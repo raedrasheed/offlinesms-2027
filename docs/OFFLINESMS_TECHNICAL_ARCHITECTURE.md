@@ -4,6 +4,20 @@ System-level blueprint for the build-out described in `OFFLINESMS_IMPLEMENTATION
 
 ---
 
+## Phase 5 — Group chat and member management
+
+- **`conversations/{id}` group fields:** `name`, `avatarUrl`, `ownerUid`, `memberCount`, `settings { onlyAdminsCanSend, onlyAdminsCanEditInfo, onlyAdminsCanAddMembers }`. `status` extended with `'locked'`.
+- **`conversations/{c}/members/{uid}`** becomes the canonical role table: `role: 'owner' | 'admin' | 'member'`, `status: 'active' | 'removed' | 'left'`, plus `addedBy`, `displayNameSnapshot`, `photoURLSnapshot`. Phase 0/4 docs (with only `{ role }`) keep working — callables `merge: true`.
+- **Group messages** carry `senderDisplayName` and `senderPhotoURL` snapshots captured at send time so the chat list and message bubbles render sender headers without joining `/users`.
+- **Six callables** drive all group writes server-side: `createGroup`, `addMembers`, `removeMember`, `changeRole`, `leaveGroup`, `lockGroup`. All audited (`group.*` namespace), all using the Admin SDK so client-side rules don't have to know about role transitions.
+- **`sendTextMessage`** is the only entry point that can write a group message. It rejects non-active members, `status === 'locked'` for non-privileged callers, and `settings.onlyAdminsCanSend` for non-privileged callers.
+- **Rules:** `conversations.create` now requires `ownerUid == auth.uid` and self-inclusion in `participantUids` for any `type === 'group'` doc. `members/{uid}` is server-only for groups; the legacy path remains for non-group conversations. Helpers added: `getMemberRole(c)`, `isConversationOwner(c)`, `isConversationAdmin(c)`, `isValidGroupRole(role)`, `isGroupTypeData(d)`, `safeGroupConversationCreate()`.
+- **Cap:** `MAX_GROUP_MEMBERS = 256`, enforced in `createGroup` and `addMembers`.
+- **New composite index:** `conversations(participantUids, type, updatedAt)` for the "Groups" filter chip.
+- **Owner transfer is deferred.** Owners cannot leave a non-empty group; transferring ownership to another admin lands in a later phase.
+
+---
+
 ## Phase 4 — Chat list and one-to-one messaging
 
 - **Canonical conversation shape:** `participantUids: string[]`, `participantKey: string` (sorted-uid join for O(1) direct-conversation lookup), `lastMessage: { messageId, senderUid, type, preview, createdAt }`, `status: 'active' | 'archived' | 'disabled'`, `createdBy`, `createdAt`, `updatedAt`. `memberIds`, `lastMessageText`, `lastMessageAt`, `lastSenderId`, message-level `senderId` are written alongside as back-compat aliases.

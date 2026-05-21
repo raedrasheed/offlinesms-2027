@@ -67,16 +67,15 @@ Legend for "Recommended phase" matches `OFFLINESMS_IMPLEMENTATION_ROADMAP.md`.
 
 | | |
 |---|---|
-| **Status** | 🟧 Scaffold (data model exists; no UI) |
-| **Existing** | `conversations.type='group'`, `members/{uid}` sub-collection |
-| **Missing** | Create-group flow, member picker, group info screen, add/remove members, role mgmt, leave group, mentions |
-| **Frontend** | `NewGroup.tsx`, `GroupInfo.tsx`, member list, role pickers |
-| **Backend** | Callables `createGroup`, `addMembers`, `removeMember`, `changeRole`; mentions extraction in `onMessageCreate` |
-| **Firestore** | `conversations`, `members`, plus `mentions` index on messages |
-| **Indexes** | `(conversationId ASC, mentions ARRAY_CONTAINS)` |
-| **Rules** | Only `owner/admin` can mutate members; member counts capped server-side |
-| **Tests** | Permission boundaries, large group performance, role transitions |
-| **Phase** | 5 |
+| **Status** | ✅ Phase 5 landed: create, member management, locks. Owner-transfer + mentions deferred. |
+| **Existing** | `conversations.type='group'` + `name` + `ownerUid` + `memberCount` + `settings`; `members/{uid}` canonical Phase 5 schema; `NewGroup.tsx`, `GroupInfo.tsx`, `AddMembers.tsx`; six audited callables; group composer gates |
+| **Missing** | Owner-transfer flow, mentions extraction, group description / about, avatar upload |
+| **Frontend** | "Transfer ownership" UI, mentions composer |
+| **Backend** | `transferOwnership` callable; `extractMentions` step in `onMessageCreate`; image-upload validation for `avatarUrl` |
+| **Firestore** | `conversations`, `members` (Phase 5 ✓); future `messages.mentions: string[]` |
+| **Indexes** | `(participantUids, type, updatedAt)` (Phase 5 ✓); future `(conversationId ASC, mentions ARRAY_CONTAINS)` |
+| **Rules** | Owner/admin gates on members (Phase 5 ✓); member-count cap server-side (Phase 5 ✓) |
+| **Phase** | 5 ✓ (with documented follow-ups) |
 
 ## 6. Communities
 

@@ -4,6 +4,103 @@ Running log of phased work. Newest first.
 
 ---
 
+## Phase 5 — Group chat and member management
+
+**Branch:** `claude/repo-audit-architecture-MiZDX`
+**Status:** Complete. App builds end-to-end (typecheck + lint + build green across workspaces).
+
+### What was done
+
+- **Group conversation contract.** `conversations/{id}` gains group-only fields (`name`, `avatarUrl`, `ownerUid`, `memberCount`, `settings { onlyAdminsCanSend, onlyAdminsCanEditInfo, onlyAdminsCanAddMembers }`) and `status` now includes `'locked'`. `participantKey` is nullable for groups.
+- **Member contract.** `conversations/{c}/members/{uid}` is the canonical role table for groups: `{ uid, role: 'owner'|'admin'|'member', status: 'active'|'removed'|'left', addedBy, displayNameSnapshot, photoURLSnapshot, joinedAt, updatedAt }`. Phase 0/4 docs with only `{ role }` keep working — callable writes use `merge: true`.
+- **Group messages** carry `senderDisplayName` + `senderPhotoURL` snapshots so the chat UI renders sender headers without joining `/users`.
+- **Six new callables.** All audited via `writeAuditLog`. Metadata sanitiser scrubs body/content/messageText if mis-used.
+  - `createGroup({ name, memberUids[], avatarUrl? })` → `group.created`. Cap `MAX_GROUP_MEMBERS = 256`.
+  - `addMembers({ conversationId, memberUids[] })` → `group.member.added`. Owner/admin only.
+  - `removeMember({ conversationId, memberUid })` → `group.member.removed`. Owner can remove admins; admin can remove members; owner-protection enforced.
+  - `changeRole({ conversationId, memberUid, role })` → `group.member.role_changed`. Owner only; role ∈ {admin, member}; owner-role immutable from this path.
+  - `leaveGroup({ conversationId })` → `group.member.left`. Owner can only leave when no other active members; last person out flips `status` to `disabled`.
+  - `lockGroup({ conversationId, locked })` → `group.locked` / `group.unlocked`. Owner/admin only.
+- **`sendTextMessage` extended** to reject non-active members, refuse sends when `status === 'locked'` unless owner/admin, refuse when `settings.onlyAdminsCanSend && !privileged`, and capture sender snapshots on the message doc.
+- **Firestore rules.**
+  - `conversations.create` now requires that group docs name the caller as `ownerUid` and include them in `participantUids` — client-side group spoofing is closed.
+  - `members/{uid}.write` is server-only for groups (callables use Admin SDK). The legacy self-or-group-admin write path remains for non-group conversations.
+  - New helpers: `getMemberRole(c)`, `memberExists(c, uid)`, `isConversationOwner(c)`, `isConversationAdmin(c)`, `isValidGroupRole(role)`, `isGroupTypeData(d)`, `safeGroupConversationCreate()`.
+- **Composite index** added: `conversations(participantUids, type, updatedAt)` for the "Groups" filter chip.
+- **Mobile UI.**
+  - `apps/mobile/src/lib/conversations.ts` gains group types + the six callable wrappers + `subscribeMembers()` + `groupErrorCopy(code)`.
+  - `ChatsList` enables the "Groups" filter chip, shows group name + member count, and the FAB now offers a "New chat / New group" action sheet.
+  - `Conversation` adds a tappable header (groups → `GroupInfo`), sender-name labels above incoming group bubbles, and a state-machine composer that disables on `disabled`/`locked`/`onlyAdminsCanSend`/non-member with friendly inline copy.
+  - `NewGroup` (new): multi-select picker on Phase 4's username search; calls `createGroup`.
+  - `GroupInfo` (new): hero header, role-gated action rows (Add members / Lock·Unlock / Leave), member list with role badges and role-respecting per-row action sheets.
+  - `AddMembers` (new): same picker pattern as `NewGroup`, filters out existing active members live.
+- **i18n.** New `group.*` and `groupErrors.*` namespaces in `en.json` and `ar.json`.
+- **No dashboard work.** Phase 14 is where admin moderation lands.
+
+### Files created
+
+- `docs/OFFLINESMS_PHASE_5_PLAN.md`
+- `apps/mobile/src/screens/{NewGroup,GroupInfo,AddMembers}.tsx`
+- `functions/src/chats/{createGroup,addMembers,removeMember,changeRole,leaveGroup,lockGroup}.ts`
+
+### Files edited
+
+- `firestore.rules`
+- `firestore.indexes.json`
+- `functions/src/chats/sendTextMessage.ts`
+- `functions/src/index.ts`
+- `apps/mobile/src/lib/conversations.ts`
+- `apps/mobile/src/screens/{ChatsList,Conversation}.tsx`
+- `apps/mobile/App.tsx`
+- `apps/mobile/src/i18n/{en,ar}.json`
+- `docs/OFFLINESMS_DATA_MODEL.md`, `docs/OFFLINESMS_PHASE_LOG.md` (this file), `docs/OFFLINESMS_TECHNICAL_ARCHITECTURE.md`, `docs/OFFLINESMS_RISK_REGISTER.md`, `docs/OFFLINESMS_DESIGN_IMPLEMENTATION_MAP.md`
+
+### Commits
+
+| Hash | Message |
+|---|---|
+| `86a9bce` | docs: add OfflineSMS phase 5 implementation plan |
+| `0750b25` | feat(data): add group conversation contracts and indexes |
+| `51c3561` | security: add group member and conversation rules |
+| `670a05c` | feat(functions): add group management callables |
+| `a9e0461` | feat(mobile): add new group creation flow |
+| `d978e91` | feat(mobile): add group conversation support |
+| `3fbdcb4` | feat(mobile): add group info and member management |
+
+Tail commit (this docs update) lands next.
+
+### Checks run
+
+```
+npm run typecheck --workspaces --if-present   → ok (dashboard, mobile, functions)
+npm run lint --workspaces --if-present        → ok
+npm run build --workspaces --if-present       → ok
+```
+
+### Known limitations
+
+- **No automated tests for rules / callables / UI.** Manual emulator checklist in the Phase 5 plan; `@firebase/rules-unit-testing` lands in Phase 20.
+- **Owner-transfer deferred.** Owners must remove or be the last member before leaving; transferring ownership to another admin is a future-phase callable.
+- **`onlyAdminsCanEditInfo` not yet wired.** The field is in the schema and a future "Edit group" screen will consult it; today only `lockGroup` / `addMembers` flows exist, both already owner/admin-only.
+- **No avatar upload.** `avatarUrl` accepted by `createGroup` but the mobile UI doesn't mount an image picker yet. Phase 4+ media wave.
+- **Member-count cap is server-only.** Rules don't enforce `memberCount <= 256` because it'd cost an extra `get()` per write. Phase 20 will reconsider.
+- **Dashboard group moderation** is still empty-state. Phase 14.
+
+### Recommended Phase 6 scope
+
+Phase 6 = **Message actions and message info** (per the roadmap):
+
+1. Long-press sheet on message bubbles: Copy, Reply, Forward, React, Star, Pin, Edit (sender only, within window), Delete-for-me / Delete-for-everyone (sender or admin).
+2. Callables: `editMessage`, `deleteMessage`, `reactToMessage`, `pinMessage` (group-aware), `forwardMessages`. All audited.
+3. Firestore fields on `messages`: `editedAt`, `deletedForEveryone`, `reactions: Record<emoji, uid[]>`, `pinnedAt`, `replyTo`, `forwardedFrom`.
+4. Rule additions: edit window guard (e.g. 15 minutes), reaction shape validation, pin allowed for participants but only owner/admin in locked groups.
+5. Disappearing-message TTL field on `messages` + a scheduled sweeper function.
+6. `MessageInfo` precursor screen (read counts from existing `receipts/{uid}` placeholders — Phase 7 will populate them).
+
+Defer: media messages, message views aggregation, full receipts UI (Phase 7), SMS escalation (Phase 8).
+
+---
+
 ## Phase 4 — Chat list and one-to-one messaging
 
 **Branch:** `claude/repo-audit-architecture-MiZDX`

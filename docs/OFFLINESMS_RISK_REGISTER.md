@@ -2,6 +2,15 @@
 
 Risks ranked across the surfaces present today and planned for later phases. Likelihood/impact are qualitative.
 
+## Phase 5 mitigation snapshot
+
+- **Risk #1 (Firebase security rules gaps)** — group creates now require `ownerUid == auth.uid` + self-inclusion in `participantUids`. Group `/members` writes are server-only (callable + Admin SDK). Direct + legacy conversation paths untouched.
+- **Risk #7 (large group performance)** — Phase 5 sets `MAX_GROUP_MEMBERS = 256` server-side. The chat-list listener stays at `limit(50)` conversations. Per-conversation fan-out by `onMessageCreate` scales linearly with `participantUids.length`; acceptable at 256 but worth re-measuring in Phase 20.
+- **Risk #14 (admin permission leakage)** — group role transitions go through audited callables (`group.member.added`, `group.member.removed`, `group.member.role_changed`, `group.member.left`, `group.locked`, `group.unlocked`). Owner role is immutable from the standard path; owner-transfer is explicitly deferred.
+- **Risk #15 (audit log gaps)** — `group.*` namespace lands; metadata sanitiser still strips body/content/messageText so a mis-used callable contract can't leak content.
+
+---
+
 ## Phase 4 mitigation snapshot
 
 - **Risk #1 (Firebase security rules gaps)** — further progress. `conversations` participation, message validation (type, length, sender), and per-user `userState` field allow-list now ship. `typing` is owner-write, participant-read.
