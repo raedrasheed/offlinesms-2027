@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  FlatList, View, Text, Pressable, StyleSheet, TextInput,
+  FlatList, View, Text, Pressable, StyleSheet, TextInput, Alert,
 } from 'react-native';
 import {
   collection, onSnapshot, doc, query, where,
@@ -14,7 +14,7 @@ import {
 import { colors, radius } from '../theme';
 import { LoadingState, EmptyState } from '../components/state';
 
-type Filter = 'all' | 'unread' | 'favorites' | 'archived';
+type Filter = 'all' | 'unread' | 'favorites' | 'groups' | 'archived';
 
 type Row = Conversation & {
   state?:        UserState;
@@ -87,20 +87,27 @@ export default function ChatsList({ navigation }: any) {
 
   const enriched: Row[] = useMemo(() => {
     if (!rows) return [];
-    return rows.map(c => ({
-      ...c,
-      state:         states[c.id],
-      peerName:      peers[c.id]?.name ?? c.name ?? 'Conversation',
-      someoneTyping: typing[c.id] ?? false,
-    }));
+    return rows.map(c => {
+      const isGroup = c.type === 'group';
+      const displayName = isGroup
+        ? (c.name ?? 'Group')
+        : (peers[c.id]?.name ?? c.name ?? 'Conversation');
+      return {
+        ...c,
+        state:         states[c.id],
+        peerName:      displayName,
+        someoneTyping: typing[c.id] ?? false,
+      };
+    });
   }, [rows, states, peers, typing]);
 
   const filtered = useMemo(() => {
     let out = enriched;
-    if (filter === 'unread')     out = out.filter(c => (c.state?.unreadCount ?? 0) > 0);
-    if (filter === 'favorites')  out = out.filter(c => c.state?.favorite === true);
-    if (filter === 'archived')   out = out.filter(c => c.state?.archived === true);
-    else                         out = out.filter(c => c.state?.archived !== true);
+    if (filter === 'unread')         out = out.filter(c => (c.state?.unreadCount ?? 0) > 0);
+    else if (filter === 'favorites') out = out.filter(c => c.state?.favorite === true);
+    else if (filter === 'groups')    out = out.filter(c => c.type === 'group');
+    else if (filter === 'archived')  out = out.filter(c => c.state?.archived === true);
+    else                             out = out.filter(c => c.state?.archived !== true);
 
     const t = search.trim().toLowerCase();
     if (t) out = out.filter(c => (c.peerName ?? '').toLowerCase().includes(t));
@@ -121,16 +128,16 @@ export default function ChatsList({ navigation }: any) {
           autoCapitalize="none"
         />
         <View style={s.chips}>
-          {(['all','unread','favorites','archived'] as Filter[]).map(f => (
+          {(['all','unread','favorites','groups','archived'] as Filter[]).map(f => (
             <Pressable key={f} style={[s.chip, filter === f && s.chipActive]} onPress={() => setFilter(f)}>
               <Text style={[s.chipText, filter === f && s.chipTextActive]}>
-                {f === 'all' ? 'All' : f === 'unread' ? 'Unread' : f === 'favorites' ? 'Favorites' : 'Archived'}
+                {f === 'all' ? 'All' :
+                 f === 'unread' ? 'Unread' :
+                 f === 'favorites' ? 'Favorites' :
+                 f === 'groups' ? 'Groups' : 'Archived'}
               </Text>
             </Pressable>
           ))}
-          <Pressable style={[s.chip, s.chipDisabled]} disabled>
-            <Text style={[s.chipText, { color: colors.ink400 }]}>Groups</Text>
-          </Pressable>
         </View>
       </View>
 
@@ -157,7 +164,10 @@ export default function ChatsList({ navigation }: any) {
               </View>
               <View style={{ flex: 1, minWidth: 0 }}>
                 <View style={s.rowTop}>
-                  <Text style={s.name} numberOfLines={1}>{item.peerName}</Text>
+                  <Text style={s.name} numberOfLines={1}>
+                    {item.peerName}
+                    {item.type === 'group' && item.memberCount ? `  · ${item.memberCount}` : ''}
+                  </Text>
                   <Text style={s.time}>{formatTime(item.state?.lastMessageAt ?? item.lastMessageAt)}</Text>
                 </View>
                 <View style={s.rowBot}>
@@ -184,7 +194,18 @@ export default function ChatsList({ navigation }: any) {
         />
       )}
 
-      <Pressable style={s.fab} onPress={() => navigation.navigate('NewChat')}>
+      <Pressable
+        style={s.fab}
+        onPress={() => Alert.alert(
+          'New conversation',
+          undefined,
+          [
+            { text: 'New chat',  onPress: () => navigation.navigate('NewChat') },
+            { text: 'New group', onPress: () => navigation.navigate('NewGroup') },
+            { text: 'Cancel', style: 'cancel' },
+          ],
+        )}
+      >
         <Text style={s.fabText}>+</Text>
       </Pressable>
     </View>
