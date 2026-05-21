@@ -1,2 +1,14 @@
-import { View, Text } from 'react-native';
-export default function Privacy() { return <View style={{ flex:1, padding:24 }}><Text>Privacy — TODO: port PrivacyScreen design</Text></View>; }
+import { View } from 'react-native';
+import { EmptyState } from '../components/state';
+
+export default function Privacy() {
+  return (
+    <View style={{ flex: 1 }}>
+      <EmptyState
+        fullPage
+        title="Privacy controls aren’t available yet"
+        description="A future phase will let you manage who can see your profile, last seen, and read receipts."
+      />
+    </View>
+  );
+}

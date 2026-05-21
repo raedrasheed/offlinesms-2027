@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { collection, onSnapshot, query, orderBy, limit } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import Topbar from '@/components/Topbar';
+import { LoadingState, EmptyState } from '@/components/state';
 import { Ban, ShieldCheck, MoreVertical } from 'lucide-react';
 
 type User = { id: string; displayName?: string; phoneNumber?: string; createdAt?: any; status?: string; admin?: boolean };
@@ -26,8 +27,16 @@ export default function UsersAdmin() {
           <div className="grid grid-cols-[1fr,1fr,1fr,120px,120px,40px] gap-4 px-5 py-3 bg-surface3 text-[10px] font-bold text-ink-700 uppercase tracking-wider">
             <div>User</div><div>Phone</div><div>Joined</div><div>Status</div><div>Role</div><div/>
           </div>
-          {busy && <div className="p-8 text-center text-sm text-ink-500">Loading…</div>}
-          {!busy && rows.length === 0 && <div className="p-8 text-center text-sm text-ink-500">No users yet — run the seed script.</div>}
+          {busy && <div className="p-8"><LoadingState compact title="Loading users…" /></div>}
+          {!busy && rows.length === 0 && (
+            <div className="p-8">
+              <EmptyState
+                compact
+                title="No users yet"
+                description="Run the seed script (npm run seed) or wait for signups."
+              />
+            </div>
+          )}
           {rows.map(u => (
             <div key={u.id} className="grid grid-cols-[1fr,1fr,1fr,120px,120px,40px] gap-4 px-5 py-3 items-center border-t border-ink-100 text-sm">
               <div className="flex items-center gap-3 min-w-0">

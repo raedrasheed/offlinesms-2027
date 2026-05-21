@@ -3,6 +3,7 @@ import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 import { colors } from '../theme';
+import { LoadingState } from '../components/state';
 
 export default function Points() {
   const [balance, setBalance] = useState<number | null>(null);
@@ -11,11 +12,18 @@ export default function Points() {
     if (!uid) return;
     return onSnapshot(doc(db, 'wallets', uid), snap => setBalance(snap.data()?.balance ?? 0));
   }, []);
+  if (balance === null) {
+    return (
+      <View style={s.root}>
+        <LoadingState compact title="Loading wallet…" />
+      </View>
+    );
+  }
   return (
     <View style={s.root}>
       <View style={s.card}>
         <Text style={s.label}>BALANCE</Text>
-        <Text style={s.amount}>{balance === null ? '—' : balance.toLocaleString()} <Text style={s.unit}>pts</Text></Text>
+        <Text style={s.amount}>{balance.toLocaleString()} <Text style={s.unit}>pts</Text></Text>
         <View style={s.actions}>
           <Pressable style={s.actionLight}><Text style={s.actionLightText}>Buy points</Text></Pressable>
           <Pressable style={s.actionDark}><Text style={s.actionDarkText}>Transfer</Text></Pressable>
