@@ -8,6 +8,13 @@ export { sendTextMessage }                from './chats/sendTextMessage';
 export { markRead }                       from './chats/markRead';
 export { setTyping }                      from './chats/setTyping';
 
+export { createGroup }   from './chats/createGroup';
+export { addMembers }    from './chats/addMembers';
+export { removeMember }  from './chats/removeMember';
+export { changeRole }    from './chats/changeRole';
+export { leaveGroup }    from './chats/leaveGroup';
+export { lockGroup }     from './chats/lockGroup';
+
 export { escalateSms } from './sms/escalate';
 export { onSmsBatchAccepted } from './sms/onSmsBatchAccepted';
 export { buyPoints } from './points/buy';
