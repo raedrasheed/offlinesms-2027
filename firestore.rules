@@ -276,9 +276,21 @@ service cloud.firestore {
         allow update: if isAdmin();
         allow delete: if isAdmin();
 
-        // Receipts (per recipient). Phase 3 added the status enum check.
+        // Receipts (per recipient).
+        //
+        // Phase 3 added the status enum check.
+        // Phase 7 tightens the read rule so participants can NOT enumerate
+        // each other's read status. Only the receipt owner, the message
+        // sender, or a project admin may read.
+        // Writes still allow the owner directly (Phase 3 path) so an
+        // offline client can refresh its own receipt without a callable;
+        // but the canonical write path is the markReceipt callable using
+        // the Admin SDK, which enforces monotonic status transitions.
         match /receipts/{uid} {
-          allow read:   if isMember(convoId) || isConversationParticipant(convoId);
+          allow read:   if isSelf(uid)
+                           || isAdmin()
+                           || (get(/databases/$(database)/documents/conversations/$(convoId)/messages/$(messageId)).data.senderUid == request.auth.uid)
+                           || (get(/databases/$(database)/documents/conversations/$(convoId)/messages/$(messageId)).data.senderId == request.auth.uid);
           allow create: if (isSelf(uid) || isAdmin())
                           && (!('status' in request.resource.data)
                               || isValidReceiptStatus(request.resource.data.status));
@@ -334,6 +346,16 @@ service cloud.firestore {
 
       allow delete: if isAdmin()
                     || (isAuthed() && resource.data.authorId == request.auth.uid);
+
+      // Status views (Phase 7) — server-only writes via markStatusViewed.
+      // Owner of the status can read the viewer list; a viewer can read
+      // their own row. Nobody else.
+      match /views/{viewerUid} {
+        allow read:  if isAdmin()
+                       || isSelf(viewerUid)
+                       || (get(/databases/$(database)/documents/statuses/$(statusId)).data.authorId == request.auth.uid);
+        allow write: if isAdmin();
+      }
     }
 
     // ════════════════════════════════════════════════════════════
