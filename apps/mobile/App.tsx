@@ -18,6 +18,8 @@ import NewChat from './src/screens/NewChat';
 import NewGroup from './src/screens/NewGroup';
 import GroupInfo from './src/screens/GroupInfo';
 import AddMembers from './src/screens/AddMembers';
+import ForwardPicker from './src/screens/ForwardPicker';
+import MessageInfo from './src/screens/MessageInfo';
 import Status from './src/screens/Status';
 import Calls from './src/screens/Calls';
 import Settings from './src/screens/Settings';
@@ -98,6 +100,8 @@ export default function App() {
             <RootStack.Screen name="Conversation" component={Conversation} />
             <RootStack.Screen name="GroupInfo" component={GroupInfo} />
             <RootStack.Screen name="AddMembers" component={AddMembers} />
+            <RootStack.Screen name="ForwardPicker" component={ForwardPicker} />
+            <RootStack.Screen name="MessageInfo" component={MessageInfo} />
             <RootStack.Screen name="Points" component={Points} />
             <RootStack.Screen name="Privacy" component={Privacy} />
             <RootStack.Screen name="Devices" component={Devices} />
