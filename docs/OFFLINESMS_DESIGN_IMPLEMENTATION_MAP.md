@@ -133,20 +133,22 @@ Legend for "Recommended phase" matches `OFFLINESMS_IMPLEMENTATION_ROADMAP.md`.
 
 | | |
 |---|---|
-| **Status** | ❌ Missing |
-| **Frontend** | Long-press sheet (Reply, Edit, Delete, Copy, Forward, React, Star, Pin) |
-| **Backend** | Callables for `edit`, `delete`, `pin`, `react`, `forward` |
-| **Firestore** | `messages.reactions/{uid}`, `messages.pinnedAt`, `messages.starredBy` |
-| **Phase** | 6 |
+| **Status** | ✅ Phase 6 landed: Copy, Reply, Forward, React, Star, Pin, Edit, Delete-for-me/everyone via long-press sheet on MessageBubble. |
+| **Existing** | `apps/mobile/src/components/MessageBubble.tsx`; callables `editMessage`, `deleteMessage`, `reactToMessage`, `starMessage`, `pinMessage`, `forwardMessages`; reply preview + edit-mode composer; reactions chips + emoji picker; pinned-message banner |
+| **Missing** | Multi-pin, richer action-sheet UI, native clipboard via `expo-clipboard`, mentions, polls, message templates |
+| **Backend** | Phase 6 ✓ |
+| **Firestore** | `messages.{editedAt, deletedForEveryone, replyTo, forwardedFrom, reactions, pinnedAt}`, `userState.{starredMessageIds, deletedForMeMessageIds}` (Phase 6 ✓) |
+| **Phase** | 6 ✓ |
 
 ## 12. Message info
 
 | | |
 |---|---|
-| **Status** | ❌ Missing |
-| **Frontend** | `MessageInfo.tsx` aggregating receipts (delivered to N, read by M) |
-| **Backend** | Receipt summariser (denormalised counters on message doc) |
-| **Phase** | 7 |
+| **Status** | 🟡 Phase 6 precursor landed: metadata + reaction summary + receipt placeholder counts. Full per-recipient receipt list deferred. |
+| **Existing** | `apps/mobile/src/screens/MessageInfo.tsx`, `getMessageInfo` callable returning aggregated metadata |
+| **Missing** | Per-recipient delivered/read/played list, sticky receipt analytics |
+| **Backend** | Phase 7 will add a receipt aggregation trigger + denormalised `deliveredCount`/`readCount` on messages |
+| **Phase** | 6 (precursor) ✓; 7 (full receipts) |
 
 ## 13. Message views
 

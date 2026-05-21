@@ -4,6 +4,21 @@ System-level blueprint for the build-out described in `OFFLINESMS_IMPLEMENTATION
 
 ---
 
+## Phase 6 — Message actions and message info
+
+- **Message schema (additive):** `editedAt`, `deletedForEveryone`/`deletedAt`/`deletedBy`/`deleteReason`, `replyTo`, `forwarded`+`forwardedFrom`, `reactions`, `pinnedAt`+`pinnedBy`, `expiresAt`. `sendTextMessage` initialises every field at creation so docs are uniform.
+- **Per-user message state lives on the existing `conversations/{c}/userState/{uid}` doc** — adds bounded `starredMessageIds` + `deletedForMeMessageIds` arrays (FIFO-capped at 500). No new collection, no new listener.
+- **Conversation-level pin** at `conversations/{c}.pinnedMessage` (single message per conversation; multi-pin is a future enhancement).
+- **Seven Phase 6 callables** (`editMessage`, `deleteMessage`, `reactToMessage`, `starMessage`, `pinMessage`, `forwardMessages`, `getMessageInfo`) own every state transition. Rules narrow `messages.update`/`messages.delete` to admin-only at the rules layer; legitimate mutations always come through the callables (Admin SDK).
+- **Edit window:** 15 minutes from `createdAt`. The check lives in `editMessage`.
+- **Delete-for-everyone policy:** sender always; group owner/admin may delete other members' messages.
+- **Pin policy:** direct chats — any participant; groups — owner/admin only.
+- **Forward:** text-only, ≤10 source messages × ≤10 targets, per-target send-permission check (locked / onlyAdminsCanSend respected).
+- **Disappearing-message TTL foundation:** `messages.expiresAt` field + a scheduled function `sweepExpiredMessages` that's **not** exported from the functions barrel in Phase 6. Activation deferred to Phase 11 alongside the client TTL setting UI.
+- **Audit:** `message.edited`, `message.deleted.for_me`, `message.deleted.for_everyone`, `message.pinned`, `message.unpinned`, `message.forwarded` (counts only). Reactions and stars deliberately not audited (noise).
+
+---
+
 ## Phase 5 — Group chat and member management
 
 - **`conversations/{id}` group fields:** `name`, `avatarUrl`, `ownerUid`, `memberCount`, `settings { onlyAdminsCanSend, onlyAdminsCanEditInfo, onlyAdminsCanAddMembers }`. `status` extended with `'locked'`.

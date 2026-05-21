@@ -4,6 +4,107 @@ Running log of phased work. Newest first.
 
 ---
 
+## Phase 6 — Message actions and message info
+
+**Branch:** `claude/repo-audit-architecture-MiZDX`
+**Status:** Complete. App builds end-to-end (typecheck + lint + build green across workspaces).
+
+### What was done
+
+- **Schema fills the Phase 4/5 placeholders + adds reactions, pinning, TTL.** `messages` now carries `editedAt`, `deletedForEveryone`/`deletedAt`/`deletedBy`/`deleteReason`, `replyTo`, `forwarded` + `forwardedFrom`, `reactions: { [emoji]: uid[] }`, `pinnedAt`/`pinnedBy`, and `expiresAt`. `sendTextMessage` now initialises every Phase 6 field explicitly so docs are uniform from creation.
+- **Per-user message state** rides on the existing `conversations/{c}/userState/{uid}` doc — adds bounded `starredMessageIds[]` and `deletedForMeMessageIds[]` arrays (FIFO-capped at 500) — instead of a new collection, keeping listener cost flat.
+- **Conversation-level pin** lives on `conversations/{c}.pinnedMessage` (single pinned message in Phase 6).
+- **Seven new audited callables** (`functions/src/chats/`):
+  - `editMessage` — sender-only, 15-minute edit window, refreshes `lastMessage` if applicable.
+  - `deleteMessage` — `for_me` writes to the caller's userState array; `for_everyone` clears text + flips `deletedForEveryone` (sender always; group owner/admin may delete other members' messages, recorded as `byRole`).
+  - `reactToMessage` — emoji allow-list, one emoji per user per message, **not** audited.
+  - `starMessage` — owner-scoped, not audited.
+  - `pinMessage` — direct: any participant; group: owner/admin only. Replaces previous pin.
+  - `forwardMessages` — text-only, skips deleted, enforces source-read + per-target-send permission, caps at 10×10.
+  - `getMessageInfo` — read-only metadata + reaction summary + receipt placeholder counts.
+- **`sendTextMessage` extended** to accept an optional `replyTo` payload and persist it on the message doc.
+- **Disappearing-message sweeper** code shipped at `functions/src/chats/sweepExpiredMessages.ts` but **deliberately not exported** from `functions/src/index.ts`, so `firebase deploy` won't register the cron job. Activation deferred to Phase 11.
+- **Rules tightening.** `messages.update` and `messages.delete` are now admin-only at the rules layer; every legitimate mutation flows through a callable using the Admin SDK. Added two shape validators (`isValidReplyTo`, `isValidForwardedFrom`) for any future direct-create path.
+- **Mobile UI.**
+  - `MessageBubble` component (new) is the long-press surface: reply preview, forwarded label, edited/starred/pinned indicators, reaction chips, and a permission-gated action sheet via `Alert.alert`. Inline emoji picker for React.
+  - `Conversation` rewritten: composer carries reply-preview / edit-mode banners; pinned-message banner above the list with tap-to-jump and × unpin (for direct chats or group admins); local `userState` drives starred + deletedForMe filtering.
+  - `ForwardPicker` (new) — multi-select target list with peer name resolution.
+  - `MessageInfo` (new) — read-only metadata + reaction summary + receipt placeholder breakdown with the Phase 7-deferral copy.
+- **i18n.** New `messageActions.*` and `messageErrors.*` namespaces in `en.json` + `ar.json`.
+
+### Files created
+
+- `docs/OFFLINESMS_PHASE_6_PLAN.md`
+- `apps/mobile/src/components/MessageBubble.tsx`
+- `apps/mobile/src/screens/ForwardPicker.tsx`
+- `apps/mobile/src/screens/MessageInfo.tsx`
+- `functions/src/chats/editMessage.ts`
+- `functions/src/chats/deleteMessage.ts`
+- `functions/src/chats/reactToMessage.ts`
+- `functions/src/chats/starMessage.ts`
+- `functions/src/chats/pinMessage.ts`
+- `functions/src/chats/forwardMessages.ts`
+- `functions/src/chats/getMessageInfo.ts`
+- `functions/src/chats/sweepExpiredMessages.ts` (code only; not exported)
+
+### Files edited
+
+- `firestore.rules`
+- `functions/src/index.ts`
+- `functions/src/chats/sendTextMessage.ts` — optional `replyTo` + Phase 6 field defaults.
+- `apps/mobile/src/lib/conversations.ts` — types + callable wrappers + `REACTION_EMOJIS`.
+- `apps/mobile/src/screens/Conversation.tsx` — uses `MessageBubble`, reply / edit composer state, pinned banner.
+- `apps/mobile/App.tsx` — registers `ForwardPicker` + `MessageInfo` routes.
+- `apps/mobile/src/i18n/{en,ar}.json`
+- `docs/OFFLINESMS_DATA_MODEL.md`, `docs/OFFLINESMS_PHASE_LOG.md` (this file), `docs/OFFLINESMS_TECHNICAL_ARCHITECTURE.md`, `docs/OFFLINESMS_RISK_REGISTER.md`, `docs/OFFLINESMS_DESIGN_IMPLEMENTATION_MAP.md`
+
+### Commits
+
+| Hash | Message |
+|---|---|
+| `3a121ad` | docs: add OfflineSMS phase 6 implementation plan |
+| `cb4f86f` | feat(data): add message action contracts |
+| `3c7f3ce` | security: add message action rules |
+| `e4dfda8` | feat(functions): add message action callables |
+| `2e23b32` | feat(mobile): add message action sheet and reply/edit composer states |
+| `dc8f440` | feat(mobile): add forward picker and message info screen |
+
+Tail commit (this docs update) lands next.
+
+### Checks run
+
+```
+npm run typecheck --workspaces --if-present   → ok (dashboard, mobile, functions)
+npm run lint --workspaces --if-present        → ok
+npm run build --workspaces --if-present       → ok
+```
+
+### Known limitations
+
+- **No automated tests** for the new callables / rules / UI. Manual emulator checklist in the Phase 6 plan; `@firebase/rules-unit-testing` lands in Phase 20.
+- **Reactions not audited.** Toggling a reaction is too noisy to record; if compliance later demands it, switch the `auditLog` call back on in `reactToMessage.ts`.
+- **Single pinned message per conversation.** Multi-pin can land as a sub-collection later. The current model is simpler and matches WhatsApp-style defaults.
+- **`Clipboard` API used by the bubble's Copy action is the legacy one** (`Clipboard.setString`). Works on web; deprecated on native. Phase 8/9 will swap to `expo-clipboard` when wider native testing happens.
+- **`deletedForMe` filtering is client-side only.** Hidden messages still exist on the server; this is intentional (the spec calls for `deleteForMe` as a per-user view).
+- **Disappearing-message sweeper code present but not scheduled.** Activation is Phase 11 alongside the TTL setting UI.
+- **No Starred-Messages screen yet.** Per-message star toggles work; a "starred across all chats" listing is deferred to a later phase.
+- **`Forward` is text-only.** Media forwarding lands with media support (Phase 8+).
+- **`MessageInfo` returns only metadata.** It deliberately doesn't return the message body — the bubble already shows it, and keeping the callable body-free is a useful boundary.
+
+### Recommended Phase 7 scope
+
+Phase 7 = **Delivery receipts, read receipts, and message views** (per the roadmap):
+
+1. Client-side `markReceipt({ messageId, status })` callable; clients call it on render (`delivered`), on view (`read`), on audio play (`played`).
+2. Aggregation trigger `onReceiptWrite` denormalises `deliveredCount` / `readCount` onto the message doc.
+3. Tick-rendering on bubbles (single tick = sent, two ticks = delivered, blue ticks = read) consuming the denormalised counts.
+4. `MessageInfo` Phase-7 pass: full per-recipient receipt list for group messages, replacing the "available in a later update" placeholder.
+5. Receipt rate-limiting and a daily reconciliation function (Phase 20 will toughen).
+
+Defer: media messages, SMS escalation UI, points UI, dashboard moderation, calls.
+
+---
+
 ## Phase 5 — Group chat and member management
 
 **Branch:** `claude/repo-audit-architecture-MiZDX`

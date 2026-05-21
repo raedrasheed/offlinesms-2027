@@ -2,6 +2,16 @@
 
 Risks ranked across the surfaces present today and planned for later phases. Likelihood/impact are qualitative.
 
+## Phase 6 mitigation snapshot
+
+- **Risk #1 (Firebase security rules gaps)** — `messages.update` and `messages.delete` are now admin-only at the rules layer; every legitimate mutation flows through a callable + Admin SDK. Two unused shape validators (`isValidReplyTo`, `isValidForwardedFrom`) are available for future direct-create paths.
+- **Risk #15 (audit log gaps)** — `message.*` namespace lands (`edited`, `deleted.for_me`, `deleted.for_everyone`, `pinned`, `unpinned`, `forwarded`). Reactions and stars deliberately unaudited. Audit-metadata sanitiser keeps stripping `body`/`content`/`messageText`/`text` keys.
+- **Risk #18 (real-time listener cost)** — per-message starred / deletedForMe state piggy-backs on the existing `userState` doc; no new listener per conversation. Reactions live on the message doc, brought by the existing listener.
+- **Risk #19 (offline sync conflicts)** — `editMessage` is server-authoritative (15-min window checked against server clock); stale offline edits fail with `edit-window-closed`.
+- **Risk #22 (stuck status uploads)** — adjacent: `expiresAt` field + `sweepExpiredMessages` cron-stub exist as code; activation queued for Phase 11.
+
+---
+
 ## Phase 5 mitigation snapshot
 
 - **Risk #1 (Firebase security rules gaps)** — group creates now require `ownerUid == auth.uid` + self-inclusion in `participantUids`. Group `/members` writes are server-only (callable + Admin SDK). Direct + legacy conversation paths untouched.
