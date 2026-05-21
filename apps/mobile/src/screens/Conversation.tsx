@@ -11,6 +11,7 @@ import {
   subscribeUserState,
   sendTextMessage,
   markRead,
+  markReceipt,
   setTyping,
   editMessage,
   pinMessage,
@@ -83,9 +84,18 @@ export default function Conversation({ route, navigation }: any) {
     return subscribeMessages(id, rows => {
       setMsgs(rows);
       markRead(id).catch(() => {});
+      // Phase 7: emit receipts for every visible message not authored
+      // by the caller. The lib dedupes (messageId, status) so this
+      // safely re-runs on every snapshot.
+      for (const m of rows) {
+        if (m.senderUid === me || (m as any).senderId === me) continue;
+        if (m.deletedForEveryone) continue;
+        markReceipt(id, m.id, 'delivered');
+        markReceipt(id, m.id, 'read');
+      }
       requestAnimationFrame(() => listRef.current?.scrollToEnd?.({ animated: false }));
     });
-  }, [id]);
+  }, [id, me]);
 
   // userState (drives starred + deletedForMe filtering).
   useEffect(() => {

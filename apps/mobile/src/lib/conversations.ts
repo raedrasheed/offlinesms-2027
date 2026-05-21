@@ -115,6 +115,13 @@ export type Message = {
   // Group-only sender snapshots (Phase 5)
   senderDisplayName?:  string | null;
   senderPhotoURL?:     string | null;
+  // Phase 7 aggregate counts (server-owned)
+  deliveredCount?:     number;
+  readCount?:          number;
+  viewedCount?:        number;
+  playedCount?:        number;
+  failedCount?:        number;
+  pendingCount?:       number;
 };
 
 export type UserState = {
@@ -408,6 +415,31 @@ export async function forwardMessages(args: {
   return { forwarded: res.data.forwarded, targets: res.data.targets };
 }
 
+export type ReceiptStatus = 'pending' | 'delivered' | 'read' | 'viewed' | 'played' | 'failed';
+
+export type ReceiptDetail = {
+  uid:           string;
+  displayName:   string | null;
+  photoURL:      string | null;
+  role:          GroupRole | null;
+  status:        ReceiptStatus;
+  deliveredAt:   any | null;
+  readAt:        any | null;
+  viewedAt:      any | null;
+  playedAt:      any | null;
+  failedAt:      any | null;
+  failureReason: string | null;
+};
+
+export type ReceiptAggregates = {
+  deliveredCount: number;
+  readCount:      number;
+  viewedCount:    number;
+  playedCount:    number;
+  failedCount:    number;
+  pendingCount:   number;
+};
+
 export type MessageInfo = {
   messageId:          string;
   conversationId:     string;
@@ -423,6 +455,14 @@ export type MessageInfo = {
   forwarded:          boolean;
   forwardedFrom:      ForwardedFrom | null;
   replyTo:            ReplyTo | null;
+
+  // Phase 7
+  aggregates?:        ReceiptAggregates;
+  isSender?:          boolean;
+  isGroup?:           boolean;
+  recipients?:        ReceiptDetail[] | null;
+
+  // Phase 6 back-compat fields kept on the response.
   reactions:          Record<string, number>;
   receiptCounts:      Record<string, number>;
 };
@@ -432,4 +472,56 @@ export async function getMessageInfo(conversationId: string, messageId: string):
     'getMessageInfo',
   )({ conversationId, messageId });
   return res.data;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Phase 7 — receipt callable with client-side rate limiting
+// ─────────────────────────────────────────────────────────────────
+
+/** In-memory dedupe of (messageId, status) pairs per session. */
+const sentReceipts = new Set<string>();
+let receiptFlushTimer: ReturnType<typeof setTimeout> | null = null;
+let receiptQueue: Array<{ conversationId: string; messageId: string; status: ReceiptStatus }> = [];
+
+async function flushReceiptQueue() {
+  const queue = receiptQueue;
+  receiptQueue = [];
+  receiptFlushTimer = null;
+  const call = fn<{ conversationId: string; messageId: string; status: ReceiptStatus }, { ok: true }>('markReceipt');
+  for (const r of queue) {
+    try { await call(r); } catch { /* best-effort */ }
+  }
+}
+
+/**
+ * Mark the caller's receipt for a message.
+ * - Dedupes (messageId, status) so repeated calls during the same session
+ *   are no-ops.
+ * - Debounces by 300 ms so a fast scroll doesn't blast the callable.
+ * The server still enforces monotonic transitions, so even if the client
+ * loses the dedupe state across reloads the receipt can't downgrade.
+ */
+export function markReceipt(conversationId: string, messageId: string, status: ReceiptStatus) {
+  const key = `${messageId}:${status}`;
+  if (sentReceipts.has(key)) return;
+  sentReceipts.add(key);
+  receiptQueue.push({ conversationId, messageId, status });
+  if (receiptFlushTimer == null) {
+    receiptFlushTimer = setTimeout(() => { flushReceiptQueue().catch(() => {}); }, 300);
+  }
+}
+
+/** Clear the dedupe set — used when switching accounts. */
+export function resetReceiptCache() {
+  sentReceipts.clear();
+  receiptQueue = [];
+  if (receiptFlushTimer != null) { clearTimeout(receiptFlushTimer); receiptFlushTimer = null; }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Phase 7 — status views (foundation; status UI lands later)
+// ─────────────────────────────────────────────────────────────────
+
+export async function markStatusViewed(statusId: string): Promise<void> {
+  await fn<{ statusId: string }, { ok: true }>('markStatusViewed')({ statusId });
 }

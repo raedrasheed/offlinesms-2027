@@ -177,6 +177,7 @@ export function MessageBubble({
           {m.editedAt ? <Text style={[s.foot, mine && { color: 'rgba(255,255,255,.7)' }]}>edited</Text> : null}
           {context.isStarred ? <Text style={s.star}>★</Text> : null}
           {context.isPinned ? <Text style={s.foot}>📌</Text> : null}
+          {mine && !deleted ? <ReceiptIndicator message={m} isGroup={context.isGroup} /> : null}
         </View>
       </Pressable>
 
@@ -207,6 +208,37 @@ export function MessageBubble({
   );
 }
 
+/**
+ * Receipt indicator rendered on the caller's own messages.
+ *
+ * Direct chats:
+ *   no recipient read    → ✓   (sent)
+ *   any recipient delivered → ✓✓ (delivered)
+ *   any recipient read   → ✓✓ in blue (read)
+ * Group chats:
+ *   compact counts: '✓ N · 👁 M' for delivered / read.
+ */
+function ReceiptIndicator({ message, isGroup }: { message: Message; isGroup: boolean }) {
+  const delivered = message.deliveredCount ?? 0;
+  const read      = message.readCount ?? 0;
+
+  if (isGroup) {
+    return (
+      <Text style={[s.foot, { color: 'rgba(255,255,255,.85)' }]}>
+        ✓ {delivered}  ·  👁 {read}
+      </Text>
+    );
+  }
+  // Direct chat: one recipient, so any read => blue double-tick.
+  if (read > 0) {
+    return <Text style={[s.tick, { color: '#9BD2EE' }]}>✓✓</Text>;
+  }
+  if (delivered > 0) {
+    return <Text style={[s.tick, { color: 'rgba(255,255,255,.85)' }]}>✓✓</Text>;
+  }
+  return <Text style={[s.tick, { color: 'rgba(255,255,255,.6)' }]}>✓</Text>;
+}
+
 const s = StyleSheet.create({
   senderLabel:    { fontSize: 11, fontWeight: '700', color: colors.ink500, marginLeft: 2, marginTop: 4, marginBottom: 2 },
   bubble:         { maxWidth: '78%', padding: 10, borderRadius: 16 },
@@ -223,6 +255,7 @@ const s = StyleSheet.create({
   bubbleFooter:   { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 6, marginTop: 4 },
   foot:           { fontSize: 10, color: colors.ink500 },
   star:           { fontSize: 10, color: '#F59E0B' },
+  tick:           { fontSize: 11, fontWeight: '700', letterSpacing: -1 },
   reactionsRow:   { flexDirection: 'row', gap: 4, marginTop: 4, marginHorizontal: 6 },
   reactionChip:   { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, backgroundColor: '#fff', borderWidth: 1, borderColor: colors.ink200 },
   reactionChipMine:{ borderColor: colors.primary, backgroundColor: colors.primaryLight },
