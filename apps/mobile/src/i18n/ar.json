@@ -1,0 +1,66 @@
+{
+  "welcome": {
+    "title": "محادثات سلسة.",
+    "subtitle": "مراسلة خاصة مصممة لطريقة تواصل الفرق والأصدقاء في عصرنا.",
+    "continuePhone": "المتابعة بالهاتف",
+    "continueEmail": "استخدام البريد الإلكتروني"
+  },
+  "auth": {
+    "yourPhone": "رقم هاتفك",
+    "sendCode": "إرسال الرمز",
+    "verifyTitle": "تحقق من رقمك",
+    "verifyHint": "أُرسل الرمز إلى {{phone}}",
+    "resend": "إعادة الإرسال",
+    "didntReceive": "لم تستلم الرمز؟",
+    "verifyContinue": "تحقق وتابع",
+    "createPin": "إنشاء رمز PIN من 6 أرقام",
+    "createProfile": "إعداد ملفك الشخصي",
+    "displayName": "الاسم الظاهر",
+    "username": "اسم المستخدم",
+    "createProfileBtn": "إنشاء الملف"
+  },
+  "tabs": {
+    "chats": "المحادثات",
+    "status": "الحالة",
+    "calls": "المكالمات",
+    "settings": "الإعدادات"
+  },
+  "chats": {
+    "title": "المحادثات",
+    "empty": "لا توجد محادثات بعد",
+    "search": "ابحث",
+    "filterAll": "الكل",
+    "filterUnread": "غير مقروء",
+    "filterFavorites": "المفضلة",
+    "filterGroups": "المجموعات"
+  },
+  "convo": {
+    "online": "متصل",
+    "typing": "يكتب…",
+    "composerPlaceholder": "رسالة",
+    "e2e": "الرسائل والمكالمات مشفّرة من الطرف إلى الطرف"
+  },
+  "sms": {
+    "sendVia": "إرسال عبر SMS",
+    "cost": "التكلفة",
+    "sentTo": "أُرسل إلى",
+    "report": "تقرير التسليم",
+    "gateway": "بوابة OfflineSMS"
+  },
+  "points": {
+    "wallet": "محفظة النقاط",
+    "balance": "الرصيد",
+    "buy": "شراء نقاط",
+    "transfer": "تحويل",
+    "history": "السجل",
+    "notEnough": "النقاط غير كافية"
+  },
+  "common": {
+    "cancel": "إلغاء",
+    "save": "حفظ",
+    "continue": "متابعة",
+    "send": "إرسال",
+    "back": "رجوع",
+    "retry": "إعادة المحاولة"
+  }
+}

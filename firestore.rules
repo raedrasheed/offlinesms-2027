@@ -1,0 +1,93 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuthed() {
+      return request.auth != null;
+    }
+    function isSelf(uid) {
+      return isAuthed() && request.auth.uid == uid;
+    }
+    function isAdmin() {
+      return isAuthed() && request.auth.token.admin == true;
+    }
+    function isMember(convoId) {
+      return isAuthed() &&
+        exists(/databases/$(database)/documents/conversations/$(convoId)/members/$(request.auth.uid));
+    }
+    function isGroupAdmin(convoId) {
+      return isAuthed() &&
+        get(/databases/$(database)/documents/conversations/$(convoId)/members/$(request.auth.uid)).data.role in ['admin', 'owner'];
+    }
+
+    // USERS — profile readable by anyone authed; writeable only by self.
+    match /users/{uid} {
+      allow read: if isAuthed();
+      allow create: if isSelf(uid);
+      allow update: if isSelf(uid) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // CONVERSATIONS
+    match /conversations/{convoId} {
+      allow read: if isMember(convoId) || isAdmin();
+      allow create: if isAuthed();
+      allow update: if isMember(convoId) || isAdmin();
+      allow delete: if isGroupAdmin(convoId) || isAdmin();
+
+      match /members/{uid} {
+        allow read: if isMember(convoId) || isAdmin();
+        allow write: if isGroupAdmin(convoId) || isSelf(uid) || isAdmin();
+      }
+
+      match /messages/{messageId} {
+        allow read: if isMember(convoId) || isAdmin();
+        allow create: if isMember(convoId) && request.resource.data.senderId == request.auth.uid;
+        allow update: if isAdmin() ||
+                       (isMember(convoId) && resource.data.senderId == request.auth.uid);
+        allow delete: if isAdmin() ||
+                       (isMember(convoId) && resource.data.senderId == request.auth.uid);
+
+        // Receipts (per recipient)
+        match /receipts/{uid} {
+          allow read: if isMember(convoId);
+          allow write: if isSelf(uid) || isAdmin(); // own receipts only
+        }
+      }
+    }
+
+    // POINTS — wallets, transactions
+    match /wallets/{uid} {
+      allow read: if isSelf(uid) || isAdmin();
+      allow write: if isAdmin();                       // mutated via Cloud Function
+    }
+    match /transactions/{txId} {
+      allow read: if isAuthed() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow write: if isAdmin();                       // via Cloud Function
+    }
+
+    // SMS BATCHES
+    match /smsBatches/{batchId} {
+      allow read: if isAuthed() && (resource.data.senderId == request.auth.uid || isAdmin());
+      allow write: if isAdmin();                       // via Cloud Function
+
+      match /recipients/{recipientId} {
+        allow read: if isAuthed();
+        allow write: if isAdmin();
+      }
+    }
+
+    // STATUS posts
+    match /statuses/{statusId} {
+      allow read: if isAuthed();
+      allow create: if isAuthed() && request.resource.data.authorId == request.auth.uid;
+      allow delete: if isAuthed() && resource.data.authorId == request.auth.uid;
+    }
+
+    // ADMIN settings
+    match /settings/{doc} {
+      allow read: if isAuthed();
+      allow write: if isAdmin();
+    }
+  }
+}

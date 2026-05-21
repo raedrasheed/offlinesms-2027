@@ -1,0 +1,66 @@
+{
+  "welcome": {
+    "title": "Conversations that just flow.",
+    "subtitle": "Private messaging built for how modern teams and friends actually talk.",
+    "continuePhone": "Continue with phone",
+    "continueEmail": "Use email instead"
+  },
+  "auth": {
+    "yourPhone": "Your phone number",
+    "sendCode": "Send code",
+    "verifyTitle": "Verify your number",
+    "verifyHint": "Code sent to {{phone}}",
+    "resend": "Resend",
+    "didntReceive": "Didn't receive a code?",
+    "verifyContinue": "Verify and continue",
+    "createPin": "Create a 6-digit PIN",
+    "createProfile": "Set up your profile",
+    "displayName": "Display name",
+    "username": "Username",
+    "createProfileBtn": "Create profile"
+  },
+  "tabs": {
+    "chats": "Chats",
+    "status": "Status",
+    "calls": "Calls",
+    "settings": "Settings"
+  },
+  "chats": {
+    "title": "Chats",
+    "empty": "No conversations yet",
+    "search": "Search",
+    "filterAll": "All",
+    "filterUnread": "Unread",
+    "filterFavorites": "Favorites",
+    "filterGroups": "Groups"
+  },
+  "convo": {
+    "online": "Online",
+    "typing": "Typing…",
+    "composerPlaceholder": "Message",
+    "e2e": "Messages and calls are end-to-end encrypted"
+  },
+  "sms": {
+    "sendVia": "Send via SMS",
+    "cost": "Cost",
+    "sentTo": "Sent to",
+    "report": "Delivery report",
+    "gateway": "OfflineSMS Gateway"
+  },
+  "points": {
+    "wallet": "Points wallet",
+    "balance": "Balance",
+    "buy": "Buy points",
+    "transfer": "Transfer",
+    "history": "History",
+    "notEnough": "Not enough points"
+  },
+  "common": {
+    "cancel": "Cancel",
+    "save": "Save",
+    "continue": "Continue",
+    "send": "Send",
+    "back": "Back",
+    "retry": "Retry"
+  }
+}

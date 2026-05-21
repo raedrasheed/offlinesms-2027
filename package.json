@@ -1,0 +1,29 @@
+{
+  "name": "offlinesms",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "functions"
+  ],
+  "scripts": {
+    "dev:mobile": "npm --workspace apps/mobile run web",
+    "dev:dashboard": "npm --workspace apps/dashboard run dev",
+    "dev:functions": "npm --workspace functions run serve",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "seed": "tsx scripts/seed.ts",
+    "firebase:emulators": "firebase emulators:start",
+    "firebase:deploy": "firebase deploy"
+  },
+  "devDependencies": {
+    "firebase-tools": "^13.21.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.4"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

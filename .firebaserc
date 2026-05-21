@@ -1,0 +1,14 @@
+{
+  "projects": {
+    "default": "offlinesms-prod"
+  },
+  "targets": {
+    "offlinesms-prod": {
+      "hosting": {
+        "dashboard": [
+          "offlinesms-dashboard"
+        ]
+      }
+    }
+  }
+}
