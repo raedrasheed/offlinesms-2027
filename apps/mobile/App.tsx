@@ -14,6 +14,7 @@ import Otp from './src/screens/Otp';
 import ProfileCompletion from './src/screens/ProfileCompletion';
 import ChatsList from './src/screens/ChatsList';
 import Conversation from './src/screens/Conversation';
+import NewChat from './src/screens/NewChat';
 import Status from './src/screens/Status';
 import Calls from './src/screens/Calls';
 import Settings from './src/screens/Settings';
@@ -89,6 +90,7 @@ export default function App() {
         ) : (
           <RootStack.Navigator screenOptions={{ headerShown: false }}>
             <RootStack.Screen name="Tabs" component={MainTabs} />
+            <RootStack.Screen name="NewChat" component={NewChat} />
             <RootStack.Screen name="Conversation" component={Conversation} />
             <RootStack.Screen name="Points" component={Points} />
             <RootStack.Screen name="Privacy" component={Privacy} />
