@@ -26,7 +26,7 @@ export const sendTextMessage = onCall(async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'sign-in-required');
 
-  const data = (request.data ?? {}) as { conversationId?: unknown; text?: unknown };
+  const data = (request.data ?? {}) as { conversationId?: unknown; text?: unknown; replyTo?: unknown };
   if (typeof data.conversationId !== 'string' || !data.conversationId) {
     throw new HttpsError('invalid-argument', 'conversationId-required');
   }
@@ -36,6 +36,35 @@ export const sendTextMessage = onCall(async (request) => {
   const text = data.text.trim();
   if (text.length === 0)       throw new HttpsError('invalid-argument', 'text-empty');
   if (text.length > TEXT_MAX)  throw new HttpsError('invalid-argument', 'text-too-long');
+
+  // Optional replyTo. Validate shape; trust the caller for messageId — the
+  // referenced message lives in the same conversation and we don't need to
+  // round-trip another read here. If the caller spoofs the preview the
+  // worst case is a wrong quote rendered to participants who can already
+  // read the original message.
+  let replyTo:
+    | null
+    | {
+        messageId:         string;
+        senderUid:         string;
+        senderDisplayName: string;
+        preview:           string;
+        type:              'text';
+        createdAt:         unknown;
+      } = null;
+  if (data.replyTo != null) {
+    const r = data.replyTo as Record<string, unknown>;
+    if (typeof r.messageId !== 'string' || !r.messageId)
+      throw new HttpsError('invalid-argument', 'replyTo.messageId-required');
+    replyTo = {
+      messageId:         r.messageId,
+      senderUid:         typeof r.senderUid === 'string' ? r.senderUid : '',
+      senderDisplayName: typeof r.senderDisplayName === 'string' ? r.senderDisplayName.slice(0, 80) : '',
+      preview:           typeof r.preview === 'string' ? r.preview.slice(0, 200) : '',
+      type:              'text',
+      createdAt:         r.createdAt ?? null,
+    };
+  }
 
   const db = getFirestore();
   const convoRef = db.collection('conversations').doc(data.conversationId);
@@ -106,7 +135,13 @@ export const sendTextMessage = onCall(async (request) => {
     status:             'sent',
     deletedForEveryone: false,
     editedAt:           null,
-    replyTo:            null,
+    replyTo,
+    forwarded:          false,
+    forwardedFrom:      null,
+    reactions:          null,
+    pinnedAt:           null,
+    pinnedBy:           null,
+    expiresAt:          null,
     createdAt:          now,
     updatedAt:          now,
     ...(isGroup ? { senderDisplayName, senderPhotoURL } : {}),
