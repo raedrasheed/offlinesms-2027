@@ -144,11 +144,11 @@ Legend for "Recommended phase" matches `OFFLINESMS_IMPLEMENTATION_ROADMAP.md`.
 
 | | |
 |---|---|
-| **Status** | 🟡 Phase 6 precursor landed: metadata + reaction summary + receipt placeholder counts. Full per-recipient receipt list deferred. |
-| **Existing** | `apps/mobile/src/screens/MessageInfo.tsx`, `getMessageInfo` callable returning aggregated metadata |
-| **Missing** | Per-recipient delivered/read/played list, sticky receipt analytics |
-| **Backend** | Phase 7 will add a receipt aggregation trigger + denormalised `deliveredCount`/`readCount` on messages |
-| **Phase** | 6 (precursor) ✓; 7 (full receipts) |
+| **Status** | ✅ Phase 7 landed: aggregates grid + tabbed per-recipient list for senders; permission notice for non-senders. |
+| **Existing** | `apps/mobile/src/screens/MessageInfo.tsx`; `getMessageInfo` callable extended with per-recipient + aggregates |
+| **Missing** | Admin-side moderation view (Phase 14, redacted); analytics rollup (Phase 17) |
+| **Backend** | Phase 7 ✓ |
+| **Phase** | 7 ✓ |
 
 ## 13. Message views
 
@@ -163,14 +163,13 @@ Legend for "Recommended phase" matches `OFFLINESMS_IMPLEMENTATION_ROADMAP.md`.
 
 | | |
 |---|---|
-| **Status** | 🟡 Backend partially hardened (Phase 3 enum); client never marks delivered/read |
-| **Existing** | `onMessageCreate` writes `receipts/{uid}` with `status: 'pending'`; status enum enforced in rules (Phase 3) |
-| **Missing** | Client write of `delivered/read/played`; UI ticks; aggregated counters |
-| **Frontend** | Mark-on-view, tick rendering |
-| **Backend** | Callable `markReceipt` (rate-limited); aggregation trigger |
-| **Firestore** | `receipts` (existing); `messages.deliveredCount`, `readCount` denorm fields |
-| **Rules** | Receipt write by self only; status enum validation (Phase 3 ✓) |
-| **Phase** | 7 |
+| **Status** | ✅ Phase 7 landed: server-monotonic markReceipt, aggregate counts, sender-only per-recipient view, group counts on bubble. |
+| **Existing** | `markReceipt` callable + `onReceiptWrite` trigger; `messages.{deliveredCount, readCount, viewedCount, playedCount, failedCount, pendingCount}`; `MessageBubble` ReceiptIndicator (own messages only); rewritten `MessageInfo` with tabbed sender view |
+| **Missing** | Group-admin aggregate visibility (no per-recipient detail); receipt reconciliation cron; tick rendering on incoming messages; played-status UI |
+| **Backend** | All Phase 7 ✓; daily reconciliation queued for Phase 20 |
+| **Firestore** | `receipts.{deliveredAt, readAt, viewedAt, playedAt, failedAt, failureReason}` (Phase 7 ✓) |
+| **Rules** | Receipt reads: owner/sender/admin (tightened Phase 7) ✓; status enum (Phase 3 ✓) |
+| **Phase** | 7 ✓ |
 
 ## 15. Bulk SMS escalation (OfflineSMS only)
 

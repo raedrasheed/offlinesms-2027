@@ -4,6 +4,20 @@ System-level blueprint for the build-out described in `OFFLINESMS_IMPLEMENTATION
 
 ---
 
+## Phase 7 — Delivery receipts, read receipts, message views
+
+- **Receipt doc shape:** `conversations/{c}/messages/{m}/receipts/{uid}` — `{ status, deliveredAt, readAt, viewedAt, playedAt, failedAt, failureReason, createdAt, updatedAt }`. Doc id is always the recipient uid.
+- **Aggregate counts on messages:** `deliveredCount`, `readCount`, `viewedCount`, `playedCount`, `failedCount`, `pendingCount`, `receiptUpdatedAt` — server-owned (Phase 6's admin-only `messages.update` rule is unchanged).
+- **`markReceipt` callable** is the canonical write path. Server-enforced monotonic transitions (`pending → delivered → read/viewed/played`, `* → failed`); downgrades are silently no-op'd. Wrapped in a Firestore transaction so concurrent clients can't race past the guard. Self-receipts are no-op'd.
+- **`onReceiptWrite` trigger** recomputes the message-level aggregates on every change to a receipt doc — simple full-scan; acceptable at the Phase 5 group cap of 256.
+- **Receipt read rule tightens** so participants can't enumerate each other's receipts. Only the receipt owner, the message sender, or an admin can read. Writes keep the Phase 3 owner-allowed path with the enum guard; `markReceipt` (Admin SDK) is the canonical write path.
+- **Client rate limiting** in `apps/mobile/src/lib/conversations.ts`: in-memory dedupe of `(messageId, status)` per session + 300 ms debounce. Server still enforces no-downgrade, so even a lost dedupe state can't regress a receipt.
+- **`getMessageInfo` extended:** senders see a per-recipient list with role badge + per-status timestamps + failure reason; non-senders see aggregates only and the client surfaces a permission notice.
+- **`statuses/{statusId}/views/{viewerUid}`** records who viewed a status. Doc id = viewer uid → no duplicate growth. Writes go through `markStatusViewed`, which re-runs Phase 3's audience + expiry check server-side.
+- **Design choice — "viewed" folded into receipts:** Phase 7 reuses the receipts enum's `viewed` for text messages. A dedicated `messages/{m}/views/{uid}` sub-collection is reserved for media-specific events when media support lands; the aggregation trigger stays uniform.
+
+---
+
 ## Phase 6 — Message actions and message info
 
 - **Message schema (additive):** `editedAt`, `deletedForEveryone`/`deletedAt`/`deletedBy`/`deleteReason`, `replyTo`, `forwarded`+`forwardedFrom`, `reactions`, `pinnedAt`+`pinnedBy`, `expiresAt`. `sendTextMessage` initialises every field at creation so docs are uniform.

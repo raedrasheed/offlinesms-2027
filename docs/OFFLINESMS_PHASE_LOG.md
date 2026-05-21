@@ -4,6 +4,95 @@ Running log of phased work. Newest first.
 
 ---
 
+## Phase 7 — Delivery receipts, read receipts, message views
+
+**Branch:** `claude/repo-audit-architecture-MiZDX`
+**Status:** Complete. App builds end-to-end (typecheck + lint + build green across workspaces).
+
+### What was done
+
+- **Receipt schema fully populated.** `conversations/{c}/messages/{m}/receipts/{uid}` now carries `status` + `deliveredAt`/`readAt`/`viewedAt`/`playedAt`/`failedAt`/`failureReason`/`createdAt`/`updatedAt`. Doc id is always the recipient uid, pinned at the rules layer.
+- **Aggregate counts denormalised onto messages.** `messages` gains `deliveredCount`, `readCount`, `viewedCount`, `playedCount`, `failedCount`, `pendingCount`, `receiptUpdatedAt` — all server-owned (Phase 6 already locked `messages.update` to admin-only at the rules layer).
+- **Three new functions:**
+  - `markReceipt` callable — monotonic-or-failed transition guard (`pending → delivered → read/viewed/played`, `* → failed`), server-side, with self-receipts silently no-op'd. Backfills `deliveredAt` when a fresh `read` arrives without prior delivery. Wrapped in a Firestore transaction so concurrent clients can't race past the guard. Not audited (too noisy).
+  - `onReceiptWrite` trigger — recomputes the message-level aggregate counts on every receipt change by scanning the receipts sub-collection. Correct, simple, fine at the Phase 5 group cap of 256.
+  - `markStatusViewed` callable — records `statuses/{statusId}/views/{viewerUid}` after re-running Phase 3's audience + expiry rules server-side. Doc id = viewer uid → duplicates are impossible by construction. Self-views silently no-op.
+- **`getMessageInfo` extended.** When the caller is the message sender (or an admin), the response now includes a per-recipient receipt list (uid, displayName snapshot, role, status, per-status timestamps, failureReason). Non-senders still see the aggregates and the client surfaces a `PermissionState`.
+- **Receipt rules tightened (Phase 7).** Receipt reads narrowed to **the receipt owner, the message sender, or an admin** — the Phase 4 "any participant" read is closed, so group members can no longer enumerate each other's read status. Writes keep the Phase 3 owner-allowed path with the enum guard; canonical writes still flow through `markReceipt`.
+- **Status-view rules.** New sub-collection `statuses/{statusId}/views/{viewerUid}`: read by owner / viewer / admin; writes server-only.
+- **Mobile UI.**
+  - `MessageBubble` gains a `ReceiptIndicator` for the caller's own messages: `✓ / ✓✓ / ✓✓` (blue) for sent/delivered/read in direct chats; compact `✓ N · 👁 M` counts in groups.
+  - `Conversation` calls `markReceipt(messageId, 'delivered')` and `'read'` for every visible non-self message on each `subscribeMessages` batch. The lib dedupes `(messageId, status)` pairs in-memory and debounces by 300 ms so a fast scroll doesn't blast the callable.
+  - `MessageInfo` rewrites the layout: stats grid (Delivered / Read / Pending / Failed) + a tabbed per-recipient list for senders; for non-senders the same grid + a `PermissionState` explaining why detail is hidden.
+- **Design choice — "viewed" folded into receipts.** Phase 7 deliberately reuses the receipts enum's `viewed` for text messages rather than introducing a parallel `messages/{m}/views/{uid}` sub-collection. The aggregation trigger stays uniform; the dedicated view collection is reserved for media-specific events when media support lands.
+- **i18n.** New `receipts.*` namespace in `en.json` + `ar.json`.
+
+### Files created
+
+- `docs/OFFLINESMS_PHASE_7_PLAN.md`
+- `functions/src/chats/markReceipt.ts`
+- `functions/src/chats/onReceiptWrite.ts`
+- `functions/src/statuses/markStatusViewed.ts`
+
+### Files edited
+
+- `firestore.rules`
+- `functions/src/index.ts`
+- `functions/src/chats/getMessageInfo.ts`
+- `apps/mobile/src/lib/conversations.ts`
+- `apps/mobile/src/components/MessageBubble.tsx`
+- `apps/mobile/src/screens/Conversation.tsx`
+- `apps/mobile/src/screens/MessageInfo.tsx`
+- `apps/mobile/src/i18n/{en,ar}.json`
+- `docs/OFFLINESMS_DATA_MODEL.md` and all phase-tracking docs
+
+### Commits
+
+| Hash | Message |
+|---|---|
+| `fcc667b` | docs: add OfflineSMS phase 7 implementation plan |
+| `47c00b5` | feat(data): add receipt and status-view contracts |
+| `69ab317` | security: add receipt and status-view rules |
+| `9855261` | feat(functions): add markReceipt and receipt aggregation |
+| `a8633ce` | feat(functions): extend message info with receipt details |
+| `9eb8c31` | feat(functions): add status view tracking foundation |
+| `930aa58` | feat(mobile): render receipt indicators and mark read/delivered |
+| `61e231c` | feat(mobile): add full receipt details to message info |
+
+Tail commit (this docs update) lands next.
+
+### Checks run
+
+```
+npm run typecheck --workspaces --if-present   → ok (dashboard, mobile, functions)
+npm run lint --workspaces --if-present        → ok
+npm run build --workspaces --if-present       → ok
+```
+
+### Known limitations
+
+- **No automated tests** yet. Manual emulator checklist in the Phase 7 plan; `@firebase/rules-unit-testing` lands in Phase 20.
+- **`onReceiptWrite` recomputes by full scan.** Fine at the Phase 5 group cap of 256, but a Phase 20 perf pass may switch to `FieldValue.increment`-based counters with a daily reconciliation function (`reconcileReceiptCounts`) — code-only follow-up, no scheduling now.
+- **Group-admin aggregate visibility is not implemented.** The Phase 7 rules only let the sender (or an admin) see per-recipient detail. Admins seeing read-rate-only without per-recipient timestamps is a clean Phase 18 feature.
+- **No "Played" UI surface.** `playedCount` is wired through the trigger and aggregates but no client UI emits or renders it — voice messages land in a later phase.
+- **No daily receipt reconciliation function.** Scheduling that safely needs emulator-tests first; queued for Phase 20.
+- **No tick rendering on incoming messages.** Receipt indicators only show on the caller's own bubbles, by design.
+- **Phase 4 receipt-read rule change is a real tightening.** Previously any participant could read receipts; now only owner/sender/admin can. Any future code path that reads receipts directly from a client other than the sender would have to be promoted to a callable. Today, no such path exists outside `getMessageInfo` (Admin SDK).
+
+### Recommended Phase 8 scope
+
+Phase 8 = **OfflineSMS SMS escalation (UI)** (per the roadmap):
+
+1. Build `SmsEscalation.tsx` on top of the existing `escalateSms` callable. Audience picker (unread / undelivered / everyone — fed by Phase 7's receipt aggregates and per-recipient receipt list), masked-phone preview, cost preview against the wallet, confirmation, and a result screen with retry surface.
+2. Add abuse controls to `escalateSms`: per-user-per-day batch cap, audience size cap, conversation cool-down. Persist to `smsQuotaUsage/{uid}/{yyyymmdd}` (Phase 3 collection already locked server-only).
+3. Wire the existing `lib/sms.ts` placeholder on mobile so the conversation screen exposes an "Escalate to SMS" entry point gated by the receipt counts (only offered when there are unread/undelivered recipients).
+4. Manual emulator pass: confirm points reservation → settle/refund flow lands the right `transactions` records (Phase 0 already wired the `onSmsBatchAccepted` trigger).
+5. Audit every escalation. Brand all dispatch as OfflineSMS — no third-party provider names anywhere in copy / logs / telemetry.
+
+Defer: media messages, communities, calls, dashboard moderation, payments. Points purchase + transfer come in Phase 10.
+
+---
+
 ## Phase 6 — Message actions and message info
 
 **Branch:** `claude/repo-audit-architecture-MiZDX`

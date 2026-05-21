@@ -2,6 +2,16 @@
 
 Risks ranked across the surfaces present today and planned for later phases. Likelihood/impact are qualitative.
 
+## Phase 7 mitigation snapshot
+
+- **Risk #1 (Firebase security rules gaps)** — receipt reads are now scoped to the receipt owner, the message sender, or admins; the Phase 4 "any participant" read is closed. `statuses/{id}/views/{uid}` writes are server-only via `markStatusViewed`, which re-runs Phase 3's audience check.
+- **Risk #6 (delivery/read receipt scalability)** — Phase 7 ships the consumer side. `onReceiptWrite` recomputes aggregates by full scan; correct and simple at the 256-member cap. Client batches via dedupe + 300 ms debounce. Phase 20 may swap to incremental counters if throughput demands.
+- **Risk #15 (audit log gaps)** — receipt writes deliberately unaudited (too noisy). Audit-metadata sanitiser still strips body/content/messageText/text keys defensively.
+- **Risk #18 (real-time listener cost)** — receipts already live in the existing per-message receipt sub-collection; aggregate counts piggy-back on the message doc that's already streamed.
+- **Risk #19 (offline sync conflicts)** — server-side monotonic guard makes receipt writes idempotent and safe to retry. Even a lost client dedupe state can't downgrade a `read` back to `delivered`.
+
+---
+
 ## Phase 6 mitigation snapshot
 
 - **Risk #1 (Firebase security rules gaps)** — `messages.update` and `messages.delete` are now admin-only at the rules layer; every legitimate mutation flows through a callable + Admin SDK. Two unused shape validators (`isValidReplyTo`, `isValidForwardedFrom`) are available for future direct-create paths.
