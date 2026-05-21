@@ -4,12 +4,14 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { auth } from './src/lib/firebase';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { auth, db } from './src/lib/firebase';
 import './src/i18n';
 
 import Welcome from './src/screens/Welcome';
 import PhoneEntry from './src/screens/PhoneEntry';
 import Otp from './src/screens/Otp';
+import ProfileCompletion from './src/screens/ProfileCompletion';
 import ChatsList from './src/screens/ChatsList';
 import Conversation from './src/screens/Conversation';
 import Status from './src/screens/Status';
@@ -21,6 +23,7 @@ import Devices from './src/screens/Devices';
 import SmsEscalation from './src/screens/SmsEscalation';
 
 const AuthStack = createNativeStackNavigator();
+const OnboardingStack = createNativeStackNavigator();
 const Tabs = createBottomTabNavigator();
 const RootStack = createNativeStackNavigator();
 
@@ -31,6 +34,14 @@ function AuthFlow() {
       <AuthStack.Screen name="PhoneEntry" component={PhoneEntry} />
       <AuthStack.Screen name="Otp" component={Otp} />
     </AuthStack.Navigator>
+  );
+}
+
+function OnboardingFlow() {
+  return (
+    <OnboardingStack.Navigator screenOptions={{ headerShown: false }}>
+      <OnboardingStack.Screen name="ProfileCompletion" component={ProfileCompletion} />
+    </OnboardingStack.Navigator>
   );
 }
 
@@ -48,12 +59,34 @@ function MainTabs() {
 export default function App() {
   const [ready, setReady] = useState(false);
   const [user, setUser] = useState<User | null>(null);
-  useEffect(() => onAuthStateChanged(auth, u => { setUser(u); setReady(true); }), []);
+  // null  = not loaded yet, false = needs onboarding, true = complete.
+  const [profileCompleted, setProfileCompleted] = useState<boolean | null>(null);
+
+  useEffect(() => onAuthStateChanged(auth, u => {
+    setUser(u);
+    setReady(true);
+    if (!u) setProfileCompleted(null);
+  }), []);
+
+  useEffect(() => {
+    if (!user) return;
+    return onSnapshot(doc(db, 'users', user.uid), snap => {
+      setProfileCompleted(snap.exists() ? snap.data()?.profileCompleted === true : false);
+    });
+  }, [user]);
+
   if (!ready) return null;
+
   return (
     <SafeAreaProvider>
       <NavigationContainer>
-        {!user ? <AuthFlow /> : (
+        {!user ? (
+          <AuthFlow />
+        ) : profileCompleted === null ? (
+          null /* waiting for users/{uid} snapshot */
+        ) : profileCompleted === false ? (
+          <OnboardingFlow />
+        ) : (
           <RootStack.Navigator screenOptions={{ headerShown: false }}>
             <RootStack.Screen name="Tabs" component={MainTabs} />
             <RootStack.Screen name="Conversation" component={Conversation} />

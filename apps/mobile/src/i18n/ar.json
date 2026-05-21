@@ -15,9 +15,33 @@
     "verifyContinue": "تحقق وتابع",
     "createPin": "إنشاء رمز PIN من 6 أرقام",
     "createProfile": "إعداد ملفك الشخصي",
+    "createProfileSub": "اختر كيف ستظهر في OfflineSMS. يمكنك تغيير ذلك لاحقًا.",
     "displayName": "الاسم الظاهر",
     "username": "اسم المستخدم",
-    "createProfileBtn": "إنشاء الملف"
+    "about": "نبذة",
+    "aboutOptional": "(اختياري)",
+    "usernameHint": "٣–٢٠ حرفًا · أحرف لاتينية صغيرة، أرقام، نقطة، شرطة سفلية.",
+    "createProfileBtn": "إنشاء الملف",
+    "useDifferentNumber": "استخدم رقمًا آخر",
+    "saving": "جارٍ الحفظ…"
+  },
+  "profileErrors": {
+    "usernameTaken": "اسم المستخدم مأخوذ. جرّب اسمًا آخر.",
+    "usernameReserved": "اسم المستخدم محجوز.",
+    "usernameTooShort": "استخدم ٣ أحرف على الأقل.",
+    "usernameTooLong": "استخدم ٢٠ حرفًا كحد أقصى.",
+    "usernameInvalidChars": "أحرف لاتينية صغيرة وأرقام ونقطة وشرطة سفلية فقط.",
+    "savingFailed": "تعذّر حفظ ملفك الشخصي. يرجى المحاولة مرة أخرى."
+  },
+  "otpErrors": {
+    "invalidPhone": "أدخل رقم هاتف بالصيغة الدولية، مثل ‎+14155550100.",
+    "invalidCode": "الرمز غير مطابق. تحقّق منه وحاول مرة أخرى.",
+    "codeExpired": "انتهت صلاحية الرمز. اضغط \"إعادة الإرسال\" للحصول على رمز جديد.",
+    "tooManyAttempts": "محاولات كثيرة جدًا. يرجى الانتظار قليلًا والمحاولة لاحقًا.",
+    "networkError": "خطأ في الشبكة. تحقّق من الاتصال وحاول مرة أخرى.",
+    "quotaExceeded": "OfflineSMS يستقبل ضغطًا عاليًا الآن. حاول لاحقًا.",
+    "recaptchaUnavailable": "التحقق من الهاتف غير متوفر على هذا الجهاز.",
+    "unknown": "حدث خطأ. يرجى المحاولة مرة أخرى."
   },
   "tabs": {
     "chats": "المحادثات",

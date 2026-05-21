@@ -15,9 +15,33 @@
     "verifyContinue": "Verify and continue",
     "createPin": "Create a 6-digit PIN",
     "createProfile": "Set up your profile",
+    "createProfileSub": "Choose how you'll appear on OfflineSMS. You can change these later.",
     "displayName": "Display name",
     "username": "Username",
-    "createProfileBtn": "Create profile"
+    "about": "About",
+    "aboutOptional": "(optional)",
+    "usernameHint": "3–20 characters · lowercase letters, numbers, dot, underscore.",
+    "createProfileBtn": "Create profile",
+    "useDifferentNumber": "Use a different number",
+    "saving": "Saving…"
+  },
+  "profileErrors": {
+    "usernameTaken": "That username is taken. Try another.",
+    "usernameReserved": "That username is reserved.",
+    "usernameTooShort": "Use at least 3 characters.",
+    "usernameTooLong": "Use at most 20 characters.",
+    "usernameInvalidChars": "Lowercase letters, numbers, dot, and underscore only.",
+    "savingFailed": "We couldn't save your profile. Please try again."
+  },
+  "otpErrors": {
+    "invalidPhone": "Enter a phone number in international format, like +14155550100.",
+    "invalidCode": "That code didn't match. Double-check and try again.",
+    "codeExpired": "That code expired. Tap \"Resend code\" to get a new one.",
+    "tooManyAttempts": "Too many attempts. Please wait a few minutes and try again.",
+    "networkError": "Network error. Check your connection and try again.",
+    "quotaExceeded": "OfflineSMS is at capacity right now. Please try again shortly.",
+    "recaptchaUnavailable": "Phone verification is unavailable on this device.",
+    "unknown": "Something went wrong. Please try again."
   },
   "tabs": {
     "chats": "Chats",
