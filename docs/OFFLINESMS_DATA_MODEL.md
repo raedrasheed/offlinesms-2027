@@ -363,6 +363,72 @@ the client to mark `delivered` / `read` / `played` / `viewed`.
 
 **Rules.** Owner-write, participant-read. No content stored.
 
+---
+
+## Phase 5 — Group conversations
+
+`conversations/{id}` gains group-only fields (direct conversations leave them unset):
+
+```ts
+{
+  // existing Phase 4 fields
+  type:        'direct' | 'group' | 'channel',
+  status:      'active' | 'archived' | 'disabled' | 'locked',   // Phase 5 adds 'locked'
+  ...
+
+  // Phase 5 (group only)
+  name:        string,                  // 1..80 chars
+  avatarUrl:   string | null,           // upload deferred — null in Phase 5
+  ownerUid:    string,                  // single owner, always in participantUids
+  memberCount: number,                  // == participantUids.length (server-owned)
+  settings: {
+    onlyAdminsCanSend:       boolean,   // default false
+    onlyAdminsCanEditInfo:   boolean,   // default true
+    onlyAdminsCanAddMembers: boolean,   // default false
+  },
+}
+```
+
+### `conversations/{c}/members/{uid}` (canonical Phase 5)
+
+```ts
+{
+  uid:                 string,
+  role:                'owner' | 'admin' | 'member',
+  displayNameSnapshot: string,          // captured at add time
+  photoURLSnapshot?:   string | null,
+  status:              'active' | 'removed' | 'left',
+  addedBy:             string,
+  joinedAt:            serverTimestamp,
+  updatedAt:           serverTimestamp,
+}
+```
+
+Existing Phase 0/4 `members/{uid}` docs (`{ role }` only) keep working: rules read `role` only, and callables `merge: true` on subsequent updates.
+
+### `conversations/{c}/messages/{messageId}` — group fields
+
+For group messages, `sendTextMessage` adds:
+
+```ts
+{
+  senderDisplayName: string,            // snapshot at send time
+  senderPhotoURL?:   string | null,
+}
+```
+
+The chat UI uses these to render sender headers without joining `users`. Direct messages omit them.
+
+### Phase 5 indexes
+
+- `conversations (participantUids array-contains, type ASC, updatedAt DESC)` — the "Groups" filter chip without a client-side filter pass.
+
+### Member-count cap
+
+`MAX_GROUP_MEMBERS = 256`. Enforced in `createGroup` and `addMembers`. Rules don't enforce (would cost an extra `get()` per write); Phase 20 will reconsider.
+
+---
+
 ### Phase 4 indexes
 
 | Collection | Fields | Used by |
