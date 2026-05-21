@@ -4,6 +4,93 @@ Running log of phased work. Newest first.
 
 ---
 
+## Phase 2 — Firebase auth, onboarding, profile completion
+
+**Branch:** `claude/repo-audit-architecture-MiZDX`
+**Status:** Complete. App builds end-to-end (typecheck + lint + build all green across workspaces).
+
+### What was done
+
+- **Native phone OTP path.** `apps/mobile/src/lib/auth.ts` refactored: web keeps invisible reCAPTCHA; native uses an `ApplicationVerifier` registered via a new `setNativeRecaptchaVerifier()` hook so a future `FirebaseRecaptchaVerifierModal` mount drops in cleanly. Firebase auth error codes are mapped to a stable `OtpError` enum (`invalid-phone-number`, `invalid-verification-code`, `code-expired`, `too-many-attempts`, `network-error`, `quota-exceeded`, `recaptcha-unavailable`, `no-confirmation-in-flight`, …). Added `isPlausiblePhone()` and a `cancelOtp()` helper for backing out of the flow. **No OTP value is ever stored or logged**; `ConfirmationResult` lives in module-scope memory only.
+- **Phone UX improvements.** `PhoneEntry.tsx` and `Otp.tsx` translate `OtpError` codes to product-friendly copy, autofill from `oneTimeCode`, and offer a "use a different number" link that clears in-flight state.
+- **Profile completion flow.** New screen `ProfileCompletion.tsx` captures `displayName` (required, 1–60 chars), `username` (required, 3–20 chars, `[a-z0-9._]` with edge/consecutive-punct guards), and optional `about` (≤140 chars). Calls the `claimUsername` callable; on success Firestore flips `profileCompleted: true` and `App.tsx` swaps the navigator into `MainTabs`. Avatar upload is deferred — `photoURL` stays `null` for now.
+- **Onboarding routing in `App.tsx`.** Subscribes to `users/{uid}` after sign-in; until `profileCompleted === true`, the app shows the `OnboardingFlow` instead of `MainTabs`.
+- **Username uniqueness.** New Firestore collection `usernames/{lowercaseUsername}` with `{ uid, username, claimedAt }`. New callable `functions/src/auth/claimUsername.ts` runs a single transaction that:
+  - Rejects `already-exists` when the target username is held by another uid.
+  - Releases the caller's prior `usernameLower` if they're renaming.
+  - Writes `usernames/{lower}` and patches `users/{uid}` with the allowed fields.
+- **`onUserCreate` seeds `profileCompleted: false`** plus `null` username fields so the gate works from the first sign-in.
+- **Firestore rules hardening.** `users.update` is now a strict field allow-list (`displayName`, `photoURL`, `about`, `profileCompleted`, `fcmTokens`, `lastSeen`, `updatedAt`). `username` and `usernameLower` are **only** writeable via the `claimUsername` callable. A redundant banned-list (`role`, `roles`, `permissions`, `admin`, `isAdmin`, `points`, `pointsBalance`, `wallet`, `walletStatus`, `organizationId`, `organizationRole`, `createdAt`, `phoneVerified`, `status`, `phoneNumber`, `email`, `username`, `usernameLower`) is a safety net against future edits. `users.create` is also field-scoped. `usernames/{lower}` reads are allowed for signed-in users (so the UI can show "taken" status); writes require admin (callable bypasses rules via Admin SDK).
+- **Admin bootstrap script.** `scripts/promoteAdmin.ts` + `npm run promote:admin -- <email>` set `admin: true` and `role: 'super_admin'` claims on a target user, preserving existing claims. Refuses without an email arg, refuses unknown emails, never logs the service-account file. Docs: `docs/admin-bootstrap.md`.
+- **Email-link sign-in:** deferred. No existing scaffolding to complete; introducing it from scratch is out of scope for Phase 2 and documented as deferred in the risk register and roadmap.
+- **i18n.** Added `auth.createProfileSub`, `auth.about*`, `auth.usernameHint`, `auth.useDifferentNumber`, `auth.saving`, plus `profileErrors.*` and `otpErrors.*` keys in `en.json` and `ar.json`.
+
+### Files created
+
+- `docs/OFFLINESMS_PHASE_2_PLAN.md`
+- `docs/admin-bootstrap.md`
+- `apps/mobile/src/lib/username.ts`
+- `apps/mobile/src/lib/profile.ts`
+- `apps/mobile/src/screens/ProfileCompletion.tsx`
+- `functions/src/auth/claimUsername.ts`
+- `scripts/promoteAdmin.ts`
+
+### Files edited
+
+- `apps/mobile/src/lib/auth.ts`
+- `apps/mobile/src/screens/{PhoneEntry,Otp}.tsx`
+- `apps/mobile/App.tsx`
+- `apps/mobile/src/i18n/{en,ar}.json`
+- `functions/src/auth/onUserCreate.ts`
+- `functions/src/index.ts`
+- `firestore.rules`
+- `package.json` (root) — added `promote:admin`
+- `.env.example` (root)
+
+### Commits
+
+| Hash | Message |
+|---|---|
+| `f4079f3` | docs: add OfflineSMS phase 2 implementation plan |
+| `67cadb1` | feat(auth): add native phone OTP flow with friendly errors |
+| `85abd69` | feat(profile): add profile completion screen with username validation |
+| `7a06371` | feat(functions): add claimUsername callable |
+| `a17199c` | security: harden user profile Firestore updates |
+| `471c0c2` | chore(admin): add first-admin promotion script |
+
+Tail commit lands with this docs update.
+
+### Checks run
+
+```
+npm run typecheck --workspaces --if-present     → ok (dashboard, mobile, functions)
+npm run lint --workspaces --if-present          → ok
+npm run build --workspaces --if-present         → ok
+npm run promote:admin                           → refuses without email arg (expected)
+```
+
+### Known limitations
+
+- **Native phone OTP requires a host-app verifier mount.** The path is plumbed (`setNativeRecaptchaVerifier`), but actually invoking it on iOS/Android requires `expo-firebase-recaptcha` (or `@react-native-firebase/auth`) to be installed and a verifier ref registered at app start. Phase 2 ships the plumbing + a clear `recaptcha-unavailable` error so web + dev work today; wiring the verifier mount is a follow-up.
+- **Email-link sign-in deferred.** Not scaffolded; out of scope.
+- **Avatar upload deferred.** `photoURL` is allowed in the field allow-list but no UI mounts the image picker yet. Phase 4+.
+- **No automated tests for rules / callable.** Phase 20 lands `@firebase/rules-unit-testing` coverage; manual emulator testing is documented in the Phase 2 plan.
+- **`claimUsername` callable** depends on Cloud Functions being deployed in environments that exercise the onboarding flow. The dashboard and seed data don't require it.
+
+### Recommended Phase 3 scope
+
+Phase 3 = **Core Firestore data model and rules hardening** (per the roadmap). Specifically:
+
+1. Add missing Firestore collections needed by later phases: `auditLogs`, `payments`, `flags`, `tickets`, `roles`, `gatewayHealth`, `smsQuotaUsage`, `organizations`. Stubs only — rules + minimal schema docs, no UI.
+2. Server-side audience enforcement for `statuses` (move the existing client-side filtering into rules / a callable).
+3. Receipt `status` enum validation in `firestore.rules`.
+4. Add a shared `functions/src/lib/auditLog.ts` helper so privileged callables in later phases can audit consistently. Wire `claimUsername` to use it as the first example.
+5. (Optional) move `onUserCreate`'s welcome credit out of the trigger into an idempotent callable so it can be re-run if the trigger fails.
+
+Defer: chat / SMS / wallet / dashboard module work — those are Phases 4+.
+
+---
+
 ## Phase 1 — Design system, layout shells, routing cleanup
 
 **Branch:** `claude/repo-audit-architecture-MiZDX`

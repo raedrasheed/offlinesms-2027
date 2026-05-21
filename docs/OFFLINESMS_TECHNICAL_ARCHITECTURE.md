@@ -4,6 +4,33 @@ System-level blueprint for the build-out described in `OFFLINESMS_IMPLEMENTATION
 
 ---
 
+## Onboarding & username uniqueness (Phase 2)
+
+- **`users/{uid}.profileCompleted: boolean`** drives onboarding routing on mobile. Set by `claimUsername`; seeded as `false` by `onUserCreate`.
+- **`usernames/{lowercaseUsername}`** is the uniqueness lookup, written **only** by the `claimUsername` callable. Shape: `{ uid, username, claimedAt }`. Anyone signed in can read the doc (so the UI can preview "taken" status); writes are denied to clients and routed through the callable, which uses the Admin SDK to bypass rules.
+- **`claimUsername` callable** runs a single Firestore transaction that:
+  - rejects when the target username is held by another uid (`already-exists`),
+  - releases the caller's prior `usernameLower` if they're renaming, and
+  - updates `users/{uid}` with `displayName`, `username`, `usernameLower`, `about`, `profileCompleted: true`, `updatedAt`.
+- **Reserved usernames** (`admin`, `support`, `system`, `offlinesms`, `official`, `root`, `null`, `undefined`, …) are enforced **both** client-side (`apps/mobile/src/lib/username.ts`) and server-side (`functions/src/auth/claimUsername.ts`). The two lists must stay in sync.
+- **OTP secrets** never leave the Firebase SDK boundary: `ConfirmationResult` lives in module-scope memory, isn't persisted, isn't logged.
+
+## User profile field allow-list (Phase 2)
+
+`firestore.rules` enforces a field allow-list on `users/{uid}.update`:
+
+| Allowed (self) | Banned (server-owned) |
+|---|---|
+| `displayName`, `photoURL`, `about`, `profileCompleted`, `fcmTokens`, `lastSeen`, `updatedAt` | `role`, `roles`, `permissions`, `admin`, `isAdmin`, `points`, `pointsBalance`, `wallet`, `walletStatus`, `organizationId`, `organizationRole`, `createdAt`, `phoneVerified`, `status`, `phoneNumber`, `email`, `username`, `usernameLower` |
+
+`username` / `usernameLower` are intentionally banned from direct client writes: they only get written by the `claimUsername` callable (Admin SDK bypasses rules). Admins keep an escape hatch via `isAdmin()`.
+
+## Admin bootstrap (Phase 2)
+
+`scripts/promoteAdmin.ts` (run via `npm run promote:admin -- <email>`) sets `admin: true` + `role: 'super_admin'` custom claims on a target user, preserving any existing claims. Long-term admin management belongs to Phase 18; this script is bootstrap-only. See `docs/admin-bootstrap.md`.
+
+---
+
 ## Design tokens — semantic layer (Phase 1)
 
 Two-tier token model in `@offlinesms/design-tokens`:

@@ -2,6 +2,15 @@
 
 Risks ranked across the surfaces present today and planned for later phases. Likelihood/impact are qualitative.
 
+## Phase 2 mitigation snapshot
+
+- **Risk #1 (Firebase security rules gaps)** — partially mitigated. `users.update` now enforces a strict field allow-list, with a redundant banned-list as a safety net. `usernames/{lower}` collection has explicit rules: read by signed-in users, writes server-only via `claimUsername`. Still pending: rules for `auditLogs`, `tickets`, `flags`, `roles`, `payments`, `gatewayHealth` (Phase 3); statuses audience enforcement (Phase 3); receipt enum validation (Phase 3); rules unit tests (Phase 20).
+- **Risk #14 (admin permission leakage)** — partial mitigation. `scripts/promoteAdmin.ts` provides a documented, controlled path to the first admin; both legacy `admin: true` and forward-compat `role: 'super_admin'` claims are set. RBAC still single-claim until Phase 18.
+- **Risk #20 (free admin bootstrap risk)** — first-admin bootstrap is now documented end-to-end (`docs/admin-bootstrap.md`). Service-account handling rules spelled out; script refuses to run without an explicit email argument and never prints the key file.
+- **Onboarding-state DoS / spam** — new mitigation lever. Reserved-username list prevents impersonation of system identities; the `claimUsername` callable runs in a single transaction so concurrent claims fail one side cleanly. Full per-user rate limiting comes in Phase 8 / Phase 20.
+
+---
+
 ## Phase 1 mitigation snapshot
 
 - **Risk #4 (admin permission leakage at the route boundary)** — partially mitigated. `apps/dashboard/app/admin/layout.tsx` is now a server-rendered guard that verifies a Firebase session cookie and admin role; non-admin traffic gets a `PermissionState` page rather than admin UI. Full RBAC (beyond `admin: true`) still lands in Phase 18.

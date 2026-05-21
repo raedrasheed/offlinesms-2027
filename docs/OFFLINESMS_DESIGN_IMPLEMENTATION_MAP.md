@@ -10,31 +10,31 @@ Legend for "Recommended phase" matches `OFFLINESMS_IMPLEMENTATION_ROADMAP.md`.
 
 | | |
 |---|---|
-| **Status** | 🟡 Partial (web phone OTP works; native unimplemented; profile completion missing) |
-| **Existing** | `apps/mobile/src/screens/Welcome.tsx`, `PhoneEntry.tsx`, `Otp.tsx`; `apps/mobile/src/lib/auth.ts`; `functions/src/auth/onUserCreate.ts`; `apps/dashboard/app/login/page.tsx` |
-| **Missing** | Native OTP, email-link path, password-less retry, profile-completion screen, terms acceptance, restore session UX, multi-device handoff |
-| **Frontend** | `ProfileCompletion.tsx`, `EmailLink.tsx`, native-OTP integration (`@react-native-firebase/auth`), terms checkbox |
-| **Backend** | Extend `onUserCreate` to seed `username`, `about`; callable `claimUsername` with uniqueness check |
-| **Firestore** | `users` (existing), new `usernames/{username}` lookup collection |
-| **Indexes** | `users.username ASC` |
-| **Rules** | `usernames` — create by self when free; immutable thereafter |
-| **Tests** | OTP success/fail, profile claim collision, dup-username, RTL screens |
-| **Phase** | 2 |
+| **Status** | 🟡 Phase 2 landed: web OTP, native-OTP plumbing, profile completion gating. Native verifier mount + email-link still pending. |
+| **Existing** | `apps/mobile/src/screens/{Welcome,PhoneEntry,Otp,ProfileCompletion}.tsx`; `apps/mobile/src/lib/{auth,profile,username}.ts`; `functions/src/auth/{onUserCreate,claimUsername}.ts`; `apps/dashboard/app/login/page.tsx`; `scripts/promoteAdmin.ts` |
+| **Missing** | Verifier mount for `expo-firebase-recaptcha` (or `@react-native-firebase/auth`), email-link path, password-less retry, terms acceptance, restore session UX, multi-device handoff |
+| **Frontend** | Verifier modal mount in mobile root, optional `EmailLink.tsx`, terms checkbox |
+| **Backend** | (Phase 3) `auditLog` helper to capture onboarding events |
+| **Firestore** | `users` (extended), `usernames/{lower}` (lookup, new in Phase 2) |
+| **Indexes** | — (lookup by doc id) |
+| **Rules** | `users.update` field allow-list (Phase 2 ✓); `usernames` server-only writes (Phase 2 ✓) |
+| **Tests** | OTP success/fail, profile claim collision, dup-username, RTL screens (Phase 20) |
+| **Phase** | 2 ✓ (with documented follow-ups) |
 
 ## 2. User profile
 
 | | |
 |---|---|
-| **Status** | 🟧 Scaffold (no UI; doc seeded by trigger) |
-| **Existing** | `users/{uid}` doc shape, avatar storage path |
-| **Missing** | View/edit profile screen, avatar upload, about, status text, presence |
-| **Frontend** | `Profile.tsx` (view), `ProfileEdit.tsx`, avatar picker |
-| **Backend** | Callable `updateProfile` (validates length, sanitises), `setPresence` (heartbeat or RTDB) |
-| **Firestore** | `users` (`displayName`, `username`, `about`, `avatarUrl`, `lastSeen`, `presence`) |
+| **Status** | 🟡 Edit-on-create exists; ongoing edit + avatar deferred. |
+| **Existing** | `users/{uid}` schema with `displayName`, `username`, `usernameLower`, `about`, `profileCompleted`; field allow-list in rules; `claimUsername` callable handles renames too |
+| **Missing** | Profile view + edit screens, avatar upload, presence, status text |
+| **Frontend** | `Profile.tsx` (view), `ProfileEdit.tsx`, avatar picker, presence indicator |
+| **Backend** | `setPresence` (heartbeat / RTDB); image-upload validation |
+| **Firestore** | `users` (`presence`, `photoURL` already allowed by rules) |
 | **Indexes** | — |
-| **Rules** | Tighten `users.update` to a field-allow-list |
+| **Rules** | Field allow-list landed Phase 2 |
 | **Tests** | Upload size limits, sanitisation, presence churn |
-| **Phase** | 2 |
+| **Phase** | 4 (when chat features need presence) |
 
 ## 3. Chat list
 
