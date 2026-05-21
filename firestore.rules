@@ -63,6 +63,44 @@ service cloud.firestore {
     }
 
     // ────────────────────────────────────────────────────────────
+    // Group helpers (Phase 5)
+    //
+    // Roles are stored in the `members` sub-collection. The send-policy
+    // gates (locked / onlyAdminsCanSend) are enforced inside the
+    // sendTextMessage callable, not in rules, because rules-level
+    // reads of conversation settings cost an extra get() per write.
+    // ────────────────────────────────────────────────────────────
+    function getMemberRole(convoId) {
+      return get(/databases/$(database)/documents/conversations/$(convoId)/members/$(request.auth.uid)).data.role;
+    }
+    function memberExists(convoId, uid) {
+      return exists(/databases/$(database)/documents/conversations/$(convoId)/members/$(uid));
+    }
+    function isConversationOwner(convoId) {
+      return memberExists(convoId, request.auth.uid)
+          && getMemberRole(convoId) == 'owner';
+    }
+    function isConversationAdmin(convoId) {
+      return memberExists(convoId, request.auth.uid)
+          && getMemberRole(convoId) in ['owner', 'admin'];
+    }
+    function isValidGroupRole(role) {
+      return role in ['owner', 'admin', 'member'];
+    }
+    function isGroupTypeData(data) {
+      return ('type' in data) && data.type == 'group';
+    }
+    function safeGroupConversationCreate() {
+      // Group conversations can be created from a client only when the
+      // doc puts the caller as the owner AND lists them in
+      // participantUids. The createGroup callable goes through the
+      // Admin SDK so it bypasses this branch entirely.
+      return isGroupTypeData(request.resource.data)
+          && request.resource.data.ownerUid == request.auth.uid
+          && request.auth.uid in request.resource.data.participantUids;
+    }
+
+    // ────────────────────────────────────────────────────────────
     // User profile field allow-list (Phase 2)
     // ────────────────────────────────────────────────────────────
     function allowedProfileFields() {
@@ -160,15 +198,32 @@ service cloud.firestore {
                        || isConversationParticipant(convoId)
                        || isAdmin();
       allow create: if isAuthed()
-                       && isConversationParticipantData(request.resource.data);
+                       && isConversationParticipantData(request.resource.data)
+                       && (!isGroupTypeData(request.resource.data) || safeGroupConversationCreate());
       allow update: if isMember(convoId)
                        || isConversationParticipant(convoId)
                        || isAdmin();
       allow delete: if isGroupAdmin(convoId) || isAdmin();
 
+      // /members:
+      //   - Read: any participant of the conversation (so members can see
+      //     the roster) or an admin.
+      //   - Write: for group conversations, server-only (createGroup,
+      //     addMembers, removeMember, changeRole, leaveGroup callables
+      //     use the Admin SDK and bypass these rules). Project admins
+      //     keep an escape hatch via the `admin` custom claim. The
+      //     legacy 1:1/channel paths still allow self-membership and
+      //     group-admin self-service for back-compat with seed data.
       match /members/{uid} {
         allow read:  if isMember(convoId) || isConversationParticipant(convoId) || isAdmin();
-        allow write: if isGroupAdmin(convoId) || isSelf(uid) || isAdmin();
+        allow write: if isAdmin()
+                       || (
+                            // Legacy path for non-group conversations: keep the
+                            // Phase 0 self-or-group-admin write. Group writes
+                            // are server-only.
+                            get(/databases/$(database)/documents/conversations/$(convoId)).data.type != 'group'
+                            && (isGroupAdmin(convoId) || isSelf(uid))
+                          );
       }
 
       // Per-user conversation state (Phase 4).
