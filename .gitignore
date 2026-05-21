@@ -10,6 +10,8 @@ build/
 out/
 .expo/
 web-build/
+*.tsbuildinfo
+functions/lib/
 
 # Env
 .env

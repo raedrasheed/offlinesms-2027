@@ -1,9 +1,14 @@
 // Firebase client (mobile · web + native)
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
-  initializeAuth, getAuth, getReactNativePersistence,
+  initializeAuth, getAuth,
   signInWithPhoneNumber, RecaptchaVerifier,
 } from 'firebase/auth';
+// `getReactNativePersistence` moved out of the main `firebase/auth` entry
+// in JS SDK 10.x; it now lives at `firebase/auth/react-native`. The
+// metro bundler will pick this up at runtime on native.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { getReactNativePersistence } = require('firebase/auth/react-native');
 import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
