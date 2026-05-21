@@ -24,6 +24,11 @@ export { pinMessage }      from './chats/pinMessage';
 export { forwardMessages } from './chats/forwardMessages';
 export { getMessageInfo }  from './chats/getMessageInfo';
 
+// Phase 7 — receipts and status views.
+export { markReceipt }       from './chats/markReceipt';
+export { onReceiptWrite }    from './chats/onReceiptWrite';
+export { markStatusViewed }  from './statuses/markStatusViewed';
+
 // Disappearing-message sweeper is implemented at
 // ./chats/sweepExpiredMessages but NOT exported here. Activation is
 // deferred to Phase 11 alongside the client-side TTL setting UI.
