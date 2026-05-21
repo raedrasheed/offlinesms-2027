@@ -280,6 +280,101 @@ the client to mark `delivered` / `read` / `played` / `viewed`.
 
 ---
 
+---
+
+## Phase 4 — Direct conversations
+
+### `conversations/{conversationId}` (extended)
+
+```ts
+{
+  // canonical Phase 4 fields
+  type:            'direct' | 'group' | 'channel',
+  participantUids: string[],                // canonical; direct = exactly 2
+  participantKey:  string,                  // sorted-uid join, e.g. 'A_B' (direct only)
+  createdBy:       string,                  // uid that opened the conversation
+  status:          'active' | 'archived' | 'disabled',
+  createdAt:       serverTimestamp,
+  updatedAt:       serverTimestamp,
+  lastMessage: {
+    messageId: string,
+    senderUid: string,
+    type:      'text',
+    preview:   string,                      // <= 80 chars, sanitised
+    createdAt: serverTimestamp,
+  } | null,
+
+  // back-compat aliases written alongside the new fields so the existing
+  // receipt-fanout trigger, dashboard list page, and seed data keep working.
+  memberIds:       string[],                // == participantUids
+  lastMessageText: string,
+  lastMessageAt:   serverTimestamp,
+  lastSenderId:    string,
+}
+```
+
+### `conversations/{c}/messages/{messageId}` (extended)
+
+```ts
+{
+  conversationId:     string,
+  senderUid:          string,               // canonical Phase 4
+  senderId:           string,               // back-compat alias of senderUid
+  type:               'text',               // Phase 4 only
+  text:               string,               // 1..4000 chars after trim
+  createdAt:          serverTimestamp,
+  updatedAt:          serverTimestamp,
+  status:             'sent',               // 'sending'|'delivered'|'read'|'failed' come later
+  deletedForEveryone: false,
+  editedAt:           null,
+  replyTo:            null,
+}
+```
+
+### `conversations/{c}/userState/{uid}` (new)
+
+```ts
+{
+  uid:                string,
+  pinned:             boolean,
+  muted:              boolean,
+  archived:           boolean,
+  favorite:           boolean,
+  lastReadAt:         serverTimestamp,
+  unreadCount:        number,               // server-owned
+  lastMessagePreview: string,               // server-owned, <= 80 chars
+  lastMessageAt:      serverTimestamp,      // server-owned
+  updatedAt:          serverTimestamp,
+}
+```
+
+**Rules.** Clients can only touch `{ pinned, muted, archived, favorite, updatedAt }` on their own `userState`. `unreadCount`, `lastMessagePreview`, `lastMessageAt`, and `lastReadAt` are server-owned (callable / trigger).
+
+### `conversations/{c}/typing/{uid}` (new)
+
+```ts
+{
+  uid:       string,
+  isTyping:  boolean,
+  updatedAt: serverTimestamp,
+  expiresAt: timestamp,                     // now + 3000ms
+}
+```
+
+**Rules.** Owner-write, participant-read. No content stored.
+
+### Phase 4 indexes
+
+| Collection | Fields | Used by |
+|---|---|---|
+| `conversations` | `(participantUids array-contains, updatedAt DESC)` | chat list, default filter |
+| `conversations` | `(participantUids array-contains, status ASC, updatedAt DESC)` | "Archived" filter without client-side filtering |
+| `conversations` | `(memberIds array-contains, lastMessageAt DESC)` (already in Phase 0) | back-compat for legacy callers / seed |
+
+`messages` is unchanged — the existing `(conversationId, createdAt DESC)` collection-group index covers in-conversation reads.
+
+---
+
 ## Index plan (mirrors `firestore.indexes.json`)
 
 | Collection | Fields | Used by |
