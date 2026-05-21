@@ -5,6 +5,7 @@ service cloud.firestore {
     function isAuthed() {
       return request.auth != null;
     }
+    function isSignedIn() { return isAuthed(); }
     function isSelf(uid) {
       return isAuthed() && request.auth.uid == uid;
     }
@@ -20,12 +21,75 @@ service cloud.firestore {
         get(/databases/$(database)/documents/conversations/$(convoId)/members/$(request.auth.uid)).data.role in ['admin', 'owner'];
     }
 
-    // USERS — profile readable by anyone authed; writeable only by self.
+    // --------------------------------------------------------------
+    // User profile field allow-list.
+    //
+    // Phase 2 hardens client writes on `users/{uid}` so:
+    //   - Only known profile fields can be set/changed by the user.
+    //   - Sensitive fields (role/admin/wallet/security flags) can only
+    //     be written by callables running with admin privileges.
+    //   - Username uniqueness is delegated to the `claimUsername`
+    //     callable; clients cannot write to /usernames/* directly.
+    // --------------------------------------------------------------
+    function allowedProfileFields() {
+      // Note: `username` and `usernameLower` are deliberately omitted.
+      // They can only be written by the `claimUsername` callable (which
+      // runs via the Admin SDK and bypasses these rules).
+      return [
+        'displayName', 'photoURL', 'about', 'profileCompleted',
+        'fcmTokens', 'lastSeen', 'updatedAt'
+      ];
+    }
+    function bannedProfileFields() {
+      // Fields the client must NEVER set or change directly. These are
+      // server-owned (set by callables / triggers / scripts).
+      return [
+        'role', 'roles', 'permissions', 'admin', 'isAdmin',
+        'points', 'pointsBalance', 'wallet', 'walletStatus',
+        'organizationId', 'organizationRole',
+        'createdAt', 'phoneVerified', 'status',
+        'phoneNumber', 'email',                 // identity fields — server-owned
+        'username', 'usernameLower'             // forced through claimUsername callable
+      ];
+    }
+    function changedKeys() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+    function changedKeysOnCreate() {
+      return request.resource.data.keys();
+    }
+    function onlyAllowedUserProfileUpdates() {
+      // Every changed key must be in the allow-list. The banned-list is
+      // a redundant safety net that flags anything that managed to slip
+      // past the allow-list (e.g. by mistake during future edits).
+      return changedKeys().hasOnly(allowedProfileFields())
+          && !changedKeys().hasAny(bannedProfileFields());
+    }
+    function safeUserProfileCreate() {
+      // On create, allow the small set of fields the user can carry in
+      // from auth; everything else is server-owned.
+      return changedKeysOnCreate().hasOnly([
+        'displayName', 'phoneNumber', 'email',
+        'createdAt', 'status'
+      ]);
+    }
+
+    // USERS — profile readable by anyone authed; writeable only by self
+    // under the field allow-list, or by admins.
     match /users/{uid} {
-      allow read: if isAuthed();
-      allow create: if isSelf(uid);
-      allow update: if isSelf(uid) || isAdmin();
+      allow read:   if isAuthed();
+      allow create: if (isSelf(uid) && safeUserProfileCreate()) || isAdmin();
+      allow update: if isAdmin() ||
+                       (isSelf(uid) && onlyAllowedUserProfileUpdates());
       allow delete: if isAdmin();
+    }
+
+    // USERNAMES — read by any signed-in user (so the app can show "taken"
+    // status before submission). Writes go through the `claimUsername`
+    // callable only; admins keep an escape hatch for moderation.
+    match /usernames/{usernameLower} {
+      allow read:  if isAuthed();
+      allow write: if isAdmin();
     }
 
     // CONVERSATIONS
