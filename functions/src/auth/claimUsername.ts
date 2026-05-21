@@ -7,6 +7,7 @@
 
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { writeAuditLog } from '../lib/auditLog';
 
 const USERNAME_MIN = 3;
 const USERNAME_MAX = 20;
@@ -74,6 +75,8 @@ export const claimUsername = onCall(async (request) => {
   const userRef     = db.collection('users').doc(uid);
   const newNameRef  = db.collection('usernames').doc(usernameLower);
 
+  let releasedPrevious: string | null = null;
+
   await db.runTransaction(async (tx) => {
     const [userSnap, newNameSnap] = await Promise.all([
       tx.get(userRef),
@@ -92,6 +95,7 @@ export const claimUsername = onCall(async (request) => {
       const prevSnap = await tx.get(prevRef);
       if (prevSnap.exists && prevSnap.data()?.uid === uid) {
         tx.delete(prevRef);
+        releasedPrevious = previousLower;
       }
     }
 
@@ -109,6 +113,17 @@ export const claimUsername = onCall(async (request) => {
       profileCompleted: true,
       updatedAt: FieldValue.serverTimestamp(),
     }, { merge: true });
+  });
+
+  await writeAuditLog({
+    action: releasedPrevious ? 'auth.username.changed' : 'auth.username.claimed',
+    actor:  { uid },
+    target: { type: 'user', id: uid },
+    result: 'success',
+    metadata: {
+      usernameLower,
+      releasedPrevious,
+    },
   });
 
   return { uid, username: usernameLower, usernameLower };
