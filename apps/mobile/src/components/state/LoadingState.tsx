@@ -7,8 +7,8 @@ export function LoadingState(props: LoadingStateProps) {
     <StateShell
       spinner
       tone="info"
-      title={props.title ?? 'Loading…'}
       {...props}
+      title={props.title ?? 'Loading…'}
     />
   );
 }

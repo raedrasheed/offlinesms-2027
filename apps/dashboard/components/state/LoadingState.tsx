@@ -9,8 +9,8 @@ export function LoadingState(props: LoadingStateProps) {
       icon={Loader2}
       iconClassName="animate-spin"
       tone="info"
-      title={props.title ?? 'Loading…'}
       {...props}
+      title={props.title ?? 'Loading…'}
     />
   );
 }

@@ -8,8 +8,8 @@ export function ErrorState(props: ErrorStateProps) {
     <StateShell
       icon={AlertTriangle}
       tone="error"
-      title={props.title ?? 'Something went wrong'}
       {...props}
+      title={props.title ?? 'Something went wrong'}
     />
   );
 }

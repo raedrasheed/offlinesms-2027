@@ -6,8 +6,8 @@ export function ErrorState(props: ErrorStateProps) {
   return (
     <StateShell
       tone="error"
-      title={props.title ?? 'Something went wrong'}
       {...props}
+      title={props.title ?? 'Something went wrong'}
     />
   );
 }

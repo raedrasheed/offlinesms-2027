@@ -8,8 +8,8 @@ export function SuccessState(props: SuccessStateProps) {
     <StateShell
       icon={CheckCircle2}
       tone="success"
-      title={props.title ?? 'All done'}
       {...props}
+      title={props.title ?? 'All done'}
     />
   );
 }
