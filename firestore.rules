@@ -101,6 +101,29 @@ service cloud.firestore {
     }
 
     // ────────────────────────────────────────────────────────────
+    // Message action validation helpers (Phase 6)
+    //
+    // The Phase 6 callables (editMessage, deleteMessage, reactToMessage,
+    // pinMessage, forwardMessages) use the Admin SDK and bypass these
+    // helpers entirely. They exist so that any future direct-write path
+    // that lands in client code can be validated for shape without a
+    // schema change.
+    // ────────────────────────────────────────────────────────────
+    function isValidReplyTo(obj) {
+      return obj == null || (
+        ('messageId' in obj) && obj.messageId is string &&
+        ('senderUid' in obj) && obj.senderUid is string &&
+        ('preview'   in obj) && obj.preview   is string && obj.preview.size() <= 200
+      );
+    }
+    function isValidForwardedFrom(obj) {
+      return obj == null || (
+        ('conversationId' in obj) && obj.conversationId is string &&
+        ('messageId'      in obj) && obj.messageId      is string
+      );
+    }
+
+    // ────────────────────────────────────────────────────────────
     // User profile field allow-list (Phase 2)
     // ────────────────────────────────────────────────────────────
     function allowedProfileFields() {
@@ -246,12 +269,12 @@ service cloud.firestore {
         allow read:   if isMember(convoId) || isConversationParticipant(convoId) || isAdmin();
         allow create: if (isMember(convoId) || isConversationParticipant(convoId))
                         && isValidTextMessage();
-        allow update: if isAdmin() ||
-                       ((isMember(convoId) || isConversationParticipant(convoId))
-                          && resource.data.senderUid == request.auth.uid);
-        allow delete: if isAdmin() ||
-                       ((isMember(convoId) || isConversationParticipant(convoId))
-                          && resource.data.senderUid == request.auth.uid);
+        // Phase 6: every legitimate update flows through a callable
+        // (editMessage / deleteMessage / reactToMessage / pinMessage)
+        // using the Admin SDK. The pre-Phase-6 sender-may-update path
+        // is closed at the rules layer; admin escape hatch remains.
+        allow update: if isAdmin();
+        allow delete: if isAdmin();
 
         // Receipts (per recipient). Phase 3 added the status enum check.
         match /receipts/{uid} {
