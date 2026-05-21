@@ -58,5 +58,5 @@ Phase 1 must not touch chat data flow, Firestore rules of the messaging system, 
 
 ### Commit
 
-- **Hash:** _to be filled by the commit step that immediately follows this file._
-- **Message:** `docs: add OfflineSMS phase 0 implementation plan`
+- **Hash:** `71fa481` (`docs: add OfflineSMS phase 0 implementation plan`).
+- **Branch:** `claude/repo-audit-architecture-MiZDX`.
