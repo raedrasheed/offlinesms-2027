@@ -2,16 +2,15 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    function isAuthed() {
-      return request.auth != null;
-    }
-    function isSignedIn() { return isAuthed(); }
-    function isSelf(uid) {
-      return isAuthed() && request.auth.uid == uid;
-    }
-    function isAdmin() {
-      return isAuthed() && request.auth.token.admin == true;
-    }
+    // ────────────────────────────────────────────────────────────
+    // Identity helpers
+    // ────────────────────────────────────────────────────────────
+    function isAuthed()      { return request.auth != null; }
+    function isSignedIn()    { return isAuthed(); }
+    function isSelf(uid)     { return isAuthed() && request.auth.uid == uid; }
+    function isAdmin()       { return isAuthed() && request.auth.token.admin == true; }
+    function hasAdminRole()  { return isAdmin(); }   // alias for readability
+
     function isMember(convoId) {
       return isAuthed() &&
         exists(/databases/$(database)/documents/conversations/$(convoId)/members/$(request.auth.uid));
@@ -21,61 +20,73 @@ service cloud.firestore {
         get(/databases/$(database)/documents/conversations/$(convoId)/members/$(request.auth.uid)).data.role in ['admin', 'owner'];
     }
 
-    // --------------------------------------------------------------
-    // User profile field allow-list.
-    //
-    // Phase 2 hardens client writes on `users/{uid}` so:
-    //   - Only known profile fields can be set/changed by the user.
-    //   - Sensitive fields (role/admin/wallet/security flags) can only
-    //     be written by callables running with admin privileges.
-    //   - Username uniqueness is delegated to the `claimUsername`
-    //     callable; clients cannot write to /usernames/* directly.
-    // --------------------------------------------------------------
+    // ────────────────────────────────────────────────────────────
+    // User profile field allow-list (Phase 2)
+    // ────────────────────────────────────────────────────────────
     function allowedProfileFields() {
-      // Note: `username` and `usernameLower` are deliberately omitted.
-      // They can only be written by the `claimUsername` callable (which
-      // runs via the Admin SDK and bypasses these rules).
+      // `username` / `usernameLower` deliberately omitted — only the
+      // `claimUsername` callable (Admin SDK) writes those.
       return [
         'displayName', 'photoURL', 'about', 'profileCompleted',
         'fcmTokens', 'lastSeen', 'updatedAt'
       ];
     }
     function bannedProfileFields() {
-      // Fields the client must NEVER set or change directly. These are
-      // server-owned (set by callables / triggers / scripts).
       return [
         'role', 'roles', 'permissions', 'admin', 'isAdmin',
         'points', 'pointsBalance', 'wallet', 'walletStatus',
         'organizationId', 'organizationRole',
         'createdAt', 'phoneVerified', 'status',
-        'phoneNumber', 'email',                 // identity fields — server-owned
-        'username', 'usernameLower'             // forced through claimUsername callable
+        'phoneNumber', 'email',
+        'username', 'usernameLower'
       ];
     }
-    function changedKeys() {
-      return request.resource.data.diff(resource.data).affectedKeys();
-    }
-    function changedKeysOnCreate() {
-      return request.resource.data.keys();
-    }
+    function changedKeys()          { return request.resource.data.diff(resource.data).affectedKeys(); }
+    function changedKeysOnCreate()  { return request.resource.data.keys(); }
     function onlyAllowedUserProfileUpdates() {
-      // Every changed key must be in the allow-list. The banned-list is
-      // a redundant safety net that flags anything that managed to slip
-      // past the allow-list (e.g. by mistake during future edits).
       return changedKeys().hasOnly(allowedProfileFields())
           && !changedKeys().hasAny(bannedProfileFields());
     }
     function safeUserProfileCreate() {
-      // On create, allow the small set of fields the user can carry in
-      // from auth; everything else is server-owned.
       return changedKeysOnCreate().hasOnly([
-        'displayName', 'phoneNumber', 'email',
-        'createdAt', 'status'
+        'displayName', 'phoneNumber', 'email', 'createdAt', 'status'
       ]);
     }
 
-    // USERS — profile readable by anyone authed; writeable only by self
-    // under the field allow-list, or by admins.
+    // ────────────────────────────────────────────────────────────
+    // Receipt enum (Phase 3)
+    // ────────────────────────────────────────────────────────────
+    function isValidReceiptStatus(s) {
+      return s in ['pending', 'delivered', 'read', 'viewed', 'played', 'failed'];
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Status audience + expiry (Phase 3)
+    // ────────────────────────────────────────────────────────────
+    function isStatusExpired(s) {
+      // `expiresAt` is a server timestamp. Missing => treat as non-expired
+      // (legacy docs) but a present timestamp in the past blocks the read.
+      return ('expiresAt' in s) && s.expiresAt != null && s.expiresAt < request.time;
+    }
+    function isStatusAudienceMember(s) {
+      // Default semantics (no audience fields): readable by any signed-in
+      // user — matches the pre-Phase-3 behaviour while still gated by the
+      // top-level auth check.
+      return !('audienceType' in s) ||
+             (s.audienceType == 'all_contacts'
+                && !( ('excludedViewerUids' in s) && request.auth.uid in s.excludedViewerUids )) ||
+             (s.audienceType == 'contacts_except'
+                && !( ('excludedViewerUids' in s) && request.auth.uid in s.excludedViewerUids )) ||
+             (s.audienceType == 'only_share_with'
+                && ('allowedViewerUids' in s) && request.auth.uid in s.allowedViewerUids);
+    }
+    function isStatusAuthor(s) {
+      return isAuthed() && s.authorId == request.auth.uid;
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // USERS
+    // ════════════════════════════════════════════════════════════
     match /users/{uid} {
       allow read:   if isAuthed();
       allow create: if (isSelf(uid) && safeUserProfileCreate()) || isAdmin();
@@ -84,74 +95,190 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // USERNAMES — read by any signed-in user (so the app can show "taken"
-    // status before submission). Writes go through the `claimUsername`
-    // callable only; admins keep an escape hatch for moderation.
+    // ════════════════════════════════════════════════════════════
+    // USERNAMES — lookup table for `claimUsername` callable
+    // ════════════════════════════════════════════════════════════
     match /usernames/{usernameLower} {
       allow read:  if isAuthed();
       allow write: if isAdmin();
     }
 
+    // ════════════════════════════════════════════════════════════
     // CONVERSATIONS
+    // ════════════════════════════════════════════════════════════
     match /conversations/{convoId} {
-      allow read: if isMember(convoId) || isAdmin();
+      allow read:   if isMember(convoId) || isAdmin();
       allow create: if isAuthed();
       allow update: if isMember(convoId) || isAdmin();
       allow delete: if isGroupAdmin(convoId) || isAdmin();
 
       match /members/{uid} {
-        allow read: if isMember(convoId) || isAdmin();
+        allow read:  if isMember(convoId) || isAdmin();
         allow write: if isGroupAdmin(convoId) || isSelf(uid) || isAdmin();
       }
 
       match /messages/{messageId} {
-        allow read: if isMember(convoId) || isAdmin();
+        allow read:   if isMember(convoId) || isAdmin();
         allow create: if isMember(convoId) && request.resource.data.senderId == request.auth.uid;
         allow update: if isAdmin() ||
                        (isMember(convoId) && resource.data.senderId == request.auth.uid);
         allow delete: if isAdmin() ||
                        (isMember(convoId) && resource.data.senderId == request.auth.uid);
 
-        // Receipts (per recipient)
+        // Receipts (per recipient). Phase 3 adds the status enum check.
         match /receipts/{uid} {
-          allow read: if isMember(convoId);
-          allow write: if isSelf(uid) || isAdmin(); // own receipts only
+          allow read:   if isMember(convoId);
+          allow create: if (isSelf(uid) || isAdmin())
+                          && (!('status' in request.resource.data)
+                              || isValidReceiptStatus(request.resource.data.status));
+          allow update: if (isSelf(uid) || isAdmin())
+                          && (!('status' in request.resource.data)
+                              || isValidReceiptStatus(request.resource.data.status));
+          allow delete: if isAdmin();
         }
       }
     }
 
+    // ════════════════════════════════════════════════════════════
     // POINTS — wallets, transactions
+    // ════════════════════════════════════════════════════════════
     match /wallets/{uid} {
-      allow read: if isSelf(uid) || isAdmin();
-      allow write: if isAdmin();                       // mutated via Cloud Function
+      allow read:  if isSelf(uid) || isAdmin();
+      allow write: if isAdmin();
     }
     match /transactions/{txId} {
-      allow read: if isAuthed() && (resource.data.userId == request.auth.uid || isAdmin());
-      allow write: if isAdmin();                       // via Cloud Function
+      allow read:  if isAuthed() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow write: if isAdmin();
     }
 
+    // ════════════════════════════════════════════════════════════
     // SMS BATCHES
+    // ════════════════════════════════════════════════════════════
     match /smsBatches/{batchId} {
-      allow read: if isAuthed() && (resource.data.senderId == request.auth.uid || isAdmin());
-      allow write: if isAdmin();                       // via Cloud Function
+      allow read:  if isAuthed() && (resource.data.senderId == request.auth.uid || isAdmin());
+      allow write: if isAdmin();
 
       match /recipients/{recipientId} {
-        allow read: if isAuthed();
+        allow read:  if isAuthed();
         allow write: if isAdmin();
       }
     }
 
-    // STATUS posts
+    // ════════════════════════════════════════════════════════════
+    // STATUSES — Phase 3 audience + expiry enforcement
+    // ════════════════════════════════════════════════════════════
     match /statuses/{statusId} {
-      allow read: if isAuthed();
-      allow create: if isAuthed() && request.resource.data.authorId == request.auth.uid;
-      allow delete: if isAuthed() && resource.data.authorId == request.auth.uid;
+      allow read:   if isAdmin()
+                    || (isAuthed()
+                        && isStatusAuthor(resource.data))
+                    || (isAuthed()
+                        && !isStatusExpired(resource.data)
+                        && isStatusAudienceMember(resource.data));
+
+      allow create: if isAuthed()
+                    && request.resource.data.authorId == request.auth.uid;
+
+      allow update: if isAdmin()
+                    || (isAuthed() && resource.data.authorId == request.auth.uid);
+
+      allow delete: if isAdmin()
+                    || (isAuthed() && resource.data.authorId == request.auth.uid);
     }
 
+    // ════════════════════════════════════════════════════════════
     // ADMIN settings
+    // ════════════════════════════════════════════════════════════
     match /settings/{doc} {
-      allow read: if isAuthed();
+      allow read:  if isAuthed();
       allow write: if isAdmin();
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // ORGANIZATIONS (Phase 3 scaffold — admin-only until Phase 13)
+    // ════════════════════════════════════════════════════════════
+    match /organizations/{organizationId} {
+      allow read:  if isAdmin();
+      allow write: if isAdmin();
+
+      match /members/{uid} {
+        allow read:  if isAdmin() || isSelf(uid);
+        allow write: if isAdmin();
+      }
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // ROLES (catalogue; live permission checks read from custom claims)
+    // ════════════════════════════════════════════════════════════
+    match /roles/{roleId} {
+      allow read:  if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // AUDIT LOGS — server-owned. Clients (incl. admins via web SDK)
+    // cannot write here. Writes always go through writeAuditLog().
+    // ════════════════════════════════════════════════════════════
+    match /auditLogs/{auditLogId} {
+      allow read:  if isAdmin();
+      allow write: if false;
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // TICKETS — owner creates, owner/admin read, admin updates.
+    // ════════════════════════════════════════════════════════════
+    match /tickets/{ticketId} {
+      allow read:   if isAdmin() ||
+                       (isAuthed() && resource.data.createdBy == request.auth.uid);
+      allow create: if isAuthed()
+                    && request.resource.data.createdBy == request.auth.uid
+                    && request.resource.data.status == 'open'
+                    && !('assignedTo' in request.resource.data);
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // FLAGS — owner creates, admin reads/updates.
+    // ════════════════════════════════════════════════════════════
+    match /flags/{flagId} {
+      allow read:   if isAdmin();
+      allow create: if isAuthed()
+                    && request.resource.data.createdBy == request.auth.uid
+                    && request.resource.data.status == 'open';
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // PAYMENTS — requester read, server-only write (even for admins,
+    // so idempotency stays in one webhook codepath in Phase 10).
+    // ════════════════════════════════════════════════════════════
+    match /payments/{paymentId} {
+      allow read:  if isAdmin() ||
+                      (isAuthed() && resource.data.userId == request.auth.uid);
+      allow write: if false;
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // GATEWAY HEALTH — admin read, server-only write.
+    // ════════════════════════════════════════════════════════════
+    match /gatewayHealth/{docId} {
+      allow read:  if isAdmin();
+      allow write: if false;
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // SMS QUOTA USAGE — requester reads own; server-only write.
+    // Stored under per-user roots so listing per-user is cheap.
+    // ════════════════════════════════════════════════════════════
+    match /smsQuotaUsage/{uid} {
+      allow read:  if isSelf(uid) || isAdmin();
+      allow write: if false;
+
+      match /days/{yyyymmdd} {
+        allow read:  if isSelf(uid) || isAdmin();
+        allow write: if false;
+      }
     }
   }
 }
