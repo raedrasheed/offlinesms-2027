@@ -64,7 +64,33 @@ export type Conversation = {
   memberCount?:     number;
   settings?:        GroupSettings;
   createdBy?:       string;
+  // Phase 6
+  pinnedMessage?:   PinnedMessage;
 };
+
+export type ReplyTo = {
+  messageId:         string;
+  senderUid:         string;
+  senderDisplayName: string;
+  preview:           string;
+  type:              'text';
+  createdAt?:        any;
+};
+
+export type ForwardedFrom = {
+  conversationId: string;
+  messageId:      string;
+  senderUid?:     string;
+};
+
+export type PinnedMessage = {
+  messageId:          string;
+  senderUid:          string;
+  senderDisplayName?: string | null;
+  preview:            string;
+  pinnedAt:           any;
+  pinnedBy:           string;
+} | null;
 
 export type Message = {
   id:                  string;
@@ -74,8 +100,17 @@ export type Message = {
   text?:               string;
   status?:             'sending' | 'sent' | 'delivered' | 'read' | 'failed';
   deletedForEveryone?: boolean;
+  deletedAt?:          any;
+  deletedBy?:          string | null;
+  deleteReason?:       string | null;
   editedAt?:           any;
-  replyTo?:            any;
+  replyTo?:            ReplyTo | null;
+  forwarded?:          boolean;
+  forwardedFrom?:      ForwardedFrom | null;
+  reactions?:          Record<string, string[]> | null;
+  pinnedAt?:           any;
+  pinnedBy?:           string | null;
+  expiresAt?:          any;
   createdAt:           any;
   // Group-only sender snapshots (Phase 5)
   senderDisplayName?:  string | null;
@@ -92,6 +127,9 @@ export type UserState = {
   lastReadAt?:         any;
   lastMessagePreview?: string;
   lastMessageAt?:      any;
+  // Phase 6 — per-user message state
+  starredMessageIds?:      string[];
+  deletedForMeMessageIds?: string[];
 };
 
 export type Typing = {
@@ -185,10 +223,15 @@ export async function getOrCreateDirectConversation(otherUserId: string): Promis
   return res.data.conversationId;
 }
 
-export async function sendTextMessage(conversationId: string, text: string): Promise<string> {
-  const res = await fn<{ conversationId: string; text: string }, { messageId: string }>(
-    'sendTextMessage',
-  )({ conversationId, text });
+export async function sendTextMessage(
+  conversationId: string,
+  text: string,
+  replyTo?: ReplyTo | null,
+): Promise<string> {
+  const res = await fn<
+    { conversationId: string; text: string; replyTo?: ReplyTo | null },
+    { messageId: string }
+  >('sendTextMessage')({ conversationId, text, replyTo: replyTo ?? null });
   return res.data.messageId;
 }
 
@@ -304,4 +347,89 @@ export function groupCallableErrorReason(err: unknown): string | null {
   if (!msg) return null;
   // Firebase callable errors look like 'group-locked' / 'admins-only' / ...
   return msg.includes(':') ? msg.split(':')[0] : msg;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Phase 6 — message action callables
+// ─────────────────────────────────────────────────────────────────
+
+export const REACTION_EMOJIS: readonly string[] = [
+  '👍', '❤️', '😂', '😮', '😢', '🙏', '🔥', '🎉',
+];
+
+export async function editMessage(conversationId: string, messageId: string, text: string): Promise<void> {
+  await fn<{ conversationId: string; messageId: string; text: string }, { ok: true }>(
+    'editMessage',
+  )({ conversationId, messageId, text });
+}
+
+export async function deleteMessage(
+  conversationId: string,
+  messageId: string,
+  mode: 'for_me' | 'for_everyone',
+): Promise<void> {
+  await fn<{ conversationId: string; messageId: string; mode: 'for_me' | 'for_everyone' }, { ok: true }>(
+    'deleteMessage',
+  )({ conversationId, messageId, mode });
+}
+
+export async function reactToMessage(
+  conversationId: string,
+  messageId: string,
+  emoji: string,
+): Promise<{ toggledOff: boolean }> {
+  const res = await fn<
+    { conversationId: string; messageId: string; emoji: string },
+    { ok: true; emoji: string; toggledOff: boolean }
+  >('reactToMessage')({ conversationId, messageId, emoji });
+  return { toggledOff: res.data.toggledOff };
+}
+
+export async function starMessage(conversationId: string, messageId: string, starred: boolean): Promise<void> {
+  await fn<{ conversationId: string; messageId: string; starred: boolean }, { ok: true }>(
+    'starMessage',
+  )({ conversationId, messageId, starred });
+}
+
+export async function pinMessage(conversationId: string, messageId: string, pinned: boolean): Promise<void> {
+  await fn<{ conversationId: string; messageId: string; pinned: boolean }, { ok: true }>(
+    'pinMessage',
+  )({ conversationId, messageId, pinned });
+}
+
+export async function forwardMessages(args: {
+  sourceConversationId: string;
+  messageIds: string[];
+  targetConversationIds: string[];
+}): Promise<{ forwarded: number; targets: number }> {
+  const res = await fn<typeof args, { ok: true; forwarded: number; targets: number }>(
+    'forwardMessages',
+  )(args);
+  return { forwarded: res.data.forwarded, targets: res.data.targets };
+}
+
+export type MessageInfo = {
+  messageId:          string;
+  conversationId:     string;
+  type:               'text';
+  senderUid:          string | null;
+  senderDisplayName:  string | null;
+  createdAt:          any;
+  editedAt:           any;
+  deletedForEveryone: boolean;
+  deletedAt:          any;
+  pinnedAt:           any;
+  pinnedBy:           string | null;
+  forwarded:          boolean;
+  forwardedFrom:      ForwardedFrom | null;
+  replyTo:            ReplyTo | null;
+  reactions:          Record<string, number>;
+  receiptCounts:      Record<string, number>;
+};
+
+export async function getMessageInfo(conversationId: string, messageId: string): Promise<MessageInfo> {
+  const res = await fn<{ conversationId: string; messageId: string }, MessageInfo>(
+    'getMessageInfo',
+  )({ conversationId, messageId });
+  return res.data;
 }
