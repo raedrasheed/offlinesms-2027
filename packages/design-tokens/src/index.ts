@@ -82,5 +82,13 @@ export const shadows = {
   shApp: '0 24px 80px -20px rgba(15,23,42,.18), 0 8px 24px -8px rgba(15,23,42,.08)',
 } as const;
 
-export const tokens = { colors, typography, spacing, radius, shadows };
+// Semantic, role-based tokens layered on top of the raw palette above.
+// Existing imports (`colors`, `typography`, `radius`, `spacing`, `shadows`)
+// remain untouched — semantic is additive.
+export { semantic, lightSemantic, darkSemantic } from './semantic';
+export type { SemanticTokens } from './semantic';
+
+import { semantic as _semantic } from './semantic';
+
+export const tokens = { colors, typography, spacing, radius, shadows, semantic: _semantic };
 export default tokens;
