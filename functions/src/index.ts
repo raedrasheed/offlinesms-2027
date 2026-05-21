@@ -9,3 +9,4 @@ export { buyPoints } from './points/buy';
 export { transferPoints } from './points/transfer';
 export { onUserCreate } from './auth/onUserCreate';
 export { setAdminClaim } from './auth/setAdminClaim';
+export { claimUsername } from './auth/claimUsername';
