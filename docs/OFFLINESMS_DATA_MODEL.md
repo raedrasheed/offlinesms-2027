@@ -365,6 +365,79 @@ the client to mark `delivered` / `read` / `played` / `viewed`.
 
 ---
 
+## Phase 7 — Receipts, message views, status views
+
+### `conversations/{c}/messages/{m}/receipts/{uid}` (extended)
+
+```ts
+{
+  uid:            string,
+  conversationId: string,
+  messageId:      string,
+  status:         'pending' | 'delivered' | 'read' | 'viewed' | 'played' | 'failed',
+  deliveredAt:    timestamp | null,
+  readAt:         timestamp | null,
+  viewedAt:       timestamp | null,
+  playedAt:       timestamp | null,
+  failedAt:       timestamp | null,
+  failureReason:  string | null,
+  createdAt:      timestamp,
+  updatedAt:      timestamp,
+}
+```
+
+- Doc id is **always the recipient uid** — pinned by the path matcher.
+- Status enum is Phase 3's; transitions are server-enforced monotonic
+  (`pending → delivered → read/viewed/played`, with `failed` reachable
+  from anywhere).
+- Read rule (Phase 7): only the receipt owner, the message sender, or
+  an admin can read. (Phase 4's "any participant" read is closed.)
+- Write rule: owner only at the rules layer; every legitimate write
+  goes through `markReceipt` (Admin SDK).
+
+### `messages/{messageId}` — aggregate counts (server-owned)
+
+```ts
+{
+  deliveredCount:   number,
+  readCount:        number,
+  viewedCount:      number,
+  playedCount:      number,
+  failedCount:      number,
+  pendingCount:     number,
+  receiptUpdatedAt: timestamp,
+}
+```
+
+Maintained by `onReceiptWrite`. Clients cannot write (the Phase 6
+`messages.update` admin-only rule stays in force).
+
+### `statuses/{statusId}/views/{viewerUid}` (new)
+
+```ts
+{
+  statusId:  string,
+  ownerUid:  string,
+  viewerUid: string,
+  viewedAt:  timestamp,
+}
+```
+
+- Doc id = viewer's uid → no duplicate-view growth.
+- Read: status owner (sees viewer list) OR the viewer (their own row).
+- Write: server-only via `markStatusViewed`. The callable re-runs
+  Phase 3's audience rules (`isStatusAudienceMember`,
+  `!isStatusExpired`) before recording.
+
+### "Viewed" vs separate views collection
+
+Phase 7 folds "viewed" into the receipts enum for text messages
+(`read` and `viewed` are interchangeable). A dedicated
+`messages/{m}/views/{uid}` sub-collection is reserved for media-
+specific events (e.g. fullscreen-open) when media support lands.
+
+---
+
 ## Phase 6 — Message actions and Message Info
 
 Existing `messages/{id}` placeholders (`editedAt`, `deletedForEveryone`, `replyTo`) become real fields, plus new ones:
