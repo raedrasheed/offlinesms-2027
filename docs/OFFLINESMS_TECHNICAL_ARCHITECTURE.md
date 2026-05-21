@@ -4,6 +4,18 @@ System-level blueprint for the build-out described in `OFFLINESMS_IMPLEMENTATION
 
 ---
 
+## Phase 3 — Core data model and rules hardening
+
+- **New collections (rules + schema only):** `organizations`, `organizations/{id}/members`, `roles`, `auditLogs`, `tickets`, `flags`, `payments`, `gatewayHealth`, `smsQuotaUsage/{uid}/days/{yyyymmdd}`. Schemas live in `docs/OFFLINESMS_DATA_MODEL.md`.
+- **System-owned collections** — `auditLogs`, `gatewayHealth`, `smsQuotaUsage`, `payments` — are `allow write: if false` for clients. All writes happen through Cloud Functions via the Admin SDK (which bypasses rules). Even admin web sessions cannot write here directly; this keeps idempotency and audit in one codepath.
+- **`statuses` audience + expiry** are enforced in `firestore.rules` (helpers `isStatusExpired()`, `isStatusAudienceMember()`). Client-side filtering is no longer load-bearing.
+- **Receipts** carry a validated enum: `pending | delivered | read | viewed | played | failed`. Unknown statuses are rejected.
+- **Audit logging.** `functions/src/lib/auditLog.ts` exports `writeAuditLog({ action, actor, target, result, metadata })` plus `sanitiseMetadata()` / `redactPhone()` / `redactEmail()`. The helper is **soft-failing** — audit-write errors never roll back the primary action. The first consumers are `claimUsername` (`auth.username.claimed` / `auth.username.changed`) and `setAdminClaim` (`admin.claim.set`).
+- **Composite indexes added:** `auditLogs(actorUid, createdAt)`, `auditLogs(targetType, targetId, createdAt)`, `payments(userId, createdAt)`, `flags(status, createdAt)`, `tickets(createdBy, status, updatedAt)`, `statuses(authorId, createdAt)`.
+- **Deferred (documented):** organization-membership rules (Phase 13), welcome-credit callable (Phase 10), automated rules tests (Phase 20).
+
+---
+
 ## Onboarding & username uniqueness (Phase 2)
 
 - **`users/{uid}.profileCompleted: boolean`** drives onboarding routing on mobile. Set by `claimUsername`; seeded as `false` by `onUserCreate`.

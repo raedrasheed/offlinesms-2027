@@ -4,6 +4,91 @@ Running log of phased work. Newest first.
 
 ---
 
+## Phase 3 — Core Firestore data model and rules hardening
+
+**Branch:** `claude/repo-audit-architecture-MiZDX`
+**Status:** Complete. App builds end-to-end (typecheck + lint + build green across workspaces).
+
+### What was done
+
+- **Data model contracts.** New `docs/OFFLINESMS_DATA_MODEL.md` documents every collection introduced in Phase 3 (`organizations`, `roles`, `auditLogs`, `tickets`, `flags`, `payments`, `gatewayHealth`, `smsQuotaUsage`) plus the new fields on existing `statuses` and the receipt-status enum. Schema only — no UI mounts them yet.
+- **Composite indexes.** Six new composite indexes added to `firestore.indexes.json`, each documented and traceable to a real query (audit-log explorer, moderation queue, own-tickets, own-payments, own-statuses, "what happened to X"). Single-field indexes (e.g. `auditLogs.createdAt` and `statuses.expiresAt`) are left to Firestore's automatic indexing.
+- **Rules hardening.** `firestore.rules` extended:
+  - `auditLogs`, `gatewayHealth`, `smsQuotaUsage/{uid}/days/{yyyymmdd}`, `payments` are all `allow write: if false` for clients (even admins). Reads scoped to owner/admin as appropriate.
+  - `tickets`: owner can create with `status: 'open'` and no `assignedTo`; owner+admin can read; admin updates/deletes.
+  - `flags`: owner can create with `status: 'open'`; admin reads and updates (so reporters can't enumerate other reports).
+  - `organizations` + `organizations/{id}/members/{uid}`: admin-only in Phase 3 (membership rules wait for Phase 13).
+  - `roles`: admin read/write (catalogue; live permission checks still come from `request.auth.token`).
+  - `statuses`: audience and expiry are now enforced server-side via the new helpers `isStatusExpired()` and `isStatusAudienceMember()`. Legacy docs without the new fields default to "any authed reader" but expired docs are read-blocked everywhere.
+  - Receipt writes are checked against an enum (`isValidReceiptStatus()`): `pending | delivered | read | viewed | played | failed`. Unknown statuses are rejected.
+  - All Phase 2 protections (users field allow-list, usernames write-deny) preserved.
+- **Audit log helper.** `functions/src/lib/auditLog.ts` provides:
+  - `writeAuditLog({ action, actor, target, result, metadata })` — soft-failing (a failed audit-log write never rolls back the primary action).
+  - `sanitiseMetadata(...)` — strips a hard-coded set of forbidden keys (`password`, `token`, `otp`, `secret`, `apiKey`, `phone`, `email`, `messageText`, `body`, `content`, …), clamps strings, flattens one level.
+  - `redactPhone(...)`, `redactEmail(...)` for callers that genuinely need an identifier signal.
+- **First audit consumers.**
+  - `claimUsername` emits `auth.username.claimed` (or `auth.username.changed` if releasing a prior name) after the transaction commits.
+  - `setAdminClaim` emits `admin.claim.set` on success and `admin.claim.set` with `result: 'failure'` on permission denial. Also fixed a long-standing latent issue: the callable now **preserves** existing custom claims (role, permissions, …) instead of overwriting the whole block when toggling `admin`.
+- **Welcome credit refactor — deferred.** `onUserCreate` already uses `merge: true`, so re-running it is idempotent in practice and Phase 3 has no consumer that needs to re-grant. A dedicated `grantWelcomeCreditIfEligible` callable lands when Phase 10 wires payments. Documented in the Phase 3 plan.
+
+### Files created
+
+- `docs/OFFLINESMS_PHASE_3_PLAN.md`
+- `docs/OFFLINESMS_DATA_MODEL.md`
+- `functions/src/lib/auditLog.ts`
+
+### Files edited
+
+- `firestore.rules`
+- `firestore.indexes.json`
+- `functions/src/auth/claimUsername.ts`
+- `functions/src/auth/setAdminClaim.ts`
+- `docs/OFFLINESMS_PHASE_LOG.md`, `OFFLINESMS_TECHNICAL_ARCHITECTURE.md`, `OFFLINESMS_RISK_REGISTER.md`, `OFFLINESMS_DESIGN_IMPLEMENTATION_MAP.md`
+
+### Commits
+
+| Hash | Message |
+|---|---|
+| `a640507` | docs: add OfflineSMS phase 3 implementation plan |
+| `35fd6ac` | feat(data): add core Firestore collection contracts and indexes |
+| `940cc7d` | security: enforce status audience, receipt enums, lock system collections |
+| `2de1b45` | feat(functions): add audit log helper |
+| `f377bb3` | feat(functions): audit auth and admin bootstrap actions |
+
+Tail commit lands with this docs update.
+
+### Checks run
+
+```
+npm run typecheck --workspaces --if-present   → ok (dashboard, mobile, functions)
+npm run lint --workspaces --if-present        → ok
+npm run build --workspaces --if-present       → ok
+```
+
+Manual emulator checks queued in the Phase 3 plan; automation lands in Phase 20.
+
+### Known limitations
+
+- **No automated rules tests yet.** Manual emulator checklist documented in `docs/OFFLINESMS_PHASE_3_PLAN.md`; Phase 20 plugs `@firebase/rules-unit-testing` into CI.
+- **Contacts graph isn't modelled.** Status audience `'all_contacts'` is approximated as "any signed-in user not in `excludedViewerUids`". When a real contacts model lands the rule tightens automatically (Phase 13).
+- **Organization membership rules deferred.** Phase 3 leaves `organizations` and its `members` sub-collection admin-only. Member-aware rules land with Phase 13's admin org module.
+- **Welcome credit callable deferred.** The `onUserCreate` trigger is idempotent today; a callable replacement isn't needed until Phase 10 introduces real payment-driven crediting.
+- **Reserved username list still duplicated** between mobile and functions. Cross-package extraction is a Phase 18 (shared utilities) item.
+
+### Recommended Phase 4 scope
+
+Phase 4 = **Chat list + one-to-one messaging** (per the roadmap):
+
+1. Per-user conversation state under `conversations/{c}/userState/{uid}` (pin, mute, archive, lastReadAt, unread). Owner-only writes; trigger maintains unread counts.
+2. `markRead` callable so receipts begin to track real delivery / read state — receipt enum guard from Phase 3 already in place.
+3. Filter chips on `ChatsList` (All / Unread / Favorites / Groups) backed by the new userState fields.
+4. Typing indicator via an ephemeral `conversations/{c}/typing/{uid}` doc (3-second TTL).
+5. Audit hooks on any privileged conversation actions (e.g. lock/unlock).
+
+Do not yet build media messaging, group management UI, SMS escalation UI, points UI, or dashboard modules.
+
+---
+
 ## Phase 2 — Firebase auth, onboarding, profile completion
 
 **Branch:** `claude/repo-audit-architecture-MiZDX`

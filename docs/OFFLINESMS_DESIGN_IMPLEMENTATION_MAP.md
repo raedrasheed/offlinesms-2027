@@ -99,16 +99,16 @@ Legend for "Recommended phase" matches `OFFLINESMS_IMPLEMENTATION_ROADMAP.md`.
 
 | | |
 |---|---|
-| **Status** | 🟧 Scaffold (`statuses` collection + storage path; no UI) |
-| **Existing** | `firestore.rules` for `statuses`, `storage.rules` for `/statuses/{uid}/...` |
-| **Missing** | Status composer, viewer, ring on chat list, audience picker, 24h expiry function |
+| **Status** | 🟧 Backend hardened (Phase 3); no UI yet |
+| **Existing** | `firestore.rules` server-side audience + expiry (Phase 3); `(authorId, createdAt)` index (Phase 3); `storage.rules` for `/statuses/{uid}/...` |
+| **Missing** | Status composer, viewer, ring on chat list, audience picker, 24h expiry function, status views collection |
 | **Frontend** | `StatusComposer.tsx`, `StatusViewer.tsx` |
-| **Backend** | Scheduled `purgeExpiredStatuses` (Storage + Firestore); audience-enforcement read mediator |
-| **Firestore** | `statuses` (existing), `statusViews/{statusId}/{viewerId}` |
-| **Indexes** | `(authorId ASC, createdAt DESC)`, `(audience IN, expiresAt ASC)` |
-| **Rules** | Audience-aware read gating (move from client-side filter) |
+| **Backend** | Scheduled `purgeExpiredStatuses` (Storage + Firestore); contacts-graph integration |
+| **Firestore** | `statuses` (extended Phase 3: `audienceType`, `allowedViewerUids`, `excludedViewerUids`, `expiresAt`), `statusViews/{statusId}/{viewerId}` |
+| **Indexes** | `(authorId ASC, createdAt DESC)` (Phase 3); single-field `expiresAt` auto |
+| **Rules** | Audience + expiry enforced server-side (Phase 3 ✓) |
 | **Tests** | Expiry, audience leakage, view tracking |
-| **Phase** | 7 (after receipts), with content in 13 |
+| **Phase** | 7 (UI), 13 (contacts-graph integration) |
 
 ## 8. Voice messages
 
@@ -165,13 +165,13 @@ Legend for "Recommended phase" matches `OFFLINESMS_IMPLEMENTATION_ROADMAP.md`.
 
 | | |
 |---|---|
-| **Status** | 🟡 Partial (placeholders fanned out; client never marks delivered/read) |
-| **Existing** | `onMessageCreate` writes `receipts/{uid}` with `status: 'pending'` |
+| **Status** | 🟡 Backend partially hardened (Phase 3 enum); client never marks delivered/read |
+| **Existing** | `onMessageCreate` writes `receipts/{uid}` with `status: 'pending'`; status enum enforced in rules (Phase 3) |
 | **Missing** | Client write of `delivered/read/played`; UI ticks; aggregated counters |
 | **Frontend** | Mark-on-view, tick rendering |
 | **Backend** | Callable `markReceipt` (rate-limited); aggregation trigger |
 | **Firestore** | `receipts` (existing); `messages.deliveredCount`, `readCount` denorm fields |
-| **Rules** | Receipt write by self only; status enum validation |
+| **Rules** | Receipt write by self only; status enum validation (Phase 3 ✓) |
 | **Phase** | 7 |
 
 ## 15. Bulk SMS escalation (OfflineSMS only)
@@ -346,12 +346,12 @@ Legend for "Recommended phase" matches `OFFLINESMS_IMPLEMENTATION_ROADMAP.md`.
 
 | | |
 |---|---|
-| **Status** | ❌ Missing |
-| **Backend** | Wrapper helper `writeAudit({actorId, action, target, redactionLevel, before, after})` invoked from every privileged callable |
-| **Firestore** | `auditLogs/{id}` |
-| **Indexes** | `(actorId ASC, createdAt DESC)`, `(targetType ASC, targetId ASC, createdAt DESC)` |
-| **Rules** | Admin-read; server-only writes |
-| **Phase** | 18 (must land before content reveal in Phase 14 — partial groundwork earlier) |
+| **Status** | 🟡 Phase 3 landed: collection + rules + helper + first two consumers. UI deferred. |
+| **Backend** | `functions/src/lib/auditLog.ts` exports `writeAuditLog` + `redactPhone`/`redactEmail`/`sanitiseMetadata`. Soft-failing — never rolls back the primary action. Used by `claimUsername` and `setAdminClaim`. |
+| **Firestore** | `auditLogs/{id}` (schema in `docs/OFFLINESMS_DATA_MODEL.md`) |
+| **Indexes** | `(actorUid ASC, createdAt DESC)`, `(targetType ASC, targetId ASC, createdAt DESC)` (Phase 3 ✓) |
+| **Rules** | Admin-read; `allow write: if false` for clients (Phase 3 ✓) |
+| **Phase** | 3 (groundwork ✓); 18 (UI explorer) |
 
 ## 33. Settings
 

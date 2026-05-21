@@ -2,6 +2,16 @@
 
 Risks ranked across the surfaces present today and planned for later phases. Likelihood/impact are qualitative.
 
+## Phase 3 mitigation snapshot
+
+- **Risk #1 (Firebase security rules gaps)** — major progress. Rules for `auditLogs`, `gatewayHealth`, `smsQuotaUsage`, `payments`, `tickets`, `flags`, `organizations`, `roles` shipped (all server-only writes for system-owned collections). Receipt `status` enum validated. `statuses` audience and expiry enforced in rules. Remaining: automated tests + content-validation rules for messages (Phase 20).
+- **Risk #3 (statuses audience leak)** — closed for the rules layer. Server-side audience filtering replaces the previous client-only filter. Contacts-graph approximation documented; tightens further when Phase 13 wires real contacts.
+- **Risk #15 (audit log gaps)** — partial mitigation. `writeAuditLog` helper is in place, two privileged callables (`claimUsername`, `setAdminClaim`) are audited end-to-end. Every privileged callable added in Phases 4+ MUST use the helper as a matter of policy.
+- **Risk #16 (payment / points purchase security)** — partial mitigation. `payments` is now `allow write: if false` for clients at the rules layer, including admins. Webhook-driven crediting still pending in Phase 10.
+- **Risk #18 (real-time listener cost) / #7 (large group performance)** — unaffected; indexes added only where strictly needed.
+
+---
+
 ## Phase 2 mitigation snapshot
 
 - **Risk #1 (Firebase security rules gaps)** — partially mitigated. `users.update` now enforces a strict field allow-list, with a redundant banned-list as a safety net. `usernames/{lower}` collection has explicit rules: read by signed-in users, writes server-only via `claimUsername`. Still pending: rules for `auditLogs`, `tickets`, `flags`, `roles`, `payments`, `gatewayHealth` (Phase 3); statuses audience enforcement (Phase 3); receipt enum validation (Phase 3); rules unit tests (Phase 20).
