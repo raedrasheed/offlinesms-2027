@@ -4,6 +4,103 @@ Running log of phased work. Newest first.
 
 ---
 
+## Phase 4 — Chat list and one-to-one messaging
+
+**Branch:** `claude/repo-audit-architecture-MiZDX`
+**Status:** Complete. App builds end-to-end (typecheck + lint + build green across workspaces).
+
+### What was done
+
+- **Direct conversation data contract.** Phase 4 introduces the canonical fields `participantUids[]`, `participantKey`, `lastMessage`, `status`, `createdBy`, `updatedAt` on `conversations/{id}`, while keeping `memberIds`, `lastMessageText`, `lastMessageAt`, `lastSenderId` and `senderId` as written-everywhere back-compat aliases so the existing receipt-fanout trigger, `/admin/users` page, and seed script keep working.
+- **Two new sub-collections.**
+  - `conversations/{c}/userState/{uid}`: per-user pin/mute/archive/favorite state plus server-owned `unreadCount`, `lastReadAt`, `lastMessagePreview`, `lastMessageAt`.
+  - `conversations/{c}/typing/{uid}`: ephemeral typing flag with `expiresAt = now + 3000ms`.
+- **Rules hardening.** New helpers `isConversationParticipantData()`, `isConversationParticipant()`, `isValidTextMessage()`, `onlyAllowedUserStateUpdates()`, etc. New rules:
+  - `conversations.read` requires participation (`participantUids` or legacy `memberIds` or `/members` sub-collection).
+  - `conversations.create` requires the caller to be listed in `participantUids/memberIds`.
+  - `messages.create` enforces `type === 'text'`, `1..4000` chars, `senderUid === auth.uid`.
+  - `userState/{uid}` is owner-only with a field allow-list (`pinned`, `muted`, `archived`, `favorite`, `updatedAt`); counters are server-owned (callable + trigger bypass via Admin SDK).
+  - `typing/{uid}` is owner-write, participant-read.
+- **Four callables (audited):**
+  - `getOrCreateDirectConversation({ otherUserId })` — `chat.directConversation.opened`.
+  - `sendTextMessage({ conversationId, text })` — `chat.message.sent` with `{ conversationId, length }` only.
+  - `markRead({ conversationId })` — `chat.markRead`.
+  - `setTyping({ conversationId, isTyping })` — **not audited** (would be too noisy).
+- **`onMessageCreate` trigger extended** to write the new `lastMessage` object, refresh recipient `userState` (unread, preview), and zero the sender's own `userState` so self-sends never appear unread on the sender's own chat list. Receipt fan-out and back-compat aliases preserved.
+- **Mobile data layer.** `apps/mobile/src/lib/conversations.ts` exposes `subscribe*` (conversations, messages, userState, typing) and typed callable wrappers (`sendTextMessage`, `markRead`, `setTyping`, `getOrCreateDirectConversation`). `setTyping` is client-debounced to one start event every 2 s. `apps/mobile/src/lib/chats.ts` becomes a thin facade so older imports keep compiling.
+- **Mobile UI.**
+  - `ChatsList` shows live conversations with unread badges, pin/mute indicators, typing previews, four filter chips (All / Unread / Favorites / Archived), a search field, and a FAB → `NewChat`. Groups chip rendered disabled until Phase 5.
+  - `NewChat` searches users by `usernameLower` prefix (Firestore range query bounded by ``), filters out the caller, and routes into the new conversation via the callable.
+  - `Conversation` consumes `sendTextMessage`, calls `markRead` on every incoming batch, emits typing start/stop on draft changes, renders peer name from `users/{peerUid}`, and surfaces inline errors via `ErrorState`.
+- **Composite indexes added:** `conversations(participantUids, updatedAt)` and `conversations(participantUids, status, updatedAt)`. The legacy `conversations(memberIds, lastMessageAt)` index remains.
+- **No dashboard work.** Phase 14 is where admin chat moderation lands.
+
+### Files created
+
+- `docs/OFFLINESMS_PHASE_4_PLAN.md`
+- `apps/mobile/src/lib/conversations.ts`
+- `apps/mobile/src/screens/NewChat.tsx`
+- `functions/src/chats/getOrCreateDirectConversation.ts`
+- `functions/src/chats/sendTextMessage.ts`
+- `functions/src/chats/markRead.ts`
+- `functions/src/chats/setTyping.ts`
+
+### Files edited
+
+- `firestore.rules`
+- `firestore.indexes.json`
+- `functions/src/chats/onMessageCreate.ts`
+- `functions/src/index.ts`
+- `apps/mobile/src/lib/chats.ts`
+- `apps/mobile/src/screens/ChatsList.tsx`
+- `apps/mobile/src/screens/Conversation.tsx`
+- `apps/mobile/App.tsx`
+- `docs/OFFLINESMS_DATA_MODEL.md`, `OFFLINESMS_TECHNICAL_ARCHITECTURE.md`, `OFFLINESMS_RISK_REGISTER.md`, `OFFLINESMS_DESIGN_IMPLEMENTATION_MAP.md`
+
+### Commits
+
+| Hash | Message |
+|---|---|
+| `8e33fbc` | docs: add OfflineSMS phase 4 implementation plan |
+| `525c701` | feat(data): add direct conversation data contracts and indexes |
+| `e054b90` | security: add conversation, message, userState, and typing rules |
+| `75475e5` | feat(functions): add direct conversation callables and fan-out |
+| `3f12c3f` | feat(mobile): add conversations lib and new-chat screen |
+| `507cf7d` | feat(mobile): add chat list filters, unread, typing, and conversation rewrite |
+
+Tail commit (this docs update) lands next.
+
+### Checks run
+
+```
+npm run typecheck --workspaces --if-present   → ok (dashboard, mobile, functions)
+npm run lint --workspaces --if-present        → ok
+npm run build --workspaces --if-present       → ok
+```
+
+### Known limitations
+
+- **No automated tests for rules / callables / UI.** Manual emulator checklist in the Phase 4 plan; `@firebase/rules-unit-testing` lands in Phase 20.
+- **`subscribeTyping` only filters expired docs client-side.** Stale `typing` docs persist in Firestore until overwritten. A scheduled cleanup function isn't strictly needed (rows are tiny and overwritten on every keystroke / 2s debounce window) but is queued for Phase 16 alongside other scheduled housekeeping.
+- **`setTyping` callable cost.** Even with the 2-second client debounce, a chatty user generates one call per ~2s of typing. Cost is acceptable for Phase 4; presence tooling (RTDB) is on the table for Phase 7.
+- **Message receipts UI not wired.** The enum is enforced and the trigger writes `status: 'pending'` for each recipient, but no client emits `delivered`/`read`/`played`. Phase 7 wires this.
+- **Direct conversation participation update path.** `conversations.update` rules still allow any participant to write — useful for the seed script and Phase 5 group flows — but means a participant can technically rewrite `lastMessage` fields. Acceptable today because the canonical updates flow through callables; tighten in Phase 5 / Phase 18.
+- **Username search is exact prefix.** A real fuzzy / full-text user search isn't in scope and isn't trivial in Firestore alone (Phase 17 will pair it with a search index).
+
+### Recommended Phase 5 scope
+
+Phase 5 = **Group chat and member management** (per the roadmap):
+
+1. Create-group flow on mobile: `NewGroup.tsx` with member picker (reuses Phase 4's username search), avatar/name input, owner role assigned to creator.
+2. `GroupInfo.tsx` screen — list members, role badges, lock/unlock, leave-group.
+3. Callables: `createGroup`, `addMembers`, `removeMember`, `changeRole`, `leaveGroup`, `lockChannel` — all audited (`group.created`, `group.member.added`, …).
+4. Rules tighten: only `owner/admin` may mutate `/members`; member-count cap enforced server-side; `conversations.update` rules narrow to the legitimate Phase 5 mutation paths.
+5. Trigger update: `onMessageCreate` already fans out across all participants — group case is automatic once `participantUids` has more than 2 entries. Confirm with a manual emulator pass.
+
+Defer: media messages, message actions, communities, dashboard moderation.
+
+---
+
 ## Phase 3 — Core Firestore data model and rules hardening
 
 **Branch:** `claude/repo-audit-architecture-MiZDX`

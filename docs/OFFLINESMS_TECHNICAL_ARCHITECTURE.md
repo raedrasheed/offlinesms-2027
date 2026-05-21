@@ -4,6 +4,16 @@ System-level blueprint for the build-out described in `OFFLINESMS_IMPLEMENTATION
 
 ---
 
+## Phase 4 — Chat list and one-to-one messaging
+
+- **Canonical conversation shape:** `participantUids: string[]`, `participantKey: string` (sorted-uid join for O(1) direct-conversation lookup), `lastMessage: { messageId, senderUid, type, preview, createdAt }`, `status: 'active' | 'archived' | 'disabled'`, `createdBy`, `createdAt`, `updatedAt`. `memberIds`, `lastMessageText`, `lastMessageAt`, `lastSenderId`, message-level `senderId` are written alongside as back-compat aliases.
+- **Per-user state and typing** live under `conversations/{c}/userState/{uid}` and `conversations/{c}/typing/{uid}`. Counters (`unreadCount`, `lastReadAt`, `lastMessagePreview`, `lastMessageAt`) are server-owned; clients write only `{ pinned, muted, archived, favorite, updatedAt }`. Typing docs carry `expiresAt = now + 3000ms` so readers filter live state client-side.
+- **Callables (audited):** `getOrCreateDirectConversation`, `sendTextMessage`, `markRead`, `setTyping` (typing intentionally unaudited to avoid noise). Each emits a `chat.*` audit event; `sendTextMessage` records only `{ conversationId, length }` — the audit-log sanitiser strips `body`/`content`/`messageText` defensively.
+- **Single fan-out trigger:** `onMessageCreate` updates the conversation summary, refreshes recipient `userState` (unread + preview), zeroes the sender's own `userState`, and writes per-recipient receipt placeholders (status `pending` per Phase 3's enum).
+- **New composite indexes:** `conversations(participantUids, updatedAt)`, `conversations(participantUids, status, updatedAt)`. Existing indexes preserved.
+
+---
+
 ## Phase 3 — Core data model and rules hardening
 
 - **New collections (rules + schema only):** `organizations`, `organizations/{id}/members`, `roles`, `auditLogs`, `tickets`, `flags`, `payments`, `gatewayHealth`, `smsQuotaUsage/{uid}/days/{yyyymmdd}`. Schemas live in `docs/OFFLINESMS_DATA_MODEL.md`.

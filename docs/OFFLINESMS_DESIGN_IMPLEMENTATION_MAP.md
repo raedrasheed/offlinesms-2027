@@ -40,31 +40,28 @@ Legend for "Recommended phase" matches `OFFLINESMS_IMPLEMENTATION_ROADMAP.md`.
 
 | | |
 |---|---|
-| **Status** | ✅ Complete (basic) |
-| **Existing** | `apps/mobile/src/screens/ChatsList.tsx`, `subscribeConversations` |
-| **Missing** | Search, filters (All/Unread/Favorites/Groups), swipe actions (mute/pin/archive), unread badge accuracy, typing indicators |
-| **Frontend** | Filter chips, swipe gesture, archive screen |
-| **Backend** | Counter increments (unread) via trigger, mute/pin field updates |
-| **Firestore** | `conversations` (`pinned`, `muted`, `archived`, `unreadByUser`) |
-| **Indexes** | `(archived ASC, lastMessageAt DESC)` per user |
-| **Rules** | Member-only writes to `pinned/muted/archived` (per-user sub-doc) |
-| **Tests** | Filter combinations, swipe actions, large list virtualization |
-| **Phase** | 4 |
+| **Status** | ✅ Phase 4 landed: filters, unread, typing, FAB, NewChat. Swipe actions deferred. |
+| **Existing** | `apps/mobile/src/screens/ChatsList.tsx` with real-time `subscribeConversations` (by `participantUids`), per-conversation `userState` + `typing` listeners, search + filters + FAB |
+| **Missing** | Swipe gesture for pin/mute/archive, large-list virtualization tuning, presence dot |
+| **Backend** | Counter increments + previews via `onMessageCreate` ✓; pin/mute/archive client writes ✓ (next: swipe UI) |
+| **Firestore** | `conversations` (extended Phase 4), `userState/{uid}` ✓, `typing/{uid}` ✓ |
+| **Indexes** | `(participantUids, updatedAt DESC)` (Phase 4 ✓); `(participantUids, status, updatedAt DESC)` (Phase 4 ✓) |
+| **Rules** | userState owner-only + field allow-list (Phase 4 ✓); typing owner-write, participant-read (Phase 4 ✓) |
+| **Phase** | 4 ✓ |
 
 ## 4. One-to-one chat
 
 | | |
 |---|---|
-| **Status** | 🟡 Partial (text only) |
-| **Existing** | `apps/mobile/src/screens/Conversation.tsx`, `sendText`, `onMessageCreate` |
+| **Status** | 🟡 Phase 4 landed text-only + read state + typing. Media + message actions deferred. |
+| **Existing** | `apps/mobile/src/screens/Conversation.tsx` driving `sendTextMessage` / `markRead` / `setTyping` callables; `subscribeMessages`; peer profile via `users/{peerUid}` |
 | **Missing** | Media (image/video/audio/file), reply, edit, delete, react, forward, copy, disappearing-messages enforcement, encrypted-banner accuracy |
 | **Frontend** | Message bubble types, attachment composer, long-press action sheet |
-| **Backend** | Callable `editMessage`, `deleteMessage`; media-upload validation; disappearing-message TTL sweeper (scheduled) |
-| **Firestore** | `messages` (`mediaUrl`, `metadata`, `replyTo`, `editedAt`, `disappearAt`) |
-| **Indexes** | Existing message index suffices |
-| **Rules** | Validate `senderId == auth.uid` on edit/delete; size/type constraints |
-| **Tests** | Send-receive race, edit/delete by non-sender denied, attachment limits |
-| **Phase** | 4–6 |
+| **Backend** | Phase 4 ships `sendTextMessage` / `markRead` / `setTyping` / `getOrCreateDirectConversation`. Phase 6 adds `editMessage` / `deleteMessage` / `reactToMessage` and media upload. |
+| **Firestore** | `messages` extended (Phase 4: `senderUid`, `status`, `deletedForEveryone`, `editedAt`, `replyTo` placeholders) |
+| **Indexes** | Existing `(conversationId, createdAt DESC)` collection-group index suffices |
+| **Rules** | `senderUid == auth.uid` + type/length on create (Phase 4 ✓); edit/delete by sender or admin (Phase 4 ✓) |
+| **Phase** | 4 ✓ (text), 6 (actions), 7 (receipts UI), 8 (media wave 1) |
 
 ## 5. Group chat
 

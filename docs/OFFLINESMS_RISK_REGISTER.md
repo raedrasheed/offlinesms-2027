@@ -2,6 +2,16 @@
 
 Risks ranked across the surfaces present today and planned for later phases. Likelihood/impact are qualitative.
 
+## Phase 4 mitigation snapshot
+
+- **Risk #1 (Firebase security rules gaps)** — further progress. `conversations` participation, message validation (type, length, sender), and per-user `userState` field allow-list now ship. `typing` is owner-write, participant-read.
+- **Risk #2 (private message content exposure in admin dashboard)** — unchanged in Phase 4 (no dashboard chat UI yet). The audit-log helper's sanitiser is the safety net for any callable that accidentally tries to log content.
+- **Risk #6 (delivery / read receipt scalability)** — Phase 4 introduces the consumer side (`unreadCount` aggregation on `userState`) without per-message reads. Phase 7 will denormalise `deliveredCount`/`readCount` onto messages and back this with the receipt enum (already enforced in Phase 3).
+- **Risk #18 (real-time listener cost)** — Phase 4 takes an explicit hit here: per-conversation listeners for `userState` and `typing`. Mitigations in place: the chat list is capped at 50 conversations, `subscribeTyping` filters expired docs client-side, and `setTyping` is debounced to one start event per 2 s. Listener-cost audit is Phase 20.
+- **Risk #19 (offline sync conflicts)** — touched. Message writes use server-generated `messageId`; client doesn't pass an id. Counter increments use `FieldValue.increment(1)`; `markRead` overwrites to `0` (last-writer-wins). Reconciliation lands in Phase 20.
+
+---
+
 ## Phase 3 mitigation snapshot
 
 - **Risk #1 (Firebase security rules gaps)** — major progress. Rules for `auditLogs`, `gatewayHealth`, `smsQuotaUsage`, `payments`, `tickets`, `flags`, `organizations`, `roles` shipped (all server-only writes for system-owned collections). Receipt `status` enum validated. `statuses` audience and expiry enforced in rules. Remaining: automated tests + content-validation rules for messages (Phase 20).
