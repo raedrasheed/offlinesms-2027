@@ -21,6 +21,48 @@ service cloud.firestore {
     }
 
     // ────────────────────────────────────────────────────────────
+    // Conversation participation (Phase 4)
+    //
+    // Accepts both the canonical Phase 4 `participantUids` array and
+    // the back-compat `memberIds` array so legacy seed data and the
+    // existing receipt trigger keep working alongside the new model.
+    // ────────────────────────────────────────────────────────────
+    function isConversationParticipantData(data) {
+      return isAuthed() && (
+        (('participantUids' in data) && request.auth.uid in data.participantUids) ||
+        (('memberIds'       in data) && request.auth.uid in data.memberIds)
+      );
+    }
+    function isConversationParticipant(convoId) {
+      return isConversationParticipantData(
+        get(/databases/$(database)/documents/conversations/$(convoId)).data
+      );
+    }
+    function isOwnUserState(uid)  { return isSelf(uid); }
+    function isOwnTyping(uid)     { return isSelf(uid); }
+
+    function allowedUserStateClientFields() {
+      // unreadCount / lastReadAt / lastMessagePreview / lastMessageAt are
+      // server-owned (mutated by the callable + trigger).
+      return ['uid', 'pinned', 'muted', 'archived', 'favorite', 'updatedAt'];
+    }
+    function onlyAllowedUserStateUpdates() {
+      return changedKeys().hasOnly(allowedUserStateClientFields());
+    }
+    function onlyAllowedUserStateCreate() {
+      return changedKeysOnCreate().hasOnly(allowedUserStateClientFields());
+    }
+    function isValidTextMessage() {
+      // Phase 4 only writes type='text'. Sender must equal caller. Text is
+      // 1..4000 chars. The fanout trigger does the rest.
+      return request.resource.data.type == 'text'
+          && request.resource.data.senderUid == request.auth.uid
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 4000;
+    }
+
+    // ────────────────────────────────────────────────────────────
     // User profile field allow-list (Phase 2)
     // ────────────────────────────────────────────────────────────
     function allowedProfileFields() {
@@ -105,29 +147,60 @@ service cloud.firestore {
 
     // ════════════════════════════════════════════════════════════
     // CONVERSATIONS
+    //
+    // Reads are gated on participation (Phase 4 `participantUids` or
+    // legacy `memberIds` membership, or via the existing /members
+    // sub-collection for the group model). Direct conversation creates
+    // require the caller to be listed in participantUids/memberIds.
+    // Updates from clients are tolerated for legacy fields; the
+    // callables (which use Admin SDK) own most updates.
     // ════════════════════════════════════════════════════════════
     match /conversations/{convoId} {
-      allow read:   if isMember(convoId) || isAdmin();
-      allow create: if isAuthed();
-      allow update: if isMember(convoId) || isAdmin();
+      allow read:   if isMember(convoId)
+                       || isConversationParticipant(convoId)
+                       || isAdmin();
+      allow create: if isAuthed()
+                       && isConversationParticipantData(request.resource.data);
+      allow update: if isMember(convoId)
+                       || isConversationParticipant(convoId)
+                       || isAdmin();
       allow delete: if isGroupAdmin(convoId) || isAdmin();
 
       match /members/{uid} {
-        allow read:  if isMember(convoId) || isAdmin();
+        allow read:  if isMember(convoId) || isConversationParticipant(convoId) || isAdmin();
         allow write: if isGroupAdmin(convoId) || isSelf(uid) || isAdmin();
       }
 
-      match /messages/{messageId} {
-        allow read:   if isMember(convoId) || isAdmin();
-        allow create: if isMember(convoId) && request.resource.data.senderId == request.auth.uid;
-        allow update: if isAdmin() ||
-                       (isMember(convoId) && resource.data.senderId == request.auth.uid);
-        allow delete: if isAdmin() ||
-                       (isMember(convoId) && resource.data.senderId == request.auth.uid);
+      // Per-user conversation state (Phase 4).
+      match /userState/{uid} {
+        allow read:   if isSelf(uid) || isAdmin();
+        allow create: if (isOwnUserState(uid) || isAdmin())
+                        && (isAdmin() || onlyAllowedUserStateCreate());
+        allow update: if (isOwnUserState(uid) || isAdmin())
+                        && (isAdmin() || onlyAllowedUserStateUpdates());
+        allow delete: if isAdmin();
+      }
 
-        // Receipts (per recipient). Phase 3 adds the status enum check.
+      // Typing indicator (Phase 4). Participant-read, owner-write.
+      match /typing/{uid} {
+        allow read:   if isMember(convoId) || isConversationParticipant(convoId) || isAdmin();
+        allow write:  if isOwnTyping(uid) || isAdmin();
+      }
+
+      match /messages/{messageId} {
+        allow read:   if isMember(convoId) || isConversationParticipant(convoId) || isAdmin();
+        allow create: if (isMember(convoId) || isConversationParticipant(convoId))
+                        && isValidTextMessage();
+        allow update: if isAdmin() ||
+                       ((isMember(convoId) || isConversationParticipant(convoId))
+                          && resource.data.senderUid == request.auth.uid);
+        allow delete: if isAdmin() ||
+                       ((isMember(convoId) || isConversationParticipant(convoId))
+                          && resource.data.senderUid == request.auth.uid);
+
+        // Receipts (per recipient). Phase 3 added the status enum check.
         match /receipts/{uid} {
-          allow read:   if isMember(convoId);
+          allow read:   if isMember(convoId) || isConversationParticipant(convoId);
           allow create: if (isSelf(uid) || isAdmin())
                           && (!('status' in request.resource.data)
                               || isValidReceiptStatus(request.resource.data.status));
