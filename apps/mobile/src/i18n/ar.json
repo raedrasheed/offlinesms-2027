@@ -79,6 +79,35 @@
     "history": "السجل",
     "notEnough": "النقاط غير كافية"
   },
+  "group": {
+    "newGroup": "مجموعة جديدة",
+    "groupName": "اسم المجموعة",
+    "members": "الأعضاء",
+    "addMembers": "إضافة أعضاء",
+    "removeMember": "إزالة عضو",
+    "promote": "ترقية إلى مشرف",
+    "demote": "تخفيض إلى عضو",
+    "leave": "مغادرة المجموعة",
+    "lock": "قفل المجموعة",
+    "unlock": "فتح المجموعة",
+    "info": "معلومات المجموعة",
+    "create": "إنشاء",
+    "memberCount_one": "{{count}} عضو",
+    "memberCount_other": "{{count}} أعضاء"
+  },
+  "groupErrors": {
+    "locked": "المجموعة مقفلة. يمكن للمشرفين فقط الإرسال.",
+    "adminsOnly": "المشرفون فقط يمكنهم القيام بذلك.",
+    "transferOwnership": "انقل الملكية قبل المغادرة.",
+    "noPermission": "ليس لديك صلاحية لهذا الإجراء.",
+    "memberAdded": "تم إضافة العضو.",
+    "memberRemoved": "تم إزالة العضو.",
+    "roleUpdated": "تم تحديث الدور.",
+    "notAMember": "لم تعد عضوًا.",
+    "tooManyMembers": "المجموعة وصلت إلى الحد الأقصى للأعضاء.",
+    "ownerRoleImmutable": "لا يمكن تغيير دور المالك هنا.",
+    "generic": "حدث خطأ. يرجى المحاولة مرة أخرى."
+  },
   "common": {
     "cancel": "إلغاء",
     "save": "حفظ",

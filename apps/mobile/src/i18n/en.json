@@ -79,6 +79,35 @@
     "history": "History",
     "notEnough": "Not enough points"
   },
+  "group": {
+    "newGroup": "New group",
+    "groupName": "Group name",
+    "members": "Members",
+    "addMembers": "Add members",
+    "removeMember": "Remove member",
+    "promote": "Promote to admin",
+    "demote": "Demote to member",
+    "leave": "Leave group",
+    "lock": "Lock group",
+    "unlock": "Unlock group",
+    "info": "Group info",
+    "create": "Create",
+    "memberCount_one": "{{count}} member",
+    "memberCount_other": "{{count}} members"
+  },
+  "groupErrors": {
+    "locked": "Group is locked. Only admins can send.",
+    "adminsOnly": "Only admins can do that.",
+    "transferOwnership": "Transfer ownership before leaving.",
+    "noPermission": "You do not have permission for this action.",
+    "memberAdded": "Member added.",
+    "memberRemoved": "Member removed.",
+    "roleUpdated": "Role updated.",
+    "notAMember": "You are no longer a member.",
+    "tooManyMembers": "Group is at member capacity.",
+    "ownerRoleImmutable": "Owner role can’t be changed here.",
+    "generic": "Something went wrong. Please try again."
+  },
   "common": {
     "cancel": "Cancel",
     "save": "Save",
