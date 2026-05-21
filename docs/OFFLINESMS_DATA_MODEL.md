@@ -365,6 +365,104 @@ the client to mark `delivered` / `read` / `played` / `viewed`.
 
 ---
 
+## Phase 6 — Message actions and Message Info
+
+Existing `messages/{id}` placeholders (`editedAt`, `deletedForEveryone`, `replyTo`) become real fields, plus new ones:
+
+```ts
+messages/{messageId} {
+  // existing Phase 4/5 …
+  editedAt:           timestamp | null,
+  deletedForEveryone: boolean,
+  deletedAt:          timestamp | null,
+  deletedBy:          string  | null,
+  deleteReason:       string  | null,     // 'expired' for the disappearing-message sweeper
+
+  replyTo: {                              // present when the sender quoted another message
+    messageId:         string,
+    senderUid:         string,
+    senderDisplayName: string,
+    preview:           string,            // <= 80 chars
+    type:              'text',
+    createdAt:         timestamp,
+  } | null,
+
+  forwarded:    boolean,
+  forwardedFrom: {
+    conversationId: string,
+    messageId:      string,
+    senderUid?:     string,
+  } | null,
+
+  // One emoji per user per message; the callable rewrites the map on each toggle.
+  reactions:    { [emoji: string]: string[] } | null,
+
+  pinnedAt:     timestamp | null,
+  pinnedBy:     string  | null,
+
+  // Disappearing-message TTL. Sweeper flips matching messages to
+  // deletedForEveryone:true with deleteReason:'expired'. No client UI yet.
+  expiresAt:    timestamp | null,
+}
+```
+
+### Per-user message state — lives on `conversations/{c}/userState/{uid}`
+
+Rather than introduce a new collection, Phase 6 piggybacks on the Phase 4 `userState` doc to keep listener cost flat:
+
+```ts
+userState/{uid} {
+  // existing Phase 4 fields …
+  starredMessageIds:      string[],   // capped at 500
+  deletedForMeMessageIds: string[],   // capped at 500
+}
+```
+
+Both arrays are bounded by the `starMessage` and `deleteMessage` callables: FIFO eviction when the cap is hit. Phase 20 will reconsider if the cap proves too tight.
+
+### Conversation-level pin
+
+```ts
+conversations/{c} {
+  pinnedMessage: {
+    messageId:        string,
+    senderUid:        string,
+    senderDisplayName?: string,
+    preview:          string,          // <= 80 chars, sanitised
+    pinnedAt:         timestamp,
+    pinnedBy:         string,
+  } | null,
+}
+```
+
+Single pinned message per conversation in Phase 6. Multi-pin can land later as a sub-collection.
+
+### Pin policy
+
+- Direct conversations: any participant may pin/unpin.
+- Group conversations: owner or admin only.
+
+### Delete-for-everyone policy
+
+- The sender may always delete-for-everyone.
+- In groups, owner / admin may additionally delete other members' messages (a `byRole` field on the audit log captures who exercised it).
+- The deleted message keeps its `senderUid`, `createdAt`, and audit lineage; `text` is cleared, `deletedForEveryone` flips to `true`.
+
+### Edit window
+
+`EDIT_WINDOW_MS = 15 * 60 * 1000`. After 15 minutes, `editMessage` rejects with `failed-precondition: 'edit-window-closed'`.
+
+### Disappearing-message TTL (foundation only)
+
+- Field `messages.expiresAt` is honoured by a scheduled callable `sweepExpiredMessages` (hourly).
+- Code is shipped in `functions/src/chats/sweepExpiredMessages.ts` but **not wired into `firebase.json`** as a scheduled function in Phase 6 — explicit activation is queued for Phase 11.
+
+### Indexes
+
+No new composite indexes in Phase 6. The existing `messages(conversationId, createdAt DESC)` covers all listing reads; the sweeper reads via a `where('expiresAt', '<=', now)` which Firestore can serve with the automatic single-field index.
+
+---
+
 ## Phase 5 — Group conversations
 
 `conversations/{id}` gains group-only fields (direct conversations leave them unset):
