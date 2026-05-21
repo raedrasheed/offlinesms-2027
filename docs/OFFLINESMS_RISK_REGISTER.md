@@ -2,6 +2,15 @@
 
 Risks ranked across the surfaces present today and planned for later phases. Likelihood/impact are qualitative.
 
+## Phase 1 mitigation snapshot
+
+- **Risk #4 (admin permission leakage at the route boundary)** — partially mitigated. `apps/dashboard/app/admin/layout.tsx` is now a server-rendered guard that verifies a Firebase session cookie and admin role; non-admin traffic gets a `PermissionState` page rather than admin UI. Full RBAC (beyond `admin: true`) still lands in Phase 18.
+- **Risk #12 (dark mode inconsistencies)** — token-level groundwork laid. Semantic tokens with paired `lightSemantic` / `darkSemantic` are exported; no provider yet, so visible UI is unchanged. Phase 19 wires the toggle.
+- **Risk #11 (RTL layout drift)** — partially mitigated for the mobile state primitives (use `I18nManager.isRTL` for alignment). Dashboard RTL still pending.
+- **Risk #13 (incomplete TODO screens)** — replaced ad-hoc TODO copy on 7 dashboard scaffold pages and 5 mobile screens with token-aware `EmptyState` / `LoadingState` primitives. No regressions in product behaviour.
+
+---
+
 | # | Risk | Impact | Likelihood | Mitigation | Phase to handle |
 |---|---|---|---|---|---|
 | 1 | **Firebase security rules gaps.** `settings` is readable by all authed users; `statuses` audience is enforced only client-side; new collections (audit, tickets, calls, roles) have no rules yet; receipt status enum not validated. | High | High | Add rules for every collection, validate enum and field allow-lists, write a comprehensive rules unit-test suite, and run the suite in CI. | 3 (groundwork), 20 (coverage) |

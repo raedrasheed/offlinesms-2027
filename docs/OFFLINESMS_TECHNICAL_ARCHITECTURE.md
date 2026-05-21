@@ -4,6 +4,17 @@ System-level blueprint for the build-out described in `OFFLINESMS_IMPLEMENTATION
 
 ---
 
+## Design tokens — semantic layer (Phase 1)
+
+Two-tier token model in `@offlinesms/design-tokens`:
+
+- **Raw palette** (unchanged): `colors.{primary, ink*, surface, bgCanvas, ok, warn, err, darkBg, …}`. Still consumed by existing code; never deprecated within this roadmap.
+- **Semantic layer** (new): `semantic.color.{background, text, border, action, state}` with light and dark variants. UI code added after Phase 1 should prefer semantic names. Tailwind preset exposes both, so `bg-bg-app` and `bg-canvas` are equivalent today.
+
+See `docs/DESIGN_TOKENS_SEMANTIC_LAYER.md` for the full table and usage examples.
+
+---
+
 ## A. Monorepo
 
 ```
@@ -44,10 +55,12 @@ offlinesms-2027/
 
 ## C. Dashboard architecture
 
-- **Framework:** Next.js 14, App Router, `typedRoutes`, static export (`out/`) served by Firebase Hosting.
+- **Framework:** Next.js 14, App Router, `typedRoutes`. Originally configured for static export (`out/`) served by Firebase Hosting; since Phase 1, `/admin/*` is server-rendered on demand (`runtime: 'nodejs'`, `dynamic: 'force-dynamic'`) so the admin guard can run server-side. Production deploys for `/admin/*` need a Node host (Cloud Run / Vercel) — addressed in Phase 12.
+- **Session cookie:** Phase 1 introduces an HTTP-only `__session` cookie issued by `POST /api/session` (Firebase Admin `createSessionCookie`, 5-day expiry) and cleared by `DELETE /api/session`. `app/admin/layout.tsx` calls `verifySession(cookieValue)` (in `lib/session.ts`) on every request.
+- **Admin role model (Phase 1):** any of `admin: true` claim · `permissions.canAccessAdmin === true` · `role` or `roles[]` ∈ {`super_admin`, `organization_admin`, `support_agent`, `finance_admin`, `auditor`} · email in `BOOTSTRAP_ADMIN_EMAILS` (env). Replaced by the full RBAC model in Phase 18; the single chokepoint at `verifySession` makes that migration a one-file change.
 - **Layouts:**
   - `app/layout.tsx` — global shell, theme bootstrap.
-  - `app/admin/layout.tsx` — **server component** that verifies session cookie + `admin` claim via `firebase-admin` (Phase 1).
+  - `app/admin/layout.tsx` — **server component** that verifies session cookie + admin role (Phase 1).
 - **Routing pattern:** `app/admin/<entity>/{page,layout,error,loading}.tsx`; entity detail under `[id]`.
 - **Data fetching:** server components read via `firebase-admin`; client components read via the public SDK with strict listener limits (typically `limit(50)`).
 - **Forms:** uncontrolled inputs + server actions where convenient; callable functions for any privileged write.
