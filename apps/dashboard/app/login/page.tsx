@@ -2,10 +2,24 @@
 import { useState } from 'react';
 import { signInWithEmailAndPassword, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
+
+async function exchangeForSession(idToken: string) {
+  const res = await fetch('/api/session', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ idToken }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `session_exchange_failed_${res.status}`);
+  }
+}
 
 export default function Login() {
   const router = useRouter();
+  const params = useSearchParams();
+  const next = params.get('next') ?? '/admin';
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -15,14 +29,20 @@ export default function Login() {
     e.preventDefault();
     setBusy(true); setErr(null);
     try {
-      await signInWithEmailAndPassword(auth, email, password);
-      router.push('/admin');
+      const cred = await signInWithEmailAndPassword(auth, email, password);
+      const idToken = await cred.user.getIdToken();
+      await exchangeForSession(idToken);
+      router.push(next);
     } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
   }
   async function google() {
     setBusy(true); setErr(null);
-    try { await signInWithPopup(auth, new GoogleAuthProvider()); router.push('/admin'); }
-    catch (e: any) { setErr(e.message); } finally { setBusy(false); }
+    try {
+      const cred = await signInWithPopup(auth, new GoogleAuthProvider());
+      const idToken = await cred.user.getIdToken();
+      await exchangeForSession(idToken);
+      router.push(next);
+    } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
   }
 
   return (
