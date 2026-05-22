@@ -21,11 +21,11 @@ export default function GroupLockAction({ conversationId, locked }: Props) {
     setErr(null);
     try {
       const fns = getFunctions(app, 'us-central1');
-      const fn = httpsCallable(fns, 'lockGroup');
+      const fn = httpsCallable(fns, 'adminLockGroup');
       await fn({ conversationId, locked: !locked });
       router.refresh();
     } catch (e: any) {
-      setErr(e?.message ?? 'Action failed. You must be a group owner/admin to lock.');
+      setErr(e?.message ?? 'Action failed.');
     } finally {
       setBusy(false);
     }

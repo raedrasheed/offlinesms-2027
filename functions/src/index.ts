@@ -64,3 +64,7 @@ export { claimUsername } from './auth/claimUsername';
 
 // Phase 13 — admin management callables.
 export { setUserStatus } from './admin/setUserStatus';
+
+// Phase 14 — admin-native group lock + role assignment.
+export { adminLockGroup } from './admin/adminLockGroup';
+export { adminSetRole }   from './admin/adminSetRole';
