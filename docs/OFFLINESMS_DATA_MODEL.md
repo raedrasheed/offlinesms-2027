@@ -1021,6 +1021,33 @@ The chat UI uses these to render sender headers without joining `users`. Direct 
 
 ---
 
+## Phase 17 — Search foundation and new indexes
+
+### `users/{uid}.usernameLower` — prefix search field
+
+The `usernameLower` field (written by `claimUsername` since Phase 2) is the basis for the Phase 17 global admin search. The `/admin/search` route queries:
+
+```ts
+usersRef
+  .where('usernameLower', '>=', query)
+  .where('usernameLower', '<=', query + '')
+  .limit(5)
+```
+
+This is the standard Firestore prefix-search pattern. Because `usernameLower` is already lowercase-normalised at write time, the search is effectively case-insensitive for username lookups. The equivalent `nameLower` field does not yet exist on `conversations` (groups) — group name search is therefore case-sensitive in Phase 17 and requires a future `nameLower` field to match the username pattern.
+
+### New composite indexes (Phase 17)
+
+| Collection | Fields | Used by |
+|---|---|---|
+| `users` | `(status ASC, createdAt DESC)` | users list status filter, users export |
+| `conversations` | `(type ASC, createdAt DESC)` | groups list, SMS batches list |
+| `conversations` | `(type ASC, status ASC, createdAt DESC)` | groups list status filter, groups export |
+| `transactions` | `(type ASC, createdAt DESC)` | transactions type filter, transactions export |
+| `payments` | `(status ASC, createdAt DESC)` | payments status filter, payments export |
+
+---
+
 ## Index plan (mirrors `firestore.indexes.json`)
 
 | Collection | Fields | Used by |
