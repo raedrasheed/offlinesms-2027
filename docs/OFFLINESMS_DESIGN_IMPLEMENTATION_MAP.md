@@ -384,3 +384,37 @@ Legend for "Recommended phase" matches `OFFLINESMS_IMPLEMENTATION_ROADMAP.md`.
 | **Status** | ❌ Inconsistent |
 | **Missing** | Shared `Loading`, `Empty`, `Error`, `Permission`, `Success` primitives (mobile + dashboard) |
 | **Phase** | 1 |
+
+---
+
+## Phase 17 additions
+
+### 37. Admin global search
+
+| | |
+|---|---|
+| **Status** | ✅ Phase 17 landed |
+| **Existing** | `app/admin/search/route.ts` — Firestore prefix search on `usernameLower` (users), `slug` (orgs), `name` (groups); exact-ID lookup for smsBatches, wallets, payments, tickets, auditLogs. Max 5 per group, 50 total, all queries parallel. `AdminGlobalSearchShell.tsx` — debounced (300 ms) fetch, grouped results UI, keyboard navigation (↑ ↓ ↵ Esc). |
+| **Capability** | `search:global` |
+| **Limitation** | Group name search is case-sensitive (prefix on stored `name`). Users must type lowercase to match mixed-case group names. A `nameLower` field is the planned fix (future phase). |
+| **Phase** | 17 ✓ |
+
+### 38. Admin CSV exports
+
+| | |
+|---|---|
+| **Status** | ✅ Phase 17 landed |
+| **Existing** | Export routes: `/admin/users/export`, `/admin/groups/export`, `/admin/sms/export`, `/admin/points/transactions/export`, `/admin/points/payments/export`, `/admin/support/export`. Shared `apps/dashboard/lib/exportHelper.ts` (`csvCell`, `csvRow`, `buildCsvResponse`, `writeExportAudit`, `EXPORT_LIMIT = 1000`). Export buttons on all six pages. |
+| **Capabilities** | `export:users`, `export:groups`, `export:sms`, `export:points`, `export:support` |
+| **Redaction** | Phones masked via `redactPhone()`. No message content in exports. |
+| **Audit** | Every export writes an `auditLogs` entry with actor, entity, row count, and applied filters. |
+| **Phase** | 17 ✓ |
+
+### 39. Admin FilterBar (URL-param driven)
+
+| | |
+|---|---|
+| **Status** | ✅ Phase 17 landed |
+| **Existing** | `FilterBar` component added to: users (status filter), groups (status filter), transactions (type filter), payments (status filter) pages. All filter state is URL-param driven — shareable links, browser back/forward compatible. `listUsers`, `listGroups`, `listTransactions`, `listPayments` in `adminData.ts` updated to accept and forward filter params. |
+| **Missing** | Date-range filter, free-text filter on list pages |
+| **Phase** | 17 ✓ |
