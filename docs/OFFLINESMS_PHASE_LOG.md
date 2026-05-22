@@ -4,6 +4,120 @@ Running log of phased work. Newest first.
 
 ---
 
+## Phase 18 — Org Scoping, Rate Limiting, Search Normalization, Date-Range Reports, Support Assignment, Webhook Logs, Notifications
+
+**Branch:** `claude/repo-audit-architecture-MiZDX`  
+**Status:** Complete.
+
+### Commits
+
+1. `docs: add OfflineSMS phase 18 implementation plan` — `486bd3f`
+2. `feat(admin): add organization-scoped admin access helpers` — `22c1f0c`
+3. `feat(admin): add rate limiting for search and exports` — `aa166d8`
+4. `feat(admin): add search normalization and backfill script` — `da78f27`
+5. `feat(admin): add report date-range controls` — `b6fd64d`
+6. `feat(admin): add support assignment workflow` — `361d6b4`
+7. `feat(admin): add webhook delivery event logs` — `a85512d`
+8. `feat(admin): add notification broadcast foundation` — `463746d`
+9. `chore(firebase): add Phase 18 indexes` — `01b8d37`
+10. `docs: update phase log for phase 18` — (this commit)
+
+### Files changed
+
+**New files:**
+- `docs/OFFLINESMS_PHASE_18_PLAN.md` — implementation plan
+- `apps/dashboard/lib/adminScope.ts` — org-scoped access helpers
+- `apps/dashboard/lib/rateLimit.ts` — in-memory rate limiter
+- `functions/src/admin/adminSetOrgRole.ts` — callable for org-scoped role assignment
+- `scripts/backfillSearchFields.ts` — backfill displayNameLower + nameLower
+- `apps/dashboard/app/admin/notifications/page.tsx` — notification broadcast foundation
+- `apps/dashboard/app/admin/notifications/DraftForm.tsx` — draft form client component
+- `apps/dashboard/app/admin/notifications/notificationActions.ts` — saveDraftNotification server action
+- `apps/dashboard/app/admin/support/[ticketId]/TicketAssignAction.tsx` — assignment client component
+
+**Modified files:**
+- `apps/dashboard/lib/adminPermissions.ts` — added view:notifications, manage:notifications capabilities
+- `apps/dashboard/lib/adminNav.ts` — added Notifications nav item (Bell icon)
+- `apps/dashboard/lib/adminData.ts` — listSupportTickets: assignedTo filter; listDeliveryEvents helper
+- `apps/dashboard/lib/supportActions.ts` — assignSupportTicket server action
+- `apps/dashboard/app/admin/search/route.ts` — rate limiting; displayNameLower + nameLower search
+- `apps/dashboard/app/admin/reports/page.tsx` — ?range=7d|30d|90d date-range controls
+- `apps/dashboard/app/admin/support/page.tsx` — assignedTo filter UI
+- `apps/dashboard/app/admin/support/[ticketId]/page.tsx` — TicketAssignAction UI
+- `apps/dashboard/app/admin/sms/[batchId]/page.tsx` — webhook delivery events card
+- `apps/dashboard/app/admin/*/export/route.ts` (6 routes) — rate limiting
+- `apps/dashboard/app/admin/audit/export/route.ts` — stricter audit-export limit (5/hr)
+- `functions/src/index.ts` — export adminSetOrgRole
+- `firestore.indexes.json` — 9 new composite indexes
+
+### What was done
+
+**1. Organization-scoped admin access (`adminScope.ts`):**
+- `getAdminScope(session)` → `{ organizationId?: string }` — org_admin gets org ID from claims; other roles unrestricted
+- `applyOrgScope(query, scope, field?)` — applies `.where('organizationId', '==', ...)` only when scope has an org
+- `canViewOrganization(session, orgId)` — true if unrestricted or claims.organizationId matches
+- `adminSetOrgRole` Cloud Function — super_admin callable to set `role + organizationId` together in custom claims
+
+**2. Rate limiting (`rateLimit.ts`):**
+- In-memory Map with TTL (per-process, ephemeral — appropriate for admin routes)
+- `checkRateLimit(key, opts)` → `{ ok, retryAfterMs? }` with automatic stale-entry pruning
+- Search: 60 req/min per uid; exports: 10 req/hr per uid; audit export: 5 req/hr per uid
+- Returns 429 JSON with human-readable retry message
+
+**3. Search normalization:**
+- `backfillSearchFields.ts` script: dry-run by default; `--write` applies changes in batches of 400
+- Populates `users.displayNameLower` and `conversations.nameLower` (groups only)
+- Search route updated: users searched on both `usernameLower` and `displayNameLower` (deduped, max GROUP_LIMIT)
+- Groups searched on `nameLower` with graceful fallback to case-sensitive `name` prefix
+
+**4. Report date-range controls:**
+- `?range=7d|30d|90d` query param (default: 7d)
+- Pill picker in top-right of Reports page; all counts and trend tables respect selected range
+- 90-day range buckets by week (13 rows) to avoid 90 sequential queries
+
+**5. Support assignment workflow:**
+- `assignSupportTicket(ticketId, ...)` server action in `supportActions.ts`
+- Audits: `support.ticket.assigned` / `support.ticket.unassigned` / `support.ticket.reassigned`
+- `TicketAssignAction.tsx` client component with UID input + Unassign button
+- Ticket detail page: assignment card below status update (manage:support required)
+- Support list: `?assignedTo=<uid>` filter param + input field in filter bar
+
+**6. Webhook delivery event logs:**
+- `listDeliveryEvents(batchId, cursor?)` helper in `adminData.ts`
+- Reads `smsDeliveryEvents` collection where `offlineSmsBatchId == batchId`, ordered by `receivedAt desc`, limit 50
+- Shown as a DetailCard on `/admin/sms/[batchId]/page.tsx` — soft-fails (hidden) when collection absent
+- No raw payload, no phone number, no SMS body shown; columns: event ID, status, result, error code, receivedAt, processedAt
+
+**7. Notification broadcast foundation:**
+- `/admin/notifications/page.tsx` — gated by `view:notifications`
+- Draft form: title (≤140), body (≤500), audience (all/organization/group)
+- "Send broadcast" disabled with tooltip explaining infrastructure requirement
+- `saveDraftNotification` server action writes `notifications/{id}` with `status: 'draft'`
+- Audits as `notification.draft.created`
+- Recent drafts table (10 rows): title, audience, status, createdAt
+- Added Bell icon to admin nav for manage:notifications-capable roles
+
+**8. Phase 18 Firestore indexes (9 new):**
+- users: organizationId + createdAt
+- users: displayNameLower + createdAt
+- conversations: nameLower + updatedAt
+- tickets: assignedTo + status + updatedAt
+- tickets: assignedTo + createdAt
+- smsDeliveryEvents: offlineSmsBatchId + receivedAt
+- notifications: status + createdAt
+- notifications: createdBy + createdAt
+
+### Security decisions
+
+- Org scope is data-layer only; no UI banner exposing the org restriction boundary
+- Rate limiter uses `<action>:<uid>` keys — no cross-user interference
+- Backfill script: destructive operations require explicit `--write` flag
+- Delivery events: errorCode exposed (safe opaque string); full gateway payload never read
+- Notification drafts: body stored in Firestore but never shown in exports or search results
+- `assignedTo` UID stored as-is (no lookup to Auth); display is truncated in list, full in detail
+
+---
+
 ## Phase 17 — Global Search, Export Foundation, Reporting, and Filter Improvements
 
 **Branch:** `claude/repo-audit-architecture-MiZDX`  
