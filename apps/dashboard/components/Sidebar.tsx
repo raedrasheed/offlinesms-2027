@@ -1,6 +1,8 @@
 'use client';
+import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
 import { signOut } from 'firebase/auth';
 import {
   LogOut, ChevronDown, Search, LayoutGrid, LineChart,
@@ -9,6 +11,7 @@ import {
   Coins, ArrowLeftRight,
   LifeBuoy, Flag, Radio,
   Shield, ScrollText, Bell, Settings,
+  ChevronLeft, ChevronRight,
   type LucideIcon,
 } from 'lucide-react';
 import { auth } from '@/lib/firebase';
@@ -89,6 +92,17 @@ const NAV_GROUPS: NavGroup[] = [
 export default function Sidebar({ role }: Props) {
   const path = usePathname();
   const router = useRouter();
+  const [collapsed, setCollapsed] = useState(false);
+
+  useEffect(() => {
+    setCollapsed(localStorage.getItem('sidebarCollapsed') === 'true');
+  }, []);
+
+  function toggleCollapse() {
+    const next = !collapsed;
+    setCollapsed(next);
+    localStorage.setItem('sidebarCollapsed', String(next));
+  }
 
   async function handleSignOut() {
     try { await fetch('/api/session', { method: 'DELETE' }); } catch { /* ignore */ }
@@ -98,50 +112,90 @@ export default function Sidebar({ role }: Props) {
 
   return (
     <aside
-      className="w-[240px] flex flex-col h-screen sticky top-0 overflow-y-auto shrink-0"
-      style={{ background: 'var(--c-sidebar)', borderRight: '1px solid var(--c-border)' }}
+      className="flex flex-col h-screen sticky top-0 overflow-y-auto shrink-0"
+      style={{
+        width: collapsed ? '60px' : '240px',
+        transition: 'width 200ms ease',
+        background: 'var(--c-sidebar)',
+        borderRight: '1px solid var(--c-border)',
+      }}
     >
-      <div className="flex items-center gap-2.5 px-4 py-4 shrink-0">
-        <span className="brand-mark shrink-0" />
-        <span className="font-extrabold text-[15px] tracking-tight" style={{ color: 'var(--c-text)' }}>
-          Offline<span style={{ color: '#5BB6DE' }}>SMS</span>
-        </span>
-        <span
-          className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0"
-          style={{ background: 'var(--c-nav-active-bg)', color: 'var(--c-nav-active-text)' }}
-        >
-          ADMIN
-        </span>
+      {/* Logo + brand */}
+      <div
+        className={clsx(
+          'flex items-center shrink-0 px-3 py-4',
+          collapsed ? 'justify-center' : 'gap-2.5 px-4',
+        )}
+      >
+        <Image
+          src="/logo.png"
+          alt="OfflineSMS"
+          width={30}
+          height={30}
+          className="shrink-0 rounded-lg"
+        />
+        {!collapsed && (
+          <>
+            <span className="font-extrabold text-[15px] tracking-tight" style={{ color: 'var(--c-text)' }}>
+              Offline<span style={{ color: '#5BB6DE' }}>SMS</span>
+            </span>
+            <span
+              className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0"
+              style={{ background: 'var(--c-nav-active-bg)', color: 'var(--c-nav-active-text)' }}
+            >
+              ADMIN
+            </span>
+          </>
+        )}
       </div>
 
-      <div className="px-3 pb-2 shrink-0">
+      {/* Collapse toggle */}
+      <div className={clsx('px-3 pb-2 shrink-0', collapsed && 'flex justify-center px-2')}>
         <button
-          className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left transition hover:bg-white/5"
-          style={{ background: 'var(--c-sidebar-sub)' }}
+          onClick={toggleCollapse}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          className="w-full flex items-center justify-center h-7 rounded-lg transition hover:brightness-110"
+          style={{ background: 'var(--c-sidebar-sub)', color: 'var(--c-text-4)', border: '1px solid var(--c-border)' }}
         >
-          <div
-            className="w-6 h-6 rounded-md flex items-center justify-center text-[10px] font-bold shrink-0"
-            style={{ background: 'var(--c-nav-active-bg)', color: 'var(--c-nav-active-text)' }}
-          >
-            A
-          </div>
-          <span className="text-[12px] font-medium flex-1 truncate" style={{ color: 'var(--c-text-2)' }}>
-            Acme Co workspace
-          </span>
-          <ChevronDown size={13} style={{ color: 'var(--c-text-4)' }} className="shrink-0" />
+          {collapsed ? <ChevronRight size={13} /> : <ChevronLeft size={13} />}
         </button>
       </div>
 
-      <div className="px-3 pb-3 shrink-0">
-        <div
-          className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg"
-          style={{ background: 'var(--c-sidebar-sub)', border: '1px solid var(--c-border)' }}
-        >
-          <Search size={12} style={{ color: 'var(--c-text-4)' }} className="shrink-0" />
-          <span className="text-[12px]" style={{ color: 'var(--c-text-4)' }}>Search...</span>
+      {/* Workspace selector */}
+      {!collapsed && (
+        <div className="px-3 pb-2 shrink-0">
+          <button
+            className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left transition hover:bg-white/5"
+            style={{ background: 'var(--c-sidebar-sub)' }}
+          >
+            <div
+              className="w-6 h-6 rounded-md flex items-center justify-center text-[10px] font-bold shrink-0"
+              style={{ background: 'var(--c-nav-active-bg)', color: 'var(--c-nav-active-text)' }}
+            >
+              A
+            </div>
+            <span className="text-[12px] font-medium flex-1 truncate" style={{ color: 'var(--c-text-2)' }}>
+              Acme Co workspace
+            </span>
+            <ChevronDown size={13} style={{ color: 'var(--c-text-4)' }} className="shrink-0" />
+          </button>
         </div>
-      </div>
+      )}
 
+      {/* Search */}
+      {!collapsed && (
+        <div className="px-3 pb-3 shrink-0">
+          <div
+            className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg"
+            style={{ background: 'var(--c-sidebar-sub)', border: '1px solid var(--c-border)' }}
+          >
+            <Search size={12} style={{ color: 'var(--c-text-4)' }} className="shrink-0" />
+            <span className="text-[12px]" style={{ color: 'var(--c-text-4)' }}>Search...</span>
+          </div>
+        </div>
+      )}
+
+      {/* Nav */}
       <nav className="flex-1 px-2 pb-3 space-y-3 overflow-y-auto">
         {NAV_GROUPS.map(group => {
           const visibleItems = group.items.filter(item =>
@@ -150,12 +204,14 @@ export default function Sidebar({ role }: Props) {
           if (!visibleItems.length) return null;
           return (
             <div key={group.label}>
-              <p
-                className="px-3 pb-1 text-[10px] font-bold uppercase tracking-widest"
-                style={{ color: 'var(--c-nav-group)' }}
-              >
-                {group.label}
-              </p>
+              {!collapsed && (
+                <p
+                  className="px-3 pb-1 text-[10px] font-bold uppercase tracking-widest"
+                  style={{ color: 'var(--c-nav-group)' }}
+                >
+                  {group.label}
+                </p>
+              )}
               {visibleItems.map(item => {
                 const isActive = item.exact
                   ? path === item.href
@@ -164,9 +220,11 @@ export default function Sidebar({ role }: Props) {
                   <Link
                     key={item.href + item.label}
                     href={item.href as any}
+                    title={collapsed ? item.label : undefined}
                     className={clsx(
                       'flex items-center gap-2.5 px-3 py-[7px] rounded-lg text-[13px] font-medium transition mb-0.5',
-                      !isActive && 'hover:bg-white/5'
+                      collapsed && 'justify-center px-0',
+                      !isActive && 'hover:bg-white/5',
                     )}
                     style={
                       isActive
@@ -175,8 +233,8 @@ export default function Sidebar({ role }: Props) {
                     }
                   >
                     <item.icon size={14} className="shrink-0" />
-                    <span className="flex-1 truncate">{item.label}</span>
-                    {item.badge && (
+                    {!collapsed && <span className="flex-1 truncate">{item.label}</span>}
+                    {!collapsed && item.badge && (
                       <span
                         className="text-[9px] font-bold px-1.5 py-0.5 rounded shrink-0"
                         style={{ background: 'var(--c-nav-active-bg)', color: 'var(--c-nav-active-text)' }}
@@ -192,14 +250,19 @@ export default function Sidebar({ role }: Props) {
         })}
       </nav>
 
+      {/* Sign out */}
       <div className="px-3 py-3 shrink-0" style={{ borderTop: '1px solid var(--c-border)' }}>
         <button
           onClick={handleSignOut}
-          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium transition hover:bg-white/5"
+          title={collapsed ? 'Sign out' : undefined}
+          className={clsx(
+            'w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium transition hover:bg-white/5',
+            collapsed && 'justify-center px-0',
+          )}
           style={{ color: 'var(--c-text-4)' }}
         >
           <LogOut size={14} />
-          Sign out
+          {!collapsed && 'Sign out'}
         </button>
       </div>
     </aside>
