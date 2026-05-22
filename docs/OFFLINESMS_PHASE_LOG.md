@@ -4,6 +4,145 @@ Running log of phased work. Newest first.
 
 ---
 
+## Phase 15 — Admin Operations Hardening and Controlled Admin Actions
+
+**Branch:** `claude/repo-audit-architecture-MiZDX`  
+**Status:** Complete. TypeScript clean (dashboard + functions), Next.js build green (35 routes).
+
+### Commits
+
+1. `docs: add OfflineSMS phase 15 implementation plan` — `cab12d5`
+2. `feat(admin): add wallet freeze and unfreeze action` — `1fb4ccb`
+3. `feat(admin): add points package create and edit flows` — `a699da8`
+4. `feat(admin): enable SMS retry from dashboard` — `2a79a90`
+5. `feat(admin): add support queue foundation` — `f4d5f07`
+6. `feat(admin): add settings foundation` — `42b37d8`
+7. `feat(admin): add dashboard counts and audit filters` — `bed2e7d`
+8. `docs: update phase log for phase 15` — (this commit)
+
+### Files changed
+
+**New files:**
+- `docs/OFFLINESMS_PHASE_15_PLAN.md` — implementation plan
+- `functions/src/admin/adminSetWalletStatus.ts` — wallet freeze/unfreeze callable
+- `apps/dashboard/lib/packageActions.ts` — package create/update server actions
+- `apps/dashboard/lib/supportActions.ts` — ticket status update server action
+- `apps/dashboard/lib/settingsActions.ts` — system settings update server action
+- `apps/dashboard/app/admin/points/wallets/WalletFreezeAction.tsx` — client component
+- `apps/dashboard/app/admin/points/packages/PackageForm.tsx` — shared form component
+- `apps/dashboard/app/admin/points/packages/new/page.tsx` — create page
+- `apps/dashboard/app/admin/points/packages/[packageId]/edit/page.tsx` — edit page
+- `apps/dashboard/app/admin/sms/[batchId]/SmsRetryAction.tsx` — retry client component
+- `apps/dashboard/app/admin/support/[ticketId]/page.tsx` — ticket detail page
+- `apps/dashboard/app/admin/support/[ticketId]/TicketStatusAction.tsx` — status update component
+- `apps/dashboard/app/admin/settings/SettingsForm.tsx` — settings form client component
+
+**Modified files:**
+- `functions/src/index.ts` — exports adminSetWalletStatus
+- `functions/src/sms/retryFailed.ts` — extends admin check to include role-based access
+- `apps/dashboard/lib/adminPermissions.ts` — 5 new capabilities: manage:wallets, manage:packages, retry:sms, manage:support, manage:settings
+- `apps/dashboard/lib/adminData.ts` — upgraded listAdminUsers to Auth.listUsers() pagination; added getPointsPackage, listSupportTickets, getSupportTicket, getSystemSettings, getDashboardCounts
+- `apps/dashboard/app/admin/points/wallets/page.tsx` — freeze/unfreeze column, status filter tabs
+- `apps/dashboard/app/admin/points/packages/page.tsx` — New package button, Edit links
+- `apps/dashboard/app/admin/sms/[batchId]/page.tsx` — real retry action (was deferred stub)
+- `apps/dashboard/app/admin/support/page.tsx` — real implementation (was stub)
+- `apps/dashboard/app/admin/settings/page.tsx` — real implementation (was stub)
+- `apps/dashboard/app/admin/page.tsx` — real Firestore count aggregation (was hardcoded)
+- `apps/dashboard/app/admin/audit/page.tsx` — filter inputs for actor, action, targetType, result, from, to
+
+### What was done
+
+**1. Wallet freeze/unfreeze:**
+- `adminSetWalletStatus` callable requires `manage:wallets` capability (super_admin, finance_admin, legacy_admin, bootstrap_admin)
+- Only the `status` field is written; balance and reserved are never touched
+- Confirmation dialog before every action
+- Audit logged as `admin.wallet.frozen` / `admin.wallet.unfrozen`
+- Wallets list now has a status filter (All / Active / Frozen)
+
+**2. Points package create/edit:**
+- `createPointsPackage` and `updatePointsPackage` server actions, gated by `manage:packages`
+- Full validation: name, points > 0, bonusPoints ≥ 0, price ≥ 0, currency, status, sortOrder
+- Audit logged as `points.package.created` / `points.package.updated` / `points.package.enabled` / `points.package.disabled`
+- Packages list now has New package button and per-row Edit links
+
+**3. SMS retry from dashboard:**
+- `SmsRetryAction` client component calls `retryFailedSmsRecipients` callable
+- `retryFailedSmsRecipients` now also accepts `role === 'super_admin'` or `role === 'organization_admin'` in addition to `admin === true`
+- Shows confirmation dialog noting points may be reserved; never exposes SMS body or full phones
+- Displays result: new batch ID, sent/failed counts, final status
+- Gated by `retry:sms` capability; roles without it see a disabled button with explanation
+
+**4. Support queue foundation:**
+- Real Firestore-backed list with status tabs and category filter
+- Ticket detail shows metadata + user-submitted description (user support content, not private messages)
+- Ticket status transitions: open → pending → resolved → closed
+- All status changes audit-logged as `support.ticket.status_changed`
+- Status update gated by `manage:support` (super_admin, support_agent)
+
+**5. Settings foundation:**
+- Reads/writes `systemSettings/general` Firestore document; falls back to safe defaults if doc absent
+- Fields: appName, supportEmail, defaultLanguage, defaultTimezone, smsEscalationEnabled, pointsEnabled
+- maintenanceMode displayed read-only (cannot be toggled from UI)
+- All updates audit-logged as `system.settings.updated`
+- Read-only view for roles without `manage:settings`
+
+**6. Dashboard real counts:**
+- Firestore count aggregation (`collection.count().get()`) for all cards
+- totalUsers and totalWallets labelled Approximate (unbounded collections)
+- Counts soft-fail on error (returns `—`)
+- Cards link to relevant management pages
+
+**7. Audit log filters:**
+- GET query params: actor (actorUid), action, targetType, result, from (date), to (date)
+- Single equality filter at a time to avoid composite index explosion
+- Missing composite index caught and surfaced as an amber warning instead of crashing
+- Payload metadata never shown (only field count)
+
+**8. listAdminUsers scalability:**
+- Upgraded from Firestore first-200 scan to `Auth.listUsers()` pagination
+- Up to 3 pages × 1 000 users (3 000 users) scanned per request
+- For each admin user, Firestore doc is fetched for display name enrichment
+- adminSetRole last-super_admin guard uses the same upgraded path indirectly
+
+### Security posture
+
+- No admin wallet balance adjustment
+- No admin refunds
+- No private message content exposed
+- No SMS body exposed
+- No full phone numbers anywhere (maskPhone always applied)
+- No secrets in settings (stored or displayed)
+- No provider names mentioned in UI
+- All new write actions re-verify session server-side
+
+### Checks run
+
+- `tsc --noEmit` — clean (dashboard + functions)
+- `next build` — passes (35 routes, 0 errors)
+
+### Known limitations
+
+1. Support ticket collection (`supportTickets`) does not yet have a mobile-side creation flow; tickets can be seeded via admin script or a future mobile feature.
+2. Audit log filters with multiple simultaneous equality conditions require composite Firestore indexes not yet deployed; the UI surfaces a warning when this occurs.
+3. Dashboard count aggregations require Firestore indexes for certain `where` clauses (e.g., `conversations.where(type==group).where(status==active).count()`); soft-fail handles missing indexes.
+4. Settings form toggles use React state; the form must be submitted to persist changes (no auto-save).
+5. `listAdminUsers` caps at 3 000 users; organizations with more than 3 000 users in Auth may miss some admin records.
+
+### Recommended Phase 16 scope
+
+- Mobile-side support ticket creation flow
+- Firestore composite indexes for audit log filter combinations (deploy via `firestore.indexes.json`)
+- Wallet detail page (`/admin/points/wallets/[uid]`) with transaction history
+- Suspension/unfreeze email notification hooks
+- Real-time dashboard count refresh (polling or Firestore snapshot)
+- Package promotion/discount engine if required
+- Calls dashboard foundation
+- Communities moderation foundation
+- Admin export / CSV download for audit log or user list (gated, rate-limited)
+- Reap stuck batches scheduled function activation
+
+---
+
 ## Phase 14 — Admin Controls, SMS Dashboard, Points Overview, Roles
 
 **Branch:** `claude/repo-audit-architecture-MiZDX`  
