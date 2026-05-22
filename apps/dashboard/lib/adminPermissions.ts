@@ -35,7 +35,10 @@ export type AdminCapability =
   | 'export:sms'
   | 'export:points'
   | 'export:support'
-  | 'view:reports';
+  | 'view:reports'
+  // Phase 18
+  | 'view:notifications'
+  | 'manage:notifications';
 
 type RoleKey = AdminRole | 'legacy_admin' | 'bootstrap_admin';
 
@@ -51,6 +54,7 @@ const ROLE_CAPABILITIES: Record<RoleKey, readonly AdminCapability[]> = {
     'manage:wallets', 'manage:packages', 'retry:sms', 'manage:support', 'manage:settings',
     'export:audit', 'view:moderation',
     'search:global', 'export:users', 'export:groups', 'export:sms', 'export:points', 'export:support', 'view:reports',
+    'view:notifications', 'manage:notifications',
   ],
   organization_admin: [
     'view:overview', 'view:users',
@@ -90,6 +94,7 @@ const ROLE_CAPABILITIES: Record<RoleKey, readonly AdminCapability[]> = {
     'manage:wallets', 'manage:packages', 'retry:sms', 'manage:support', 'manage:settings',
     'export:audit', 'view:moderation',
     'search:global', 'export:users', 'export:groups', 'export:sms', 'export:points', 'export:support', 'view:reports',
+    'view:notifications', 'manage:notifications',
   ],
   bootstrap_admin: [
     'view:overview', 'view:users', 'manage:users',
@@ -102,6 +107,7 @@ const ROLE_CAPABILITIES: Record<RoleKey, readonly AdminCapability[]> = {
     'manage:wallets', 'manage:packages', 'retry:sms', 'manage:support', 'manage:settings',
     'export:audit', 'view:moderation',
     'search:global', 'export:users', 'export:groups', 'export:sms', 'export:points', 'export:support', 'view:reports',
+    'view:notifications', 'manage:notifications',
   ],
 };
 
