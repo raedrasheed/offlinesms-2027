@@ -365,6 +365,166 @@ the client to mark `delivered` / `read` / `played` / `viewed`.
 
 ---
 
+## Phase 10 — Points purchase, transfer, lifecycle
+
+### `pointsPackages/{packageId}` (new)
+
+```ts
+{
+  name:        string,
+  points:      number,
+  bonusPoints: number,
+  price:       number,           // smallest currency unit (e.g. cents)
+  currency:    string,           // ISO 4217 (e.g. 'EUR')
+  status:      'active' | 'disabled',
+  sortOrder:   number,
+  createdAt:   timestamp,
+  updatedAt:   timestamp,
+}
+```
+
+**Rules.** Any signed-in user may read. Writes admin-only.
+
+### `payments/{paymentId}` (extended; rules already locked Phase 3)
+
+```ts
+{
+  userId:           string,
+  packageId:        string,
+  points:           number,
+  bonusPoints:      number,
+  totalPoints:      number,
+  amount:           number,
+  currency:         string,
+  status:           'pending' | 'processing' | 'completed' | 'failed'
+                  | 'cancelled' | 'refunded',
+  idempotencyKey:   string,
+  checkoutUrl:      string | null,
+  providerReference: string | null,
+  createdAt:        timestamp,
+  updatedAt:        timestamp,
+  completedAt:      timestamp | null,
+  failureReason:    string | null,
+}
+```
+
+**Rules.** Owner-read. Writes server-only (Phase 3). `confirmPayment`
+and `confirmPaymentMock` are the only paths that flip the status.
+
+### `pointsTransfers/{transferId}` (new)
+
+```ts
+{
+  fromUserId:     string,
+  toUserId:       string,
+  amount:         number,
+  fee:            number,        // always 0 in Phase 10
+  status:         'pending' | 'completed' | 'failed' | 'reversed',
+  idempotencyKey: string,
+  flagged:        boolean,
+  createdAt:      timestamp,
+  completedAt:    timestamp | null,
+  failureReason:  string | null,
+}
+```
+
+**Rules.** Sender (`fromUserId == auth.uid`) or recipient
+(`toUserId == auth.uid`) may read their own; writes server-only.
+
+### `transferQuotaUsage/{uid}/days/{yyyymmdd}` (new)
+
+```ts
+{
+  uid:                string,
+  date:               string,          // 'yyyy-mm-dd'
+  transferCount:      number,
+  pointsTransferred:  number,
+  updatedAt:          timestamp,
+}
+```
+
+**Rules.** Owner-read; writes server-only. Mirrors the Phase 3
+`smsQuotaUsage` shape.
+
+### `wallets/{uid}` (extended)
+
+```ts
+{
+  // Phase 0+9
+  balance:   number,
+  reserved:  number,
+  createdAt: timestamp,
+  updatedAt: timestamp,
+  // Phase 10
+  status?:   'active' | 'frozen' | 'closed',   // defaults to 'active'
+}
+```
+
+Default = `'active'`. `transferPoints` refuses on `'frozen'` /
+`'closed'`. Phase 10 doesn't ship a freeze callable; admin freeze is a
+Phase 15 deliverable.
+
+### `transactions/{transactionId}` (canonical Phase 10)
+
+Backend writers now emit:
+
+| Canonical | Emitter |
+|---|---|
+| `purchase` | `confirmPayment(Mock)` (on `'completed'`) |
+| `transfer_in` / `transfer_out` | `transferPoints` |
+| `reservation` | `escalateSms` (at reservation time) |
+| `reservation_release` | `onSmsBatchAccepted` (settlement) |
+| `sms_spend` | `onSmsBatchAccepted` (per-recipient cost) |
+| `refund` | `onSmsBatchAccepted` (when actual cost < reserved) |
+| `admin_adjustment` | reserved for Phase 15 |
+
+Each row carries:
+
+```ts
+{
+  userId:              string,
+  type:                CanonicalType,
+  direction:           'credit' | 'debit',
+  amount:              number,            // absolute, ≥ 0
+  status:              'pending' | 'completed' | 'failed' | 'reversed' | 'refunded',
+  relatedPaymentId?:   string | null,
+  relatedTransferId?:  string | null,
+  relatedSmsBatchId?:  string | null,
+  relatedUserId?:      string | null,
+  relatedMessageId?:   string | null,
+  relatedConversationId?: string | null,
+  note?:               string | null,
+  createdAt:           timestamp,
+  completedAt?:        timestamp,
+}
+```
+
+Legacy Phase 0 emitters (`'sms'`, `'buy'`, `'transfer-in/out'`,
+`'refund'`) are migrated one phase at a time. `onSmsBatchAccepted`
+emits **both** the legacy `'sms'` row and the canonical
+`reservation_release` + `sms_spend` (+ `refund`) rows for one phase so
+older clients keep parsing; Phase 11 will drop the legacy row.
+
+### Caps and policy
+
+```
+DAILY_TRANSFER_CAP_COUNT     = 20
+DAILY_TRANSFER_CAP_POINTS    = 5000
+FRAUD_FLAG_THRESHOLD_POINTS  = 2000
+```
+
+### Indexes
+
+| Collection | Fields | Used by |
+|---|---|---|
+| `pointsTransfers` | `(fromUserId, createdAt DESC)` | sender history |
+| `pointsTransfers` | `(toUserId, createdAt DESC)` | recipient history |
+
+`payments(userId, createdAt DESC)` already exists from Phase 3.
+`pointsPackages` is served by automatic single-field indexes.
+
+---
+
 ## Phase 9 — Wallet and transaction read models
 
 ### `wallets/{uid}` (read formalised)
