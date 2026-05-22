@@ -13,7 +13,8 @@ import DetailCard from '@/components/admin/DetailCard';
 import MetadataList from '@/components/admin/MetadataList';
 import StatusBadge from '@/components/admin/StatusBadge';
 import TicketStatusAction from './TicketStatusAction';
-import { updateTicketStatus } from '@/lib/supportActions';
+import TicketAssignAction from './TicketAssignAction';
+import { updateTicketStatus, assignSupportTicket } from '@/lib/supportActions';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -31,6 +32,7 @@ export default async function TicketDetailPage({ params }: { params: { ticketId:
 
   const canManage = canDo(session.role, 'manage:support');
   const boundAction = updateTicketStatus.bind(null, params.ticketId);
+  const boundAssign = assignSupportTicket.bind(null, params.ticketId);
 
   return (
     <div className="p-7 max-w-2xl">
@@ -81,6 +83,12 @@ export default async function TicketDetailPage({ params }: { params: { ticketId:
             <p className="text-sm text-ink-500">Only support agents and super admins can update ticket status.</p>
           </DetailCard>
         )}
+
+        {canManage ? (
+          <DetailCard title="Assignment" subtitle="Assign to an admin UID. Changes are audit-logged.">
+            <TicketAssignAction action={boundAssign} currentAssignee={ticket.assignedTo ?? null} />
+          </DetailCard>
+        ) : null}
       </div>
     </div>
   );

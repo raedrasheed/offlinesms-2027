@@ -24,7 +24,7 @@ const STATUS_TABS = [
 export default async function SupportPage({
   searchParams,
 }: {
-  searchParams?: { status?: string; category?: string; cursor?: string };
+  searchParams?: { status?: string; category?: string; assignedTo?: string; cursor?: string };
 }) {
   const cookie = cookies().get('__session')?.value;
   const session = await verifySession(cookie);
@@ -33,16 +33,18 @@ export default async function SupportPage({
     return <div className="p-8"><PermissionState title="Support access required" /></div>;
   }
 
-  const statusFilter   = searchParams?.status   ?? '';
-  const categoryFilter = searchParams?.category ?? '';
+  const statusFilter     = searchParams?.status     ?? '';
+  const categoryFilter   = searchParams?.category   ?? '';
+  const assignedToFilter = searchParams?.assignedTo ?? '';
 
   let rows: Awaited<ReturnType<typeof listSupportTickets>> = [];
   let fetchError: string | null = null;
   try {
     rows = await listSupportTickets({
-      status:   statusFilter   || undefined,
-      category: categoryFilter || undefined,
-      cursor:   searchParams?.cursor,
+      status:     statusFilter     || undefined,
+      category:   categoryFilter   || undefined,
+      assignedTo: assignedToFilter || undefined,
+      cursor:     searchParams?.cursor,
     });
   } catch (e: any) {
     fetchError = e?.message ?? 'Failed to load support tickets.';
@@ -86,8 +88,8 @@ export default async function SupportPage({
             </a>
           );
         })}
-        {/* Category filter */}
-        <div className="ml-auto">
+        {/* Category + assignee filters */}
+        <div className="ml-auto flex items-center gap-2">
           <select
             defaultValue={categoryFilter}
             onChange={e => {
@@ -105,6 +107,20 @@ export default async function SupportPage({
             <option value="account">Account</option>
             <option value="other">Other</option>
           </select>
+          <input
+            type="text"
+            placeholder="Assigned to (UID)"
+            defaultValue={assignedToFilter}
+            onBlur={e => {
+              const url = new URL(window.location.href);
+              const v = e.target.value.trim();
+              if (v) url.searchParams.set('assignedTo', v);
+              else url.searchParams.delete('assignedTo');
+              url.searchParams.delete('cursor');
+              window.location.href = url.toString();
+            }}
+            className="bg-white border border-ink-200 rounded-lg px-3 py-1.5 text-xs text-ink-700 outline-none font-mono w-36"
+          />
         </div>
       </div>
 

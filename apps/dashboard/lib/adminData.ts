@@ -733,13 +733,15 @@ export type AdminSupportTicketDetail = AdminSupportTicketRow & {
 type SupportTicketFilters = {
   status?: string;
   category?: string;
+  assignedTo?: string;
   cursor?: string;
 };
 
 export async function listSupportTickets(filters: SupportTicketFilters = {}): Promise<AdminSupportTicketRow[]> {
   let q = adminDb.collection('tickets').orderBy('createdAt', 'desc').limit(50);
-  if (filters.status)   q = q.where('status',   '==', filters.status)   as typeof q;
-  if (filters.category) q = q.where('category', '==', filters.category) as typeof q;
+  if (filters.status)     q = q.where('status',     '==', filters.status)     as typeof q;
+  if (filters.category)   q = q.where('category',   '==', filters.category)   as typeof q;
+  if (filters.assignedTo) q = q.where('assignedTo', '==', filters.assignedTo) as typeof q;
   if (filters.cursor) {
     const snap = await adminDb.collection('tickets').doc(filters.cursor).get();
     if (snap.exists) q = q.startAfter(snap);
