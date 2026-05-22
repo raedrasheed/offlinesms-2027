@@ -75,6 +75,10 @@ export default function Settings({ navigation }: any) {
         <Text style={s.title}>Linked devices</Text>
         <Text style={s.chev}>›</Text>
       </Pressable>
+      <Pressable style={s.row} onPress={() => navigation.navigate('SupportTicket')}>
+        <Text style={s.title}>Help & Support</Text>
+        <Text style={s.chev}>›</Text>
+      </Pressable>
 
       <Pressable style={[s.row, s.signOut]} onPress={() => signOut()}>
         <Text style={[s.title, { color: colors.err }]}>Sign out</Text>

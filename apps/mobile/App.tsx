@@ -31,6 +31,7 @@ import Points from './src/screens/Points';
 import Privacy from './src/screens/Privacy';
 import Devices from './src/screens/Devices';
 import SmsEscalation from './src/screens/SmsEscalation';
+import SupportTicket from './src/screens/SupportTicket';
 
 const AuthStack = createNativeStackNavigator();
 const OnboardingStack = createNativeStackNavigator();
@@ -114,6 +115,7 @@ export default function App() {
             <RootStack.Screen name="Privacy" component={Privacy} />
             <RootStack.Screen name="Devices" component={Devices} />
             <RootStack.Screen name="SmsEscalation" component={SmsEscalation} />
+            <RootStack.Screen name="SupportTicket" component={SupportTicket} />
           </RootStack.Navigator>
         )}
       </NavigationContainer>

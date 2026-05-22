@@ -88,7 +88,7 @@ export default async function WalletsPage({ searchParams }: { searchParams?: { c
               {rows.map((w, i) => (
                 <tr key={w.uid} className={`border-t border-ink-100 hover:bg-primary/5 ${i % 2 === 0 ? 'bg-white' : 'bg-surface3/40'}`}>
                   <td className="px-4 py-3">
-                    <Link href={`/admin/users/${w.uid}` as any} className="font-mono text-xs text-primary hover:underline">
+                    <Link href={`/admin/points/wallets/${w.uid}` as any} className="font-mono text-xs text-primary hover:underline">
                       {w.uid.slice(0, 14)}…
                     </Link>
                   </td>

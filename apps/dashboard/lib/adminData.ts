@@ -549,6 +549,22 @@ export type AdminPackageRow = {
   sortOrder: number;
 };
 
+export async function getWallet(uid: string): Promise<AdminWalletRow | null> {
+  const snap = await adminDb.collection('wallets').doc(uid).get();
+  if (!snap.exists) return null;
+  const data = snap.data()!;
+  const balance  = (data.balance  as number) ?? 0;
+  const reserved = (data.reserved as number) ?? 0;
+  return {
+    uid:       snap.id,
+    balance,
+    reserved,
+    available: Math.max(0, balance - reserved),
+    status:    (data.status as string | null) ?? 'active',
+    updatedAt: safeDate(data.updatedAt),
+  };
+}
+
 export async function listWallets(cursor?: string, status?: string): Promise<AdminWalletRow[]> {
   let q = adminDb.collection('wallets').orderBy('updatedAt', 'desc').limit(50);
   if (status) q = q.where('status', '==', status) as typeof q;
