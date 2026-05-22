@@ -4,6 +4,30 @@
 
 @layer base {
   html, body { font-family: theme(fontFamily.sans); background: theme(colors.canvas); color: theme(colors.ink.DEFAULT); }
+
+  /* Visible focus ring for keyboard users on all interactive elements */
+  :focus-visible {
+    outline: 2px solid theme(colors.primary.DEFAULT);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+}
+
+/* Skip-to-main-content link: hidden until focused */
+.skip-nav {
+  position: absolute;
+  top: -9999px;
+  left: 0;
+  z-index: 100;
+  padding: 8px 16px;
+  background: theme(colors.primary.DEFAULT);
+  color: #fff;
+  font-weight: 700;
+  font-size: 14px;
+  border-radius: 0 0 4px 0;
+}
+.skip-nav:focus {
+  top: 0;
 }
 
 /* Brand mark in CSS so we don't have to ship an SVG just to render the logo */

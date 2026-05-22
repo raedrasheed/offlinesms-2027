@@ -24,7 +24,7 @@ const RANGE_OPTIONS = [
 ] as const;
 type RangeValue = '7d' | '30d' | '90d';
 
-function parseRange(raw: string | undefined): { value: RangeValue; days: number } {
+function parseRange(raw: string | undefined): { value: RangeValue; days: number; label: string } {
   const found = RANGE_OPTIONS.find(o => o.value === raw);
   return found ?? RANGE_OPTIONS[0];
 }

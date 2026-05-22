@@ -95,16 +95,20 @@ export default function AdminGlobalSearchShell() {
         <div
           className="fixed inset-0 bg-black/40 z-50 grid place-items-start pt-28"
           onClick={handleClose}
+          role="presentation"
         >
           <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Global search"
             className="bg-white rounded-2xl shadow-sh2 w-full max-w-lg mx-auto overflow-hidden"
             onClick={e => e.stopPropagation()}
           >
             {/* Search input */}
             <div className="flex items-center gap-3 px-4 py-3 border-b border-ink-100">
               {loading
-                ? <Loader2 size={16} className="text-ink-400 shrink-0 animate-spin" />
-                : <Search size={16} className="text-ink-400 shrink-0" />}
+                ? <Loader2 size={16} className="text-ink-400 shrink-0 animate-spin" aria-hidden />
+                : <Search size={16} className="text-ink-400 shrink-0" aria-hidden />}
               <input
                 ref={inputRef}
                 value={q}
@@ -113,29 +117,38 @@ export default function AdminGlobalSearchShell() {
                 className="flex-1 text-sm outline-none text-ink-900 placeholder-ink-400"
                 placeholder="Search users, groups, SMS batches…"
                 autoComplete="off"
+                aria-label="Search"
+                aria-autocomplete="list"
+                aria-controls="search-results"
+                aria-expanded={groups.length > 0}
+                role="combobox"
               />
-              <button onClick={handleClose} className="text-ink-400 hover:text-ink-700 transition">
-                <X size={16} />
+              <button
+                onClick={handleClose}
+                className="text-ink-400 hover:text-ink-700 transition"
+                aria-label="Close search"
+              >
+                <X size={16} aria-hidden />
               </button>
             </div>
 
             {/* Results */}
-            <div className="max-h-[420px] overflow-y-auto">
+            <div id="search-results" role="listbox" aria-label="Search results" className="max-h-[420px] overflow-y-auto">
               {q.trim().length < 2 ? (
-                <div className="px-4 py-8 text-center text-sm text-ink-400">
+                <div className="px-4 py-8 text-center text-sm text-ink-400" aria-live="polite">
                   Type at least 2 characters to search.
                 </div>
               ) : loading && groups.length === 0 ? (
-                <div className="px-4 py-8 text-center text-sm text-ink-400">Searching…</div>
+                <div className="px-4 py-8 text-center text-sm text-ink-400" aria-live="polite">Searching…</div>
               ) : groups.length === 0 ? (
-                <div className="px-4 py-8 text-center text-sm text-ink-400">
+                <div className="px-4 py-8 text-center text-sm text-ink-400" aria-live="polite">
                   No results for <strong className="text-ink-600">{q}</strong>
                 </div>
               ) : (
-                <div className="py-2">
+                <div className="py-2" aria-live="polite">
                   {groups.map(group => (
-                    <div key={group.label}>
-                      <div className="px-4 py-1.5 text-[10px] font-bold text-ink-400 uppercase tracking-widest">
+                    <div key={group.label} role="group" aria-label={group.label}>
+                      <div className="px-4 py-1.5 text-[10px] font-bold text-ink-400 uppercase tracking-widest" aria-hidden>
                         {group.label}
                       </div>
                       {group.results.map(result => {
@@ -144,6 +157,8 @@ export default function AdminGlobalSearchShell() {
                         return (
                           <button
                             key={`${result.type}-${result.href}-${idx}`}
+                            role="option"
+                            aria-selected={isSelected}
                             onClick={() => navigate(result)}
                             onMouseEnter={() => setSelected(idx)}
                             className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition ${isSelected ? 'bg-primary/10' : 'hover:bg-surface3'}`}
@@ -153,7 +168,7 @@ export default function AdminGlobalSearchShell() {
                               <div className="text-sm font-semibold text-ink-900 truncate">{result.title}</div>
                               <div className="text-xs text-ink-500 truncate">{result.subtitle}</div>
                             </div>
-                            {isSelected && <span className="text-[10px] text-ink-400 shrink-0">↵</span>}
+                            {isSelected && <span className="text-[10px] text-ink-400 shrink-0" aria-hidden>↵</span>}
                           </button>
                         );
                       })}
@@ -164,7 +179,7 @@ export default function AdminGlobalSearchShell() {
             </div>
 
             {groups.length > 0 && (
-              <div className="border-t border-ink-100 px-4 py-2 flex items-center gap-4 text-[10px] text-ink-400">
+              <div className="border-t border-ink-100 px-4 py-2 flex items-center gap-4 text-[10px] text-ink-400" aria-hidden>
                 <span>↑↓ navigate</span><span>↵ open</span><span>Esc close</span>
               </div>
             )}
