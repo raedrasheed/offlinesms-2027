@@ -13,6 +13,9 @@ import StatusBadge from '@/components/admin/StatusBadge';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
+const CARD   = '#131B27';
+const BORDER = '#1A2437';
+
 const STATUS_TABS = [
   { label: 'All',      value: '' },
   { label: 'Open',     value: 'open' },
@@ -54,41 +57,54 @@ export default async function SupportPage({
   const canExport  = canDo(session.role, 'export:support');
   const exportHref = `/admin/support/export${statusFilter ? `?status=${statusFilter}` : ''}${categoryFilter ? `${statusFilter ? '&' : '?'}category=${categoryFilter}` : ''}`;
 
+  const selectStyle = {
+    background: '#131B27',
+    border: '1px solid #1A2437',
+    color: '#E2E8F2',
+  };
+
   return (
-    <div className="p-7">
-      <div className="flex items-center justify-between mb-6">
+    <div className="p-6 space-y-5" style={{ color: '#E2E8F2' }}>
+      <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-extrabold tracking-tight text-ink-900">Support queue</h1>
-          <p className="text-sm text-ink-500 mt-0.5">{rows.length}{nextCursor ? '+' : ''} ticket{rows.length !== 1 ? 's' : ''}</p>
+          <p className="text-[12px] font-medium mb-0.5" style={{ color: '#64748B' }}>Admin / Support</p>
+          <h1 className="text-[22px] font-extrabold tracking-tight">Support queue</h1>
+          <p className="text-[13px] mt-0.5" style={{ color: '#64748B' }}>
+            {rows.length}{nextCursor ? '+' : ''} ticket{rows.length !== 1 ? 's' : ''}
+          </p>
         </div>
         {canExport && (
-          <a href={exportHref} className="px-4 py-2 bg-surface3 border border-ink-200 text-ink-700 text-sm font-bold rounded-lg hover:bg-ink-100 transition">
+          <a
+            href={exportHref}
+            className="px-4 py-2 text-sm font-bold rounded-lg transition hover:brightness-110"
+            style={{ background: '#0A1828', color: '#5BB6DE', border: '1px solid #0E3A5A' }}
+          >
             Export CSV
           </a>
         )}
       </div>
 
-      {/* Status tabs */}
-      <div className="flex gap-1 mb-4 flex-wrap">
+      {/* Status tabs + filters */}
+      <div className="flex gap-2 flex-wrap items-center">
         {STATUS_TABS.map(t => {
           const href = t.value
             ? `/admin/support?status=${t.value}${categoryFilter ? `&category=${categoryFilter}` : ''}`
             : `/admin/support${categoryFilter ? `?category=${categoryFilter}` : ''}`;
+          const active = statusFilter === t.value;
           return (
             <a
               key={t.value}
               href={href}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
-                statusFilter === t.value
-                  ? 'bg-primary text-white'
-                  : 'bg-surface3 text-ink-600 hover:bg-ink-100'
-              }`}
+              className="px-3 py-1.5 rounded-lg text-[11px] font-bold transition"
+              style={active
+                ? { background: '#1F7BA8', color: '#fff' }
+                : { background: '#131B27', color: '#94A3B8', border: '1px solid #1A2437' }
+              }
             >
               {t.label}
             </a>
           );
         })}
-        {/* Category + assignee filters */}
         <div className="ml-auto flex items-center gap-2">
           <select
             defaultValue={categoryFilter}
@@ -99,7 +115,8 @@ export default async function SupportPage({
               url.searchParams.delete('cursor');
               window.location.href = url.toString();
             }}
-            className="bg-white border border-ink-200 rounded-lg px-3 py-1.5 text-xs text-ink-700 outline-none"
+            className="rounded-lg px-3 py-1.5 text-[11px] outline-none"
+            style={selectStyle}
           >
             <option value="">All categories</option>
             <option value="billing">Billing</option>
@@ -119,61 +136,65 @@ export default async function SupportPage({
               url.searchParams.delete('cursor');
               window.location.href = url.toString();
             }}
-            className="bg-white border border-ink-200 rounded-lg px-3 py-1.5 text-xs text-ink-700 outline-none font-mono w-36"
+            className="rounded-lg px-3 py-1.5 text-[11px] outline-none font-mono w-36"
+            style={selectStyle}
           />
         </div>
       </div>
 
       {fetchError ? (
-        <div className="rounded-xl bg-red-50 border border-red-200 p-4 text-sm text-red-700">{fetchError}</div>
+        <div className="rounded-xl px-4 py-3 text-sm" style={{ background: '#2D0D0D', border: '1px solid #3D1515', color: '#EF4444' }}>
+          {fetchError}
+        </div>
       ) : rows.length === 0 ? (
-        <div className="rounded-xl border border-ink-100 bg-white p-12">
+        <div className="rounded-xl p-12" style={{ background: CARD, border: `1px solid ${BORDER}` }}>
           <EmptyState title="No tickets found" description="No support tickets match the current filters." />
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-ink-100 bg-white">
-          <table className="w-full text-sm border-collapse">
+        <div className="overflow-x-auto rounded-xl" style={{ background: CARD, border: `1px solid ${BORDER}` }}>
+          <table className="w-full text-[12px] border-collapse">
             <thead>
-              <tr className="bg-surface3 text-left text-[10px] font-bold text-ink-500 tracking-wide uppercase">
-                <th className="px-4 py-3">Subject</th>
-                <th className="px-4 py-3">Category</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">User</th>
-                <th className="px-4 py-3">Assigned</th>
-                <th className="px-4 py-3">Created</th>
-                <th className="px-4 py-3">Updated</th>
+              <tr style={{ borderBottom: `1px solid ${BORDER}` }}>
+                {['Subject', 'Category', 'Status', 'User', 'Assigned', 'Created', 'Updated'].map(h => (
+                  <th key={h} className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#475569' }}>{h}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
               {rows.map((t, i) => (
-                <tr key={t.id} className={`border-t border-ink-100 hover:bg-primary/5 ${i % 2 === 0 ? 'bg-white' : 'bg-surface3/40'}`}>
+                <tr
+                  key={t.id}
+                  className="transition hover:bg-white/[0.03]"
+                  style={i < rows.length - 1 ? { borderBottom: `1px solid ${BORDER}` } : {}}
+                >
                   <td className="px-4 py-3">
-                    <Link href={`/admin/support/${t.id}` as any} className="font-semibold text-ink-900 hover:text-primary block truncate max-w-[200px]">
+                    <Link href={`/admin/support/${t.id}` as any} className="font-semibold hover:underline block truncate max-w-[200px]" style={{ color: '#E2E8F2' }}>
                       {t.subject}
                     </Link>
-                    <div className="text-[10px] font-mono text-ink-400 mt-0.5">{t.id.slice(0, 12)}…</div>
+                    <div className="text-[10px] font-mono mt-0.5" style={{ color: '#475569' }}>{t.id.slice(0, 12)}…</div>
                   </td>
-                  <td className="px-4 py-3 text-xs text-ink-600 capitalize">{t.category}</td>
+                  <td className="px-4 py-3 capitalize" style={{ color: '#94A3B8' }}>{t.category}</td>
                   <td className="px-4 py-3"><StatusBadge status={t.status} /></td>
                   <td className="px-4 py-3">
-                    <Link href={`/admin/users/${t.createdBy}` as any} className="font-mono text-[11px] text-primary hover:underline">
+                    <Link href={`/admin/users/${t.createdBy}` as any} className="font-mono text-[11px] hover:underline" style={{ color: '#5BB6DE' }}>
                       {t.createdBy.slice(0, 10)}…
                     </Link>
                   </td>
-                  <td className="px-4 py-3 text-xs text-ink-500">
+                  <td className="px-4 py-3" style={{ color: '#475569' }}>
                     {t.assignedTo ? <span className="font-mono text-[11px]">{t.assignedTo.slice(0, 10)}…</span> : '—'}
                   </td>
-                  <td className="px-4 py-3 text-xs text-ink-500 whitespace-nowrap">{t.createdAt}</td>
-                  <td className="px-4 py-3 text-xs text-ink-500 whitespace-nowrap">{t.updatedAt}</td>
+                  <td className="px-4 py-3 whitespace-nowrap text-[11px]" style={{ color: '#475569' }}>{t.createdAt}</td>
+                  <td className="px-4 py-3 whitespace-nowrap text-[11px]" style={{ color: '#475569' }}>{t.updatedAt}</td>
                 </tr>
               ))}
             </tbody>
           </table>
           {nextCursor && (
-            <div className="px-4 py-3 border-t border-ink-100 text-center">
+            <div className="px-4 py-3 text-center" style={{ borderTop: `1px solid ${BORDER}` }}>
               <Link
                 href={`/admin/support?cursor=${nextCursor}${statusFilter ? `&status=${statusFilter}` : ''}${categoryFilter ? `&category=${categoryFilter}` : ''}` as any}
-                className="text-sm text-primary font-semibold hover:underline"
+                className="text-sm font-semibold hover:underline"
+                style={{ color: '#5BB6DE' }}
               >
                 Load more →
               </Link>

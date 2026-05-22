@@ -1,16 +1,19 @@
-const PRESETS: Record<string, { bg: string; fg: string; label?: string }> = {
-  active:    { bg: 'bg-emerald-50', fg: 'text-emerald-700' },
-  suspended: { bg: 'bg-red-50',     fg: 'text-red-700' },
-  blocked:   { bg: 'bg-red-50',     fg: 'text-red-700' },
-  locked:    { bg: 'bg-amber-50',   fg: 'text-amber-700' },
-  inactive:  { bg: 'bg-gray-50',    fg: 'text-gray-500' },
-  disabled:  { bg: 'bg-gray-50',    fg: 'text-gray-500' },
-  pending:   { bg: 'bg-blue-50',    fg: 'text-blue-700' },
-  completed: { bg: 'bg-emerald-50', fg: 'text-emerald-700' },
-  failed:    { bg: 'bg-red-50',     fg: 'text-red-700' },
-  owner:     { bg: 'bg-purple-50',  fg: 'text-purple-700' },
-  admin:     { bg: 'bg-blue-50',    fg: 'text-blue-700' },
-  member:    { bg: 'bg-gray-50',    fg: 'text-gray-600' },
+const PRESETS: Record<string, { bg: string; color: string }> = {
+  active:    { bg: '#052E1B', color: '#22C55E' },
+  suspended: { bg: '#2D0D0D', color: '#EF4444' },
+  blocked:   { bg: '#2D0D0D', color: '#EF4444' },
+  locked:    { bg: '#1C1405', color: '#F59E0B' },
+  inactive:  { bg: '#1A2437', color: '#475569' },
+  disabled:  { bg: '#1A2437', color: '#475569' },
+  pending:   { bg: '#0A2035', color: '#5BB6DE' },
+  sending:   { bg: '#1C1405', color: '#F59E0B' },
+  completed: { bg: '#052E1B', color: '#22C55E' },
+  failed:    { bg: '#2D0D0D', color: '#EF4444' },
+  partial:   { bg: '#1C1405', color: '#F59E0B' },
+  owner:     { bg: '#1A0D2E', color: '#A78BFA' },
+  admin:     { bg: '#0A2035', color: '#5BB6DE' },
+  member:    { bg: '#1A2437', color: '#94A3B8' },
+  archived:  { bg: '#1A2437', color: '#475569' },
 };
 
 type Props = {
@@ -19,9 +22,12 @@ type Props = {
 };
 
 export default function StatusBadge({ status, label }: Props) {
-  const p = PRESETS[status.toLowerCase()] ?? { bg: 'bg-gray-50', fg: 'text-gray-600' };
+  const p = PRESETS[status.toLowerCase()] ?? { bg: '#1A2437', color: '#94A3B8' };
   return (
-    <span className={`inline-block text-[10px] font-bold tracking-wide px-2 py-0.5 rounded-full ${p.bg} ${p.fg}`}>
+    <span
+      className="inline-block text-[10px] font-bold tracking-wide px-2 py-0.5 rounded-full"
+      style={{ background: p.bg, color: p.color }}
+    >
       {label ?? status.toUpperCase()}
     </span>
   );

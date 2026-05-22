@@ -34,35 +34,40 @@ export default async function OrgsAdminPage({
 
   const nextCursor = rows.length === 50 ? rows[rows.length - 1].id : null;
 
+  const CARD = '#131B27';
+  const BORDER = '#1A2437';
+
   return (
-    <div className="p-7">
+    <div className="p-6 space-y-5" style={{ color: '#E2E8F2' }}>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-xl font-extrabold tracking-tight text-ink-900">Organizations</h1>
-          <p className="text-sm text-ink-500 mt-0.5">Read-only overview</p>
+          <p className="text-[12px] font-medium mb-0.5" style={{ color: '#64748B' }}>Admin / Organizations</p>
+          <h1 className="text-[22px] font-extrabold tracking-tight">Organizations</h1>
+          <p className="text-sm mt-0.5" style={{ color: '#64748B' }}>Read-only overview</p>
         </div>
         {canDo(session.role, 'manage:organizations') && (
           <Link href={'/admin/organizations/new' as any}
-            className="px-4 py-2 bg-primary text-white text-sm font-bold rounded-xl hover:bg-primary-dark transition">
+            className="px-4 py-2 text-sm font-bold rounded-xl transition"
+            style={{ background: '#1F7BA8', color: '#fff' }}>
             + New organization
           </Link>
         )}
       </div>
 
       {fetchError ? (
-        <div className="rounded-xl bg-red-50 border border-red-200 p-4 text-sm text-red-700">{fetchError}</div>
+        <div className="rounded-xl p-4 text-sm" style={{ background: '#2D0D0D', border: '1px solid #3D1515', color: '#EF4444' }}>{fetchError}</div>
       ) : rows.length === 0 ? (
-        <div className="rounded-xl border border-ink-100 bg-white p-12">
+        <div className="rounded-xl p-12" style={{ border: `1px solid ${BORDER}`, background: CARD }}>
           <EmptyState
             title="No organizations yet"
             description="Organizations will appear here when created via the Admin SDK or a future admin action."
           />
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-ink-100 bg-white">
+        <div className="overflow-x-auto rounded-xl" style={{ border: `1px solid ${BORDER}`, background: CARD }}>
           <table className="w-full text-sm border-collapse">
             <thead>
-              <tr className="bg-surface3 text-left text-[10px] font-bold text-ink-500 tracking-wide uppercase">
+              <tr className="text-left text-[10px] font-bold tracking-wide uppercase" style={{ borderBottom: `1px solid ${BORDER}`, color: '#475569' }}>
                 <th className="px-4 py-3">Organization</th>
                 <th className="px-4 py-3">Slug</th>
                 <th className="px-4 py-3">Status</th>
@@ -73,33 +78,33 @@ export default async function OrgsAdminPage({
             </thead>
             <tbody>
               {rows.map((org, i) => (
-                <tr key={org.id} className={`border-t border-ink-100 hover:bg-primary/5 ${i % 2 === 0 ? 'bg-white' : 'bg-surface3/40'}`}>
+                <tr key={org.id} className="transition hover:bg-white/[0.03]" style={i < rows.length - 1 ? { borderBottom: `1px solid ${BORDER}` } : {}}>
                   <td className="px-4 py-3">
-                    <Link href={`/admin/organizations/${org.id}` as any} className="font-semibold text-ink-900 hover:text-primary">
+                    <Link href={`/admin/organizations/${org.id}` as any} className="font-semibold hover:underline" style={{ color: '#E2E8F2' }}>
                       {org.name}
                     </Link>
-                    <div className="text-[10px] text-ink-400 font-mono mt-0.5">{org.id.slice(0, 12)}</div>
+                    <div className="text-[10px] font-mono mt-0.5" style={{ color: '#475569' }}>{org.id.slice(0, 12)}</div>
                   </td>
-                  <td className="px-4 py-3 font-mono text-xs text-ink-600">{org.slug}</td>
+                  <td className="px-4 py-3 font-mono text-xs" style={{ color: '#94A3B8' }}>{org.slug}</td>
                   <td className="px-4 py-3"><StatusBadge status={org.status} /></td>
                   <td className="px-4 py-3">
-                    <span className={`text-[10px] font-bold ${org.smsEnabled ? 'text-emerald-600' : 'text-ink-400'}`}>
+                    <span className="text-[10px] font-bold" style={{ color: org.smsEnabled ? '#22C55E' : '#475569' }}>
                       {org.smsEnabled ? 'Enabled' : 'Disabled'}
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    <span className={`text-[10px] font-bold ${org.pointsEnabled ? 'text-emerald-600' : 'text-ink-400'}`}>
+                    <span className="text-[10px] font-bold" style={{ color: org.pointsEnabled ? '#22C55E' : '#475569' }}>
                       {org.pointsEnabled ? 'Enabled' : 'Disabled'}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-xs text-ink-500 whitespace-nowrap">{org.createdAt}</td>
+                  <td className="px-4 py-3 text-xs whitespace-nowrap" style={{ color: '#64748B' }}>{org.createdAt}</td>
                 </tr>
               ))}
             </tbody>
           </table>
           {nextCursor && (
-            <div className="px-4 py-3 border-t border-ink-100 text-center">
-              <Link href={`/admin/organizations?cursor=${nextCursor}` as any} className="text-sm text-primary font-semibold hover:underline">
+            <div className="px-4 py-3 text-center" style={{ borderTop: `1px solid ${BORDER}` }}>
+              <Link href={`/admin/organizations?cursor=${nextCursor}` as any} className="text-sm font-semibold hover:underline" style={{ color: '#5BB6DE' }}>
                 Load more →
               </Link>
             </div>

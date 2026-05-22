@@ -40,12 +40,12 @@ export default function SmsRetryAction({ batchId, failedCount }: Props) {
 
   if (result) {
     return (
-      <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-        <p className="text-sm font-bold text-emerald-800">Retry submitted</p>
-        <p className="text-xs text-emerald-700 mt-1">
+      <div className="rounded-xl p-4" style={{ background: '#052E1B', border: '1px solid #0A4428' }}>
+        <p className="text-sm font-bold" style={{ color: '#22C55E' }}>Retry submitted</p>
+        <p className="text-xs mt-1" style={{ color: '#22C55E' }}>
           New batch: <span className="font-mono">{result.batchId.slice(0, 16)}…</span>
           {' · '}Queued: {result.sent}
-          {result.failed > 0 && <span className="text-red-600"> · Failed at gateway: {result.failed}</span>}
+          {result.failed > 0 && <span style={{ color: '#EF4444' }}> · Failed at gateway: {result.failed}</span>}
           {' · '}Status: {result.status}
         </p>
       </div>
@@ -53,19 +53,20 @@ export default function SmsRetryAction({ batchId, failedCount }: Props) {
   }
 
   return (
-    <div className="rounded-xl border border-ink-100 bg-surface3/50 p-4 flex items-center justify-between">
+    <div className="rounded-xl p-4 flex items-center justify-between" style={{ background: '#131B27', border: '1px solid #1A2437' }}>
       <div>
-        <p className="text-sm font-bold text-ink-900">{failedCount} failed recipient{failedCount !== 1 ? 's' : ''}</p>
-        <p className="text-xs text-ink-500">
+        <p className="text-sm font-bold" style={{ color: '#E2E8F2' }}>{failedCount} failed recipient{failedCount !== 1 ? 's' : ''}</p>
+        <p className="text-xs mt-0.5" style={{ color: '#64748B' }}>
           Retrying will create a new batch for failed recipients only. No SMS body or phone numbers are shown here.
         </p>
       </div>
       <div className="flex items-center gap-3">
-        {err && <p className="text-xs text-red-600 max-w-[200px]">{err}</p>}
+        {err && <p className="text-xs max-w-[200px]" style={{ color: '#EF4444' }}>{err}</p>}
         <button
           onClick={handleRetry}
           disabled={busy}
-          className="px-3 py-1.5 bg-amber-600 text-white text-xs font-bold rounded-lg hover:bg-amber-700 transition disabled:opacity-50"
+          className="px-3 py-1.5 text-xs font-bold rounded-lg transition hover:brightness-110 disabled:opacity-50"
+          style={{ background: '#1C1405', color: '#F59E0B', border: '1px solid #2A2005' }}
         >
           {busy ? 'Retrying…' : 'Retry failed'}
         </button>

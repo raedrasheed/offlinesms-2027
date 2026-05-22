@@ -61,25 +61,29 @@ export default async function CallsPage() {
 
   const { rows, empty } = await fetchCallLogs();
 
+  const CARD = '#131B27';
+  const BORDER = '#1A2437';
+
   return (
-    <div className="p-7">
+    <div className="p-6 space-y-5" style={{ color: '#E2E8F2' }}>
       <div className="mb-6">
-        <h1 className="text-xl font-extrabold tracking-tight text-ink-900">Calls</h1>
-        <p className="text-sm text-ink-500 mt-0.5">Voice and video call logs.</p>
+        <p className="text-[12px] font-medium mb-0.5" style={{ color: '#64748B' }}>Admin / Calls</p>
+        <h1 className="text-[22px] font-extrabold tracking-tight">Calls</h1>
+        <p className="text-sm mt-0.5" style={{ color: '#64748B' }}>Voice and video call logs.</p>
       </div>
 
       {empty || rows.length === 0 ? (
-        <div className="rounded-2xl border border-ink-100 bg-white p-12">
+        <div className="rounded-2xl p-12" style={{ border: `1px solid ${BORDER}`, background: CARD }}>
           <EmptyState
             title="No call logs yet"
             description="Call log records will appear here once users make calls."
           />
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-ink-100 bg-white">
+        <div className="overflow-x-auto rounded-xl" style={{ border: `1px solid ${BORDER}`, background: CARD }}>
           <table className="w-full text-sm border-collapse">
             <thead>
-              <tr className="bg-surface3 text-left text-[10px] font-bold text-ink-500 tracking-wide uppercase">
+              <tr className="text-left text-[10px] font-bold tracking-wide uppercase" style={{ borderBottom: `1px solid ${BORDER}`, color: '#475569' }}>
                 <th className="px-4 py-3">Initiator</th>
                 <th className="px-4 py-3">Conversation</th>
                 <th className="px-4 py-3 text-right">Duration</th>
@@ -89,12 +93,12 @@ export default async function CallsPage() {
             </thead>
             <tbody>
               {rows.map((r, i) => (
-                <tr key={r.id} className={`border-t border-ink-100 ${i % 2 === 0 ? 'bg-white' : 'bg-surface3/40'}`}>
-                  <td className="px-4 py-3 font-mono text-xs text-ink-700">{r.initiatorUid?.slice(0, 12) ?? '—'}…</td>
-                  <td className="px-4 py-3 font-mono text-xs text-ink-500">{r.conversationId?.slice(0, 10) ?? '—'}…</td>
-                  <td className="px-4 py-3 text-right text-xs font-mono">{r.durationSeconds}s</td>
-                  <td className="px-4 py-3 text-xs text-ink-600 capitalize">{r.status}</td>
-                  <td className="px-4 py-3 text-xs text-ink-500 whitespace-nowrap">{r.startedAt}</td>
+                <tr key={r.id} className="transition hover:bg-white/[0.03]" style={i < rows.length - 1 ? { borderBottom: `1px solid ${BORDER}` } : {}}>
+                  <td className="px-4 py-3 font-mono text-xs" style={{ color: '#94A3B8' }}>{r.initiatorUid?.slice(0, 12) ?? '—'}…</td>
+                  <td className="px-4 py-3 font-mono text-xs" style={{ color: '#64748B' }}>{r.conversationId?.slice(0, 10) ?? '—'}…</td>
+                  <td className="px-4 py-3 text-right text-xs font-mono" style={{ color: '#E2E8F2' }}>{r.durationSeconds}s</td>
+                  <td className="px-4 py-3 text-xs capitalize" style={{ color: '#94A3B8' }}>{r.status}</td>
+                  <td className="px-4 py-3 text-xs whitespace-nowrap" style={{ color: '#64748B' }}>{r.startedAt}</td>
                 </tr>
               ))}
             </tbody>

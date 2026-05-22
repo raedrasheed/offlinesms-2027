@@ -14,6 +14,9 @@ import { updateSystemSettings } from '@/lib/settingsActions';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
+const CARD   = '#131B27';
+const BORDER = '#1A2437';
+
 export default async function SettingsPage() {
   const cookie = cookies().get('__session')?.value;
   const session = await verifySession(cookie);
@@ -38,10 +41,11 @@ export default async function SettingsPage() {
   }
 
   return (
-    <div className="p-7 max-w-2xl">
-      <div className="mb-6">
-        <h1 className="text-xl font-extrabold tracking-tight text-ink-900">System settings</h1>
-        <p className="text-sm text-ink-500 mt-0.5">
+    <div className="p-6 max-w-2xl space-y-5" style={{ color: '#E2E8F2' }}>
+      <div>
+        <p className="text-[12px] font-medium mb-0.5" style={{ color: '#64748B' }}>Admin / Settings</p>
+        <h1 className="text-[22px] font-extrabold tracking-tight">System settings</h1>
+        <p className="text-[13px] mt-0.5" style={{ color: '#64748B' }}>
           {canManage
             ? 'Update safe system configuration. Changes are audit-logged.'
             : 'Read-only — super admin required to update settings.'}
@@ -51,7 +55,7 @@ export default async function SettingsPage() {
       {canManage ? (
         <SettingsForm action={updateSystemSettings} initial={settings} />
       ) : (
-        <div className="bg-white rounded-2xl border border-ink-100 shadow-sh1 p-6 space-y-4">
+        <div className="rounded-2xl p-6 space-y-4" style={{ background: CARD, border: `1px solid ${BORDER}` }}>
           <Row label="App name"          value={settings.appName} />
           <Row label="Support email"     value={settings.supportEmail || '—'} />
           <Row label="Default language"  value={settings.defaultLanguage} />
@@ -67,9 +71,9 @@ export default async function SettingsPage() {
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex justify-between items-center border-b border-ink-50 pb-3 last:border-0 last:pb-0">
-      <span className="text-sm text-ink-500">{label}</span>
-      <span className="text-sm font-semibold text-ink-900">{value}</span>
+    <div className="flex justify-between items-center pb-3 last:pb-0" style={{ borderBottom: '1px solid #1A2437' }}>
+      <span className="text-sm" style={{ color: '#64748B' }}>{label}</span>
+      <span className="text-sm font-semibold" style={{ color: '#E2E8F2' }}>{value}</span>
     </div>
   );
 }

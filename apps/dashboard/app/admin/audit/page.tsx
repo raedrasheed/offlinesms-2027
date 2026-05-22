@@ -18,6 +18,9 @@ import { PermissionState } from '@/components/state';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
+const CARD   = '#131B27';
+const BORDER = '#1A2437';
+
 type AuditEntry = {
   id: string;
   actorUid?: string;
@@ -93,7 +96,6 @@ async function fetchAuditLogs(filters: AuditFilters): Promise<{ entries: AuditEn
       indexError: false,
     };
   } catch (e: any) {
-    // Firestore will throw if a composite index is missing.
     const isMissingIndex = e?.code === 9 || (e?.message ?? '').includes('index');
     if (isMissingIndex) return { entries: [], indexError: true };
     throw e;
@@ -109,10 +111,9 @@ function fmtTs(ts: Timestamp | null | undefined): string {
   });
 }
 
-const SEVERITY_CLS: Record<string, string> = {
-  info:     'bg-blue-50 text-blue-700',
-  warn:     'bg-yellow-50 text-yellow-700',
-  critical: 'bg-red-50 text-red-700',
+const RESULT_STYLE: Record<string, { bg: string; color: string }> = {
+  success: { bg: '#052E1B', color: '#22C55E' },
+  failure: { bg: '#2D0D0D', color: '#EF4444' },
 };
 
 export default async function AuditLogPage({
@@ -159,7 +160,6 @@ export default async function AuditLogPage({
   }
 
   const hasFilters = !!(filters.actor || filters.action || filters.targetType || filters.result || filters.from || filters.to);
-
   const canExport = canDo(session.role, 'export:audit');
 
   function buildExportHref() {
@@ -174,17 +174,22 @@ export default async function AuditLogPage({
     return `/admin/audit/export${qs ? `?${qs}` : ''}`;
   }
 
+  const inputStyle = 'rounded-lg px-3 py-2 text-[12px] outline-none';
+  const inputSx = { background: '#131B27', border: '1px solid #1A2437', color: '#E2E8F2' };
+
   return (
-    <div className="p-7">
-      <div className="mb-6 flex items-start justify-between gap-4">
+    <div className="p-6 space-y-5" style={{ color: '#E2E8F2' }}>
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-extrabold tracking-tight text-ink-900">Audit Log</h1>
-          <p className="text-sm text-ink-500 mt-0.5">Read-only record of administrative actions. Payload contents are not shown.</p>
+          <p className="text-[12px] font-medium mb-0.5" style={{ color: '#64748B' }}>Admin / Audit</p>
+          <h1 className="text-[22px] font-extrabold tracking-tight">Audit Log</h1>
+          <p className="text-[13px] mt-0.5" style={{ color: '#64748B' }}>Read-only record of administrative actions. Payload contents are not shown.</p>
         </div>
         {canExport && (
           <a
             href={buildExportHref()}
-            className="shrink-0 px-4 py-2 bg-surface3 border border-ink-200 text-ink-700 text-sm font-bold rounded-lg hover:bg-ink-100 transition"
+            className="shrink-0 px-4 py-2 text-sm font-bold rounded-lg transition hover:brightness-110"
+            style={{ background: '#0A1828', color: '#5BB6DE', border: '1px solid #0E3A5A' }}
           >
             Export CSV
           </a>
@@ -192,116 +197,99 @@ export default async function AuditLogPage({
       </div>
 
       {/* Filters */}
-      <form method="GET" className="flex flex-wrap gap-3 mb-5">
-        <input
-          name="actor"
-          defaultValue={filters.actor ?? ''}
-          placeholder="Actor UID"
-          className="bg-white border border-ink-200 rounded-lg px-3 py-2 text-sm outline-none text-ink-700 w-40"
-        />
-        <input
-          name="action"
-          defaultValue={filters.action ?? ''}
-          placeholder="Action (e.g. admin.wallet.frozen)"
-          className="bg-white border border-ink-200 rounded-lg px-3 py-2 text-sm outline-none text-ink-700 w-56"
-        />
-        <input
-          name="targetType"
-          defaultValue={filters.targetType ?? ''}
-          placeholder="Target type"
-          className="bg-white border border-ink-200 rounded-lg px-3 py-2 text-sm outline-none text-ink-700 w-36"
-        />
-        <select
-          name="result"
-          defaultValue={filters.result ?? ''}
-          className="bg-white border border-ink-200 rounded-lg px-3 py-2 text-sm outline-none text-ink-700"
-        >
+      <form method="GET" className="flex flex-wrap gap-2">
+        <input name="actor"      defaultValue={filters.actor ?? ''}      placeholder="Actor UID"                          className={inputStyle} style={inputSx} />
+        <input name="action"     defaultValue={filters.action ?? ''}     placeholder="Action (e.g. admin.wallet.frozen)"  className={`${inputStyle} w-56`} style={inputSx} />
+        <input name="targetType" defaultValue={filters.targetType ?? ''} placeholder="Target type"                       className={`${inputStyle} w-36`} style={inputSx} />
+        <select name="result" defaultValue={filters.result ?? ''} className={inputStyle} style={inputSx}>
           <option value="">Any result</option>
           <option value="success">Success</option>
           <option value="failure">Failure</option>
         </select>
-        <input
-          name="from"
-          type="date"
-          defaultValue={filters.from ?? ''}
-          className="bg-white border border-ink-200 rounded-lg px-3 py-2 text-sm outline-none text-ink-700"
-        />
-        <input
-          name="to"
-          type="date"
-          defaultValue={filters.to ?? ''}
-          className="bg-white border border-ink-200 rounded-lg px-3 py-2 text-sm outline-none text-ink-700"
-        />
+        <input name="from" type="date" defaultValue={filters.from ?? ''} className={inputStyle} style={inputSx} />
+        <input name="to"   type="date" defaultValue={filters.to ?? ''}   className={inputStyle} style={inputSx} />
         <button
           type="submit"
-          className="px-4 py-2 bg-primary text-white text-sm font-bold rounded-lg hover:bg-primary-dark transition"
+          className="px-4 py-2 text-sm font-bold rounded-lg transition hover:brightness-110"
+          style={{ background: '#1F7BA8', color: '#fff' }}
         >
           Filter
         </button>
         {hasFilters && (
-          <a href="/admin/audit" className="px-4 py-2 bg-surface3 text-ink-600 text-sm font-bold rounded-lg hover:bg-ink-100 transition">
+          <a
+            href="/admin/audit"
+            className="px-4 py-2 text-sm font-bold rounded-lg transition"
+            style={{ background: '#131B27', color: '#94A3B8', border: '1px solid #1A2437' }}
+          >
             Clear
           </a>
         )}
       </form>
 
       {indexError && (
-        <div className="rounded-xl bg-amber-50 border border-amber-200 p-4 text-sm text-amber-700 mb-4">
+        <div className="rounded-xl px-4 py-3 text-sm" style={{ background: '#1C1405', border: '1px solid #2A2005', color: '#F59E0B' }}>
           This filter combination requires a Firestore composite index that has not been deployed. Try fewer simultaneous filters or use the date range alone.
         </div>
       )}
 
       {fetchError ? (
-        <div className="rounded-xl bg-red-50 border border-red-200 p-4 text-sm text-red-700">{fetchError}</div>
+        <div className="rounded-xl px-4 py-3 text-sm" style={{ background: '#2D0D0D', border: '1px solid #3D1515', color: '#EF4444' }}>
+          {fetchError}
+        </div>
       ) : entries.length === 0 && !indexError ? (
-        <div className="rounded-xl bg-surface3 border border-ink-100 p-8 text-center text-sm text-ink-500">
+        <div className="rounded-xl p-8 text-center text-sm" style={{ background: CARD, border: `1px solid ${BORDER}`, color: '#64748B' }}>
           {hasFilters ? 'No entries match the current filters.' : 'No audit log entries yet.'}
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-ink-100 bg-white">
-          <table className="w-full text-sm border-collapse">
+        <div className="overflow-x-auto rounded-xl" style={{ background: CARD, border: `1px solid ${BORDER}` }}>
+          <table className="w-full text-[12px] border-collapse">
             <thead>
-              <tr className="bg-surface3 text-left text-xs font-bold text-ink-500 tracking-wide uppercase">
-                <th className="px-4 py-3">Timestamp</th>
-                <th className="px-4 py-3">Actor</th>
-                <th className="px-4 py-3">Action</th>
-                <th className="px-4 py-3">Resource</th>
-                <th className="px-4 py-3">Result</th>
-                <th className="px-4 py-3 text-right">Metadata fields</th>
+              <tr style={{ borderBottom: `1px solid ${BORDER}` }}>
+                {['Timestamp', 'Actor', 'Action', 'Resource', 'Result', 'Metadata fields'].map((h, idx) => (
+                  <th
+                    key={h}
+                    className={`px-4 py-3 text-[10px] font-semibold uppercase tracking-wider ${idx === 5 ? 'text-right' : 'text-left'}`}
+                    style={{ color: '#475569' }}
+                  >
+                    {h}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
               {entries.map((entry, i) => (
                 <tr
                   key={entry.id}
-                  className={`border-t border-ink-100 ${i % 2 === 0 ? 'bg-white' : 'bg-surface3/40'}`}
+                  className="transition hover:bg-white/[0.03]"
+                  style={i < entries.length - 1 ? { borderBottom: `1px solid ${BORDER}` } : {}}
                 >
-                  <td className="px-4 py-2.5 font-mono text-xs text-ink-500 whitespace-nowrap">
+                  <td className="px-4 py-2.5 font-mono text-[11px] whitespace-nowrap" style={{ color: '#475569' }}>
                     {fmtTs(entry.createdAt)}
                   </td>
                   <td className="px-4 py-2.5">
-                    <p className="font-semibold text-ink-900 text-xs truncate max-w-[140px]">
+                    <p className="font-semibold text-[11px] truncate max-w-[140px]" style={{ color: '#E2E8F2' }}>
                       {entry.actorEmail ?? entry.actorUid ?? '—'}
                     </p>
                   </td>
                   <td className="px-4 py-2.5">
-                    <span className="font-mono text-xs text-ink-700">{entry.action}</span>
+                    <span className="font-mono text-[11px]" style={{ color: '#94A3B8' }}>{entry.action}</span>
                   </td>
-                  <td className="px-4 py-2.5 text-xs text-ink-500">
+                  <td className="px-4 py-2.5 text-[11px]" style={{ color: '#64748B' }}>
                     {entry.targetType
-                      ? <span>{entry.targetType}{entry.targetId ? <span className="font-mono ml-1 text-ink-400">·{entry.targetId.slice(0, 8)}</span> : null}</span>
+                      ? <span>{entry.targetType}{entry.targetId ? <span className="font-mono ml-1" style={{ color: '#475569' }}>·{entry.targetId.slice(0, 8)}</span> : null}</span>
                       : '—'}
                   </td>
                   <td className="px-4 py-2.5">
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                      entry.result === 'failure' ? 'bg-red-50 text-red-700'
-                      : entry.result === 'success' ? 'bg-emerald-50 text-emerald-700'
-                      : 'bg-gray-50 text-gray-600'
-                    }`}>
-                      {entry.result ?? '—'}
-                    </span>
+                    {(() => {
+                      const s = RESULT_STYLE[entry.result ?? ''] ?? { bg: '#1A2437', color: '#94A3B8' };
+                      return (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: s.bg, color: s.color }}>
+                          {entry.result ?? '—'}
+                        </span>
+                      );
+                    })()}
                   </td>
-                  <td className="px-4 py-2.5 text-right text-xs text-ink-400">
+                  <td className="px-4 py-2.5 text-right text-[11px]" style={{ color: '#475569' }}>
                     {entry.payloadFieldCount ?? 0}
                   </td>
                 </tr>
@@ -312,10 +300,11 @@ export default async function AuditLogPage({
       )}
 
       {entries.length === 50 && (
-        <div className="mt-4 text-center">
+        <div className="text-center">
           <a
             href={`/admin/audit?cursor=${entries[entries.length - 1].id}${filters.actor ? `&actor=${filters.actor}` : ''}${filters.action ? `&action=${filters.action}` : ''}${filters.targetType ? `&targetType=${filters.targetType}` : ''}${filters.result ? `&result=${filters.result}` : ''}${filters.from ? `&from=${filters.from}` : ''}${filters.to ? `&to=${filters.to}` : ''}`}
-            className="text-sm text-primary font-semibold hover:underline"
+            className="text-sm font-semibold hover:underline"
+            style={{ color: '#5BB6DE' }}
           >
             Load older entries →
           </a>

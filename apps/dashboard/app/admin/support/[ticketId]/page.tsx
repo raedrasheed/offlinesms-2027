@@ -19,6 +19,9 @@ import { updateTicketStatus, assignSupportTicket } from '@/lib/supportActions';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
+const CARD   = '#131B27';
+const BORDER = '#1A2437';
+
 export default async function TicketDetailPage({ params }: { params: { ticketId: string } }) {
   const cookie = cookies().get('__session')?.value;
   const session = await verifySession(cookie);
@@ -35,17 +38,17 @@ export default async function TicketDetailPage({ params }: { params: { ticketId:
   const boundAssign = assignSupportTicket.bind(null, params.ticketId);
 
   return (
-    <div className="p-7 max-w-2xl">
-      <div className="flex items-center gap-3 mb-6">
-        <Link href={'/admin/support' as any} className="text-sm text-ink-500 hover:text-ink-900">← Support</Link>
-        <span className="text-ink-300">/</span>
-        <span className="text-sm font-semibold text-ink-900 truncate">{ticket.subject}</span>
+    <div className="p-6 max-w-2xl space-y-5" style={{ color: '#E2E8F2' }}>
+      <div className="flex items-center gap-2 text-[12px]">
+        <Link href={'/admin/support' as any} className="hover:underline" style={{ color: '#5BB6DE' }}>← Support</Link>
+        <span style={{ color: '#475569' }}>/</span>
+        <span className="font-semibold truncate" style={{ color: '#64748B' }}>{ticket.subject}</span>
       </div>
 
-      <div className="flex items-center gap-4 mb-6">
+      <div className="flex items-center gap-4">
         <div>
-          <h1 className="text-xl font-extrabold tracking-tight text-ink-900">{ticket.subject}</h1>
-          <p className="text-xs font-mono text-ink-400 mt-0.5">{params.ticketId}</p>
+          <h1 className="text-[22px] font-extrabold tracking-tight">{ticket.subject}</h1>
+          <p className="font-mono text-[11px] mt-0.5" style={{ color: '#475569' }}>{params.ticketId}</p>
         </div>
         <StatusBadge status={ticket.status} />
       </div>
@@ -56,7 +59,7 @@ export default async function TicketDetailPage({ params }: { params: { ticketId:
             { label: 'Category',    value: <span className="capitalize">{ticket.category}</span> },
             { label: 'Status',      value: <StatusBadge status={ticket.status} /> },
             { label: 'Submitted by', value: (
-              <Link href={`/admin/users/${ticket.createdBy}` as any} className="font-mono text-[11px] text-primary hover:underline">
+              <Link href={`/admin/users/${ticket.createdBy}` as any} className="font-mono text-[11px] hover:underline" style={{ color: '#5BB6DE' }}>
                 {ticket.createdBy}
               </Link>
             )},
@@ -70,7 +73,7 @@ export default async function TicketDetailPage({ params }: { params: { ticketId:
 
         {ticket.description && (
           <DetailCard title="Description" subtitle="User-submitted content">
-            <p className="text-sm text-ink-700 whitespace-pre-wrap leading-relaxed">{ticket.description}</p>
+            <p className="text-sm whitespace-pre-wrap leading-relaxed" style={{ color: '#94A3B8' }}>{ticket.description}</p>
           </DetailCard>
         )}
 
@@ -80,7 +83,7 @@ export default async function TicketDetailPage({ params }: { params: { ticketId:
           </DetailCard>
         ) : (
           <DetailCard title="Update status">
-            <p className="text-sm text-ink-500">Only support agents and super admins can update ticket status.</p>
+            <p className="text-sm" style={{ color: '#64748B' }}>Only support agents and super admins can update ticket status.</p>
           </DetailCard>
         )}
 

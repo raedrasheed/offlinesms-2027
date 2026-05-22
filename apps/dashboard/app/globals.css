@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 @layer base {
-  html, body { font-family: theme(fontFamily.sans); background: theme(colors.canvas); color: theme(colors.ink.DEFAULT); }
+  html, body { font-family: theme(fontFamily.sans); background: #0D1117; color: #E2E8F2; }
 
   /* Visible focus ring for keyboard users on all interactive elements */
   :focus-visible {

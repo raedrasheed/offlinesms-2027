@@ -77,11 +77,15 @@ export default async function ModerationPage({
     { label: 'Dismissed', value: 'dismissed' },
   ];
 
+  const CARD = '#131B27';
+  const BORDER = '#1A2437';
+
   return (
-    <div className="p-7">
+    <div className="p-6 space-y-5" style={{ color: '#E2E8F2' }}>
       <div className="mb-6">
-        <h1 className="text-xl font-extrabold tracking-tight text-ink-900">Moderation</h1>
-        <p className="text-sm text-ink-500 mt-0.5">Content flags and reports. No private content is displayed here.</p>
+        <p className="text-[12px] font-medium mb-0.5" style={{ color: '#64748B' }}>Admin / Moderation</p>
+        <h1 className="text-[22px] font-extrabold tracking-tight">Moderation</h1>
+        <p className="text-sm mt-0.5" style={{ color: '#64748B' }}>Content flags and reports. No private content is displayed here.</p>
       </div>
 
       {/* Status tabs */}
@@ -90,11 +94,12 @@ export default async function ModerationPage({
           <a
             key={t.value}
             href={t.value ? `/admin/moderation?status=${t.value}` : '/admin/moderation'}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+            className="px-3 py-1.5 rounded-lg text-xs font-bold transition"
+            style={
               statusFilter === t.value
-                ? 'bg-primary text-white'
-                : 'bg-surface3 text-ink-600 hover:bg-ink-100'
-            }`}
+                ? { background: '#1F7BA8', color: '#fff' }
+                : { background: '#131B27', color: '#94A3B8', border: `1px solid ${BORDER}` }
+            }
           >
             {t.label}
           </a>
@@ -102,19 +107,19 @@ export default async function ModerationPage({
       </div>
 
       {fetchError ? (
-        <div className="rounded-xl bg-red-50 border border-red-200 p-4 text-sm text-red-700">{fetchError}</div>
+        <div className="rounded-xl p-4 text-sm" style={{ background: '#2D0D0D', border: '1px solid #3D1515', color: '#EF4444' }}>{fetchError}</div>
       ) : flags.length === 0 ? (
-        <div className="rounded-xl border border-ink-100 bg-white p-12">
+        <div className="rounded-xl p-12" style={{ border: `1px solid ${BORDER}`, background: CARD }}>
           <EmptyState
             title="No flags found"
             description={statusFilter ? 'No flags match the current filter.' : 'No content flags have been submitted yet.'}
           />
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-ink-100 bg-white">
+        <div className="overflow-x-auto rounded-xl" style={{ border: `1px solid ${BORDER}`, background: CARD }}>
           <table className="w-full text-sm border-collapse">
             <thead>
-              <tr className="bg-surface3 text-left text-[10px] font-bold text-ink-500 tracking-wide uppercase">
+              <tr className="text-left text-[10px] font-bold tracking-wide uppercase" style={{ borderBottom: `1px solid ${BORDER}`, color: '#475569' }}>
                 <th className="px-4 py-3">Flag ID</th>
                 <th className="px-4 py-3">Type</th>
                 <th className="px-4 py-3">Target</th>
@@ -124,17 +129,17 @@ export default async function ModerationPage({
             </thead>
             <tbody>
               {flags.map((f, i) => (
-                <tr key={f.id} className={`border-t border-ink-100 ${i % 2 === 0 ? 'bg-white' : 'bg-surface3/40'}`}>
-                  <td className="px-4 py-3 font-mono text-xs text-ink-400">{f.id.slice(0, 12)}…</td>
-                  <td className="px-4 py-3 text-xs text-ink-700 capitalize">{f.type}</td>
-                  <td className="px-4 py-3 text-xs text-ink-500">
+                <tr key={f.id} className="transition hover:bg-white/[0.03]" style={i < flags.length - 1 ? { borderBottom: `1px solid ${BORDER}` } : {}}>
+                  <td className="px-4 py-3 font-mono text-xs" style={{ color: '#475569' }}>{f.id.slice(0, 12)}…</td>
+                  <td className="px-4 py-3 text-xs capitalize" style={{ color: '#94A3B8' }}>{f.type}</td>
+                  <td className="px-4 py-3 text-xs" style={{ color: '#64748B' }}>
                     <span className="capitalize">{f.targetType}</span>
                     {f.targetId && (
-                      <span className="font-mono ml-1 text-ink-400">·{f.targetId}</span>
+                      <span className="font-mono ml-1" style={{ color: '#475569' }}>·{f.targetId}</span>
                     )}
                   </td>
                   <td className="px-4 py-3"><StatusBadge status={f.status} /></td>
-                  <td className="px-4 py-3 text-xs text-ink-500 whitespace-nowrap">{f.createdAt}</td>
+                  <td className="px-4 py-3 text-xs whitespace-nowrap" style={{ color: '#64748B' }}>{f.createdAt}</td>
                 </tr>
               ))}
             </tbody>

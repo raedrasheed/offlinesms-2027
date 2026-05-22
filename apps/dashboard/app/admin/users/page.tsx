@@ -17,6 +17,9 @@ import FilterBar from '@/components/admin/FilterBar';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
+const CARD   = '#131B27';
+const BORDER = '#1A2437';
+
 export default async function UsersAdminPage({
   searchParams,
 }: {
@@ -50,14 +53,21 @@ export default async function UsersAdminPage({
   }
 
   return (
-    <div className="p-7">
-      <div className="flex items-center justify-between mb-6">
+    <div className="p-6 space-y-5" style={{ color: '#E2E8F2' }}>
+      <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-extrabold tracking-tight text-ink-900">Users</h1>
-          <p className="text-sm text-ink-500 mt-0.5">{rows.length === 50 ? '50+ users' : `${rows.length} user${rows.length !== 1 ? 's' : ''}`}</p>
+          <p className="text-[12px] font-medium mb-0.5" style={{ color: '#64748B' }}>Admin / Users</p>
+          <h1 className="text-[22px] font-extrabold tracking-tight">Users</h1>
+          <p className="text-[13px] mt-0.5" style={{ color: '#64748B' }}>
+            {rows.length === 50 ? '50+ users' : `${rows.length} user${rows.length !== 1 ? 's' : ''}`}
+          </p>
         </div>
         {canExport && (
-          <a href={buildExportHref()} className="px-4 py-2 bg-surface3 border border-ink-200 text-ink-700 text-sm font-bold rounded-lg hover:bg-ink-100 transition">
+          <a
+            href={buildExportHref()}
+            className="px-4 py-2 text-sm font-bold rounded-lg transition hover:brightness-110"
+            style={{ background: '#0A1828', color: '#5BB6DE', border: '1px solid #0E3A5A' }}
+          >
             Export CSV
           </a>
         )}
@@ -77,58 +87,68 @@ export default async function UsersAdminPage({
       </Suspense>
 
       {fetchError ? (
-        <div className="rounded-xl bg-red-50 border border-red-200 p-4 text-sm text-red-700">{fetchError}</div>
+        <div className="rounded-xl px-4 py-3 text-sm" style={{ background: '#2D0D0D', border: '1px solid #3D1515', color: '#EF4444' }}>
+          {fetchError}
+        </div>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-ink-100 bg-white">
-          <table className="w-full text-sm border-collapse">
+        <div className="overflow-x-auto rounded-xl" style={{ background: CARD, border: `1px solid ${BORDER}` }}>
+          <table className="w-full text-[12px] border-collapse">
             <thead>
-              <tr className="bg-surface3 text-left text-[10px] font-bold text-ink-500 tracking-wide uppercase">
-                <th className="px-4 py-3">User</th>
-                <th className="px-4 py-3">Phone</th>
-                <th className="px-4 py-3">Email</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Profile</th>
-                <th className="px-4 py-3">Joined</th>
+              <tr style={{ borderBottom: `1px solid ${BORDER}` }}>
+                {['User', 'Phone', 'Email', 'Status', 'Profile', 'Joined'].map(h => (
+                  <th key={h} className="px-4 py-3 text-left font-semibold uppercase tracking-wider text-[10px]" style={{ color: '#475569' }}>{h}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-12 text-center text-sm text-ink-500">
+                  <td colSpan={6} className="px-4 py-12 text-center text-sm" style={{ color: '#64748B' }}>
                     {statusFilter ? 'No users match the current filter.' : 'No users yet.'}
                   </td>
                 </tr>
               ) : rows.map((u, i) => (
-                <tr key={u.uid} className={`border-t border-ink-100 hover:bg-primary/5 ${i % 2 === 0 ? 'bg-white' : 'bg-surface3/40'}`}>
+                <tr
+                  key={u.uid}
+                  className="transition hover:bg-white/[0.03]"
+                  style={i < rows.length - 1 ? { borderBottom: `1px solid ${BORDER}` } : {}}
+                >
                   <td className="px-4 py-3">
                     <Link href={`/admin/users/${u.uid}` as any} className="flex items-center gap-3 min-w-0">
-                      <div className="w-8 h-8 rounded-full bg-primary/20 text-primary font-bold text-xs grid place-items-center shrink-0">
+                      <div
+                        className="w-8 h-8 rounded-full font-bold text-xs grid place-items-center shrink-0"
+                        style={{ background: '#1F7BA822', color: '#5BB6DE' }}
+                      >
                         {(u.displayName ?? u.uid).slice(0, 1).toUpperCase()}
                       </div>
                       <div className="min-w-0">
-                        <div className="font-semibold text-ink-900 truncate">{u.displayName ?? '—'}</div>
-                        <div className="text-[10px] text-ink-400 font-mono truncate">
+                        <div className="font-semibold truncate" style={{ color: '#E2E8F2' }}>{u.displayName ?? '—'}</div>
+                        <div className="text-[10px] font-mono truncate" style={{ color: '#475569' }}>
                           {u.username ? `@${u.username}` : u.uid.slice(0, 10)}
                         </div>
                       </div>
                     </Link>
                   </td>
-                  <td className="px-4 py-3 font-mono text-xs text-ink-600">{maskPhone(u.phoneNumber)}</td>
-                  <td className="px-4 py-3 text-xs text-ink-600 max-w-[160px] truncate">{maskEmail(u.email, session.role)}</td>
+                  <td className="px-4 py-3 font-mono text-[11px]" style={{ color: '#94A3B8' }}>{maskPhone(u.phoneNumber)}</td>
+                  <td className="px-4 py-3 text-[11px] max-w-[160px] truncate" style={{ color: '#94A3B8' }}>{maskEmail(u.email, session.role)}</td>
                   <td className="px-4 py-3"><StatusBadge status={u.status} /></td>
                   <td className="px-4 py-3">
-                    <span className={`text-[10px] font-bold ${u.profileCompleted ? 'text-emerald-600' : 'text-amber-600'}`}>
+                    <span className="text-[10px] font-bold" style={{ color: u.profileCompleted ? '#22C55E' : '#F59E0B' }}>
                       {u.profileCompleted ? 'Complete' : 'Pending'}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-xs text-ink-500 whitespace-nowrap">{u.createdAt}</td>
+                  <td className="px-4 py-3 text-[11px] whitespace-nowrap" style={{ color: '#475569' }}>{u.createdAt}</td>
                 </tr>
               ))}
             </tbody>
           </table>
           {nextCursor && (
-            <div className="px-4 py-3 border-t border-ink-100 text-center">
-              <Link href={`/admin/users?cursor=${nextCursor}${statusFilter ? `&status=${statusFilter}` : ''}` as any} className="text-sm text-primary font-semibold hover:underline">
+            <div className="px-4 py-3 text-center" style={{ borderTop: `1px solid ${BORDER}` }}>
+              <Link
+                href={`/admin/users?cursor=${nextCursor}${statusFilter ? `&status=${statusFilter}` : ''}` as any}
+                className="text-sm font-semibold hover:underline"
+                style={{ color: '#5BB6DE' }}
+              >
                 Load more →
               </Link>
             </div>

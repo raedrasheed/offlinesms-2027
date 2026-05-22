@@ -32,15 +32,19 @@ export default function DataTable<T extends Record<string, any>>({
   if (loading) return <LoadingState compact title="Loading…" />;
   if (error)   return <ErrorState compact title="Load error" description={error} />;
 
+  const CARD = '#131B27';
+  const BORDER = '#1A2437';
+
   return (
-    <div className="overflow-x-auto rounded-xl border border-ink-100 bg-white">
+    <div className="overflow-x-auto rounded-xl" style={{ background: CARD, border: `1px solid ${BORDER}` }}>
       <table className="w-full text-sm border-collapse">
         <thead>
-          <tr className="bg-surface3 text-left">
+          <tr style={{ borderBottom: `1px solid ${BORDER}` }}>
             {columns.map(col => (
               <th
                 key={col.key}
-                className={`px-4 py-3 text-[10px] font-bold text-ink-500 tracking-wide uppercase whitespace-nowrap ${col.className ?? ''}`}
+                className={`px-4 py-3 text-left text-[10px] font-bold tracking-wide uppercase whitespace-nowrap ${col.className ?? ''}`}
+                style={{ color: '#475569' }}
               >
                 {col.label}
               </th>
@@ -57,13 +61,16 @@ export default function DataTable<T extends Record<string, any>>({
           ) : (
             rows.map((row, i) => {
               const rowHref = href?.(row);
-              const rowClass = `border-t border-ink-100 ${i % 2 === 0 ? 'bg-white' : 'bg-surface3/40'} ${rowHref ? 'hover:bg-primary/5' : ''}`;
               return (
-                <tr key={String(row[keyField])} className={rowClass}>
+                <tr
+                  key={String(row[keyField])}
+                  className={rowHref ? 'transition hover:bg-white/[0.03]' : ''}
+                  style={i < rows.length - 1 ? { borderBottom: `1px solid ${BORDER}` } : {}}
+                >
                   {columns.map(col => (
-                    <td key={col.key} className={`px-4 py-3 ${col.className ?? ''}`}>
+                    <td key={col.key} className={`px-4 py-3 ${col.className ?? ''}`} style={{ color: '#94A3B8' }}>
                       {rowHref && col === columns[0] ? (
-                        <Link href={rowHref as any} className="block">
+                        <Link href={rowHref as any} className="block" style={{ color: '#E2E8F2' }}>
                           {col.render ? col.render(row) : String(row[col.key] ?? '—')}
                         </Link>
                       ) : (
@@ -78,8 +85,8 @@ export default function DataTable<T extends Record<string, any>>({
         </tbody>
       </table>
       {nextCursor && basePath && (
-        <div className="px-4 py-3 border-t border-ink-100 text-center">
-          <Link href={`${basePath}?cursor=${nextCursor}` as any} className="text-sm text-primary font-semibold hover:underline">
+        <div className="px-4 py-3 text-center" style={{ borderTop: `1px solid ${BORDER}` }}>
+          <Link href={`${basePath}?cursor=${nextCursor}` as any} className="text-sm font-semibold hover:underline" style={{ color: '#5BB6DE' }}>
             Load more →
           </Link>
         </div>

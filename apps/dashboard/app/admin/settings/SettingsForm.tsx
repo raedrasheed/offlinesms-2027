@@ -10,13 +10,20 @@ type Props = {
   initial: SystemSettings;
 };
 
+const CARD   = '#131B27';
+const BORDER = '#1A2437';
+
+const inputCls = 'w-full rounded-lg px-3 py-2 text-sm outline-none';
+const inputStyle = { background: '#0D1117', border: '1px solid #1A2437', color: '#E2E8F2' };
+
 function SubmitButton() {
   const { pending } = useFormStatus();
   return (
     <button
       type="submit"
       disabled={pending}
-      className="px-5 py-2 bg-primary text-white text-sm font-bold rounded-lg hover:bg-primary-dark transition disabled:opacity-50"
+      className="px-5 py-2 text-sm font-bold rounded-lg transition hover:brightness-110 disabled:opacity-50"
+      style={{ background: '#1F7BA8', color: '#fff' }}
     >
       {pending ? 'Saving…' : 'Save settings'}
     </button>
@@ -39,8 +46,8 @@ function Toggle({
   return (
     <div className="flex items-center justify-between">
       <div>
-        <p className="text-sm font-semibold text-ink-900">{label}</p>
-        <p className="text-xs text-ink-500 mt-0.5">{description}</p>
+        <p className="text-sm font-semibold" style={{ color: '#E2E8F2' }}>{label}</p>
+        <p className="text-xs mt-0.5" style={{ color: '#64748B' }}>{description}</p>
       </div>
       <label className="relative inline-flex items-center cursor-pointer select-none">
         <input type="hidden" name={name} value={checked ? 'true' : 'false'} />
@@ -49,10 +56,12 @@ function Toggle({
           role="switch"
           aria-checked={checked}
           onClick={() => setChecked(v => !v)}
-          className={`w-11 h-6 rounded-full transition-colors ${checked ? 'bg-primary' : 'bg-ink-300'}`}
+          className="w-11 h-6 rounded-full transition-colors"
+          style={{ background: checked ? '#1F7BA8' : '#1A2437' }}
         >
           <span
-            className={`block w-5 h-5 bg-white rounded-full shadow transition-transform mx-0.5 ${checked ? 'translate-x-5' : 'translate-x-0'}`}
+            className={`block w-5 h-5 rounded-full shadow transition-transform mx-0.5 ${checked ? 'translate-x-5' : 'translate-x-0'}`}
+            style={{ background: '#E2E8F2' }}
           />
         </button>
       </label>
@@ -65,42 +74,55 @@ export default function SettingsForm({ action, initial }: Props) {
 
   return (
     <form action={formAction} className="space-y-5">
-      {state?.error   && <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{state.error}</div>}
-      {state?.success && <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-700">Settings saved.</div>}
+      {state?.error   && (
+        <div className="rounded-lg px-4 py-3 text-sm" style={{ background: '#2D0D0D', border: '1px solid #3D1515', color: '#EF4444' }}>
+          {state.error}
+        </div>
+      )}
+      {state?.success && (
+        <div className="rounded-lg px-4 py-3 text-sm" style={{ background: '#052E1B', border: '1px solid #0A4428', color: '#22C55E' }}>
+          Settings saved.
+        </div>
+      )}
 
-      <div className="bg-white rounded-2xl border border-ink-100 shadow-sh1 p-6 space-y-4">
-        <h2 className="text-sm font-extrabold text-ink-900 tracking-tight">General</h2>
+      <div className="rounded-2xl p-6 space-y-4" style={{ background: CARD, border: `1px solid ${BORDER}` }}>
+        <h2 className="text-sm font-extrabold tracking-tight" style={{ color: '#E2E8F2' }}>General</h2>
 
         <div>
-          <label className="block text-xs font-bold text-ink-700 mb-1">App name <span className="text-red-500">*</span></label>
+          <label className="block text-xs font-bold mb-1" style={{ color: '#94A3B8' }}>
+            App name <span style={{ color: '#EF4444' }}>*</span>
+          </label>
           <input
             name="appName"
             defaultValue={initial.appName}
             required
             maxLength={60}
-            className="w-full border border-ink-200 rounded-lg px-3 py-2 text-sm outline-none bg-white"
+            className={inputCls}
+            style={inputStyle}
           />
         </div>
 
         <div>
-          <label className="block text-xs font-bold text-ink-700 mb-1">Support email</label>
+          <label className="block text-xs font-bold mb-1" style={{ color: '#94A3B8' }}>Support email</label>
           <input
             name="supportEmail"
             type="email"
             defaultValue={initial.supportEmail}
             maxLength={120}
-            className="w-full border border-ink-200 rounded-lg px-3 py-2 text-sm outline-none bg-white"
+            className={inputCls}
+            style={inputStyle}
             placeholder="support@example.com"
           />
         </div>
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs font-bold text-ink-700 mb-1">Default language</label>
+            <label className="block text-xs font-bold mb-1" style={{ color: '#94A3B8' }}>Default language</label>
             <select
               name="defaultLanguage"
               defaultValue={initial.defaultLanguage}
-              className="w-full border border-ink-200 rounded-lg px-3 py-2 text-sm outline-none bg-white"
+              className={inputCls}
+              style={inputStyle}
             >
               {LANGUAGES.map(l => (
                 <option key={l.value} value={l.value}>{l.label}</option>
@@ -108,20 +130,21 @@ export default function SettingsForm({ action, initial }: Props) {
             </select>
           </div>
           <div>
-            <label className="block text-xs font-bold text-ink-700 mb-1">Default timezone</label>
+            <label className="block text-xs font-bold mb-1" style={{ color: '#94A3B8' }}>Default timezone</label>
             <input
               name="defaultTimezone"
               defaultValue={initial.defaultTimezone}
               maxLength={60}
-              className="w-full border border-ink-200 rounded-lg px-3 py-2 text-sm outline-none bg-white"
+              className={inputCls}
+              style={inputStyle}
               placeholder="UTC"
             />
           </div>
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl border border-ink-100 shadow-sh1 p-6 space-y-5">
-        <h2 className="text-sm font-extrabold text-ink-900 tracking-tight">Feature flags</h2>
+      <div className="rounded-2xl p-6 space-y-5" style={{ background: CARD, border: `1px solid ${BORDER}` }}>
+        <h2 className="text-sm font-extrabold tracking-tight" style={{ color: '#E2E8F2' }}>Feature flags</h2>
 
         <Toggle
           label="SMS escalation"
@@ -138,7 +161,7 @@ export default function SettingsForm({ action, initial }: Props) {
         />
 
         {initial.maintenanceMode && (
-          <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-700">
+          <div className="rounded-lg px-3 py-2 text-xs" style={{ background: '#1C1405', border: '1px solid #2A2005', color: '#F59E0B' }}>
             Maintenance mode is currently <strong>on</strong>. Toggle is read-only here; change via server config.
           </div>
         )}
@@ -146,7 +169,7 @@ export default function SettingsForm({ action, initial }: Props) {
 
       <div className="flex items-center gap-3 pt-2">
         <SubmitButton />
-        <p className="text-xs text-ink-400">All changes are audit-logged.</p>
+        <p className="text-xs" style={{ color: '#475569' }}>All changes are audit-logged.</p>
       </div>
     </form>
   );

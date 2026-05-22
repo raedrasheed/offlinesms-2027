@@ -23,15 +23,25 @@ export default function FilterBar({ searchPlaceholder = 'Search…', filters = [
     router.push(`${pathname}?${params.toString()}` as any);
   }, [router, pathname, searchParams]);
 
+  const inputStyle = {
+    background: '#131B27',
+    border: '1px solid #1A2437',
+    color: '#E2E8F2',
+  } as const;
+
   return (
     <div className="flex items-center gap-3 mb-5 flex-wrap">
-      <div className="flex items-center gap-2 bg-white border border-ink-200 rounded-lg px-3 py-2 text-ink-500 min-w-[200px] flex-1 max-w-xs">
-        <Search size={13} />
+      <div
+        className="flex items-center gap-2 rounded-lg px-3 py-2 min-w-[200px] flex-1 max-w-xs"
+        style={inputStyle}
+      >
+        <Search size={13} style={{ color: '#475569' }} />
         <input
           placeholder={searchPlaceholder}
           defaultValue={searchParams?.get('q') ?? ''}
           onChange={e => update('q', e.target.value)}
-          className="bg-transparent text-sm flex-1 outline-none text-ink-900 placeholder-ink-400"
+          className="bg-transparent text-sm flex-1 outline-none"
+          style={{ color: '#E2E8F2' }}
         />
       </div>
       {filters.map(f => (
@@ -39,7 +49,8 @@ export default function FilterBar({ searchPlaceholder = 'Search…', filters = [
           key={f.key}
           defaultValue={searchParams?.get(f.key) ?? ''}
           onChange={e => update(f.key, e.target.value)}
-          className="bg-white border border-ink-200 rounded-lg px-3 py-2 text-sm text-ink-700 outline-none"
+          className="rounded-lg px-3 py-2 text-sm outline-none"
+          style={inputStyle}
         >
           <option value="">{f.label}</option>
           {f.options.map(o => (

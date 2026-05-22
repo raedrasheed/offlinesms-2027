@@ -21,13 +21,13 @@ export default async function NewPackagePage() {
   }
 
   return (
-    <div className="p-7 max-w-xl">
-      <div className="flex items-center gap-3 mb-6">
-        <Link href={'/admin/points/packages' as any} className="text-sm text-ink-500 hover:text-ink-900">← Packages</Link>
-        <span className="text-ink-300">/</span>
-        <span className="text-sm font-semibold text-ink-900">New package</span>
+    <div className="p-6 max-w-xl space-y-5" style={{ color: '#E2E8F2' }}>
+      <div className="flex items-center gap-2 text-[12px]">
+        <Link href={'/admin/points/packages' as any} className="hover:underline" style={{ color: '#5BB6DE' }}>← Packages</Link>
+        <span style={{ color: '#475569' }}>/</span>
+        <span style={{ color: '#64748B' }}>New package</span>
       </div>
-      <h1 className="text-xl font-extrabold tracking-tight text-ink-900 mb-5">Create points package</h1>
+      <h1 className="text-[22px] font-extrabold tracking-tight">Create points package</h1>
       <PackageForm action={createPointsPackage} submitLabel="Create package" />
     </div>
   );

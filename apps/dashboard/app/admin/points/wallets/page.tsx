@@ -11,6 +11,9 @@ import WalletFreezeAction from './WalletFreezeAction';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
+const CARD   = '#131B27';
+const BORDER = '#1A2437';
+
 export default async function WalletsPage({ searchParams }: { searchParams?: { cursor?: string; status?: string } }) {
   const cookie = cookies().get('__session')?.value;
   const session = await verifySession(cookie);
@@ -36,67 +39,76 @@ export default async function WalletsPage({ searchParams }: { searchParams?: { c
   ];
 
   return (
-    <div className="p-7">
-      <div className="flex items-center gap-3 mb-6">
-        <Link href={'/admin/points' as any} className="text-sm text-ink-500 hover:text-ink-900">← Points</Link>
-        <span className="text-ink-300">/</span>
-        <span className="text-sm font-semibold text-ink-900">Wallets</span>
+    <div className="p-6 space-y-5" style={{ color: '#E2E8F2' }}>
+      <div>
+        <div className="flex items-center gap-2 text-[12px] mb-2">
+          <Link href={'/admin/points' as any} className="hover:underline" style={{ color: '#5BB6DE' }}>← Points</Link>
+          <span style={{ color: '#475569' }}>/</span>
+          <span style={{ color: '#64748B' }}>Wallets</span>
+        </div>
+        <h1 className="text-[22px] font-extrabold tracking-tight">Wallets</h1>
+        <p className="text-[13px] mt-0.5" style={{ color: '#64748B' }}>
+          {canFreeze ? 'Freeze or unfreeze wallets. Balance is never modified here.' : 'Read-only — no adjustment actions.'}
+        </p>
       </div>
-      <h1 className="text-xl font-extrabold tracking-tight text-ink-900 mb-1">Wallets</h1>
-      <p className="text-sm text-ink-500 mb-5">
-        {canFreeze ? 'Freeze or unfreeze wallets. Balance is never modified here.' : 'Read-only — no adjustment actions.'}
-      </p>
 
       {/* Status tabs */}
-      <div className="flex gap-1 mb-5">
-        {STATUS_TABS.map(t => (
-          <a
-            key={t.value}
-            href={t.value ? `/admin/points/wallets?status=${t.value}` : '/admin/points/wallets'}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
-              statusFilter === t.value
-                ? 'bg-primary text-white'
-                : 'bg-surface3 text-ink-600 hover:bg-ink-100'
-            }`}
-          >
-            {t.label}
-          </a>
-        ))}
+      <div className="flex gap-2">
+        {STATUS_TABS.map(t => {
+          const active = statusFilter === t.value;
+          return (
+            <a
+              key={t.value}
+              href={t.value ? `/admin/points/wallets?status=${t.value}` : '/admin/points/wallets'}
+              className="px-3 py-1.5 rounded-lg text-[11px] font-bold transition"
+              style={active
+                ? { background: '#1F7BA8', color: '#fff' }
+                : { background: CARD, color: '#94A3B8', border: `1px solid ${BORDER}` }
+              }
+            >
+              {t.label}
+            </a>
+          );
+        })}
       </div>
 
       {fetchError ? (
-        <div className="rounded-xl bg-red-50 border border-red-200 p-4 text-sm text-red-700">{fetchError}</div>
+        <div className="rounded-xl px-4 py-3 text-sm" style={{ background: '#2D0D0D', border: '1px solid #3D1515', color: '#EF4444' }}>{fetchError}</div>
       ) : rows.length === 0 ? (
-        <div className="rounded-xl border border-ink-100 bg-white p-12">
+        <div className="rounded-xl p-12" style={{ background: CARD, border: `1px solid ${BORDER}` }}>
           <EmptyState title="No wallets yet" />
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-ink-100 bg-white">
-          <table className="w-full text-sm border-collapse">
+        <div className="overflow-x-auto rounded-xl" style={{ background: CARD, border: `1px solid ${BORDER}` }}>
+          <table className="w-full text-[12px] border-collapse">
             <thead>
-              <tr className="bg-surface3 text-left text-[10px] font-bold text-ink-500 tracking-wide uppercase">
-                <th className="px-4 py-3">User</th>
-                <th className="px-4 py-3 text-right">Balance</th>
-                <th className="px-4 py-3 text-right">Reserved</th>
-                <th className="px-4 py-3 text-right">Available</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Updated</th>
-                {canFreeze && <th className="px-4 py-3">Actions</th>}
+              <tr style={{ borderBottom: `1px solid ${BORDER}` }}>
+                <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#475569' }}>User</th>
+                <th className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#475569' }}>Balance</th>
+                <th className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#475569' }}>Reserved</th>
+                <th className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#475569' }}>Available</th>
+                <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#475569' }}>Status</th>
+                <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#475569' }}>Updated</th>
+                {canFreeze && <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#475569' }}>Actions</th>}
               </tr>
             </thead>
             <tbody>
               {rows.map((w, i) => (
-                <tr key={w.uid} className={`border-t border-ink-100 hover:bg-primary/5 ${i % 2 === 0 ? 'bg-white' : 'bg-surface3/40'}`}>
+                <tr
+                  key={w.uid}
+                  className="transition hover:bg-white/[0.03]"
+                  style={i < rows.length - 1 ? { borderBottom: `1px solid ${BORDER}` } : {}}
+                >
                   <td className="px-4 py-3">
-                    <Link href={`/admin/points/wallets/${w.uid}` as any} className="font-mono text-xs text-primary hover:underline">
+                    <Link href={`/admin/points/wallets/${w.uid}` as any} className="font-mono text-[11px] hover:underline" style={{ color: '#5BB6DE' }}>
                       {w.uid.slice(0, 14)}…
                     </Link>
                   </td>
-                  <td className="px-4 py-3 text-right font-mono text-xs font-bold text-ink-900">{w.balance}</td>
-                  <td className="px-4 py-3 text-right font-mono text-xs text-amber-700">{w.reserved}</td>
-                  <td className="px-4 py-3 text-right font-mono text-xs text-emerald-700">{w.available}</td>
+                  <td className="px-4 py-3 text-right font-mono text-[11px] font-bold" style={{ color: '#E2E8F2' }}>{w.balance}</td>
+                  <td className="px-4 py-3 text-right font-mono text-[11px]" style={{ color: '#F59E0B' }}>{w.reserved}</td>
+                  <td className="px-4 py-3 text-right font-mono text-[11px]" style={{ color: '#22C55E' }}>{w.available}</td>
                   <td className="px-4 py-3"><StatusBadge status={w.status} /></td>
-                  <td className="px-4 py-3 text-xs text-ink-500 whitespace-nowrap">{w.updatedAt}</td>
+                  <td className="px-4 py-3 text-[11px] whitespace-nowrap" style={{ color: '#475569' }}>{w.updatedAt}</td>
                   {canFreeze && (
                     <td className="px-4 py-3">
                       <WalletFreezeAction uid={w.uid} currentStatus={w.status} />
@@ -107,10 +119,11 @@ export default async function WalletsPage({ searchParams }: { searchParams?: { c
             </tbody>
           </table>
           {nextCursor && (
-            <div className="px-4 py-3 border-t border-ink-100 text-center">
+            <div className="px-4 py-3 text-center" style={{ borderTop: `1px solid ${BORDER}` }}>
               <Link
                 href={`/admin/points/wallets?cursor=${nextCursor}${statusFilter ? `&status=${statusFilter}` : ''}` as any}
-                className="text-sm text-primary font-semibold hover:underline"
+                className="text-sm font-semibold hover:underline"
+                style={{ color: '#5BB6DE' }}
               >
                 Load more →
               </Link>

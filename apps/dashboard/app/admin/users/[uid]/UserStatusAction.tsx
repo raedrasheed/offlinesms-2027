@@ -14,9 +14,9 @@ export default function UserStatusAction({ uid, currentStatus }: Props) {
   const isSuspended = currentStatus === 'suspended';
   const label = isSuspended ? 'Reactivate user' : 'Suspend user';
   const nextStatus = isSuspended ? 'active' : 'suspended';
-  const btnClass = isSuspended
-    ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
-    : 'bg-red-50 hover:bg-red-100 text-red-700 border border-red-200';
+  const btnStyle = isSuspended
+    ? { background: '#052E1B', color: '#22C55E', border: '1px solid #0A4428' }
+    : { background: '#2D0D0D', color: '#EF4444', border: '1px solid #3D1515' };
 
   async function handleClick() {
     if (!confirm(`${label}? This action is logged.`)) return;
@@ -39,11 +39,12 @@ export default function UserStatusAction({ uid, currentStatus }: Props) {
       <button
         onClick={handleClick}
         disabled={busy}
-        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${btnClass} disabled:opacity-50`}
+        className="px-3 py-1.5 rounded-lg text-xs font-bold transition hover:brightness-110 disabled:opacity-50"
+        style={btnStyle}
       >
         {busy ? 'Working…' : label}
       </button>
-      {err && <p className="text-[10px] text-red-600">{err}</p>}
+      {err && <p className="text-[10px]" style={{ color: '#EF4444' }}>{err}</p>}
     </div>
   );
 }

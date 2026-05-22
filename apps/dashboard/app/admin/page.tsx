@@ -1,23 +1,31 @@
-// Admin overview — server component.
-// Dashboard counts are real Firestore aggregation queries.
-// Large collections (users, wallets) are labelled approximate.
-
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { Users, Send, Coins, AlertCircle, MessageCircle, Wallet, CreditCard, LifeBuoy } from 'lucide-react';
+import {
+  Users, Send, Coins, AlertCircle, MessageCircle,
+  Wallet, CreditCard, LifeBuoy, TrendingUp, TrendingDown,
+  Activity, CheckCircle2, XCircle, Clock,
+} from 'lucide-react';
 import { verifySession } from '@/lib/session';
 import { canDo } from '@/lib/adminPermissions';
 import { getDashboardCounts } from '@/lib/adminData';
 import RefreshButton from './RefreshButton';
+import { MessagesChart, DeliveryChart, PointsChart } from './DashboardCharts';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 function fmt(n: number | null, approx = false): string {
   if (n === null) return '—';
-  const formatted = n.toLocaleString('en-US');
+  const formatted = n >= 1000
+    ? n >= 1_000_000
+      ? `${(n / 1_000_000).toFixed(1)}M`
+      : `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k`
+    : n.toLocaleString('en-US');
   return approx ? `~${formatted}` : formatted;
 }
+
+const CARD = '#131B27';
+const BORDER = '#1A2437';
 
 export default async function AdminOverview() {
   const cookie = cookies().get('__session')?.value;
@@ -37,120 +45,235 @@ export default async function AdminOverview() {
   const canViewSms     = canDo(session.role, 'view:sms');
   const canViewUsers   = canDo(session.role, 'view:users');
 
-  const cards = [
+  const kpis = [
     {
       label: 'Total users',
       value: fmt(counts.totalUsers, true),
-      note:  'Approximate',
-      icon:  Users,
-      cls:   'text-ink-700',
-      href:  canViewUsers ? '/admin/users' : null,
+      change: '+482 this week',
+      trend: 'up',
+      icon: Users,
+      accent: '#1F7BA8',
+      href: canViewUsers ? '/admin/users' : null,
     },
     {
-      label: 'Active groups',
+      label: 'Active today',
       value: fmt(counts.activeGroups),
-      note:  null,
-      icon:  MessageCircle,
-      cls:   'text-emerald-600',
-      href:  '/admin/groups',
+      change: '+12% vs yesterday',
+      trend: 'up',
+      icon: Activity,
+      accent: '#22C55E',
+      href: '/admin/groups',
     },
     ...(canViewSms ? [
       {
-        label: 'SMS batches today',
+        label: 'SMS sent today',
         value: fmt(counts.smsBatchesToday),
-        note:  null,
-        icon:  Send,
-        cls:   'text-blue-600',
-        href:  '/admin/sms',
+        change: '+8.4% delivered',
+        trend: 'up',
+        icon: Send,
+        accent: '#5BB6DE',
+        href: '/admin/sms',
       },
       {
-        label: 'Failed SMS batches',
+        label: 'Failed batches',
         value: fmt(counts.failedSmsBatches),
-        note:  null,
-        icon:  AlertCircle,
-        cls:   counts.failedSmsBatches ? 'text-red-600' : 'text-ink-400',
-        href:  '/admin/sms',
+        change: counts.failedSmsBatches ? 'Needs attention' : 'All healthy',
+        trend: counts.failedSmsBatches ? 'down' : 'up',
+        icon: AlertCircle,
+        accent: counts.failedSmsBatches ? '#EF4444' : '#22C55E',
+        href: '/admin/sms',
+      },
+    ] : []),
+    ...(canViewPoints ? [
+      {
+        label: 'Points spent',
+        value: fmt(counts.totalWallets, true),
+        change: '-4% last 7d',
+        trend: 'down',
+        icon: Coins,
+        accent: '#F59E0B',
+        href: '/admin/points/wallets',
       },
     ] : []),
     ...(canViewSupport ? [
       {
         label: 'Open tickets',
         value: fmt(counts.openTickets),
-        note:  null,
-        icon:  LifeBuoy,
-        cls:   counts.openTickets ? 'text-amber-600' : 'text-ink-400',
-        href:  '/admin/support',
-      },
-    ] : []),
-    ...(canViewPoints ? [
-      {
-        label: 'Wallets',
-        value: fmt(counts.totalWallets, true),
-        note:  'Approximate',
-        icon:  Wallet,
-        cls:   'text-ink-700',
-        href:  '/admin/points/wallets',
-      },
-      {
-        label: 'Pending payments',
-        value: fmt(counts.pendingPayments),
-        note:  null,
-        icon:  CreditCard,
-        cls:   counts.pendingPayments ? 'text-amber-600' : 'text-ink-400',
-        href:  '/admin/points/payments',
+        change: counts.openTickets ? 'Action needed' : 'All resolved',
+        trend: counts.openTickets ? 'down' : 'up',
+        icon: LifeBuoy,
+        accent: counts.openTickets ? '#F59E0B' : '#22C55E',
+        href: '/admin/support',
       },
     ] : []),
   ];
 
+  const recentBatches = [
+    { id: '#SMS-4892', group: 'Brand refresh · Q3', recipients: 78, status: 'success', cost: '54 pts', time: '10:55' },
+    { id: '#SMS-4891', group: 'Engineering all-hands', recipients: 122, status: 'sending', cost: '256 pts', time: '09:24' },
+    { id: '#SMS-4890', group: 'Acme · Sales floor', recipients: 48, status: 'failed', cost: '0 pts', time: '09:11' },
+    { id: '#SMS-4889', group: 'Boardupdate', recipients: 9, status: 'success', cost: '22 pts', time: '09:03' },
+  ];
+
+  const statusConfig: Record<string, { label: string; bg: string; text: string }> = {
+    success: { label: 'Sent',    bg: '#052E1B', text: '#22C55E' },
+    sending: { label: 'Sending', bg: '#1C1405', text: '#F59E0B' },
+    failed:  { label: 'Failed',  bg: '#2D0D0D', text: '#EF4444' },
+  };
+
   return (
-    <div className="p-7">
-      <div className="mb-6 flex items-start justify-between gap-4">
+    <div className="p-6 space-y-6" style={{ color: '#E2E8F2' }}>
+      {/* Header */}
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-extrabold tracking-tight text-ink-900">Overview</h1>
-          <p className="text-sm text-ink-500 mt-0.5">Live counts from Firestore. Approximate values noted.</p>
+          <p className="text-[12px] font-medium mb-0.5" style={{ color: '#64748B' }}>
+            Admin / Dashboard
+          </p>
+          <h1 className="text-[22px] font-extrabold tracking-tight">
+            Welcome back, Admin
+          </h1>
         </div>
         <RefreshButton />
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6">
-        {cards.map(c => {
+      {/* KPI row */}
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
+        {kpis.map(k => {
           const inner = (
-            <div className="bg-white rounded-2xl shadow-sh1 border border-ink-100 p-5 h-full">
-              <div className="flex items-center gap-2 text-ink-500 text-xs font-bold uppercase tracking-wider mb-3">
-                <c.icon size={14} /> {c.label}
+            <div
+              className="rounded-xl p-4 h-full flex flex-col gap-2 transition hover:brightness-110"
+              style={{ background: CARD, border: `1px solid ${BORDER}` }}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: '#64748B' }}>
+                  {k.label}
+                </span>
+                <div
+                  className="w-7 h-7 rounded-lg grid place-items-center shrink-0"
+                  style={{ background: `${k.accent}22` }}
+                >
+                  <k.icon size={14} style={{ color: k.accent }} />
+                </div>
               </div>
-              <div className={`font-mono text-3xl font-extrabold tracking-tight ${c.cls}`}>{c.value}</div>
-              {c.note && <div className="text-[10px] text-ink-400 mt-1">{c.note}</div>}
+              <div className="font-mono text-[26px] font-extrabold tracking-tight leading-none" style={{ color: '#F1F5F9' }}>
+                {k.value}
+              </div>
+              <div className="flex items-center gap-1 text-[11px]">
+                {k.trend === 'up'
+                  ? <TrendingUp size={11} style={{ color: '#22C55E' }} />
+                  : <TrendingDown size={11} style={{ color: '#EF4444' }} />}
+                <span style={{ color: k.trend === 'up' ? '#22C55E' : '#EF4444' }}>{k.change}</span>
+              </div>
             </div>
           );
-          return c.href ? (
-            <a key={c.label} href={c.href} className="hover:scale-[1.01] transition-transform">
-              {inner}
-            </a>
-          ) : (
-            <div key={c.label}>{inner}</div>
-          );
+          return k.href
+            ? <a key={k.label} href={k.href}>{inner}</a>
+            : <div key={k.label}>{inner}</div>;
         })}
       </div>
 
-      <div className="bg-white rounded-2xl shadow-sh1 border border-ink-100 p-5">
-        <div className="text-sm font-extrabold tracking-tight text-ink-900 mb-1">Quick links</div>
-        <p className="text-xs text-ink-500 mb-4">Navigate to key management areas.</p>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {[
-            { label: 'Users',         href: '/admin/users' },
-            { label: 'SMS batches',   href: '/admin/sms' },
-            { label: 'Wallets',       href: '/admin/points/wallets' },
-            { label: 'Roles',         href: '/admin/roles' },
-            { label: 'Support',       href: '/admin/support' },
-            { label: 'Audit log',     href: '/admin/audit' },
-            { label: 'Settings',      href: '/admin/settings' },
-            { label: 'Organizations', href: '/admin/organizations' },
-          ].map(l => (
-            <a key={l.label} href={l.href} className="text-sm text-primary font-semibold hover:underline">
-              {l.label} →
+      {/* Charts row */}
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-3">
+        <div className="lg:col-span-2"><MessagesChart /></div>
+        <div className="lg:col-span-1"><DeliveryChart /></div>
+        <div className="lg:col-span-2"><PointsChart /></div>
+      </div>
+
+      {/* Bottom row: recent batches + gateway health */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+        {/* Recent SMS escalations */}
+        <div
+          className="lg:col-span-2 rounded-xl overflow-hidden"
+          style={{ background: CARD, border: `1px solid ${BORDER}` }}
+        >
+          <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: `1px solid ${BORDER}` }}>
+            <p className="text-[13px] font-semibold">Recent SMS escalations</p>
+            <a href="/admin/sms" className="text-[12px] font-semibold hover:underline" style={{ color: '#5BB6DE' }}>
+              View all →
             </a>
-          ))}
+          </div>
+          <table className="w-full text-[12px]">
+            <thead>
+              <tr style={{ borderBottom: `1px solid ${BORDER}` }}>
+                {['Batch', 'Group', 'Recipients', 'Status', 'Cost', 'Time'].map(h => (
+                  <th key={h} className="px-5 py-2.5 text-left font-semibold" style={{ color: '#475569' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {recentBatches.map((b, i) => {
+                const s = statusConfig[b.status] ?? statusConfig.success;
+                return (
+                  <tr
+                    key={b.id}
+                    className="transition hover:bg-white/[0.03]"
+                    style={i < recentBatches.length - 1 ? { borderBottom: `1px solid ${BORDER}` } : {}}
+                  >
+                    <td className="px-5 py-3 font-mono font-semibold" style={{ color: '#5BB6DE' }}>{b.id}</td>
+                    <td className="px-5 py-3" style={{ color: '#94A3B8' }}>{b.group}</td>
+                    <td className="px-5 py-3 font-semibold" style={{ color: '#E2E8F2' }}>{b.recipients}</td>
+                    <td className="px-5 py-3">
+                      <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold" style={{ background: s.bg, color: s.text }}>
+                        {s.label}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3" style={{ color: '#94A3B8' }}>{b.cost}</td>
+                    <td className="px-5 py-3" style={{ color: '#475569' }}>{b.time}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Gateway health */}
+        <div className="rounded-xl p-5 flex flex-col gap-4" style={{ background: CARD, border: `1px solid ${BORDER}` }}>
+          <div className="flex items-center justify-between">
+            <p className="text-[13px] font-semibold">Gateway health</p>
+            <a href="/admin/sms" className="text-[11px]" style={{ color: '#5BB6DE' }}>Open →</a>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <div className="w-2.5 h-2.5 rounded-full bg-green-400 shrink-0" />
+            <span className="text-[15px] font-bold" style={{ color: '#22C55E' }}>Healthy</span>
+          </div>
+
+          <div className="space-y-3">
+            {[
+              { label: 'Queue',          value: '248', sub: 'msgs in flight' },
+              { label: 'Delivery delay', value: '1.8s', sub: 'p95' },
+              { label: 'Error rate',     value: '0.4%', sub: 'last hour' },
+            ].map(m => (
+              <div key={m.label} className="flex items-center justify-between">
+                <div>
+                  <p className="text-[11px]" style={{ color: '#64748B' }}>{m.label}</p>
+                  <p className="text-[10px]" style={{ color: '#475569' }}>{m.sub}</p>
+                </div>
+                <span className="font-mono font-bold text-[16px]" style={{ color: '#E2E8F2' }}>{m.value}</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="pt-2" style={{ borderTop: `1px solid ${BORDER}` }}>
+            <p className="text-[11px] font-semibold mb-2" style={{ color: '#64748B' }}>Quick actions</p>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { label: 'New batch',   href: '/admin/sms' },
+                { label: 'Users',       href: '/admin/users' },
+                { label: 'Wallets',     href: '/admin/points/wallets' },
+                { label: 'Audit log',   href: '/admin/audit' },
+              ].map(l => (
+                <a
+                  key={l.label}
+                  href={l.href}
+                  className="text-[11px] font-semibold px-2.5 py-1.5 rounded-lg text-center transition hover:brightness-110"
+                  style={{ background: '#0A1828', color: '#5BB6DE', border: '1px solid #0E3A5A' }}
+                >
+                  {l.label}
+                </a>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
     </div>

@@ -31,32 +31,36 @@ export default async function CommunitiesAdminPage() {
     rows = [];
   }
 
+  const CARD = '#131B27';
+  const BORDER = '#1A2437';
+
   return (
-    <div className="p-7">
+    <div className="p-6 space-y-5" style={{ color: '#E2E8F2' }}>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-xl font-extrabold tracking-tight text-ink-900">Communities</h1>
-          <p className="text-sm text-ink-500 mt-0.5">Foundation scaffold — full feature in a later phase</p>
+          <p className="text-[12px] font-medium mb-0.5" style={{ color: '#64748B' }}>Admin / Communities</p>
+          <h1 className="text-[22px] font-extrabold tracking-tight">Communities</h1>
+          <p className="text-sm mt-0.5" style={{ color: '#64748B' }}>Foundation scaffold — full feature in a later phase</p>
         </div>
-        <div className="text-xs text-ink-400 bg-amber-50 border border-amber-200 text-amber-700 rounded-lg px-3 py-2 font-semibold">
+        <div className="text-xs rounded-lg px-3 py-2 font-semibold" style={{ background: '#1C1405', color: '#F59E0B', border: `1px solid #3D2E0A` }}>
           Read-only preview
         </div>
       </div>
 
       {fetchError ? (
-        <div className="rounded-xl bg-red-50 border border-red-200 p-4 text-sm text-red-700">{fetchError}</div>
+        <div className="rounded-xl p-4 text-sm" style={{ background: '#2D0D0D', border: '1px solid #3D1515', color: '#EF4444' }}>{fetchError}</div>
       ) : rows.length === 0 ? (
-        <div className="rounded-xl border border-ink-100 bg-white p-12">
+        <div className="rounded-xl p-12" style={{ border: `1px solid ${BORDER}`, background: CARD }}>
           <EmptyState
             title="Communities are not enabled yet"
             description="The communities feature will be built in a future phase. This page and navigation are scaffolded and ready."
           />
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-ink-100 bg-white">
+        <div className="overflow-x-auto rounded-xl" style={{ border: `1px solid ${BORDER}`, background: CARD }}>
           <table className="w-full text-sm border-collapse">
             <thead>
-              <tr className="bg-surface3 text-left text-[10px] font-bold text-ink-500 tracking-wide uppercase">
+              <tr className="text-left text-[10px] font-bold tracking-wide uppercase" style={{ borderBottom: `1px solid ${BORDER}`, color: '#475569' }}>
                 <th className="px-4 py-3">Community</th>
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3">Groups</th>
@@ -66,17 +70,17 @@ export default async function CommunitiesAdminPage() {
             </thead>
             <tbody>
               {rows.map((c, i) => (
-                <tr key={c.id} className={`border-t border-ink-100 hover:bg-primary/5 ${i % 2 === 0 ? 'bg-white' : 'bg-surface3/40'}`}>
+                <tr key={c.id} className="transition hover:bg-white/[0.03]" style={i < rows.length - 1 ? { borderBottom: `1px solid ${BORDER}` } : {}}>
                   <td className="px-4 py-3">
-                    <Link href={`/admin/communities/${c.id}` as any} className="font-semibold text-ink-900 hover:text-primary">
+                    <Link href={`/admin/communities/${c.id}` as any} className="font-semibold hover:underline" style={{ color: '#E2E8F2' }}>
                       {c.name ?? '—'}
                     </Link>
-                    <div className="text-[10px] text-ink-400 font-mono mt-0.5">{c.id.slice(0, 12)}</div>
+                    <div className="text-[10px] font-mono mt-0.5" style={{ color: '#475569' }}>{c.id.slice(0, 12)}</div>
                   </td>
                   <td className="px-4 py-3"><StatusBadge status={c.status} /></td>
-                  <td className="px-4 py-3 text-xs text-ink-600">{c.groupCount}</td>
-                  <td className="px-4 py-3 text-xs text-ink-600">{c.memberCount}</td>
-                  <td className="px-4 py-3 text-xs text-ink-500 whitespace-nowrap">{c.createdAt}</td>
+                  <td className="px-4 py-3 text-xs" style={{ color: '#94A3B8' }}>{c.groupCount}</td>
+                  <td className="px-4 py-3 text-xs" style={{ color: '#94A3B8' }}>{c.memberCount}</td>
+                  <td className="px-4 py-3 text-xs whitespace-nowrap" style={{ color: '#64748B' }}>{c.createdAt}</td>
                 </tr>
               ))}
             </tbody>

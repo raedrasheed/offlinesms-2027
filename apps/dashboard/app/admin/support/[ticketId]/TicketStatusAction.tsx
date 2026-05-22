@@ -10,13 +10,16 @@ type Props = {
 
 const STATUSES = ['open', 'pending', 'resolved', 'closed'] as const;
 
+const inputStyle = { background: '#0D1117', border: '1px solid #1A2437', color: '#E2E8F2' };
+
 function SubmitButton() {
   const { pending } = useFormStatus();
   return (
     <button
       type="submit"
       disabled={pending}
-      className="px-4 py-2 bg-primary text-white text-sm font-bold rounded-lg hover:bg-primary-dark transition disabled:opacity-50"
+      className="px-4 py-2 text-sm font-bold rounded-lg transition hover:brightness-110 disabled:opacity-50"
+      style={{ background: '#1F7BA8', color: '#fff' }}
     >
       {pending ? 'Saving…' : 'Update status'}
     </button>
@@ -31,15 +34,16 @@ export default function TicketStatusAction({ action, currentStatus }: Props) {
       <select
         name="status"
         defaultValue={currentStatus}
-        className="border border-ink-200 rounded-lg px-3 py-2 text-sm outline-none bg-white"
+        className="rounded-lg px-3 py-2 text-sm outline-none"
+        style={inputStyle}
       >
         {STATUSES.map(s => (
-          <option key={s} value={s} className="capitalize">{s.charAt(0).toUpperCase() + s.slice(1)}</option>
+          <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
         ))}
       </select>
       <SubmitButton />
-      {state?.error  && <p className="text-xs text-red-600">{state.error}</p>}
-      {state?.success && <p className="text-xs text-emerald-600">Status updated.</p>}
+      {state?.error   && <p className="text-xs" style={{ color: '#EF4444' }}>{state.error}</p>}
+      {state?.success && <p className="text-xs" style={{ color: '#22C55E' }}>Status updated.</p>}
     </form>
   );
 }

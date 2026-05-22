@@ -31,20 +31,21 @@ export default function WalletFreezeAction({ uid, currentStatus }: Props) {
     }
   }
 
+  const btnStyle = isFrozen
+    ? { background: '#052E1B', color: '#22C55E', border: '1px solid #0A4428' }
+    : { background: '#1C1405', color: '#F59E0B', border: '1px solid #2A2005' };
+
   return (
     <div className="flex items-center gap-2">
       <button
         onClick={handleClick}
         disabled={busy}
-        className={`px-3 py-1 text-xs font-bold rounded-lg transition disabled:opacity-50 ${
-          isFrozen
-            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'
-            : 'bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100'
-        }`}
+        className="px-3 py-1 text-xs font-bold rounded-lg transition hover:brightness-110 disabled:opacity-50"
+        style={btnStyle}
       >
         {busy ? '…' : isFrozen ? 'Unfreeze' : 'Freeze'}
       </button>
-      {err && <span className="text-[10px] text-red-600">{err}</span>}
+      {err && <span className="text-[10px]" style={{ color: '#EF4444' }}>{err}</span>}
     </div>
   );
 }

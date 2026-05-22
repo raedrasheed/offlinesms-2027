@@ -39,21 +39,25 @@ export default async function RoleDetailPage({ params }: { params: { uid: string
   const isLegacyAdmin = claims.admin === true;
   const canManage = canDo(session.role, 'manage:roles') && params.uid !== session.user.uid;
 
+  const CARD = '#131B27';
+  const BORDER = '#1A2437';
+
   return (
-    <div className="p-7 max-w-2xl">
+    <div className="p-6 space-y-5 max-w-2xl" style={{ color: '#E2E8F2' }}>
       <div className="flex items-center gap-3 mb-6">
-        <Link href={'/admin/roles' as any} className="text-sm text-ink-500 hover:text-ink-900">← Roles</Link>
-        <span className="text-ink-300">/</span>
-        <span className="text-sm font-semibold text-ink-900 truncate">{user.displayName ?? params.uid}</span>
+        <p className="text-[12px] font-medium mb-0.5" style={{ color: '#64748B' }}>Admin / Roles</p>
+        <Link href={'/admin/roles' as any} className="text-sm hover:underline" style={{ color: '#64748B' }}>← Roles</Link>
+        <span style={{ color: '#475569' }}>/</span>
+        <span className="text-sm font-semibold truncate" style={{ color: '#E2E8F2' }}>{user.displayName ?? params.uid}</span>
       </div>
 
       <div className="flex items-center gap-4 mb-6">
-        <div className="w-12 h-12 rounded-full bg-primary/20 text-primary font-bold text-xl grid place-items-center shrink-0">
+        <div className="w-12 h-12 rounded-full font-bold text-xl grid place-items-center shrink-0" style={{ background: 'rgba(91,182,222,0.15)', color: '#5BB6DE' }}>
           {(user.displayName ?? params.uid).slice(0, 1).toUpperCase()}
         </div>
         <div>
-          <h1 className="text-xl font-extrabold tracking-tight text-ink-900">{user.displayName ?? '—'}</h1>
-          <p className="text-sm text-ink-500">{maskEmail(user.email, session.role)}</p>
+          <h1 className="text-[22px] font-extrabold tracking-tight">{user.displayName ?? '—'}</h1>
+          <p className="text-sm" style={{ color: '#64748B' }}>{maskEmail(user.email, session.role)}</p>
         </div>
         {currentRole && <RoleBadge role={currentRole as AdminRole} />}
       </div>
@@ -70,13 +74,13 @@ export default async function RoleDetailPage({ params }: { params: { uid: string
         {canManage ? (
           <DetailCard title="Assign role" subtitle="Changes are audit-logged. You cannot modify your own role.">
             <RoleAssignAction targetUid={params.uid} currentRole={currentRole} />
-            <p className="text-xs text-ink-400 mt-3">
+            <p className="text-xs mt-3" style={{ color: '#475569' }}>
               Removing the last super_admin is blocked. Legacy admin claim is not affected by this form.
             </p>
           </DetailCard>
         ) : (
           <DetailCard title="Role assignment">
-            <p className="text-sm text-ink-500">
+            <p className="text-sm" style={{ color: '#64748B' }}>
               {params.uid === session.user.uid
                 ? 'You cannot modify your own role.'
                 : 'Only super admins can assign roles.'}

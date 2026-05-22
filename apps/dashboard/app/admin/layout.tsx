@@ -23,8 +23,8 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 
   if (session.state === 'forbidden') {
     return (
-      <div className="min-h-screen bg-bg-app grid place-items-center p-6">
-        <div className="bg-bg-surface rounded-2xl shadow-sh2 p-8 w-full max-w-md">
+      <div className="min-h-screen grid place-items-center p-6" style={{ background: '#0D1117' }}>
+        <div className="rounded-2xl p-8 w-full max-w-md" style={{ background: '#131B27', border: '1px solid #1A2437' }}>
           <PermissionState
             title="Admin access required"
             description={
@@ -42,7 +42,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   const { user, role } = session;
 
   return (
-    <div className="flex min-h-screen bg-canvas">
+    <div className="flex min-h-screen" style={{ background: '#0D1117' }}>
       <Sidebar role={role} />
       <div className="flex-1 min-w-0 flex flex-col">
         <AdminTopbar email={user.email} role={role} />

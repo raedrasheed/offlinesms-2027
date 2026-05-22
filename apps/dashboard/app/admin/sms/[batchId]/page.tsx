@@ -17,6 +17,9 @@ import SmsRetryAction from './SmsRetryAction';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
+const CARD   = '#131B27';
+const BORDER = '#1A2437';
+
 export default async function SmsBatchDetailPage({
   params,
   searchParams,
@@ -44,17 +47,17 @@ export default async function SmsBatchDetailPage({
   const nextCursor = recipients.length === 100 ? recipients[recipients.length - 1].uid : null;
 
   return (
-    <div className="p-7 max-w-5xl">
-      <div className="flex items-center gap-3 mb-6">
-        <Link href={'/admin/sms' as any} className="text-sm text-ink-500 hover:text-ink-900">← SMS Gateway</Link>
-        <span className="text-ink-300">/</span>
-        <span className="text-sm font-mono text-ink-900 truncate">{params.batchId.slice(0, 16)}…</span>
+    <div className="p-6 max-w-5xl space-y-5" style={{ color: '#E2E8F2' }}>
+      <div className="flex items-center gap-2 text-[12px]">
+        <Link href={'/admin/sms' as any} className="hover:underline" style={{ color: '#5BB6DE' }}>← SMS Gateway</Link>
+        <span style={{ color: '#475569' }}>/</span>
+        <span className="font-mono truncate" style={{ color: '#64748B' }}>{params.batchId.slice(0, 16)}…</span>
       </div>
 
-      <div className="flex items-center justify-between mb-5">
+      <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-extrabold tracking-tight text-ink-900">SMS Batch</h1>
-          <p className="text-xs font-mono text-ink-400 mt-0.5">{params.batchId}</p>
+          <h1 className="text-[22px] font-extrabold tracking-tight">SMS Batch</h1>
+          <p className="font-mono text-[11px] mt-0.5" style={{ color: '#475569' }}>{params.batchId}</p>
         </div>
         <StatusBadge status={batch.status} />
       </div>
@@ -63,16 +66,16 @@ export default async function SmsBatchDetailPage({
         {/* Summary stats */}
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
           {[
-            { label: 'Total',     value: batch.totalCount,     cls: '' },
-            { label: 'Queued',    value: batch.queuedCount,    cls: 'text-blue-700' },
-            { label: 'Sent',      value: batch.sentCount,      cls: 'text-ink-700' },
-            { label: 'Delivered', value: batch.deliveredCount, cls: 'text-emerald-700' },
-            { label: 'Failed',    value: batch.failedCount,    cls: 'text-red-700' },
-            { label: 'Skipped',   value: batch.skippedCount,   cls: 'text-ink-400' },
+            { label: 'Total',     value: batch.totalCount,     color: '#E2E8F2' },
+            { label: 'Queued',    value: batch.queuedCount,    color: '#5BB6DE' },
+            { label: 'Sent',      value: batch.sentCount,      color: '#94A3B8' },
+            { label: 'Delivered', value: batch.deliveredCount, color: '#22C55E' },
+            { label: 'Failed',    value: batch.failedCount,    color: '#EF4444' },
+            { label: 'Skipped',   value: batch.skippedCount,   color: '#475569' },
           ].map(s => (
-            <div key={s.label} className="bg-white rounded-xl border border-ink-100 p-3 text-center">
-              <div className={`text-2xl font-extrabold font-mono ${s.cls}`}>{s.value}</div>
-              <div className="text-[10px] font-bold text-ink-500 uppercase tracking-wide mt-1">{s.label}</div>
+            <div key={s.label} className="rounded-xl p-3 text-center" style={{ background: CARD, border: `1px solid ${BORDER}` }}>
+              <div className="text-2xl font-extrabold font-mono" style={{ color: s.color }}>{s.value}</div>
+              <div className="text-[10px] font-bold uppercase tracking-wide mt-1" style={{ color: '#64748B' }}>{s.label}</div>
             </div>
           ))}
         </div>
@@ -82,12 +85,12 @@ export default async function SmsBatchDetailPage({
           <MetadataList columns={2} items={[
             { label: 'Batch ID',      value: <span className="font-mono text-[11px]">{params.batchId}</span> },
             { label: 'Conversation',  value: batch.conversationId ? (
-              <Link href={`/admin/groups/${batch.conversationId}` as any} className="font-mono text-[11px] text-primary hover:underline">
+              <Link href={`/admin/groups/${batch.conversationId}` as any} className="font-mono text-[11px] hover:underline" style={{ color: '#5BB6DE' }}>
                 {batch.conversationId.slice(0, 16)}
               </Link>
             ) : '—' },
             { label: 'Sender',        value: batch.senderId ? (
-              <Link href={`/admin/users/${batch.senderId}` as any} className="font-mono text-[11px] text-primary hover:underline">
+              <Link href={`/admin/users/${batch.senderId}` as any} className="font-mono text-[11px] hover:underline" style={{ color: '#5BB6DE' }}>
                 {batch.senderId.slice(0, 16)}
               </Link>
             ) : '—' },
@@ -104,12 +107,16 @@ export default async function SmsBatchDetailPage({
           canRetry ? (
             <SmsRetryAction batchId={params.batchId} failedCount={batch.failedCount} />
           ) : (
-            <div className="rounded-xl border border-ink-100 bg-surface3/50 p-4 flex items-center justify-between">
+            <div className="rounded-xl p-4 flex items-center justify-between" style={{ background: CARD, border: `1px solid ${BORDER}` }}>
               <div>
-                <p className="text-sm font-bold text-ink-900">{batch.failedCount} failed recipient{batch.failedCount !== 1 ? 's' : ''}</p>
-                <p className="text-xs text-ink-500">Retry requires the retry:sms capability (super_admin or organization_admin).</p>
+                <p className="text-sm font-bold" style={{ color: '#E2E8F2' }}>
+                  {batch.failedCount} failed recipient{batch.failedCount !== 1 ? 's' : ''}
+                </p>
+                <p className="text-xs mt-0.5" style={{ color: '#64748B' }}>
+                  Retry requires the retry:sms capability (super_admin or organization_admin).
+                </p>
               </div>
-              <button disabled className="px-3 py-1.5 bg-ink-100 text-ink-400 text-xs font-bold rounded-lg cursor-not-allowed">
+              <button disabled className="px-3 py-1.5 text-xs font-bold rounded-lg cursor-not-allowed opacity-40" style={{ background: '#1A2437', color: '#94A3B8' }}>
                 Retry failed
               </button>
             </div>
@@ -122,39 +129,40 @@ export default async function SmsBatchDetailPage({
           subtitle="Phones masked · no SMS body shown"
         >
           {recipients.length === 0 ? (
-            <p className="text-sm text-ink-500">No recipients loaded.</p>
+            <p className="text-sm" style={{ color: '#64748B' }}>No recipients loaded.</p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm border-collapse">
+              <table className="w-full text-[12px] border-collapse">
                 <thead>
-                  <tr className="text-[10px] font-bold text-ink-500 uppercase tracking-wide text-left">
-                    <th className="pb-2 pr-4">User</th>
-                    <th className="pb-2 pr-4">Phone (masked)</th>
-                    <th className="pb-2 pr-4">App receipt</th>
-                    <th className="pb-2 pr-4">SMS status</th>
-                    <th className="pb-2 pr-4">Skip/failure reason</th>
-                    <th className="pb-2">Updated</th>
+                  <tr className="text-left">
+                    {['User', 'Phone (masked)', 'App receipt', 'SMS status', 'Skip/failure reason', 'Updated'].map(h => (
+                      <th key={h} className="pb-2 pr-4 text-[10px] font-bold uppercase tracking-wide" style={{ color: '#475569' }}>{h}</th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
                   {recipients.map((r, i) => (
-                    <tr key={r.uid} className={`border-t border-ink-100 ${i % 2 === 0 ? '' : 'bg-surface3/40'}`}>
+                    <tr
+                      key={r.uid}
+                      className="transition hover:bg-white/[0.03]"
+                      style={{ borderTop: `1px solid ${BORDER}` }}
+                    >
                       <td className="py-2.5 pr-4">
-                        <Link href={`/admin/users/${r.uid}` as any} className="text-xs text-primary hover:underline font-mono">
+                        <Link href={`/admin/users/${r.uid}` as any} className="font-mono text-[11px] hover:underline" style={{ color: '#5BB6DE' }}>
                           {(r.displayName ?? r.uid).slice(0, 12)}
                         </Link>
                       </td>
-                      <td className="py-2.5 pr-4 font-mono text-xs text-ink-600">{maskPhone(r.phone)}</td>
+                      <td className="py-2.5 pr-4 font-mono text-[11px]" style={{ color: '#94A3B8' }}>{maskPhone(r.phone)}</td>
                       <td className="py-2.5 pr-4">
-                        {r.appReceiptStatus ? <StatusBadge status={r.appReceiptStatus} /> : <span className="text-ink-400">—</span>}
+                        {r.appReceiptStatus ? <StatusBadge status={r.appReceiptStatus} /> : <span style={{ color: '#475569' }}>—</span>}
                       </td>
                       <td className="py-2.5 pr-4">
-                        {r.smsStatus ? <StatusBadge status={r.smsStatus} /> : <span className="text-ink-400">—</span>}
+                        {r.smsStatus ? <StatusBadge status={r.smsStatus} /> : <span style={{ color: '#475569' }}>—</span>}
                       </td>
-                      <td className="py-2.5 pr-4 text-xs text-ink-500 max-w-[180px] truncate">
+                      <td className="py-2.5 pr-4 text-[11px] max-w-[180px] truncate" style={{ color: '#64748B' }}>
                         {r.skipReason ?? r.failureReason ?? '—'}
                       </td>
-                      <td className="py-2.5 text-xs text-ink-400 whitespace-nowrap">{r.updatedAt}</td>
+                      <td className="py-2.5 text-[11px] whitespace-nowrap" style={{ color: '#475569' }}>{r.updatedAt}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -163,41 +171,41 @@ export default async function SmsBatchDetailPage({
           )}
           {nextCursor && (
             <div className="mt-3 text-center">
-              <Link href={`/admin/sms/${params.batchId}?cursor=${nextCursor}` as any}
-                className="text-sm text-primary font-semibold hover:underline">
+              <Link href={`/admin/sms/${params.batchId}?cursor=${nextCursor}` as any} className="text-sm font-semibold hover:underline" style={{ color: '#5BB6DE' }}>
                 Load more →
               </Link>
             </div>
           )}
         </DetailCard>
 
-        {/* Webhook delivery events — soft-fail: hidden if collection absent */}
+        {/* Webhook delivery events */}
         {deliveryEvents.length > 0 && (
           <DetailCard
             title={`Webhook delivery events (${deliveryEvents.length})`}
             subtitle="No raw payload, no phone number, no SMS body shown"
           >
             <div className="overflow-x-auto">
-              <table className="w-full text-sm border-collapse">
+              <table className="w-full text-[12px] border-collapse">
                 <thead>
-                  <tr className="text-[10px] font-bold text-ink-500 uppercase tracking-wide text-left">
-                    <th className="pb-2 pr-4">Event ID</th>
-                    <th className="pb-2 pr-4">Status</th>
-                    <th className="pb-2 pr-4">Result</th>
-                    <th className="pb-2 pr-4">Error code</th>
-                    <th className="pb-2 pr-4">Received</th>
-                    <th className="pb-2">Processed</th>
+                  <tr className="text-left">
+                    {['Event ID', 'Status', 'Result', 'Error code', 'Received', 'Processed'].map(h => (
+                      <th key={h} className="pb-2 pr-4 text-[10px] font-bold uppercase tracking-wide" style={{ color: '#475569' }}>{h}</th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
                   {deliveryEvents.map((ev, i) => (
-                    <tr key={ev.id} className={`border-t border-ink-100 ${i % 2 === 0 ? '' : 'bg-surface3/40'}`}>
-                      <td className="py-2.5 pr-4 font-mono text-xs text-ink-500">{ev.id.slice(0, 14)}…</td>
+                    <tr
+                      key={ev.id}
+                      className="transition hover:bg-white/[0.03]"
+                      style={{ borderTop: `1px solid ${BORDER}` }}
+                    >
+                      <td className="py-2.5 pr-4 font-mono text-[11px]" style={{ color: '#475569' }}>{ev.id.slice(0, 14)}…</td>
                       <td className="py-2.5 pr-4"><StatusBadge status={ev.status} /></td>
-                      <td className="py-2.5 pr-4 text-xs text-ink-600 capitalize">{ev.result ?? '—'}</td>
-                      <td className="py-2.5 pr-4 text-xs font-mono text-ink-500">{ev.errorCode ?? '—'}</td>
-                      <td className="py-2.5 pr-4 text-xs text-ink-400 whitespace-nowrap">{ev.receivedAt}</td>
-                      <td className="py-2.5 text-xs text-ink-400 whitespace-nowrap">{ev.processedAt ?? '—'}</td>
+                      <td className="py-2.5 pr-4 text-[11px] capitalize" style={{ color: '#94A3B8' }}>{ev.result ?? '—'}</td>
+                      <td className="py-2.5 pr-4 font-mono text-[11px]" style={{ color: '#475569' }}>{ev.errorCode ?? '—'}</td>
+                      <td className="py-2.5 pr-4 text-[11px] whitespace-nowrap" style={{ color: '#475569' }}>{ev.receivedAt}</td>
+                      <td className="py-2.5 text-[11px] whitespace-nowrap" style={{ color: '#475569' }}>{ev.processedAt ?? '—'}</td>
                     </tr>
                   ))}
                 </tbody>
