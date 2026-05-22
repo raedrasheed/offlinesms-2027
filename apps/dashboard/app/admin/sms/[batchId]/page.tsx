@@ -6,7 +6,7 @@ import { redirect, notFound } from 'next/navigation';
 import Link from 'next/link';
 import { verifySession } from '@/lib/session';
 import { canDo } from '@/lib/adminPermissions';
-import { getSmsBatch, listSmsBatchRecipients } from '@/lib/adminData';
+import { getSmsBatch, listSmsBatchRecipients, listDeliveryEvents } from '@/lib/adminData';
 import { maskPhone } from '@/lib/redaction';
 import { PermissionState } from '@/components/state';
 import DetailCard from '@/components/admin/DetailCard';
@@ -33,9 +33,10 @@ export default async function SmsBatchDetailPage({
 
   const canRetry = canDo(session.role, 'retry:sms');
 
-  const [batch, recipients] = await Promise.all([
+  const [batch, recipients, deliveryEvents] = await Promise.all([
     getSmsBatch(params.batchId),
     listSmsBatchRecipients(params.batchId, searchParams?.cursor),
+    listDeliveryEvents(params.batchId).catch(() => []),
   ]);
 
   if (!batch) notFound();
@@ -169,6 +170,41 @@ export default async function SmsBatchDetailPage({
             </div>
           )}
         </DetailCard>
+
+        {/* Webhook delivery events — soft-fail: hidden if collection absent */}
+        {deliveryEvents.length > 0 && (
+          <DetailCard
+            title={`Webhook delivery events (${deliveryEvents.length})`}
+            subtitle="No raw payload, no phone number, no SMS body shown"
+          >
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm border-collapse">
+                <thead>
+                  <tr className="text-[10px] font-bold text-ink-500 uppercase tracking-wide text-left">
+                    <th className="pb-2 pr-4">Event ID</th>
+                    <th className="pb-2 pr-4">Status</th>
+                    <th className="pb-2 pr-4">Result</th>
+                    <th className="pb-2 pr-4">Error code</th>
+                    <th className="pb-2 pr-4">Received</th>
+                    <th className="pb-2">Processed</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {deliveryEvents.map((ev, i) => (
+                    <tr key={ev.id} className={`border-t border-ink-100 ${i % 2 === 0 ? '' : 'bg-surface3/40'}`}>
+                      <td className="py-2.5 pr-4 font-mono text-xs text-ink-500">{ev.id.slice(0, 14)}…</td>
+                      <td className="py-2.5 pr-4"><StatusBadge status={ev.status} /></td>
+                      <td className="py-2.5 pr-4 text-xs text-ink-600 capitalize">{ev.result ?? '—'}</td>
+                      <td className="py-2.5 pr-4 text-xs font-mono text-ink-500">{ev.errorCode ?? '—'}</td>
+                      <td className="py-2.5 pr-4 text-xs text-ink-400 whitespace-nowrap">{ev.receivedAt}</td>
+                      <td className="py-2.5 text-xs text-ink-400 whitespace-nowrap">{ev.processedAt ?? '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </DetailCard>
+        )}
       </div>
     </div>
   );

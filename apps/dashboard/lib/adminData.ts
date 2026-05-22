@@ -855,6 +855,45 @@ export async function getDashboardCounts(): Promise<DashboardCounts> {
 
 // ─── Points package helpers ───────────────────────────────────────────────────
 
+// ─── SMS delivery events ──────────────────────────────────────────────────────
+
+export type AdminDeliveryEventRow = {
+  id: string;
+  status: string;
+  result: string | null;
+  receivedAt: string;
+  processedAt: string | null;
+  errorCode: string | null;
+};
+
+export async function listDeliveryEvents(
+  batchId: string,
+  cursor?: string,
+): Promise<AdminDeliveryEventRow[]> {
+  let q = adminDb.collection('smsDeliveryEvents')
+    .where('offlineSmsBatchId', '==', batchId)
+    .orderBy('receivedAt', 'desc')
+    .limit(50) as FirebaseFirestore.Query;
+
+  if (cursor) {
+    const snap = await adminDb.collection('smsDeliveryEvents').doc(cursor).get();
+    if (snap.exists) q = q.startAfter(snap);
+  }
+
+  const result = await q.get();
+  return result.docs.map(d => {
+    const data = d.data();
+    return {
+      id:          d.id,
+      status:      (data.status      as string) ?? '—',
+      result:      (data.result      as string | null) ?? null,
+      receivedAt:  safeDate(data.receivedAt),
+      processedAt: data.processedAt ? safeDate(data.processedAt) : null,
+      errorCode:   (data.errorCode   as string | null) ?? null,
+    };
+  });
+}
+
 export async function getPointsPackage(packageId: string): Promise<AdminPackageRow | null> {
   const snap = await adminDb.collection('pointsPackages').doc(packageId).get();
   if (!snap.exists) return null;
