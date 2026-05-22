@@ -4,6 +4,46 @@ Running log of phased work. Newest first.
 
 ---
 
+## Phase 21 — Controlled Production Rollout
+
+**Branch:** `claude/repo-audit-architecture-MiZDX`
+**Status:** Complete.
+
+### What was done
+
+1. **Phase 21 plan** (`docs/OFFLINESMS_PHASE_21_PLAN.md`) — objective, release gates (10 items), deployment sequence, constraints, acceptance criteria.
+2. **Environment & secrets checklist** (`docs/OFFLINESMS_ENVIRONMENT_CHECKLIST.md`) — Firebase project setup, Cloud Functions config keys (SMS gateway, payments webhook, notifications scaffold), mobile `.env` variables, dashboard `.env.local` variables, verification steps, staging vs production parity checks.
+3. **Deployment runbook** (`docs/OFFLINESMS_DEPLOYMENT_RUNBOOK.md`) — exact commands for rules, indexes, functions, dashboard (Vercel/Hosting), admin bootstrap, scheduled jobs, post-deploy checks, and common failure recovery (billing, parse errors, index conflicts, cold starts, missing config).
+4. **Admin bootstrap checklist** (`docs/OFFLINESMS_ADMIN_BOOTSTRAP_CHECKLIST.md`) — first-time `super_admin` creation via Admin SDK or Functions shell, role verification, last-super_admin protection test, support_agent creation, route guard validation, emergency locked-out recovery.
+5. **Production smoke-test guide** (`docs/OFFLINESMS_PRODUCTION_SMOKE_TEST.md`) — 17 mobile items (login/OTP, profile, direct chat, message actions, groups, typing indicator, SMS escalation entry, insufficient balance, batch send/receipt, wallet, transactions, support ticket, i18n, dark mode, toggle persistence, receipts, sign out), 13 dashboard items (auth gate, RBAC nav, org scoping, search, export, privileged action + audit, wallet management, SMS batch view, support ticket, notification draft disabled, rate limits, reports), 6 security negative tests.
+6. **Release tagging guide** (`docs/OFFLINESMS_RELEASE_TAGGING.md`) — `v<major>.<minor>.<patch>` convention, annotated tag commands, release notes template, rollback tag strategy, GitHub Release creation.
+7. **Monitoring & incident checklist** (`docs/OFFLINESMS_MONITORING_CHECKLIST.md`) — SEV1/SEV2/SEV3 severity definitions and response targets, 48-hour observation items across auth/Firestore/functions/SMS gateway/points/dashboard/security, incident response steps per severity, monitoring tooling table.
+8. **Rollback runbook** (`docs/OFFLINESMS_ROLLBACK_RUNBOOK.md`) — functions rollback (redeploy from tag), rules rollback (redeploy or console history), index rollback limitations, dashboard rollback (Vercel or Firebase Hosting rollback command), emergency feature disables (SMS, purchase/transfer, exports), full rollback sequence, data rollback limitations (PITR/export note), post-rollback checklist.
+
+### Commits
+
+- `docs: add OfflineSMS phase 21 rollout plan and runbooks`
+- `docs: update phase log for phase 21` — _(this commit)_
+
+### Files changed
+
+- New: `docs/OFFLINESMS_PHASE_21_PLAN.md`
+- New: `docs/OFFLINESMS_ENVIRONMENT_CHECKLIST.md`
+- New: `docs/OFFLINESMS_DEPLOYMENT_RUNBOOK.md`
+- New: `docs/OFFLINESMS_ADMIN_BOOTSTRAP_CHECKLIST.md`
+- New: `docs/OFFLINESMS_PRODUCTION_SMOKE_TEST.md`
+- New: `docs/OFFLINESMS_RELEASE_TAGGING.md`
+- New: `docs/OFFLINESMS_MONITORING_CHECKLIST.md`
+- New: `docs/OFFLINESMS_ROLLBACK_RUNBOOK.md`
+- Modified: `docs/OFFLINESMS_PHASE_LOG.md`
+
+### Checks
+
+- `npm run validate` — typecheck ✅ lint ✅ i18n:check ✅ test ✅ build ✅
+- No new product code. Documentation only.
+
+---
+
 ## Phase 20 — Final Hardening: Testing, Security, Performance, Release Readiness
 
 **Branch:** `claude/repo-audit-architecture-MiZDX`
