@@ -8,7 +8,7 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore } from 'firebase-admin/firestore';
 import {
-  AudienceInput, canonicalAudience, classifyRecipients, filterByAudience,
+  AudienceInput, canonicalAudience, classifyRecipients, filterByAudience, findAlreadySentUids,
   COST_PER_SMS, MAX_RECIPIENTS_PER_BATCH,
 } from './recipients';
 
@@ -68,7 +68,8 @@ export const previewSmsEscalation = onCall({ region: 'us-central1' }, async (req
     receiptsByUid.set(r.id, { status: (r.data() as { status?: string }).status });
   }
   const { candidates } = filterByAudience(audience, participants, senderUid ?? uid, receiptsByUid);
-  const { eligible, excluded } = await classifyRecipients(db, candidates);
+  const alreadySent = await findAlreadySentUids(db, uid, data.messageId);
+  const { eligible, excluded } = await classifyRecipients(db, candidates, alreadySent);
 
   const wallet = await db.collection('wallets').doc(uid).get();
   const balance  = (wallet.data()?.balance  as number) ?? 0;

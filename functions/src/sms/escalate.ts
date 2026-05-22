@@ -10,7 +10,7 @@ import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore, FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { sendBatch } from './gateway';
 import {
-  canonicalAudience, classifyRecipients, filterByAudience,
+  canonicalAudience, classifyRecipients, filterByAudience, findAlreadySentUids,
   AudienceInput,
   COOLDOWN_MS, COST_PER_SMS, MAX_BATCHES_PER_DAY, MAX_RECIPIENTS_PER_BATCH,
   todayKey,
@@ -116,7 +116,8 @@ export const escalateSms = onCall({ region: 'us-central1' }, async (request) => 
     receiptsByUid.set(r.id, { status: (r.data() as { status?: string }).status });
   }
   const { candidates } = filterByAudience(audience, participants, senderUid ?? uid, receiptsByUid);
-  const { eligible, excluded } = await classifyRecipients(db, candidates);
+  const alreadySent = await findAlreadySentUids(db, uid, data.messageId);
+  const { eligible, excluded } = await classifyRecipients(db, candidates, alreadySent);
 
   if (eligible.length === 0) throw new HttpsError('failed-precondition', 'no-eligible-recipients');
   if (eligible.length > MAX_RECIPIENTS_PER_BATCH) {

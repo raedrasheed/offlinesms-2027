@@ -53,9 +53,37 @@ export const retryFailedSmsRecipients = onCall({ region: 'us-central1' }, async 
     throw new HttpsError('failed-precondition', 'nothing-to-retry');
   }
 
+  // Phase 11: cross-batch dedupe — skip recipients who already
+  // received a non-failed SMS for the same originating message
+  // (e.g. another retry batch landed in between).
+  const sourceMessageId = source.messageId ?? '';
+  const alreadySent = new Set<string>();
+  if (sourceMessageId) {
+    const prior = await db.collection('smsBatches')
+      .where('senderId',  '==', uid)
+      .where('messageId', '==', sourceMessageId)
+      .limit(50)
+      .get();
+    for (const b of prior.docs) {
+      if (b.id === data.batchId) continue;       // skip the source itself
+      const rcs = await b.ref.collection('recipients').get();
+      for (const r of rcs.docs) {
+        const st = r.get('smsStatus') as string | undefined;
+        if (st === 'queued' || st === 'sent' || st === 'delivered') {
+          alreadySent.add(r.id);
+        }
+      }
+    }
+  }
+
   type Failed = { uid: string; phone: string; maskedPhone: string; appReceiptStatus: string | null };
   const failed: Failed[] = [];
+  const skippedByDedupe: string[] = [];
   for (const r of failedSnap.docs) {
+    if (alreadySent.has(r.id)) {
+      skippedByDedupe.push(r.id);
+      continue;
+    }
     const u = await db.collection('users').doc(r.id).get();
     const phone = u.data()?.phoneNumber as string | undefined;
     if (!phone) continue;
@@ -103,20 +131,22 @@ export const retryFailedSmsRecipients = onCall({ region: 'us-central1' }, async 
     gatewayBatchId:    null,
     offlineSmsBatchId: null,
     retryOfBatchId:    data.batchId,
+    attemptNumber:     ((source as { attemptNumber?: number }).attemptNumber ?? 1) + 1,
     createdAt:         now,
     updatedAt:         now,
   });
 
   await writeAuditLog({
-    action: 'sms.escalation.retry_failed',
+    action: 'sms.retry.created',
     actor:  { uid },
     target: { type: 'sms-batch', id: newRef.id },
     result: 'success',
     metadata: {
-      batchId:       newRef.id,
-      retryOf:       data.batchId,
-      count:         failed.length,
-      pointsCost:    cost,
+      batchId:        newRef.id,
+      retryOf:        data.batchId,
+      count:          failed.length,
+      pointsCost:     cost,
+      skippedByDedupe: skippedByDedupe.length,
     },
   });
 
@@ -125,6 +155,13 @@ export const retryFailedSmsRecipients = onCall({ region: 'us-central1' }, async 
     result = await sendBatch(newRef.id, source.smsBody ?? '', failed);
   } catch {
     await newRef.update({ status: 'failed', updatedAt: FieldValue.serverTimestamp() });
+    await writeAuditLog({
+      action: 'sms.retry.failed',
+      actor:  { uid },
+      target: { type: 'sms-batch', id: newRef.id },
+      result: 'failure',
+      metadata: { batchId: newRef.id, retryOf: data.batchId, reason: 'gateway-error' },
+    });
     throw new HttpsError('internal', 'gateway-error');
   }
 

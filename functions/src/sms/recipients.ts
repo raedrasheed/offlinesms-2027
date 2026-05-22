@@ -94,6 +94,7 @@ export function filterByAudience(
 export async function classifyRecipients(
   db: Firestore,
   candidates: Array<{ uid: string; appReceiptStatus: string | null }>,
+  alreadySentUids?: ReadonlySet<string>,
 ): Promise<{ eligible: Eligible[]; excluded: Excluded[] }> {
   const eligible: Eligible[] = [];
   const excluded: Excluded[] = [];
@@ -105,6 +106,18 @@ export async function classifyRecipients(
 
   for (let i = 0; i < candidates.length; i++) {
     const c = candidates[i];
+
+    // Phase 11 cross-batch dedupe: skip recipients who already have
+    // a non-failed SMS for the same originating message.
+    if (alreadySentUids?.has(c.uid)) {
+      excluded.push({
+        uid: c.uid, displayName: null,
+        appReceiptStatus: c.appReceiptStatus,
+        skipReason: 'already-sent-for-message',
+      });
+      continue;
+    }
+
     const snap: DocumentSnapshot = userSnaps[i];
     if (!snap.exists) {
       excluded.push({ uid: c.uid, displayName: null, appReceiptStatus: c.appReceiptStatus, skipReason: 'no-phone' });
@@ -149,6 +162,36 @@ export async function classifyRecipients(
   }
 
   return { eligible, excluded };
+}
+
+/**
+ * Phase 11 cross-batch dedupe lookup. Returns the set of recipient uids
+ * who have at least one non-failed (queued/sent/delivered) SMS row for
+ * the (messageId, senderUid) pair across all prior batches.
+ */
+export async function findAlreadySentUids(
+  db: Firestore,
+  senderUid: string,
+  messageId: string,
+): Promise<Set<string>> {
+  const out = new Set<string>();
+  // Index: smsBatches(senderId, messageId, createdAt DESC) — Phase 11.
+  const batches = await db.collection('smsBatches')
+    .where('senderId',  '==', senderUid)
+    .where('messageId', '==', messageId)
+    .limit(50)
+    .get();
+  if (batches.empty) return out;
+  for (const b of batches.docs) {
+    const recipients = await b.ref.collection('recipients').get();
+    for (const r of recipients.docs) {
+      const status = r.get('smsStatus') as string | undefined;
+      if (status === 'queued' || status === 'sent' || status === 'delivered') {
+        out.add(r.id);
+      }
+    }
+  }
+  return out;
 }
 
 export const MAX_BATCHES_PER_DAY     = 20;
