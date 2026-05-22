@@ -19,8 +19,8 @@ import { LoadingState, EmptyState } from '../components/state';
 
 type FilterKey = 'all' | 'sms_spend' | 'refund' | 'purchase' | 'transfer' | 'admin';
 
-const BUY_ENABLED = false;
-const TRANSFER_ENABLED = false;
+const BUY_ENABLED = true;       // Phase 10 — webhook-driven purchase flow wired.
+const TRANSFER_ENABLED = true;  // Phase 10 — hardened transfer flow wired.
 
 function filterMatches(filter: FilterKey, t: Transaction): boolean {
   if (filter === 'all') return true;
@@ -93,13 +93,21 @@ export default function Points({ navigation }: any) {
             </Text>
 
             <View style={s.actions}>
-              <Pressable style={[s.action, !BUY_ENABLED && { opacity: 0.45 }]} disabled={!BUY_ENABLED}>
+              <Pressable
+                style={[s.action, !BUY_ENABLED && { opacity: 0.45 }]}
+                disabled={!BUY_ENABLED}
+                onPress={() => navigation.navigate('BuyPoints')}
+              >
                 <Text style={s.actionTitle}>Buy points</Text>
-                <Text style={s.actionSub}>{BUY_ENABLED ? '' : 'Coming soon'}</Text>
+                <Text style={s.actionSub}>{BUY_ENABLED ? 'OfflineSMS Points' : 'Coming soon'}</Text>
               </Pressable>
-              <Pressable style={[s.action, !TRANSFER_ENABLED && { opacity: 0.45 }]} disabled={!TRANSFER_ENABLED}>
+              <Pressable
+                style={[s.action, !TRANSFER_ENABLED && { opacity: 0.45 }]}
+                disabled={!TRANSFER_ENABLED}
+                onPress={() => navigation.navigate('TransferPoints')}
+              >
                 <Text style={s.actionTitle}>Transfer</Text>
-                <Text style={s.actionSub}>{TRANSFER_ENABLED ? '' : 'Coming soon'}</Text>
+                <Text style={s.actionSub}>{TRANSFER_ENABLED ? 'Send points to another user' : 'Coming soon'}</Text>
               </Pressable>
             </View>
           </View>

@@ -114,6 +114,26 @@ export default function TransactionDetail({ route, navigation }: any) {
           </Pressable>
         ) : null}
 
+        {tx.relatedPaymentId ? (
+          <View style={s.card}>
+            <Text style={s.sectionLabel}>Payment</Text>
+            <Row label="Payment ID" value={tx.relatedPaymentId} />
+          </View>
+        ) : null}
+
+        {tx.relatedTransferId ? (
+          <View style={s.card}>
+            <Text style={s.sectionLabel}>Transfer</Text>
+            <Row label="Transfer ID" value={tx.relatedTransferId} />
+            {tx.relatedUserId ? (
+              <Row
+                label={tx.direction === 'credit' ? 'From' : 'To'}
+                value={tx.relatedUserId}
+              />
+            ) : null}
+          </View>
+        ) : null}
+
         {tx.relatedUserId ? (
           <View style={s.card}>
             <Row label="Counterparty" value={tx.relatedUserId} />

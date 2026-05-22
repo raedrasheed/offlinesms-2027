@@ -21,6 +21,8 @@ import AddMembers from './src/screens/AddMembers';
 import ForwardPicker from './src/screens/ForwardPicker';
 import MessageInfo from './src/screens/MessageInfo';
 import TransactionDetail from './src/screens/TransactionDetail';
+import BuyPoints from './src/screens/BuyPoints';
+import TransferPoints from './src/screens/TransferPoints';
 import Status from './src/screens/Status';
 import Calls from './src/screens/Calls';
 import Settings from './src/screens/Settings';
@@ -104,6 +106,8 @@ export default function App() {
             <RootStack.Screen name="ForwardPicker" component={ForwardPicker} />
             <RootStack.Screen name="MessageInfo" component={MessageInfo} />
             <RootStack.Screen name="TransactionDetail" component={TransactionDetail} />
+            <RootStack.Screen name="BuyPoints" component={BuyPoints} />
+            <RootStack.Screen name="TransferPoints" component={TransferPoints} />
             <RootStack.Screen name="Points" component={Points} />
             <RootStack.Screen name="Privacy" component={Privacy} />
             <RootStack.Screen name="Devices" component={Devices} />
