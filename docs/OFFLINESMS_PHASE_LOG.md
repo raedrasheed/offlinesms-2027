@@ -4,6 +4,115 @@ Running log of phased work. Newest first.
 
 ---
 
+## Phase 13 — Admin Management Foundations
+
+**Branch:** `claude/repo-audit-architecture-MiZDX`  
+**Status:** Complete. TypeScript clean (dashboard + functions), Next.js build green (22 routes).
+
+### Commits
+
+1. `docs: add OfflineSMS phase 13 implementation plan`
+2. `feat(dashboard): add admin data and redaction helpers`
+3. `feat(dashboard): add shared admin table primitives`
+4. `feat(dashboard): implement users list and detail views`
+5. `feat(dashboard): implement organizations list and detail views`
+6. `feat(dashboard): implement groups list and detail views`
+7. `feat(dashboard): add communities foundation pages`
+8. `docs: update phase log for phase 13`
+
+### Files changed
+
+**New files (21):**
+- `docs/OFFLINESMS_PHASE_13_PLAN.md`
+- `apps/dashboard/lib/redaction.ts`
+- `apps/dashboard/lib/adminData.ts`
+- `apps/dashboard/components/admin/DataTable.tsx`
+- `apps/dashboard/components/admin/StatusBadge.tsx`
+- `apps/dashboard/components/admin/MetadataList.tsx`
+- `apps/dashboard/components/admin/DetailCard.tsx`
+- `apps/dashboard/components/admin/FilterBar.tsx`
+- `apps/dashboard/app/admin/users/[uid]/page.tsx`
+- `apps/dashboard/app/admin/users/[uid]/UserStatusAction.tsx`
+- `apps/dashboard/app/admin/organizations/page.tsx`
+- `apps/dashboard/app/admin/organizations/[orgId]/page.tsx`
+- `apps/dashboard/app/admin/groups/[conversationId]/page.tsx`
+- `apps/dashboard/app/admin/groups/[conversationId]/GroupLockAction.tsx`
+- `apps/dashboard/app/admin/communities/page.tsx`
+- `apps/dashboard/app/admin/communities/[communityId]/page.tsx`
+- `functions/src/admin/setUserStatus.ts`
+
+**Updated files (6):**
+- `apps/dashboard/lib/adminPermissions.ts` — add view:organizations, manage:users, manage:groups, view:communities
+- `apps/dashboard/lib/adminNav.ts` — add Organizations, Communities nav items
+- `apps/dashboard/app/admin/users/page.tsx` — replace client component with server component
+- `apps/dashboard/app/admin/groups/page.tsx` — replace EmptyState placeholder with server list
+- `functions/src/index.ts` — export setUserStatus
+
+### What was done
+
+- **`lib/redaction.ts` (new).** `maskPhone()`, `maskEmail(role?)`, `safeDate()`,
+  `safeUserSummary()`. Phone always masked (`+••• 1234`). Email shown in full only to
+  `super_admin`, `legacy_admin`, `bootstrap_admin`, `support_agent`.
+- **`lib/adminData.ts` (new).** 15 server-side Admin SDK helpers covering all four
+  modules. All functions paginate at 50 docs max. All timestamps converted via `safeDate()`.
+  Raw phone/email returned for callers to redact. Never reads message bodies.
+- **`lib/adminPermissions.ts` (updated).** Three new capabilities:
+  `view:organizations`, `manage:users` (super_admin only), `manage:groups` (super_admin
+  only), `view:communities`.
+- **`components/admin/` (5 new).** `DataTable`, `StatusBadge`, `MetadataList`,
+  `DetailCard`, `FilterBar` — shared primitives used across all module pages.
+- **Users module.**
+  - `users/page.tsx` replaced (was insecure client-side Firestore read) with server
+    component using Admin SDK; phones always masked; emails role-gated.
+  - `users/[uid]/page.tsx` — profile, wallet balance (balance + reserved only, no
+    full transaction list), group memberships, recent audit (action + timestamp + result).
+  - `UserStatusAction.tsx` — client-side suspend/reactivate via `setUserStatus` callable;
+    only rendered for `manage:users` roles; confirmation dialog required.
+  - `setUserStatus` callable — prevents self-suspension, super_admin suspension;
+    validates transitions; audit-logs every attempt.
+- **Organizations module.** Read-only list + tabbed detail (overview / users / groups /
+  settings). Write action button shows "deferred to a later phase" notice. Settings
+  shows boolean flags only (no secrets).
+- **Groups module.**
+  - `groups/page.tsx` replaced with server list using Admin SDK.
+  - `groups/[conversationId]/page.tsx` — tabbed: overview, members (200 max, no message
+    bodies), settings (locked flag, description only), SMS batch count summary.
+  - `GroupLockAction.tsx` — calls existing `lockGroup` callable; guarded by
+    `manage:groups`; confirmation dialog; error message explains membership requirement.
+- **Communities module.** Scaffold pages. Empty state if collection absent (error caught
+  gracefully so missing collection does not 500). Detail page documents deferred full
+  feature.
+
+### Security posture
+
+- Every page re-verifies session via `verifySession()` (Phase 1 guard stays first).
+- Every page checks `canDo(role, capability)` server-side before any Firestore read.
+- No private message content, SMS bodies, full phone numbers, or payment secrets exposed.
+- `setUserStatus` prevents privilege escalation via self-suspend and super_admin suspend.
+- Audit log written for all status change attempts (success and failure).
+
+### Known limitations
+
+- `getUserGroupMemberships` queries `participantUids` array; groups with >1000
+  members that don't carry this field will be missed.
+- `listOrgMembers` reads `organizations/{id}/members` sub-collection; if membership
+  was never written there (early orgs), it returns empty.
+- `GroupLockAction` calls the existing `lockGroup` callable which requires the
+  admin to be a member of the group. Dashboard admins who are not group members
+  will see an error. A dedicated admin lock action is recommended for Phase 14.
+- Communities are scaffolded; no actual community data model exists yet.
+
+### Recommended Phase 14 scope
+
+1. Admin-native `adminLockGroup` callable (no membership requirement).
+2. Organizations create/edit via server action (data model + rules already exist).
+3. Admin SMS gateway dashboard (batch list, status summary, no message bodies).
+4. Admin points/wallet overview (per-user balance list, no transaction edit).
+5. Admin roles page (assign/revoke admin roles, uses setAdminClaim).
+6. Server action / API route for real-time refreshes (replace router.refresh pattern).
+
+---
+
 ## Phase 12 — Admin Dashboard Foundation
 
 **Branch:** `claude/repo-audit-architecture-MiZDX`  
