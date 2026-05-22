@@ -8,6 +8,7 @@ import { verifySession } from '@/lib/session';
 import { canDo } from '@/lib/adminPermissions';
 import { safeDate } from '@/lib/redaction';
 import { csvRow, buildCsvResponse, writeExportAudit, EXPORT_LIMIT } from '@/lib/exportHelper';
+import { checkRateLimit, rateLimitResponse, LIMITS } from '@/lib/rateLimit';
 
 export const runtime = 'nodejs';
 
@@ -16,6 +17,9 @@ export async function GET(request: Request) {
   const session = await verifySession(sessionCookie);
   if (session.state !== 'authorized') return new NextResponse('Unauthorized', { status: 401 });
   if (!canDo(session.role, 'export:points')) return new NextResponse('Forbidden', { status: 403 });
+
+  const rl = checkRateLimit(`export:${session.user.uid}`, LIMITS.export);
+  if (!rl.ok) return rateLimitResponse(rl.retryAfterMs!);
 
   const url    = new URL(request.url);
   const status = url.searchParams.get('status') || undefined;

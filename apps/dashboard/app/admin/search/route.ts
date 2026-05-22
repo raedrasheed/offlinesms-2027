@@ -9,6 +9,7 @@ import { adminDb } from '@/lib/firebase-admin';
 import { verifySession } from '@/lib/session';
 import { canDo } from '@/lib/adminPermissions';
 import { maskEmail, maskPhone, safeDate } from '@/lib/redaction';
+import { checkRateLimit, rateLimitResponse, LIMITS } from '@/lib/rateLimit';
 
 export const runtime = 'nodejs';
 
@@ -206,6 +207,9 @@ export async function GET(request: Request) {
   if (!canDo(session.role, 'search:global')) {
     return NextResponse.json({ groups: [] }, { status: 403 });
   }
+
+  const rl = checkRateLimit(`search:${session.user.uid}`, LIMITS.search);
+  if (!rl.ok) return rateLimitResponse(rl.retryAfterMs!);
 
   const url = new URL(request.url);
   const q    = (url.searchParams.get('q') ?? '').trim();

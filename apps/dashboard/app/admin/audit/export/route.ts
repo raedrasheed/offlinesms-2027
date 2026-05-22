@@ -12,6 +12,7 @@ import { Timestamp, FieldValue } from 'firebase-admin/firestore';
 import { adminDb } from '@/lib/firebase-admin';
 import { verifySession } from '@/lib/session';
 import { canDo } from '@/lib/adminPermissions';
+import { checkRateLimit, rateLimitResponse, LIMITS } from '@/lib/rateLimit';
 
 export const runtime = 'nodejs';
 
@@ -44,6 +45,9 @@ export async function GET(request: Request) {
   if (!canDo(session.role, 'export:audit')) {
     return new NextResponse('Forbidden', { status: 403 });
   }
+
+  const rl = checkRateLimit(`audit-export:${session.user.uid}`, LIMITS.auditExport);
+  if (!rl.ok) return rateLimitResponse(rl.retryAfterMs!);
 
   const url = new URL(request.url);
   const actor      = url.searchParams.get('actor')      || undefined;
