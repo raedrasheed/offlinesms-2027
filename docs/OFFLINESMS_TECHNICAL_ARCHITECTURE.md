@@ -4,6 +4,50 @@ System-level blueprint for the build-out described in `OFFLINESMS_IMPLEMENTATION
 
 ---
 
+## Phase 17 — Global search, exports, filter bars, reports
+
+### Search architecture
+
+- **Route:** `app/admin/search/route.ts` (Next.js App Router API route, server-side).
+- **Firestore prefix search:** performed via range queries (`where('field', '>=', q)` + `where('field', '<=', q + '')`). Applied to `usernameLower` (users), `slug` (organizations), `name` (groups). Exact-ID lookups handle `smsBatches`, `wallets` (by UID), `payments`, `tickets`, and `auditLogs` (by action prefix).
+- **Limits:** max 5 results per entity group; 50 total across all groups. Queries are run in parallel via `Promise.all`.
+- **Capability gating:** the route checks the `search:global` permission before running any query; missing permission → 403.
+- **Shell:** `AdminGlobalSearchShell.tsx` — debounced fetch (300 ms), grouped-results UI, keyboard navigation (↑ ↓ ↵ Esc), accessible `aria-activedescendant` wiring.
+- **Limitation:** Firestore prefix search is case-sensitive; group `name` search requires lowercase input (documented in UI placeholder text).
+
+### Export architecture
+
+- **Shared helper:** `apps/dashboard/lib/exportHelper.ts` exports `csvCell`, `csvRow`, `buildCsvResponse`, `writeExportAudit`, and the constant `EXPORT_LIMIT = 1000`.
+- **Routes:** `/admin/users/export`, `/admin/groups/export`, `/admin/sms/export`, `/admin/points/transactions/export`, `/admin/points/payments/export`, `/admin/support/export` — all Next.js API routes.
+- **Row cap:** hard-limited to 1000 rows per export. Queries use `limit(EXPORT_LIMIT)` before streaming; no unbounded reads.
+- **Redaction:** phone numbers masked via the existing `redactPhone()` helper; message content excluded. Same redaction contract as the admin UI.
+- **Audit:** every export invocation calls `writeExportAudit` which writes an `auditLogs` entry with `action = 'export.<entity>'`, actor UID, row count, and filters applied.
+- **Capability gating:** `export:users`, `export:groups`, `export:sms`, `export:points`, `export:support` capabilities checked at the route level.
+
+### Reports architecture
+
+- **Route:** `/admin/reports` — server component; all queries run server-side via `firebase-admin`.
+- **Overview cards:** 8 parallel `getCountFromServer()` aggregation calls (users, organizations, groups, SMS batches, wallet total, payments, tickets, audit log entries). Rendered as count cards.
+- **7-day trend:** 14 sequential Firestore date-range queries (7 days × 2 collections: `smsBatches` by `createdAt` day, `users` by `createdAt` day). Each day soft-fails independently — a query error produces a `null` entry rather than breaking the page. Results rendered as inline bar-chart visualization using CSS widths.
+- **Support breakdown:** single query on `tickets` grouped by `status` (`open`, `pending`, `resolved`, `closed`); rendered as a status breakdown table.
+- **Capability gating:** `view:reports` permission required; missing → `PermissionState` page.
+
+### New capabilities (Phase 17)
+
+`search:global`, `export:users`, `export:groups`, `export:sms`, `export:points`, `export:support`, `view:reports`
+
+### New Firestore indexes (Phase 17)
+
+| Collection | Fields | Used by |
+|---|---|---|
+| `users` | `(status ASC, createdAt DESC)` | users list status filter + export |
+| `conversations` | `(type ASC, createdAt DESC)` | groups list + SMS list |
+| `conversations` | `(type ASC, status ASC, createdAt DESC)` | groups list status filter + export |
+| `transactions` | `(type ASC, createdAt DESC)` | transactions type filter + export |
+| `payments` | `(status ASC, createdAt DESC)` | payments status filter + export |
+
+---
+
 ## Phase 11 — SMS delivery reports, retry, reaper
 
 - **Legacy `type: 'sms'` transaction row dropped.** `onSmsBatchAccepted` emits only the canonical lifecycle (`reservation_release`, `sms_spend`, `refund`).

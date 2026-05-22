@@ -2,6 +2,22 @@
 
 Risks ranked across the surfaces present today and planned for later phases. Likelihood/impact are qualitative.
 
+## Phase 17 mitigation snapshot
+
+- **Risk #10 (phone privacy) — exports addressed.** All six export routes apply `redactPhone()` before writing CSV cells. Full-unmask exports are not implemented; the 1000-row cap also limits blast radius.
+- **Risk #17 (export/report privacy risks) — CLOSED for Phase 17 scope.** Every export is capability-gated (`export:<entity>`), row-capped at 1000, redacted by default, and writes an audit log entry via `writeExportAudit`.
+
+**New Phase 17 risks:**
+
+| # | Risk | Impact | Likelihood | Mitigation |
+|---|---|---|---|---|
+| 23 | **Search returns stale results.** Firestore is eventually consistent; a newly created or updated document may not appear immediately in prefix-range query results. | Low | Medium | Acceptable for admin search. Documented as a known limitation; admins can search by exact ID as a fallback. No mitigation planned. |
+| 24 | **Export slow on large datasets.** A 1000-row export over a slow connection may time out or appear hung. | Medium | Low | Hard `EXPORT_LIMIT = 1000` is applied via `limit()` before streaming. Next.js streaming response returns headers immediately. Further optimisation (background job + signed URL) deferred to Phase 20 if needed. |
+| 25 | **Reports trend queries add 14 sequential Firestore reads per page load.** 7-day × 2-collection date-range queries run sequentially and add latency proportional to Firestore response times. | Low | Medium | Each day's query soft-fails independently — one error doesn't block others. Total acceptable latency at current data volume. Consider pre-aggregation (scheduled rollup → `reports/trend`) if p95 load time exceeds 3 s. |
+| 26 | **Prefix search case-sensitivity on group names.** `name` field is stored with original casing; a search for "Marketing" won't match "marketing". | Low | High | Documented limitation in UI placeholder text. Mitigation: add a `nameLower` field on groups (mirrors `usernameLower` pattern) in a future phase to enable case-insensitive prefix search. |
+
+---
+
 ## Phase 11 mitigation snapshot
 
 - **Risk #5 (stuck reservations) — code shipped; activation opt-in.** `reapStuckBatches` exists; operators flip on the schedule when a real provider is wired. Idempotent on `pointsRefunded`; reads `status` inside the transaction and exits if `onSmsBatchAccepted` raced ahead.

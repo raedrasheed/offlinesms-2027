@@ -235,12 +235,12 @@ Legend for "Recommended phase" matches `OFFLINESMS_IMPLEMENTATION_ROADMAP.md`.
 
 | | |
 |---|---|
-| **Status** | 🟡 Shell present, no role gating |
-| **Existing** | `Sidebar.tsx`, `Topbar.tsx`, `/admin` |
-| **Missing** | Auth+admin guard, RBAC-aware menu, user menu, search, breadcrumb, notifications |
-| **Frontend** | `app/admin/layout.tsx` enforcing claim; user menu component |
-| **Backend** | Verify session cookie via `firebase-admin` in server component |
-| **Phase** | 12 |
+| **Status** | 🟡 Phase 12 + Phase 17 partial |
+| **Existing** | `Sidebar.tsx`, `Topbar.tsx`, `/admin`; `AdminGlobalSearchShell.tsx` with debounced fetch, grouped results, keyboard navigation (↑ ↓ ↵ Esc), `search:global` capability gate. `/admin/search/route.ts` Firestore prefix + exact-ID search across 8 entity types, max 5 per group / 50 total. |
+| **Missing** | RBAC-aware sidebar menu, breadcrumb, notifications, user menu |
+| **Frontend** | `app/admin/layout.tsx` enforcing claim; `AdminGlobalSearchShell.tsx` (Phase 17 ✓) |
+| **Backend** | `app/admin/search/route.ts` (Phase 17 ✓); session cookie verification via `firebase-admin` |
+| **Phase** | 12 (guard), 17 ✓ (global search) |
 
 ## 21. Users management
 
@@ -306,10 +306,11 @@ Legend for "Recommended phase" matches `OFFLINESMS_IMPLEMENTATION_ROADMAP.md`.
 
 | | |
 |---|---|
-| **Status** | ❌ Missing |
-| **Frontend** | Report builder, exports (CSV) with phone masking |
-| **Backend** | Scheduled rollup function → `reports/{id}` |
-| **Phase** | 17 |
+| **Status** | ✅ Phase 17 landed: 8 overview count cards, 7-day trend tables (SMS batches + new users with bar visualization), support tickets by status breakdown. |
+| **Existing** | `app/admin/reports/page.tsx` (server component); parallel `getCountFromServer()` aggregation; 14-query 7-day trend (soft-fail per day); status breakdown table. Gated by `view:reports` capability. |
+| **Missing** | Pre-aggregated rollup (currently all live queries); date-range picker; per-organization breakdowns; downloadable report PDF |
+| **Backend** | All queries run server-side via `firebase-admin`. Scheduled rollup to `reports/{id}` deferred — current volume acceptable with live queries. |
+| **Phase** | 17 ✓ (live queries); 20 (pre-aggregation rollups if latency degrades) |
 
 ## 29. Support tickets
 
