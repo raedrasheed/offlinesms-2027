@@ -64,20 +64,39 @@
     "composerPlaceholder": "Message",
     "e2e": "Messages and calls are end-to-end encrypted"
   },
-  "sms": {
-    "sendVia": "Send via SMS",
-    "cost": "Cost",
-    "sentTo": "Sent to",
-    "report": "Delivery report",
-    "gateway": "OfflineSMS Gateway"
-  },
   "points": {
+    "title": "OfflineSMS Points",
     "wallet": "Points wallet",
     "balance": "Balance",
+    "reserved": "Reserved",
+    "available": "Available",
+    "reservedHelp": "Reserved points are temporarily held for SMS batches that are still processing.",
+    "history": "Transaction history",
+    "empty": "No transactions yet",
+    "comingSoon": "Coming soon",
     "buy": "Buy points",
     "transfer": "Transfer",
-    "history": "History",
-    "notEnough": "Not enough points"
+    "notEnough": "Not enough points",
+    "viewDeliveryReport": "View OfflineSMS Delivery Report",
+    "allowSmsReminders": "Allow important SMS reminders",
+    "txType": {
+      "sms_spend": "SMS spending",
+      "reservation": "Reservation",
+      "reservation_release": "Reservation released",
+      "refund": "Refund",
+      "purchase": "Purchase",
+      "transfer_in": "Transfer in",
+      "transfer_out": "Transfer out",
+      "admin_adjustment": "Admin adjustment",
+      "other": "Adjustment"
+    },
+    "txStatus": {
+      "pending": "Pending",
+      "completed": "Completed",
+      "failed": "Failed",
+      "reversed": "Reversed",
+      "refunded": "Refunded"
+    }
   },
   "group": {
     "newGroup": "New group",

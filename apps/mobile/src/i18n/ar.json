@@ -64,20 +64,39 @@
     "composerPlaceholder": "رسالة",
     "e2e": "الرسائل والمكالمات مشفّرة من الطرف إلى الطرف"
   },
-  "sms": {
-    "sendVia": "إرسال عبر SMS",
-    "cost": "التكلفة",
-    "sentTo": "أُرسل إلى",
-    "report": "تقرير التسليم",
-    "gateway": "بوابة OfflineSMS"
-  },
   "points": {
+    "title": "نقاط OfflineSMS",
     "wallet": "محفظة النقاط",
     "balance": "الرصيد",
+    "reserved": "المحجوز",
+    "available": "المتاح",
+    "reservedHelp": "النقاط المحجوزة تُحفظ مؤقتًا لرسائل SMS قيد المعالجة.",
+    "history": "سجل العمليات",
+    "empty": "لا توجد عمليات بعد",
+    "comingSoon": "قريبًا",
     "buy": "شراء نقاط",
-    "transfer": "تحويل",
-    "history": "السجل",
-    "notEnough": "النقاط غير كافية"
+    "transfer": "تحويل نقاط",
+    "notEnough": "النقاط غير كافية",
+    "viewDeliveryReport": "عرض تقرير تسليم OfflineSMS",
+    "allowSmsReminders": "السماح بتذكيرات SMS المهمة",
+    "txType": {
+      "sms_spend": "تكلفة SMS",
+      "reservation": "حجز نقاط",
+      "reservation_release": "تحرير الحجز",
+      "refund": "استرداد",
+      "purchase": "شراء",
+      "transfer_in": "تحويل وارد",
+      "transfer_out": "تحويل صادر",
+      "admin_adjustment": "تعديل إداري",
+      "other": "تسوية"
+    },
+    "txStatus": {
+      "pending": "قيد الانتظار",
+      "completed": "مكتمل",
+      "failed": "فشل",
+      "reversed": "معكوس",
+      "refunded": "تم الاسترداد"
+    }
   },
   "group": {
     "newGroup": "مجموعة جديدة",
