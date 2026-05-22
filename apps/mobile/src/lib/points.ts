@@ -51,6 +51,8 @@ export type Transaction = {
   relatedMessageId?:     string | null;
   relatedConversationId?: string | null;
   relatedUserId?:        string | null;
+  relatedPaymentId?:     string | null;
+  relatedTransferId?:    string | null;
   refund?:               number;
   sent?:                 number;
   failed?:               number;
@@ -184,6 +186,8 @@ function fromSnap(id: string, raw: Record<string, unknown>): Transaction {
     relatedMessageId:      (raw.relatedMessageId as string | undefined) ?? null,
     relatedConversationId: (raw.relatedConversationId as string | undefined) ?? null,
     relatedUserId:         (raw.peerId as string | undefined) ?? (raw.relatedUserId as string | undefined) ?? null,
+    relatedPaymentId:      (raw.relatedPaymentId as string | undefined) ?? null,
+    relatedTransferId:     (raw.relatedTransferId as string | undefined) ?? null,
     refund:                (raw.refund as number | undefined) ?? undefined,
     sent:                  (raw.sent as number | undefined) ?? undefined,
     failed:                (raw.failed as number | undefined) ?? undefined,
@@ -250,4 +254,149 @@ export async function getTransaction(transactionId: string): Promise<Transaction
   const snap = await getDoc(doc(db, 'transactions', transactionId));
   if (!snap.exists()) return null;
   return fromSnap(snap.id, snap.data());
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Phase 10 — packages, payments, transfers (callable wrappers)
+// ─────────────────────────────────────────────────────────────────
+
+import { getFunctions, httpsCallable } from 'firebase/functions';
+import { app } from './firebase';
+
+export type PointsPackage = {
+  id:          string;
+  name:        string;
+  points:      number;
+  bonusPoints: number;
+  price:       number;
+  currency:    string;
+  status:      'active' | 'disabled';
+  sortOrder:   number;
+};
+
+export type Payment = {
+  id:             string;
+  userId:         string;
+  packageId:      string;
+  points:         number;
+  bonusPoints:    number;
+  totalPoints:    number;
+  amount:         number;
+  currency:       string;
+  status:         'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'refunded';
+  checkoutUrl?:   string | null;
+  failureReason?: string | null;
+  createdAt:      any;
+  completedAt?:   any;
+};
+
+export type PurchaseResult = {
+  paymentId:      string;
+  idempotencyKey: string;
+  checkoutUrl:    string | null;
+  points:         number;
+  bonusPoints:    number;
+  totalPoints:    number;
+  amount:         number;
+  currency:       string;
+  status:         'pending';
+};
+
+export type TransferResult = {
+  transferId: string;
+  amount:     number;
+  flagged:    boolean;
+};
+
+function callable<T = unknown, R = unknown>(name: string) {
+  return httpsCallable<T, R>(getFunctions(app), name);
+}
+
+export function subscribePackages(cb: (rows: PointsPackage[]) => void) {
+  const q = query(
+    collection(db, 'pointsPackages'),
+    where('status', '==', 'active'),
+    orderBy('sortOrder', 'asc'),
+    limit(20),
+  );
+  return onSnapshot(q, snap => {
+    const rows = snap.docs.map(d => ({ id: d.id, ...(d.data() as Omit<PointsPackage, 'id'>) }));
+    cb(rows);
+  });
+}
+
+export function subscribePayment(paymentId: string, cb: (p: Payment | null) => void) {
+  if (!paymentId) { cb(null); return () => {}; }
+  return onSnapshot(doc(db, 'payments', paymentId), snap => {
+    if (!snap.exists()) { cb(null); return; }
+    cb({ id: snap.id, ...(snap.data() as Omit<Payment, 'id'>) });
+  });
+}
+
+export async function createPurchase(packageId: string): Promise<PurchaseResult> {
+  const res = await callable<{ packageId: string }, PurchaseResult>('createPurchase')({ packageId });
+  return res.data;
+}
+
+/** Emulator-only. The callable refuses to run in production. */
+export async function confirmPaymentMock(paymentId: string, status: 'completed' | 'failed' = 'completed') {
+  await callable<{ paymentId: string; status: 'completed' | 'failed' }, { ok: true }>(
+    'confirmPaymentMock',
+  )({ paymentId, status });
+}
+
+export async function transferPoints(args: {
+  recipientUid: string;
+  amount: number;
+  note?: string;
+}): Promise<TransferResult> {
+  const res = await callable<typeof args, TransferResult>('transferPoints')(args);
+  return res.data;
+}
+
+export function pointsErrorReason(err: unknown): string | null {
+  const msg = (err as { message?: string })?.message ?? '';
+  if (!msg) return null;
+  return msg.includes(':') ? msg.split(':')[0] : msg;
+}
+
+export function pointsErrorCopy(code: string, reason?: string | null): string {
+  if (reason) {
+    switch (reason) {
+      case 'self-transfer':            return 'You can’t transfer points to yourself.';
+      case 'insufficient-balance':     return 'Not enough OfflineSMS Points.';
+      case 'daily-cap-count-reached':  return 'Daily transfer limit reached.';
+      case 'daily-cap-points-reached': return 'Daily transfer points limit reached.';
+      case 'wallet-frozen':            return 'Your OfflineSMS Points wallet is frozen.';
+      case 'wallet-closed':            return 'Your OfflineSMS Points wallet is closed.';
+      case 'recipient-wallet-frozen':  return 'The recipient’s wallet is frozen.';
+      case 'recipient-not-found':      return 'Recipient not found.';
+      case 'package-inactive':         return 'That package is no longer available.';
+      case 'package-not-found':        return 'Package not found.';
+      case 'package-misconfigured':    return 'That package is misconfigured. Contact support.';
+      case 'payment-not-found':        return 'Payment not found.';
+      case 'emulator-only':            return 'Mock confirmations only work in development.';
+      case 'payment-webhook-not-configured':
+        return 'OfflineSMS payment confirmation isn’t configured yet.';
+    }
+  }
+  switch (code) {
+    case 'functions/resource-exhausted':
+    case 'resource-exhausted':
+      return 'Daily limit reached. Try again tomorrow.';
+    case 'functions/permission-denied':
+    case 'permission-denied':
+      return 'You don’t have permission for this action.';
+    case 'functions/failed-precondition':
+    case 'failed-precondition':
+      return 'This action isn’t available right now.';
+    case 'functions/invalid-argument':
+    case 'invalid-argument':
+      return 'Please review the values and try again.';
+    case 'functions/not-found':
+    case 'not-found':
+      return 'Not found.';
+    default:
+      return 'Something went wrong. Please try again.';
+  }
 }
