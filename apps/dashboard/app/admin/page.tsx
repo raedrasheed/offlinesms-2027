@@ -8,6 +8,7 @@ import { Users, Send, Coins, AlertCircle, MessageCircle, Wallet, CreditCard, Lif
 import { verifySession } from '@/lib/session';
 import { canDo } from '@/lib/adminPermissions';
 import { getDashboardCounts } from '@/lib/adminData';
+import RefreshButton from './RefreshButton';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -103,9 +104,12 @@ export default async function AdminOverview() {
 
   return (
     <div className="p-7">
-      <div className="mb-6">
-        <h1 className="text-xl font-extrabold tracking-tight text-ink-900">Overview</h1>
-        <p className="text-sm text-ink-500 mt-0.5">Live counts from Firestore. Approximate values noted.</p>
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-extrabold tracking-tight text-ink-900">Overview</h1>
+          <p className="text-sm text-ink-500 mt-0.5">Live counts from Firestore. Approximate values noted.</p>
+        </div>
+        <RefreshButton />
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6">
