@@ -8,7 +8,7 @@ service cloud.firestore {
     function isAuthed()      { return request.auth != null; }
     function isSignedIn()    { return isAuthed(); }
     function isSelf(uid)     { return isAuthed() && request.auth.uid == uid; }
-    function isAdmin()       { return isAuthed() && request.auth.token.admin == true; }
+    function isAdmin()       { return isAuthed() && request.auth.token.get('admin', false) == true; }
     function hasAdminRole()  { return isAdmin(); }   // alias for readability
 
     function isMember(convoId) {
