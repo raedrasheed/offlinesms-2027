@@ -403,7 +403,11 @@ function ConfirmStep({
       <View style={s.statsGrid}>
         <Stat label="Recipients" value={preview.eligibleCount} />
         <Stat label="Cost"       value={preview.pointsCost} />
+      </View>
+      <View style={s.statsGrid}>
         <Stat label="Balance"    value={preview.walletBalance} />
+        <Stat label="Reserved"   value={preview.walletReserved} />
+        <Stat label="Available"  value={Math.max(0, preview.walletBalance - preview.walletReserved)} />
         <Stat label="Remaining"  value={remaining} />
       </View>
 
