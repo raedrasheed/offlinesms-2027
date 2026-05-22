@@ -18,6 +18,8 @@ export default async function PackagesPage() {
     return <div className="p-8"><PermissionState title="Points access required" /></div>;
   }
 
+  const canManage = canDo(session.role, 'manage:packages');
+
   let rows: Awaited<ReturnType<typeof listPointsPackages>> = [];
   let fetchError: string | null = null;
   try { rows = await listPointsPackages(); }
@@ -30,13 +32,20 @@ export default async function PackagesPage() {
         <span className="text-ink-300">/</span>
         <span className="text-sm font-semibold text-ink-900">Packages</span>
       </div>
-      <div className="flex items-center justify-between mb-1">
-        <h1 className="text-xl font-extrabold tracking-tight text-ink-900">Points packages</h1>
-        <div className="text-xs text-ink-400 bg-surface3 border border-ink-100 rounded-lg px-3 py-2">
-          Package editing deferred to a later phase
+      <div className="flex items-center justify-between mb-5">
+        <div>
+          <h1 className="text-xl font-extrabold tracking-tight text-ink-900">Points packages</h1>
+          <p className="text-sm text-ink-500 mt-0.5">{rows.length} package{rows.length !== 1 ? 's' : ''}</p>
         </div>
+        {canManage && (
+          <Link
+            href={'/admin/points/packages/new' as any}
+            className="px-4 py-2 bg-primary text-white text-sm font-bold rounded-lg hover:bg-primary-dark transition"
+          >
+            + New package
+          </Link>
+        )}
       </div>
-      <p className="text-sm text-ink-500 mb-5">Read-only catalog</p>
 
       {fetchError ? (
         <div className="rounded-xl bg-red-50 border border-red-200 p-4 text-sm text-red-700">{fetchError}</div>
@@ -54,11 +63,12 @@ export default async function PackagesPage() {
                 <th className="px-4 py-3">Currency</th>
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3 text-right">Order</th>
+                {canManage && <th className="px-4 py-3">Actions</th>}
               </tr>
             </thead>
             <tbody>
               {rows.map((p, i) => (
-                <tr key={p.id} className={`border-t border-ink-100 ${i % 2 === 0 ? 'bg-white' : 'bg-surface3/40'}`}>
+                <tr key={p.id} className={`border-t border-ink-100 hover:bg-primary/5 ${i % 2 === 0 ? 'bg-white' : 'bg-surface3/40'}`}>
                   <td className="px-4 py-3 font-semibold text-ink-900">{p.name}</td>
                   <td className="px-4 py-3 text-right font-mono text-xs font-bold text-emerald-700">{p.points}</td>
                   <td className="px-4 py-3 text-right font-mono text-xs text-amber-700">{p.bonusPoints || '—'}</td>
@@ -66,6 +76,16 @@ export default async function PackagesPage() {
                   <td className="px-4 py-3 text-xs font-mono text-ink-600">{p.currency}</td>
                   <td className="px-4 py-3"><StatusBadge status={p.status} /></td>
                   <td className="px-4 py-3 text-right text-xs text-ink-400">{p.sortOrder}</td>
+                  {canManage && (
+                    <td className="px-4 py-3">
+                      <Link
+                        href={`/admin/points/packages/${p.id}/edit` as any}
+                        className="text-xs text-primary font-semibold hover:underline"
+                      >
+                        Edit →
+                      </Link>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
