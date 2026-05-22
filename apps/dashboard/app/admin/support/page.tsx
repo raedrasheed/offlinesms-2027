@@ -131,8 +131,8 @@ export default async function SupportPage({
                   <td className="px-4 py-3 text-xs text-ink-600 capitalize">{t.category}</td>
                   <td className="px-4 py-3"><StatusBadge status={t.status} /></td>
                   <td className="px-4 py-3">
-                    <Link href={`/admin/users/${t.userId}` as any} className="font-mono text-[11px] text-primary hover:underline">
-                      {t.userId.slice(0, 10)}…
+                    <Link href={`/admin/users/${t.createdBy}` as any} className="font-mono text-[11px] text-primary hover:underline">
+                      {t.createdBy.slice(0, 10)}…
                     </Link>
                   </td>
                   <td className="px-4 py-3 text-xs text-ink-500">

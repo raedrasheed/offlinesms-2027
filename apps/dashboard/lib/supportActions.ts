@@ -26,13 +26,13 @@ export async function updateTicketStatus(
     return { error: 'Invalid status.' };
   }
 
-  const ticketSnap = await adminDb.collection('supportTickets').doc(ticketId).get();
+  const ticketSnap = await adminDb.collection('tickets').doc(ticketId).get();
   if (!ticketSnap.exists) return { error: 'Ticket not found.' };
 
   const prevStatus = (ticketSnap.data()?.status as string) ?? 'open';
   if (prevStatus === newStatus) return { success: true };
 
-  await adminDb.collection('supportTickets').doc(ticketId).update({
+  await adminDb.collection('tickets').doc(ticketId).update({
     status:    newStatus,
     updatedAt: FieldValue.serverTimestamp(),
   });

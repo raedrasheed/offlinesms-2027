@@ -700,7 +700,7 @@ export type AdminSupportTicketRow = {
   subject: string;
   category: string;
   status: string;
-  userId: string;
+  createdBy: string;
   assignedTo: string | null;
   createdAt: string;
   updatedAt: string;
@@ -717,11 +717,11 @@ type SupportTicketFilters = {
 };
 
 export async function listSupportTickets(filters: SupportTicketFilters = {}): Promise<AdminSupportTicketRow[]> {
-  let q = adminDb.collection('supportTickets').orderBy('createdAt', 'desc').limit(50);
+  let q = adminDb.collection('tickets').orderBy('createdAt', 'desc').limit(50);
   if (filters.status)   q = q.where('status',   '==', filters.status)   as typeof q;
   if (filters.category) q = q.where('category', '==', filters.category) as typeof q;
   if (filters.cursor) {
-    const snap = await adminDb.collection('supportTickets').doc(filters.cursor).get();
+    const snap = await adminDb.collection('tickets').doc(filters.cursor).get();
     if (snap.exists) q = q.startAfter(snap);
   }
   const result = await q.get();
@@ -732,7 +732,7 @@ export async function listSupportTickets(filters: SupportTicketFilters = {}): Pr
       subject:    (data.subject    as string) ?? '—',
       category:   (data.category   as string) ?? 'other',
       status:     (data.status     as string) ?? 'open',
-      userId:     (data.userId     as string) ?? '—',
+      createdBy:  (data.createdBy  as string) ?? '—',
       assignedTo: (data.assignedTo as string | null) ?? null,
       createdAt:  safeDate(data.createdAt),
       updatedAt:  safeDate(data.updatedAt),
@@ -741,7 +741,7 @@ export async function listSupportTickets(filters: SupportTicketFilters = {}): Pr
 }
 
 export async function getSupportTicket(ticketId: string): Promise<AdminSupportTicketDetail | null> {
-  const snap = await adminDb.collection('supportTickets').doc(ticketId).get();
+  const snap = await adminDb.collection('tickets').doc(ticketId).get();
   if (!snap.exists) return null;
   const data = snap.data()!;
   return {
@@ -749,7 +749,7 @@ export async function getSupportTicket(ticketId: string): Promise<AdminSupportTi
     subject:     (data.subject     as string) ?? '—',
     category:    (data.category    as string) ?? 'other',
     status:      (data.status      as string) ?? 'open',
-    userId:      (data.userId      as string) ?? '—',
+    createdBy:   (data.createdBy   as string) ?? '—',
     assignedTo:  (data.assignedTo  as string | null) ?? null,
     description: (data.description as string) ?? '',
     createdAt:   safeDate(data.createdAt),
@@ -823,7 +823,7 @@ export async function getDashboardCounts(): Promise<DashboardCounts> {
       safe(() => adminDb.collection('conversations').where('type', '==', 'group').where('status', '==', 'active').count().get().then(s => s.data().count)),
       safe(() => adminDb.collection('smsBatches').where('createdAt', '>=', todayTs).count().get().then(s => s.data().count)),
       safe(() => adminDb.collection('smsBatches').where('status', '==', 'failed').count().get().then(s => s.data().count)),
-      safe(() => adminDb.collection('supportTickets').where('status', '==', 'open').count().get().then(s => s.data().count)),
+      safe(() => adminDb.collection('tickets').where('status', '==', 'open').count().get().then(s => s.data().count)),
       safe(() => adminDb.collection('wallets').count().get().then(s => s.data().count)),
       safe(() => adminDb.collection('payments').where('status', '==', 'pending').count().get().then(s => s.data().count)),
     ]);

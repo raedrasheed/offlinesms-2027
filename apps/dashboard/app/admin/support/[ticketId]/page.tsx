@@ -54,8 +54,8 @@ export default async function TicketDetailPage({ params }: { params: { ticketId:
             { label: 'Category',    value: <span className="capitalize">{ticket.category}</span> },
             { label: 'Status',      value: <StatusBadge status={ticket.status} /> },
             { label: 'Submitted by', value: (
-              <Link href={`/admin/users/${ticket.userId}` as any} className="font-mono text-[11px] text-primary hover:underline">
-                {ticket.userId}
+              <Link href={`/admin/users/${ticket.createdBy}` as any} className="font-mono text-[11px] text-primary hover:underline">
+                {ticket.createdBy}
               </Link>
             )},
             { label: 'Assigned to', value: ticket.assignedTo ? (
