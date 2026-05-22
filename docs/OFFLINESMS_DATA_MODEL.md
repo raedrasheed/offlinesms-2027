@@ -365,6 +365,85 @@ the client to mark `delivered` / `read` / `played` / `viewed`.
 
 ---
 
+## Phase 9 — Wallet and transaction read models
+
+### `wallets/{uid}` (read formalised)
+
+```ts
+{
+  balance:   number,            // server-owned
+  reserved:  number,            // server-owned (in-flight SMS holds)
+  createdAt: timestamp,
+  updatedAt?: timestamp,
+}
+```
+
+UI computes `available = balance - reserved` client-side. Phase 0 +
+Phase 3 rules: read by self or admin, write by admin only (callables /
+trigger use Admin SDK). Phase 9 makes no rule change here.
+
+### `transactions/{transactionId}` (read formalised)
+
+```ts
+{
+  userId:                 string,
+  type:                   string,   // see canonical/legacy mapping below
+  amount:                 number,   // positive integer; direction implied by type
+  direction?:             'credit' | 'debit',
+  status?:                'pending' | 'completed' | 'failed' | 'reversed' | 'refunded',
+  package?:               string | null,
+  batchId?:               string | null,       // == relatedSmsBatchId
+  peerId?:                string | null,       // == relatedUserId
+  relatedMessageId?:      string | null,
+  relatedConversationId?: string | null,
+  note?:                  string | null,
+  refund?:                number,
+  sent?:                  number,
+  failed?:                number,
+  priceCents?:            number,
+  createdAt:              timestamp,
+  completedAt?:           timestamp | null,
+}
+```
+
+Phase 0 writers stay; Phase 9 only reads. The UI maps legacy type
+strings to canonical names at the boundary:
+
+| Canonical | Legacy in code | UI label |
+|---|---|---|
+| `sms_spend` | `'sms'` | SMS spending |
+| `reservation` | — | Reservation |
+| `reservation_release` | — | Reservation released |
+| `refund` | `'refund'` | Refund |
+| `purchase` | `'buy'` | Purchase |
+| `transfer_in` | `'transfer-in'` | Transfer in |
+| `transfer_out` | `'transfer-out'` | Transfer out |
+| `admin_adjustment` | `'admin-adjust'` | Admin adjustment |
+
+### Indexes added
+
+| Collection | Fields | Used by |
+|---|---|---|
+| `transactions` | `(userId ASC, type ASC, createdAt DESC)` | Phase 9 history filter chips |
+
+The existing `transactions(userId, createdAt DESC)` (Phase 0) covers
+the unfiltered list.
+
+### `users/{uid}.smsOptOut` (Phase 9 allow-list addition)
+
+```ts
+{
+  smsOptOut?: boolean,   // owner-write, allow-listed in firestore.rules
+}
+```
+
+Already consumed by `escalateSms` (Phase 8) — when `true` the recipient
+is excluded with `skipReason: 'opt-out'`. Phase 9 adds the
+client-write path through the Settings toggle by extending the
+`users.update` allow-list.
+
+---
+
 ## Phase 8 — OfflineSMS escalation
 
 ### `smsBatches/{batchId}` (extended in place — same collection as Phase 0)
