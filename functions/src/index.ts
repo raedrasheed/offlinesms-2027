@@ -34,6 +34,8 @@ export { markStatusViewed }  from './statuses/markStatusViewed';
 // deferred to Phase 11 alongside the client-side TTL setting UI.
 
 export { escalateSms } from './sms/escalate';
+export { previewSmsEscalation } from './sms/previewEscalation';
+export { retryFailedSmsRecipients } from './sms/retryFailed';
 export { onSmsBatchAccepted } from './sms/onSmsBatchAccepted';
 export { buyPoints } from './points/buy';
 export { transferPoints } from './points/transfer';
