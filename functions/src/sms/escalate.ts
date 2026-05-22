@@ -162,6 +162,20 @@ export const escalateSms = onCall({ region: 'us-central1' }, async (request) => 
     updatedAt:         now,
   });
 
+  // Phase 10: emit a canonical 'reservation' transaction so the wallet
+  // UI shows the hold event. The matching reservation_release is
+  // emitted by onSmsBatchAccepted on settlement.
+  await db.collection('transactions').add({
+    userId:            uid,
+    type:              'reservation',
+    direction:         'debit',
+    amount:            cost,
+    status:             'completed',
+    relatedSmsBatchId:  batchRef.id,
+    createdAt:          FieldValue.serverTimestamp(),
+    completedAt:        FieldValue.serverTimestamp(),
+  });
+
   await writeAuditLog({
     action: 'sms.escalation.created',
     actor:  { uid },

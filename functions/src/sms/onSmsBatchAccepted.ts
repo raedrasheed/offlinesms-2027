@@ -1,6 +1,13 @@
 // When the gateway acknowledges a batch, transition reserved → deducted.
 // Refund any per-recipient failures and record the points settlement on
 // the batch doc so the OfflineSMS Delivery Report has the final numbers.
+//
+// Phase 10: emit canonical Phase 9 transaction lifecycle rows
+// (reservation_release, sms_spend, refund) in addition to the
+// back-compat 'sms' row, so the Phase 9 wallet UI shows the full
+// reservation → settle lifecycle. The Phase 9 canonicaliseType helper
+// accepts both legacy and canonical strings, so older clients still
+// parse this transition; Phase 11 will drop the legacy emission.
 
 import { onDocumentUpdated } from 'firebase-functions/v2/firestore';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
@@ -15,7 +22,7 @@ export const onSmsBatchAccepted = onDocumentUpdated('smsBatches/{batchId}', asyn
   if (after.status !== 'accepted' && after.status !== 'partial' && after.status !== 'completed') return;
 
   const db = getFirestore();
-  const batchRef = db.collection('smsBatches').doc(event.params.batchId);
+  const batchRef  = db.collection('smsBatches').doc(event.params.batchId);
   const walletRef = db.collection('wallets').doc(after.senderId);
 
   const recipients = await batchRef.collection('recipients').get();
@@ -37,21 +44,70 @@ export const onSmsBatchAccepted = onDocumentUpdated('smsBatches/{batchId}', asyn
     tx.set(walletRef, {
       balance:  balance + refund,
       reserved: Math.max(0, r - reserved),
+      updatedAt: FieldValue.serverTimestamp(),
     }, { merge: true });
   });
 
-  await db.collection('transactions').add({
-    userId:    after.senderId,
-    type:      'sms',
-    amount:    -actualCost,
+  const now = FieldValue.serverTimestamp();
+  const txCol = db.collection('transactions');
+
+  // Legacy single-row emission (kept one phase for back-compat).
+  await txCol.add({
+    userId:            after.senderId,
+    type:              'sms',
+    amount:            -actualCost,
     refund,
     sent,
     failed,
-    batchId:   event.params.batchId,
-    createdAt: FieldValue.serverTimestamp(),
+    batchId:           event.params.batchId,
+    relatedSmsBatchId: event.params.batchId,
+    createdAt:         now,
   });
 
-  // Stamp the settlement onto the batch so the Delivery Report shows it.
+  // Phase 10 canonical lifecycle rows.
+  // 1) reservation_release — clears the reserve hold (whole amount).
+  if (reserved > 0) {
+    await txCol.add({
+      userId:            after.senderId,
+      type:              'reservation_release',
+      direction:         'credit',
+      amount:            reserved,
+      status:            'completed',
+      relatedSmsBatchId: event.params.batchId,
+      createdAt:         now,
+      completedAt:       now,
+    });
+  }
+  // 2) sms_spend — what was actually billed.
+  if (actualCost > 0) {
+    await txCol.add({
+      userId:            after.senderId,
+      type:              'sms_spend',
+      direction:         'debit',
+      amount:            actualCost,
+      status:            'completed',
+      sent,
+      failed,
+      relatedSmsBatchId: event.params.batchId,
+      createdAt:         now,
+      completedAt:       now,
+    });
+  }
+  // 3) refund — only when actual < reserved.
+  if (refund > 0) {
+    await txCol.add({
+      userId:            after.senderId,
+      type:              'refund',
+      direction:         'credit',
+      amount:            refund,
+      status:            'completed',
+      relatedSmsBatchId: event.params.batchId,
+      createdAt:         now,
+      completedAt:       now,
+    });
+  }
+
+  // Stamp settlement onto the batch doc.
   await batchRef.update({
     pointsDeducted: actualCost,
     pointsRefunded: refund,

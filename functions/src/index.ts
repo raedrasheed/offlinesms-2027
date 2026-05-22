@@ -37,8 +37,18 @@ export { escalateSms } from './sms/escalate';
 export { previewSmsEscalation } from './sms/previewEscalation';
 export { retryFailedSmsRecipients } from './sms/retryFailed';
 export { onSmsBatchAccepted } from './sms/onSmsBatchAccepted';
-export { buyPoints } from './points/buy';
-export { transferPoints } from './points/transfer';
+
+// Phase 10 — points purchase + transfer.
+// The Phase 0 buyPoints callable (which credited the wallet directly)
+// has been removed; createPurchase + confirmPayment / confirmPaymentMock
+// replace it. The Phase 0 transferPoints (functions/src/points/transfer.ts)
+// is superseded by functions/src/points/transferPoints.ts which adds the
+// daily cap, frozen-wallet guard, canonical types, idempotency, and the
+// fraud-flag emission.
+export { createPurchase }      from './points/createPurchase';
+export { confirmPayment }      from './points/confirmPayment';
+export { confirmPaymentMock }  from './points/confirmPaymentMock';
+export { transferPoints }      from './points/transferPoints';
 export { onUserCreate } from './auth/onUserCreate';
 export { setAdminClaim } from './auth/setAdminClaim';
 export { claimUsername } from './auth/claimUsername';
