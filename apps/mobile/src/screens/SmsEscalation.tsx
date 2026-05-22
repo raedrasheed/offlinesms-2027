@@ -192,6 +192,7 @@ export default function SmsEscalation({ route, navigation }: any) {
             preview={preview}
             onRetry={result.failed > 0 ? retry : null}
             onClose={() => navigation.popToTop()}
+            onViewReport={() => navigation.navigate('SmsBatchReport', { batchId: result.batchId })}
           />
         ) : null}
       </ScrollView>
@@ -439,12 +440,13 @@ function ConfirmStep({
 }
 
 function ResultStep({
-  result, preview, onRetry, onClose,
+  result, preview, onRetry, onClose, onViewReport,
 }: {
   result: EscalationResult;
   preview: EscalationPreview | null;
   onRetry: (() => void) | null;
   onClose: () => void;
+  onViewReport: () => void;
 }) {
   return (
     <View>
@@ -478,14 +480,18 @@ function ResultStep({
         </>
       ) : null}
 
+      <Pressable style={s.primaryBtn} onPress={onViewReport}>
+        <Text style={s.primaryBtnText}>View OfflineSMS Delivery Report</Text>
+      </Pressable>
+
       <View style={s.row}>
         {onRetry ? (
           <Pressable style={[s.secondaryBtn, { flex: 1 }]} onPress={onRetry}>
             <Text style={s.secondaryBtnText}>Retry failed</Text>
           </Pressable>
         ) : null}
-        <Pressable style={[s.primaryBtn, { flex: 1 }]} onPress={onClose}>
-          <Text style={s.primaryBtnText}>Done</Text>
+        <Pressable style={[s.secondaryBtn, { flex: 1 }]} onPress={onClose}>
+          <Text style={s.secondaryBtnText}>Done</Text>
         </Pressable>
       </View>
     </View>

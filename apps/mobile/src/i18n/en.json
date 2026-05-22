@@ -198,6 +198,30 @@
       "policyBlocked": "Blocked by policy"
     }
   },
+  "smsReport": {
+    "title": "OfflineSMS Delivery Report",
+    "batch": "SMS batch",
+    "status": "Batch status",
+    "sent": "Sent",
+    "delivered": "Delivered",
+    "pending": "Pending",
+    "failed": "Failed",
+    "skipped": "Skipped",
+    "undelivered": "Undelivered",
+    "retryFailed": "Retry failed",
+    "retryFailedSms": "Retry failed SMS",
+    "viewReport": "View OfflineSMS Delivery Report",
+    "alreadySent": "Already sent for this message",
+    "alreadySentDescription": "This member already received an SMS for this message.",
+    "deliveryReportPending": "Delivery report pending",
+    "gatewayEventReceived": "Gateway event received",
+    "batchExpired": "Batch expired",
+    "batchFailed": "Batch failed",
+    "batchPartiallyFailed": "Batch partially failed",
+    "pointsRefunded": "Points refunded",
+    "reservationReleased": "Reservation released",
+    "noFailedRecipientsToRetry": "No failed recipients to retry"
+  },
   "receipts": {
     "sent": "Sent",
     "delivered": "Delivered",

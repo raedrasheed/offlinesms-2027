@@ -7,6 +7,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable, FlatList } from 'react-native';
 import {
+  collection, limit, onSnapshot, orderBy, query, where,
+} from 'firebase/firestore';
+import { auth, db } from '../lib/firebase';
+import {
   getMessageInfo,
   MessageInfo as MessageInfoData,
   ReceiptDetail,
@@ -138,6 +142,14 @@ export default function MessageInfo({ route, navigation }: any) {
           </Pressable>
         ) : null}
 
+        {info.isSender ? (
+          <LatestBatchLink
+            conversationId={id}
+            messageId={messageId}
+            onOpen={batchId => navigation.navigate('SmsBatchReport', { batchId })}
+          />
+        ) : null}
+
         {info.isSender && info.recipients ? (
           <>
             <View style={s.tabs}>
@@ -197,6 +209,49 @@ function Stat({ label, value }: { label: string; value: number }) {
   );
 }
 
+/**
+ * Phase 11: when the message has any OfflineSMS escalation batch, surface
+ * a deep link to the most recent batch's Delivery Report. Subscribes to
+ * smsBatches where senderId == me and messageId == X order by createdAt desc.
+ */
+function LatestBatchLink({
+  conversationId, messageId, onOpen,
+}: {
+  conversationId: string;
+  messageId: string;
+  onOpen: (batchId: string) => void;
+}) {
+  const me = auth.currentUser?.uid;
+  const [batch, setBatch] = useState<{ id: string; status?: string; createdAt?: any } | null>(null);
+
+  useEffect(() => {
+    if (!me || !messageId) return;
+    const q = query(
+      collection(db, 'smsBatches'),
+      where('senderId',  '==', me),
+      where('messageId', '==', messageId),
+      orderBy('createdAt', 'desc'),
+      limit(1),
+    );
+    return onSnapshot(q, snap => {
+      if (snap.empty) { setBatch(null); return; }
+      const d = snap.docs[0];
+      setBatch({ id: d.id, ...(d.data() as { status?: string; createdAt?: any }) });
+    });
+  }, [me, messageId, conversationId]);
+
+  if (!batch) return null;
+  return (
+    <Pressable style={s.batchLinkCard} onPress={() => onOpen(batch.id)}>
+      <View style={{ flex: 1 }}>
+        <Text style={s.batchLinkTitle}>OfflineSMS reminders</Text>
+        <Text style={s.batchLinkSub}>Latest batch · status {batch.status ?? '—'}</Text>
+      </View>
+      <Text style={s.batchLinkChevron}>›</Text>
+    </Pressable>
+  );
+}
+
 const s = StyleSheet.create({
   root:    { flex: 1, backgroundColor: colors.bgCanvas },
   header:  { paddingTop: 50, paddingBottom: 12, paddingHorizontal: 14, backgroundColor: colors.primaryLight, flexDirection: 'row', alignItems: 'center', gap: 12 },
@@ -212,6 +267,10 @@ const s = StyleSheet.create({
   escalateBtn:  { marginTop: 14, padding: 14, borderRadius: radius.md, backgroundColor: colors.primary },
   escalateText: { color: '#fff', fontWeight: '800', fontSize: 14 },
   escalateSub:  { color: 'rgba(255,255,255,.85)', fontSize: 11, marginTop: 4 },
+  batchLinkCard: { flexDirection: 'row', alignItems: 'center', marginTop: 10, padding: 14, borderRadius: radius.md, backgroundColor: '#fff', borderWidth: 1, borderColor: colors.ink100 },
+  batchLinkTitle: { fontSize: 13, fontWeight: '800', color: colors.ink },
+  batchLinkSub:   { fontSize: 11, color: colors.ink500, marginTop: 2 },
+  batchLinkChevron: { fontSize: 18, color: colors.ink400, fontWeight: '700' },
   statsGrid:{ flexDirection: 'row', gap: 8 },
   statCard: { flex: 1, backgroundColor: '#fff', borderRadius: radius.md, borderWidth: 1, borderColor: colors.ink100, padding: 10, alignItems: 'center' },
   statValue:{ fontSize: 22, fontWeight: '800', color: colors.ink },

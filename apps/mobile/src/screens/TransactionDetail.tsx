@@ -104,10 +104,7 @@ export default function TransactionDetail({ route, navigation }: any) {
         {tx.relatedSmsBatchId ? (
           <Pressable
             style={s.linkCard}
-            onPress={() => navigation.navigate('SmsEscalation', {
-              conversationId: tx.relatedConversationId ?? '',
-              messageId:      tx.relatedMessageId ?? '',
-            })}
+            onPress={() => navigation.navigate('SmsBatchReport', { batchId: tx.relatedSmsBatchId })}
           >
             <Text style={s.linkTitle}>OfflineSMS Delivery Report</Text>
             <Text style={s.linkSub}>OfflineSMS batch · {tx.relatedSmsBatchId}</Text>

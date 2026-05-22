@@ -198,6 +198,30 @@
       "policyBlocked": "محظور بسياسة"
     }
   },
+  "smsReport": {
+    "title": "تقرير تسليم OfflineSMS",
+    "batch": "دفعة SMS",
+    "status": "حالة الدفعة",
+    "sent": "تم الإرسال",
+    "delivered": "تم التسليم",
+    "pending": "قيد الانتظار",
+    "failed": "فشل",
+    "skipped": "تم التجاوز",
+    "undelivered": "لم يتم التسليم",
+    "retryFailed": "إعادة محاولة الفاشل",
+    "retryFailedSms": "إعادة إرسال SMS الفاشلة",
+    "viewReport": "عرض تقرير التسليم",
+    "alreadySent": "تم الإرسال مسبقًا لهذه الرسالة",
+    "alreadySentDescription": "هذا العضو استلم SMS مسبقًا لهذه الرسالة.",
+    "deliveryReportPending": "تقرير التسليم قيد التحديث",
+    "gatewayEventReceived": "تم استلام حدث البوابة",
+    "batchExpired": "انتهت صلاحية الدفعة",
+    "batchFailed": "فشلت الدفعة",
+    "batchPartiallyFailed": "فشل جزئي في الدفعة",
+    "pointsRefunded": "تم استرداد النقاط",
+    "reservationReleased": "تم تحرير الحجز",
+    "noFailedRecipientsToRetry": "لا يوجد مستلمون فاشلون لإعادة المحاولة"
+  },
   "receipts": {
     "sent": "أُرسلت",
     "delivered": "وصلت",
