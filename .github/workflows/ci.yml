@@ -10,7 +10,7 @@ on:
 
 jobs:
   validate:
-    name: install · typecheck · lint · build
+    name: install · typecheck · lint · i18n · test · build
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -37,5 +37,18 @@ jobs:
       - name: Lint (all workspaces)
         run: npm run lint --workspaces --if-present
 
+      - name: i18n parity check (EN ↔ AR)
+        run: npm run i18n:check
+
+      - name: Test (vitest unit suites)
+        run: npm run test
+
       - name: Build (all workspaces)
         run: npm run build --workspaces --if-present
+
+# Firestore rules tests (tests/rules/) require the Firestore emulator
+# which depends on Java. They run locally via:
+#   firebase emulators:start --only firestore   (Terminal A)
+#   npm run test:rules                          (Terminal B)
+# A dedicated rules-test job that boots the emulator can be added in a
+# future phase.
