@@ -103,12 +103,12 @@ export default function Sidebar({ role }: Props) {
     >
       <div className="flex items-center gap-2.5 px-4 py-4 shrink-0">
         <span className="brand-mark shrink-0" />
-        <span className="font-extrabold text-[15px] tracking-tight text-white">
+        <span className="font-extrabold text-[15px] tracking-tight" style={{ color: 'var(--c-text)' }}>
           Offline<span style={{ color: '#5BB6DE' }}>SMS</span>
         </span>
         <span
           className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0"
-          style={{ background: '#0E2A45', color: '#5BB6DE' }}
+          style={{ background: 'var(--c-nav-active-bg)', color: 'var(--c-nav-active-text)' }}
         >
           ADMIN
         </span>
@@ -116,12 +116,12 @@ export default function Sidebar({ role }: Props) {
 
       <div className="px-3 pb-2 shrink-0">
         <button
-          className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left transition"
-          style={{ background: '#111827' }}
+          className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left transition hover:bg-white/5"
+          style={{ background: 'var(--c-sidebar-sub)' }}
         >
           <div
             className="w-6 h-6 rounded-md flex items-center justify-center text-[10px] font-bold shrink-0"
-            style={{ background: '#0E4F6E', color: '#5BB6DE' }}
+            style={{ background: 'var(--c-nav-active-bg)', color: 'var(--c-nav-active-text)' }}
           >
             A
           </div>
@@ -135,7 +135,7 @@ export default function Sidebar({ role }: Props) {
       <div className="px-3 pb-3 shrink-0">
         <div
           className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg"
-          style={{ background: '#111827', border: '1px solid var(--c-border)' }}
+          style={{ background: 'var(--c-sidebar-sub)', border: '1px solid var(--c-border)' }}
         >
           <Search size={12} style={{ color: 'var(--c-text-4)' }} className="shrink-0" />
           <span className="text-[12px]" style={{ color: 'var(--c-text-4)' }}>Search...</span>
@@ -152,7 +152,7 @@ export default function Sidebar({ role }: Props) {
             <div key={group.label}>
               <p
                 className="px-3 pb-1 text-[10px] font-bold uppercase tracking-widest"
-                style={{ color: '#2D4057' }}
+                style={{ color: 'var(--c-nav-group)' }}
               >
                 {group.label}
               </p>
@@ -170,7 +170,7 @@ export default function Sidebar({ role }: Props) {
                     )}
                     style={
                       isActive
-                        ? { background: '#162032', color: '#7CC8EC' }
+                        ? { background: 'var(--c-nav-active-bg)', color: 'var(--c-nav-active-text)' }
                         : { color: 'var(--c-text-3)' }
                     }
                   >
@@ -179,7 +179,7 @@ export default function Sidebar({ role }: Props) {
                     {item.badge && (
                       <span
                         className="text-[9px] font-bold px-1.5 py-0.5 rounded shrink-0"
-                        style={{ background: '#0E2A45', color: '#5BB6DE' }}
+                        style={{ background: 'var(--c-nav-active-bg)', color: 'var(--c-nav-active-text)' }}
                       >
                         {item.badge}
                       </span>
