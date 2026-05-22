@@ -4,6 +4,91 @@ Running log of phased work. Newest first.
 
 ---
 
+## Phase 9 — OfflineSMS Points Wallet (read-only foundation)
+
+**Branch:** `claude/repo-audit-architecture-MiZDX`
+**Status:** Complete. App builds end-to-end (typecheck + lint + build green across workspaces).
+
+### What was done
+
+- **Data model formalised.** Documented the read shape for `wallets/{uid}` (balance + reserved + computed available) and `transactions/{transactionId}` (type, direction, amount, status, related batch / message / conversation / user, refund / sent / failed / priceCents settlement fields). Phase 0 backend writers are unchanged in Phase 9.
+- **Canonical transaction-type mapping.** Phase 0 wrote `'sms' / 'buy' / 'transfer-in' / 'transfer-out' / 'refund' / 'admin-adjust'`. The mobile lib canonicalises these (plus the new Phase 9 names) to a single union: `sms_spend | reservation | reservation_release | refund | purchase | transfer_in | transfer_out | admin_adjustment | other`. UI never branches on legacy values.
+- **New index.** `transactions(userId ASC, type ASC, createdAt DESC)` — feeds the type filter chip on the wallet screen when the canonical maps to a single legacy value (e.g. `reservation`, `refund`). For multi-value mappings the lib falls back to a client-side filter over the unfiltered stream.
+- **Rule change (narrow).** `smsOptOut` added to the `users.update` allow-list so the Settings toggle can persist it. Phase 8's `escalateSms` already honours the flag with `skipReason: 'opt-out'`. All other Phase 2 protections (`role`, `admin`, `wallet`, `points`, `permissions`, …) stay banned.
+- **Mobile lib.**
+  - `apps/mobile/src/lib/points.ts` — `subscribeWallet`, `subscribeTransactions`, `getTransaction`, plus `canonicaliseType`, `getTransactionLabel`, `getTransactionIcon`, `formatPointsAmount`.
+  - `apps/mobile/src/lib/user.ts` — `subscribeMe(uid)`, `setSmsOptOut(uid, value)`.
+- **Mobile UI.**
+  - `Points.tsx` rewritten: balance card (Balance / Reserved / Available with explanation), disabled "Buy points" + "Transfer" (`Coming soon`, gated by `BUY_ENABLED` / `TRANSFER_ENABLED` constants — Phase 10 flips them), help card, filter chips (All / SMS / Refunds / Purchases / Transfers / Admin), transaction list.
+  - `TransactionDetail.tsx` (new): hero with status pill + signed amount, details card, SMS settlement card when present, purchase card with package + price, counterparty card, "OfflineSMS Delivery Report" deep-link for `sms_spend` transactions with a related batch.
+  - `Settings.tsx`: top "OfflineSMS Points" row with the live `{balance} pts · {reserved} reserved` subtitle; "Allow important SMS reminders" toggle wired to `users/{uid}.smsOptOut`; existing Privacy / Linked devices / Sign out rows retained.
+  - `SmsEscalation.tsx` confirm step now shows two rows of stats: `Recipients / Cost` and `Balance / Reserved / Available / Remaining` so the wallet semantics match the Points screen.
+- **i18n.** Phase 9 cleaned up the duplicate Phase 0 `sms` + `points` namespaces (they weren't referenced anywhere) and added the `points.*` namespace with `txType.*` and `txStatus.*` dictionaries. `en` and `ar` both updated.
+- **No backend changes** in `functions/`. Phase 10 will migrate writers to canonical type names alongside payment integration.
+
+### Files created
+
+- `docs/OFFLINESMS_PHASE_9_PLAN.md`
+- `apps/mobile/src/lib/points.ts`
+- `apps/mobile/src/lib/user.ts`
+- `apps/mobile/src/screens/TransactionDetail.tsx`
+
+### Files edited
+
+- `apps/mobile/src/screens/Points.tsx`
+- `apps/mobile/src/screens/Settings.tsx`
+- `apps/mobile/src/screens/SmsEscalation.tsx`
+- `apps/mobile/App.tsx`
+- `apps/mobile/src/i18n/{en,ar}.json`
+- `firestore.rules`
+- `firestore.indexes.json`
+- `docs/OFFLINESMS_{DATA_MODEL,PHASE_LOG,TECHNICAL_ARCHITECTURE,RISK_REGISTER,DESIGN_IMPLEMENTATION_MAP}.md`
+
+### Commits
+
+| Hash | Message |
+|---|---|
+| `57aaa1a` | docs: add OfflineSMS phase 9 implementation plan |
+| `2c762c2` | feat(data): formalize wallet and transaction read models |
+| `72c946d` | security: allow user-controlled smsOptOut profile field |
+| `f118368` | feat(mobile): add points wallet and transaction history lib |
+| `cc08e5d` | feat(mobile): rewrite OfflineSMS Points wallet screen |
+| `712e157` | feat(mobile): add transaction detail screen and settings entries |
+| `d28599e` | feat(mobile): show reserved and available balance in SMS confirm |
+
+Tail commit (this docs update) lands next.
+
+### Checks run
+
+```
+npm run typecheck --workspaces --if-present   → ok (dashboard, mobile, functions)
+npm run lint --workspaces --if-present        → ok
+npm run build --workspaces --if-present       → ok
+```
+
+### Known limitations
+
+- **No pagination** — the wallet list is capped at 25 most-recent transactions. "Load more" / infinite scroll lands when Phase 10 introduces purchase flows that grow history quickly.
+- **No `reservation` / `reservation_release` writers exist yet** — Phase 0's escalation path does `balance -= cost; reserved += cost` inside a single transaction and `onSmsBatchAccepted` settles via the same wallet doc + a `type: 'sms'` transaction. The Phase 9 lib already recognises the canonical types, so a Phase 10/11 backend can emit dedicated `reservation` / `reservation_release` rows without UI changes.
+- **`smsOptOut` is the only user-controlled preference today.** A full notifications-settings screen is Phase 19.
+- **No "Buy points" / "Transfer" landing** — both are disabled with `Coming soon`. Phase 10.
+- **Transaction filter for canonical types that map to multiple legacy values** (sms_spend, purchase, transfer_in, transfer_out, admin_adjustment) uses a client-side filter over the unfiltered stream rather than an `in` query. Acceptable at the 25-row default; Phase 20 can switch to a server-side `in` query once `MAX_OR_GROUP_SIZE` budgets are formalised.
+- **TransactionDetail's delivery-report link** routes into `SmsEscalation` with the related conversation/message context, where the Phase 8 result step renders the report. A dedicated `BatchReport` screen is a possible refactor in a later phase.
+
+### Recommended Phase 10 scope
+
+Phase 10 = **Points purchase and transfer flows** (per the roadmap):
+
+1. `BuyPoints.tsx` package picker; replace the Phase 0 synchronous `buyPoints` callable with a **webhook-driven** flow that writes `payments/{id}` idempotently and only credits the wallet when the provider event arrives. Close the free-points exploit (Risk #16 in the register).
+2. `TransferPoints.tsx` flow with daily transfer cap and fraud-flag emitter.
+3. Switch backend writers to canonical transaction-type names (`sms_spend`, `purchase`, `transfer_in/out`, `admin_adjustment`) and emit `reservation` / `reservation_release` rows so the Phase 9 wallet UI shows the full lifecycle.
+4. Flip `BUY_ENABLED` / `TRANSFER_ENABLED` in `apps/mobile/src/screens/Points.tsx`.
+5. Audit every payment + transfer.
+
+Defer: media messages, calls, dashboard moderation.
+
+---
+
 ## Phase 8 — OfflineSMS SMS escalation
 
 **Branch:** `claude/repo-audit-architecture-MiZDX`

@@ -187,13 +187,13 @@ Legend for "Recommended phase" matches `OFFLINESMS_IMPLEMENTATION_ROADMAP.md`.
 
 | | |
 |---|---|
-| **Status** | 🟡 Read-only screen exists |
-| **Existing** | `apps/mobile/src/screens/Points.tsx` live `wallets/{uid}` |
-| **Missing** | History list, reservation badge, transaction details |
-| **Frontend** | `PointsHistory.tsx`, transaction row, filter |
-| **Backend** | Existing `transactions` powers history |
-| **Indexes** | `(userId ASC, createdAt DESC)` (already defined) |
-| **Phase** | 9 |
+| **Status** | ✅ Phase 9 landed: balance + reserved + available, filter chips, transaction history, transaction detail, SMS-batch deep-link, settings toggle for SMS opt-out. |
+| **Existing** | `apps/mobile/src/screens/{Points,TransactionDetail,Settings}.tsx`; `apps/mobile/src/lib/{points,user}.ts`; canonical transaction-type mapping |
+| **Missing** | Pagination beyond 25, dedicated `BatchReport` screen, server-side `in` queries for multi-value canonical filters |
+| **Backend** | Phase 0 writers unchanged; Phase 10 will switch to canonical type strings + emit dedicated `reservation` / `reservation_release` rows |
+| **Indexes** | `(userId, createdAt DESC)` (Phase 0) + `(userId, type, createdAt DESC)` (Phase 9 ✓) |
+| **Rules** | Owner-read wallets / transactions, server-only writes (Phase 0 + Phase 3) ✓; `smsOptOut` allowed in `users.update` (Phase 9 ✓) |
+| **Phase** | 9 ✓ |
 
 ## 17. Buy points
 

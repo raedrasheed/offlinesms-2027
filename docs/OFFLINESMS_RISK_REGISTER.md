@@ -2,6 +2,15 @@
 
 Risks ranked across the surfaces present today and planned for later phases. Likelihood/impact are qualitative.
 
+## Phase 9 mitigation snapshot
+
+- **Risk #1 (Firebase security rules gaps)** — narrow allow-list addition. `users.update` accepts `smsOptOut` (owner-scoped boolean) so the Settings toggle can persist it. All other Phase 2 protections stay in force.
+- **Risk #3 (SMS escalation abuse)** — paired control. Users can now opt out via the Settings toggle (`users.smsOptOut`), and Phase 8's `escalateSms` already excludes opt-outs with `skipReason: 'opt-out'`.
+- **Risk #4 / #5 (points double-spending, stuck reservations)** — Phase 9 surfaces `wallet.reserved` so users see in-flight holds. The numbers come straight from Phase 0's escalate transaction + Phase 8's `onSmsBatchAccepted` settlement.
+- **Risk #16 (payment / points-purchase security)** — unchanged. Phase 9's `Buy points` button is disabled (`BUY_ENABLED = false`); Phase 10 will replace the Phase 0 synchronous credit path with a webhook-driven flow before flipping the flag.
+
+---
+
 ## Phase 8 mitigation snapshot
 
 - **Risk #3 (SMS escalation abuse)** — major progress. Per-uid daily cap (20 batches), per-batch recipient cap (200), per-message cooldown (60 s), eligibility classification (no-phone / opt-out / duplicate / unverified). `previewSmsEscalation` is read-only and surfaces the same eligibility breakdown so the UI can warn before submit. `smsQuotaUsage` now has a writer.

@@ -4,6 +4,17 @@ System-level blueprint for the build-out described in `OFFLINESMS_IMPLEMENTATION
 
 ---
 
+## Phase 9 — OfflineSMS Points Wallet
+
+- **Read-only client.** `wallets/{uid}` and `transactions/{id}` rules are unchanged (admin-only writes from Phase 0 / Phase 3). Mobile only subscribes.
+- **Canonical type union.** The mobile lib maps the legacy strings (`'sms', 'buy', 'transfer-in', 'transfer-out', 'refund', 'admin-adjust'`) and the new canonical names to a single union (`sms_spend | reservation | reservation_release | refund | purchase | transfer_in | transfer_out | admin_adjustment | other`). UI never branches on legacy values.
+- **New index** `transactions(userId, type, createdAt DESC)` powers the per-type filter chip. The Phase 0 `transactions(userId, createdAt DESC)` index still covers the unfiltered list.
+- **Rule change:** `smsOptOut` added to the Phase 2 `users.update` allow-list. Phase 8's `escalateSms` already honoured the field; Phase 9 makes it writable from the Settings toggle. No other Phase 2/3 protection is touched.
+- **Mobile UI.** `Points.tsx` (balance + reserved + available + filter chips + transaction history), `TransactionDetail.tsx` (with OfflineSMS Delivery Report deep-link for SMS-spend rows), `Settings.tsx` (OfflineSMS Points row + SMS reminders toggle), and the Phase 8 `SmsEscalation` confirm step shows reserved / available alongside balance / cost / remaining for consistency.
+- **Coming-soon affordances.** `Points.tsx` carries a `BUY_ENABLED` / `TRANSFER_ENABLED = false` pair that Phase 10 flips when the payment + transfer flows land.
+
+---
+
 ## Phase 8 — OfflineSMS SMS escalation
 
 - **Backend.** `escalateSms` (Phase 0 callable) is rewritten in place: audience canonical form (`'everyone' | 'unread_only' | 'undelivered_only'` + legacy aliases), recipient resolution off Phase 7 receipts, eligibility classification (`no-phone` / `unverified-phone` / `opt-out` / `duplicate-phone` / `already-sent-for-message` / `rate-limited` / `policy-blocked`), daily batch cap (`MAX_BATCHES_PER_DAY = 20`), audience size cap (`MAX_RECIPIENTS_PER_BATCH = 200`), per-message cooldown (`COOLDOWN_MS = 60_000`), and quota persistence to `smsQuotaUsage/{uid}/days/{yyyymmdd}`.
