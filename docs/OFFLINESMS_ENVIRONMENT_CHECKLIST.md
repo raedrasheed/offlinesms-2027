@@ -79,6 +79,7 @@ provided by the Firebase console. These files must **not** be committed.
 | `NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET` | Firebase storage bucket |
 | `NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID` | FCM sender ID |
 | `NEXT_PUBLIC_FIREBASE_APP_ID` | Firebase app ID |
+| `BOOTSTRAP_ADMIN_EMAILS` | Comma-separated list of email addresses granted temporary `bootstrap_admin` access to `/admin` before any real admin claims exist. Set to the first operator's email, then remove after the first `super_admin` is promoted. Example: `operator@example.com` |
 
 ---
 

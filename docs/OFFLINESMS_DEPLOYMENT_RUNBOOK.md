@@ -108,19 +108,28 @@ Resolution: Enable billing in the Firebase / Google Cloud console.
 
 ## 5. Dashboard (Next.js)
 
-### Option A — Vercel
+> **Important:** The dashboard uses SSR dynamic routes (no `output: 'export'` in `next.config.js`).
+> Firebase Hosting static deployment (`firebase deploy --only hosting`) requires a static export
+> which this app does not produce. Use **Option A (Vercel)** as the primary deployment path.
+> Firebase Hosting is only viable if the Next.js on Firebase framework integration is configured
+> (add `"frameworksBackend"` to `firebase.json`) — this is not currently set up.
+
+### Option A — Vercel (recommended)
 
 ```bash
 # From apps/dashboard
 vercel --prod
 ```
 
-### Option B — Firebase Hosting
+### Option B — Firebase Hosting with Next.js framework adapter
 
+Enable the experimental Firebase Hosting + Next.js integration:
 ```bash
-# From repo root
+firebase experiments:enable webframeworks
 firebase deploy --only hosting
 ```
+
+This requires adding `"frameworksBackend": { "region": "us-central1" }` to `firebase.json`.
 
 **Verification:**
 - Navigate to the dashboard URL.

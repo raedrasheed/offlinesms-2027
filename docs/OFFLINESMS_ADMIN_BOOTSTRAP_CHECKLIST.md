@@ -7,35 +7,54 @@ and whenever you need to verify admin account integrity.
 
 ## First-Time Bootstrap
 
-### Step 1 — Create the first super_admin account
+### Step 0 — Enable the bootstrap email allow-list
 
-The `promote:admin` callable function is the only way to elevate a user to `super_admin`.
-On the first deploy it must be called from a trusted server context (not the mobile app or dashboard,
-as neither has admin access yet).
+Before any user has admin claims, the `/admin` route guard checks a
+server-side allow-list driven by the `BOOTSTRAP_ADMIN_EMAILS` environment
+variable. Set this in `apps/dashboard/.env.local` (never committed):
 
-```bash
-# From a Firebase Admin SDK script or via the Firebase console → Functions → Shell
-
-# Option A — Firebase Functions shell
-firebase functions:shell
-# Then:
-promoteAdmin({ uid: '<uid-of-first-user>', role: 'super_admin' })
+```
+BOOTSTRAP_ADMIN_EMAILS=operator@example.com
 ```
 
+This grants the listed email(s) temporary `bootstrap_admin` access to the
+dashboard so they can sign in and view the admin panel. **This is the only
+way to reach `/admin` before claims exist.** Remove this variable after
+the first `super_admin` is promoted.
+
+> `bootstrap_admin` cannot call `adminSetRole` (that callable requires the
+> caller to already have `role: super_admin` in their custom claims). Use
+> the Admin SDK script in Step 1 instead.
+
+### Step 1 — Create the first super_admin account
+
+Both Firestore and Firebase Auth custom claims must be updated together via
+the Admin SDK. A service-account key is required — never commit it.
+
 ```typescript
-// Option B — Node script (run once, do not commit secrets)
+// bootstrap-admin.ts — run once, do not commit secrets
 import { initializeApp, cert } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
+import { getAuth } from 'firebase-admin/auth';
 
 // Use a downloaded service-account key — do not commit this file
 const app = initializeApp({ credential: cert('./service-account.json') });
-const db = getFirestore(app);
+const db  = getFirestore(app);
+const uid = '<uid-of-first-user>';  // Firebase Auth UID
 
-await db.collection('users').doc('<uid>').update({
-  role: 'super_admin',
+// 1. Update Firestore profile
+await db.collection('users').doc(uid).update({
+  role:      'super_admin',
   roleSetAt: new Date().toISOString(),
   roleSetBy: 'bootstrap',
 });
+
+// 2. Set custom claims (role + admin flag) so the dashboard route guard
+//    and the Firestore rules isAdmin() helper both recognise this user.
+const existing = ((await getAuth().getUser(uid)).customClaims ?? {}) as Record<string, unknown>;
+await getAuth().setCustomUserClaims(uid, { ...existing, role: 'super_admin', admin: true });
+
+console.log('Bootstrap complete. User must sign out and back in to refresh the ID token.');
 ```
 
 > The `uid` must belong to an already-authenticated user (they must have signed in at least once
@@ -78,12 +97,13 @@ Run these after every deployment that touches admin permissions code:
 
 ## Route Guard Verification
 
-The dashboard route guard relies on the `role` field in the Firestore `users/{uid}` document
-and the Firebase Auth custom claims set by the `syncRoleClaims` function.
+The dashboard route guard reads `role` from the Firebase Auth ID-token custom claims.
+Custom claims are set atomically by `adminSetRole` (for dashboard-initiated changes) or
+by the Admin SDK script during bootstrap.
 
 If a role update is not reflected in the dashboard immediately:
-1. The user may need to sign out and sign back in (custom claims are cached in the ID token for up to 1 hour).
-2. Verify `syncRoleClaims` completed without error in Cloud Logging.
+1. The user must sign out and sign back in — custom claims are cached in the ID token for up to 1 hour.
+2. Confirm `adminSetRole` completed without error in Cloud Logging (search for `admin.role.set` in audit logs).
 
 ---
 
