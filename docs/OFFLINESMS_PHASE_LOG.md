@@ -4,6 +4,98 @@ Running log of phased work. Newest first.
 
 ---
 
+## Phase 8 — OfflineSMS SMS escalation
+
+**Branch:** `claude/repo-audit-architecture-MiZDX`
+**Status:** Complete. App builds end-to-end (typecheck + lint + build green across workspaces).
+
+### What was done
+
+- **Backend hardening (`escalateSms`).** Rewrites the Phase 0 callable to:
+  - Accept canonical `'everyone' | 'unread_only' | 'undelivered_only'` plus legacy `'unread' / 'undelivered'`.
+  - Resolve recipients from Phase 7 receipts (not just the sender check).
+  - Classify candidates into eligible + excluded with a structured `skipReason` (`no-phone`, `unverified-phone`, `opt-out`, `duplicate-phone`, `already-sent-for-message`, `rate-limited`, `policy-blocked`).
+  - Enforce `MAX_BATCHES_PER_DAY = 20`, `MAX_RECIPIENTS_PER_BATCH = 200`, and a `COOLDOWN_MS = 60_000` per `(messageId, senderUid)` pair.
+  - Persist usage to `smsQuotaUsage/{uid}/days/{yyyymmdd}` (Phase 3 collection — writer wired here).
+  - Audit every state transition (`sms.escalation.created`, `…accepted`, `…partial`, `…failed`) with counts-only metadata. Never the SMS body, never the message body, never full phones.
+  - Allow group owners/admins to escalate other members' messages (Phase 0 was sender-only).
+- **Two new callables.**
+  - `previewSmsEscalation` — read-only mirror of `escalateSms`'s audience + eligibility logic. Returns masked phones + wallet snapshot + cost + cap status. Mutates nothing.
+  - `retryFailedSmsRecipients` — re-dispatches only the failed recipients of a prior batch. Creates a new batch with `retryOfBatchId` for audit lineage; bypasses the conversation cooldown (it's a targeted recovery), still respects the daily cap.
+- **Shared helpers in `functions/src/sms/recipients.ts`** — `canonicalAudience`, `filterByAudience`, `classifyRecipients`, `maskPhone`, `todayKey`, plus the cap + cost constants.
+- **`onSmsBatchAccepted` extended** to stamp `pointsDeducted` and `pointsRefunded` onto the batch doc so the OfflineSMS Delivery Report can show final settlement.
+- **Mobile UI.**
+  - `apps/mobile/src/lib/sms.ts` wraps the three callables, provides `smsErrorCopy`/`smsErrorReason`/`smsSkipReasonCopy`, and `buildDefaultSmsBody(conversationName, messageText)` for the SMS preview.
+  - `apps/mobile/src/screens/SmsEscalation.tsx` replaces the Phase 1 EmptyState placeholder with a single screen that walks through five steps (audience → recipients → text → confirm → result), with a top stepper. The OfflineSMS Delivery Report at the end shows Sent / Failed / Skipped / Points cost + the OfflineSMS batch ID; "Retry failed" is offered when `result.failed > 0`.
+  - `MessageInfo` shows a "Send via OfflineSMS" CTA when there are unread / pending / failed recipients on the sender's own message.
+  - `MessageBubble` adds a "Send via OfflineSMS" entry to the long-press action sheet for the sender's own messages.
+- **Branding policy.** Only OfflineSMS / OfflineSMS SMS Gateway / OfflineSMS Points / OfflineSMS Delivery Report / OfflineSMS batch in user-visible copy and audit metadata. The provider boundary stays exactly where Phase 0 put it — `functions/src/sms/gateway.ts`.
+- **No rule changes.** The Phase 0 + Phase 3 rules already lock `smsBatches`, `smsBatches/{b}/recipients`, and `smsQuotaUsage` to server-only writes. Phase 8 confirms and documents this.
+- **i18n.** New `sms.*` namespace in `en.json` + `ar.json`.
+
+### Files created
+
+- `docs/OFFLINESMS_PHASE_8_PLAN.md`
+- `functions/src/sms/previewEscalation.ts`
+- `functions/src/sms/retryFailed.ts`
+- `functions/src/sms/recipients.ts`
+- `apps/mobile/src/lib/sms.ts`
+
+### Files edited
+
+- `functions/src/sms/escalate.ts`
+- `functions/src/sms/onSmsBatchAccepted.ts`
+- `functions/src/index.ts`
+- `apps/mobile/src/screens/SmsEscalation.tsx` (replaced placeholder)
+- `apps/mobile/src/screens/MessageInfo.tsx`
+- `apps/mobile/src/screens/Conversation.tsx`
+- `apps/mobile/src/components/MessageBubble.tsx`
+- `apps/mobile/src/i18n/{en,ar}.json`
+- `docs/OFFLINESMS_{DATA_MODEL,PHASE_LOG,TECHNICAL_ARCHITECTURE,RISK_REGISTER,DESIGN_IMPLEMENTATION_MAP}.md`
+
+### Commits
+
+| Hash | Message |
+|---|---|
+| `eafe368` | docs: add OfflineSMS phase 8 implementation plan |
+| `be453a1` | feat(data): add SMS escalation batch and quota contracts |
+| `90e9a59` | feat(functions): harden OfflineSMS escalation with caps, cooldown, quota |
+| `e3c0c98` | feat(mobile): add SMS escalation audience and recipient preview |
+| `3009bad` | feat(mobile): wire Send via OfflineSMS entry points |
+
+Tail commit (this docs update) lands next.
+
+### Checks run
+
+```
+npm run typecheck --workspaces --if-present   → ok (dashboard, mobile, functions)
+npm run lint --workspaces --if-present        → ok
+npm run build --workspaces --if-present       → ok
+```
+
+### Known limitations
+
+- **No automated tests** for the new callables / rules / UI. Manual emulator checklist in the Phase 8 plan; `@firebase/rules-unit-testing` lands in Phase 20.
+- **`phoneVerified` is treated as truthy-by-default.** The current onboarding flow doesn't explicitly set the flag; the eligibility check only excludes when `phoneVerified === false`. Once Phase 2's onboarding owns the flag, the check tightens to `=== true`.
+- **`smsOptOut` field has no UI to set it.** The escalation correctly respects an opt-out, but there's no settings screen yet (Phase 19).
+- **`'already-sent-for-message'` skip reason isn't yet detected.** The skip-reason enum supports it for the future cross-batch dedupe, but Phase 8 doesn't yet scan prior batches to flag previously-SMSed recipients.
+- **Mock gateway only.** `functions/src/sms/gateway.ts` is still the 90/10 mock; a real provider integration is a deployment-time concern that goes through the same typed interface.
+- **No "Buy points" affordance lands a real flow.** Phase 10 wires the purchase flow; for now the confirm step disables when balance is insufficient.
+- **`retryFailedSmsRecipients` doesn't deduplicate against the original batch's failures** if a separate manual escalation has been sent in between. Acceptable for Phase 8; tightens in Phase 11.
+
+### Recommended Phase 9 scope
+
+Phase 9 = **OfflineSMS Points Wallet** (per the roadmap):
+
+1. `Points.tsx` history listing — live `transactions where userId == uid order by createdAt desc`, paginated.
+2. `TransactionDetail.tsx` screen showing per-transaction breakdown (type, amount, related batch / peer / package).
+3. Reservation badge — surface the existing `wallets/{uid}.reserved` in the header card so users see "Reserved for in-flight SMS" without having to dig.
+4. Settings link for `smsOptOut` on the caller's own user doc.
+5. No payment flow yet (Phase 10).
+6. No admin wallet operations (Phase 15).
+
+---
+
 ## Phase 7 — Delivery receipts, read receipts, message views
 
 **Branch:** `claude/repo-audit-architecture-MiZDX`

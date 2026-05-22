@@ -175,15 +175,13 @@ Legend for "Recommended phase" matches `OFFLINESMS_IMPLEMENTATION_ROADMAP.md`.
 
 | | |
 |---|---|
-| **Status** | 🟡 Backend exists, no UI |
-| **Existing** | `functions/src/sms/escalate.ts`, `gateway.ts`, `onSmsBatchAccepted.ts`; `smsBatches` rules + index |
-| **Missing** | Mobile UI (`SmsEscalation.tsx` is empty), audience preview, cost preview, confirmation, receipt screen |
-| **Frontend** | `SmsEscalation.tsx` full flow, audience picker, cost line item |
-| **Backend** | Add per-user/day quota, audience-size cap, retry-failed callable |
-| **Firestore** | `smsBatches` (existing); add `smsQuotaUsage/{uid}/{yyyymmdd}` |
-| **Rules** | Quota docs admin-only writes |
-| **Tests** | Insufficient points, partial fail refund, quota |
-| **Phase** | 8, retries in 11 |
+| **Status** | ✅ Phase 8 landed: hardened backend + multi-step mobile flow + entry points + audit. |
+| **Existing** | `functions/src/sms/{escalate,previewEscalation,retryFailed,onSmsBatchAccepted,gateway,recipients}.ts`; `apps/mobile/src/lib/sms.ts`; `apps/mobile/src/screens/SmsEscalation.tsx`; `MessageInfo` + `MessageBubble` entry points |
+| **Missing** | Real provider integration (currently mock gateway); `smsOptOut` settings UI; cross-batch dedupe for `already-sent-for-message`; `phoneVerified` strict mode |
+| **Backend** | Phase 8 ✓ |
+| **Firestore** | `smsBatches`, `smsBatches/{b}/recipients`, `smsQuotaUsage/{uid}/days/{yyyymmdd}` (writer wired Phase 8) |
+| **Rules** | Server-only writes (Phase 0 + Phase 3) ✓ |
+| **Phase** | 8 ✓; provider integration is deployment-time; opt-out settings UI Phase 19 |
 
 ## 16. OfflineSMS Points Wallet
 

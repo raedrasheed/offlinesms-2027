@@ -2,6 +2,16 @@
 
 Risks ranked across the surfaces present today and planned for later phases. Likelihood/impact are qualitative.
 
+## Phase 8 mitigation snapshot
+
+- **Risk #3 (SMS escalation abuse)** — major progress. Per-uid daily cap (20 batches), per-batch recipient cap (200), per-message cooldown (60 s), eligibility classification (no-phone / opt-out / duplicate / unverified). `previewSmsEscalation` is read-only and surfaces the same eligibility breakdown so the UI can warn before submit. `smsQuotaUsage` now has a writer.
+- **Risk #4 / #5 (points double-spending, stuck reservations)** — escalation still uses the Phase 0 wallet transaction; `onSmsBatchAccepted` settles per-recipient outcomes and now also stamps `pointsDeducted` / `pointsRefunded` on the batch for visibility. Phase 11 will add a reaper for batches stuck in `sending`.
+- **Risk #10 (phone privacy)** — preview and result UIs only ever show masked phones. The unmasked phone never leaves `functions/src/sms/recipients.ts` and `gateway.ts`. Audit logs carry counts only.
+- **Risk #15 (audit log gaps)** — `sms.escalation.*` namespace lands; metadata sanitiser still strips body/content/messageText/text keys defensively.
+- **Risk #21 (third-party brand bleed)** — Phase 8 reaffirms the policy: only OfflineSMS branding in UI, copy, and audit logs. `gateway.ts` remains the single isolation point.
+
+---
+
 ## Phase 7 mitigation snapshot
 
 - **Risk #1 (Firebase security rules gaps)** — receipt reads are now scoped to the receipt owner, the message sender, or admins; the Phase 4 "any participant" read is closed. `statuses/{id}/views/{uid}` writes are server-only via `markStatusViewed`, which re-runs Phase 3's audience check.

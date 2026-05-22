@@ -4,6 +4,19 @@ System-level blueprint for the build-out described in `OFFLINESMS_IMPLEMENTATION
 
 ---
 
+## Phase 8 — OfflineSMS SMS escalation
+
+- **Backend.** `escalateSms` (Phase 0 callable) is rewritten in place: audience canonical form (`'everyone' | 'unread_only' | 'undelivered_only'` + legacy aliases), recipient resolution off Phase 7 receipts, eligibility classification (`no-phone` / `unverified-phone` / `opt-out` / `duplicate-phone` / `already-sent-for-message` / `rate-limited` / `policy-blocked`), daily batch cap (`MAX_BATCHES_PER_DAY = 20`), audience size cap (`MAX_RECIPIENTS_PER_BATCH = 200`), per-message cooldown (`COOLDOWN_MS = 60_000`), and quota persistence to `smsQuotaUsage/{uid}/days/{yyyymmdd}`.
+- **Preview and retry.** `previewSmsEscalation` is a read-only mirror of the eligibility logic. `retryFailedSmsRecipients` re-dispatches only the failed recipients of an existing batch, linked via `retryOfBatchId`; bypasses the cooldown but still respects the daily cap.
+- **Settlement.** `onSmsBatchAccepted` (Phase 0) now also stamps `pointsDeducted` and `pointsRefunded` onto the batch doc so the OfflineSMS Delivery Report shows final numbers.
+- **Audit.** `sms.escalation.created` / `sms.escalation.accepted` / `sms.escalation.partial` / `sms.escalation.failed` / `sms.escalation.retry_failed`. Counts-only metadata — never the SMS body, never the message body, never full phone numbers.
+- **Branding.** Single provider isolation point at `functions/src/sms/gateway.ts`. The rest of the system — UI, audit logs, telemetry, docs — only sees OfflineSMS.
+- **Mobile UI.** `SmsEscalation.tsx` five-step flow (audience → recipients → text → confirm → result), driven by the Phase 8 callables; `MessageInfo` + `MessageBubble` entry points gated to the sender of the message.
+- **Rules.** Unchanged. Phase 0 + Phase 3 already lock `smsBatches`, its `recipients`, and `smsQuotaUsage` to server-only writes.
+- **Caps & defaults:** `COST_PER_SMS = 28` (Phase 0 default), `EDIT_WINDOW_MS` and other policy constants live in `functions/src/sms/recipients.ts`.
+
+---
+
 ## Phase 7 — Delivery receipts, read receipts, message views
 
 - **Receipt doc shape:** `conversations/{c}/messages/{m}/receipts/{uid}` — `{ status, deliveredAt, readAt, viewedAt, playedAt, failedAt, failureReason, createdAt, updatedAt }`. Doc id is always the recipient uid.
