@@ -458,6 +458,16 @@ service cloud.firestore {
     }
 
     // ════════════════════════════════════════════════════════════
+    // SMS DELIVERY EVENTS — Phase 11 webhook idempotency table.
+    // Admin-read; client writes denied. Only the gatewayWebhook HTTP
+    // function (Admin SDK) inserts.
+    // ════════════════════════════════════════════════════════════
+    match /smsDeliveryEvents/{eventId} {
+      allow read:  if isAdmin();
+      allow write: if false;
+    }
+
+    // ════════════════════════════════════════════════════════════
     // POINTS PACKAGES — public-read catalogue for signed-in users.
     // Admin writes only; Phase 15 will add management UI.
     // ════════════════════════════════════════════════════════════
