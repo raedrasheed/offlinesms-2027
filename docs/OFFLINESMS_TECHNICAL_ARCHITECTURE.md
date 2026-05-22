@@ -4,6 +4,19 @@ System-level blueprint for the build-out described in `OFFLINESMS_IMPLEMENTATION
 
 ---
 
+## Phase 10 — Points purchase and transfer
+
+- **Free-points exploit closed.** Phase 0's `buyPoints` callable is removed. The new flow is `createPurchase` (creates pending `payments/{id}`, never credits) → `confirmPayment` (shared-secret-gated, idempotent, credits + writes canonical `purchase` transaction in one Firestore transaction). `confirmPaymentMock` reuses the same internal credit path and refuses unless `process.env.FUNCTIONS_EMULATOR === 'true'`.
+- **Hardened transfer.** `transferPoints` (Phase 10 replacement) enforces self-transfer / frozen-wallet / closed-wallet / daily caps (`COUNT = 20`, `POINTS = 5000`), insufficient-balance against `balance - reserved`, writes `pointsTransfers/{id}`, emits canonical `transfer_in/out` rows, increments `transferQuotaUsage`, and emits a `flags/{id}` doc above `FRAUD_FLAG_THRESHOLD_POINTS = 2000`.
+- **Canonical SMS lifecycle.** `escalateSms` emits a `reservation` (debit) row. `onSmsBatchAccepted` emits `reservation_release` (credit) + `sms_spend` (debit) + `refund` (credit when applicable) in addition to the Phase 0 `type: 'sms'` row for one phase. Phase 11 drops the legacy row.
+- **Data model.** `pointsPackages/{id}`, `pointsTransfers/{id}`, `transferQuotaUsage/{uid}/days/{yyyymmdd}` added. `wallets/{uid}` gets optional `status` ('active' | 'frozen' | 'closed'; missing == 'active'). `transactions` carry `relatedPaymentId` / `relatedTransferId`.
+- **Rules.** Packages — signed-in read, admin write. Transfers — sender or recipient or admin read, server-only write. Quota — owner read, server-only write. `payments` and `wallets` unchanged.
+- **New indexes.** `pointsTransfers(fromUserId, createdAt DESC)` and `pointsTransfers(toUserId, createdAt DESC)`.
+- **Mobile UI.** `BuyPoints.tsx` (4-step purchase) and `TransferPoints.tsx` (4-step transfer). `Points.tsx` flips both `BUY_ENABLED` and `TRANSFER_ENABLED` to true. `TransactionDetail` renders `Payment` and `Transfer` cards.
+- **Branding.** Only OfflineSMS strings in user-visible copy and audit metadata.
+
+---
+
 ## Phase 9 — OfflineSMS Points Wallet
 
 - **Read-only client.** `wallets/{uid}` and `transactions/{id}` rules are unchanged (admin-only writes from Phase 0 / Phase 3). Mobile only subscribes.

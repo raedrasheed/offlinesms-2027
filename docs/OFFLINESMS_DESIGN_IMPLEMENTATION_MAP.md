@@ -199,25 +199,25 @@ Legend for "Recommended phase" matches `OFFLINESMS_IMPLEMENTATION_ROADMAP.md`.
 
 | | |
 |---|---|
-| **Status** | 🟡 Callable exists but trusts client; no payment |
-| **Existing** | `functions/src/points/buy.ts`, `/admin/points` packages UI |
-| **Missing** | Mobile purchase flow, payment provider integration (webhook-driven), receipts |
-| **Frontend** | `BuyPoints.tsx`, package picker |
-| **Backend** | Webhook endpoint, idempotent crediting, refund flow |
-| **Firestore** | `payments/{paymentId}` |
-| **Rules** | Server-only writes |
-| **Phase** | 10 |
+| **Status** | ✅ Phase 10 landed: webhook-driven purchase, idempotent credits, emulator-only mock confirmation. |
+| **Existing** | `functions/src/points/{createPurchase,confirmPayment,confirmPaymentMock}.ts`, `apps/mobile/src/screens/BuyPoints.tsx`, `pointsPackages/{id}` collection |
+| **Missing** | Real provider integration (deployment-time concern), `pointsPackages` seed data, in-app receipt screen |
+| **Backend** | `createPurchase` creates pending payment; `confirmPayment` is shared-secret-gated and idempotent; `confirmPaymentMock` refuses outside `FUNCTIONS_EMULATOR` |
+| **Firestore** | `pointsPackages` (Phase 10 ✓), `payments` (Phase 3 + Phase 10 ✓) |
+| **Rules** | Packages: signed-in read, admin write (Phase 10 ✓); Payments: server-only write (Phase 3 ✓) |
+| **Phase** | 10 ✓ |
 
 ## 18. Transfer points
 
 | | |
 |---|---|
-| **Status** | 🟡 Callable exists, no UI |
-| **Existing** | `functions/src/points/transfer.ts` |
-| **Missing** | `TransferPoints.tsx`, recipient picker, amount + note, confirmation |
-| **Frontend** | Form, contact search |
-| **Backend** | Add daily transfer cap, fraud-flag emitter |
-| **Phase** | 10 |
+| **Status** | ✅ Phase 10 landed: hardened transfer with caps, frozen-wallet guard, canonical transactions, fraud-flag emission. |
+| **Existing** | `functions/src/points/transferPoints.ts`, `apps/mobile/src/screens/TransferPoints.tsx`, `pointsTransfers/{id}`, `transferQuotaUsage/{uid}/days/{yyyymmdd}` |
+| **Missing** | Rate-window fraud detection (Phase 18), admin freeze callable (Phase 15) |
+| **Backend** | Daily caps (20 transfers / 5000 pts), fraud flag at ≥ 2000 pts, canonical `transfer_in`/`transfer_out` rows, `transferQuotaUsage` increment, audit lineage |
+| **Firestore** | `pointsTransfers`, `transferQuotaUsage` (Phase 10 ✓) |
+| **Rules** | Transfers: sender+recipient+admin read, server-only write; quota: owner read, server-only write (Phase 10 ✓) |
+| **Phase** | 10 ✓ |
 
 ## 19. SMS delivery reports
 

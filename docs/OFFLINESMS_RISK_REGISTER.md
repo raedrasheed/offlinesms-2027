@@ -2,6 +2,16 @@
 
 Risks ranked across the surfaces present today and planned for later phases. Likelihood/impact are qualitative.
 
+## Phase 10 mitigation snapshot
+
+- **Risk #16 (payment / points-purchase security) — CLOSED.** Phase 0's `buyPoints` direct-credit callable is removed. Purchase credits now require a `confirmPayment` event guarded by a constant-time shared-secret check, with idempotency on the doc's `idempotencyKey` and a single Firestore transaction that credits + writes the canonical `purchase` row atomically. `confirmPaymentMock` is hard-gated to the Functions emulator. Production must set `PAYMENT_WEBHOOK_SECRET` before any credit can fire.
+- **Risk #4 / #5 (points double-spending, stuck reservations)** — Phase 10 emits explicit `reservation` / `reservation_release` / `sms_spend` / `refund` rows. Transfers run inside a Firestore transaction so concurrent calls can't race past the balance / cap checks. Stuck-batch reaper still queued for Phase 11.
+- **Risk #14 (admin permission leakage)** — `transferPoints` blocks frozen wallets; only admins can freeze (Phase 15 ships the callable).
+- **Risk #21 (third-party brand bleed)** — no payment-provider name in any user-visible string. Real provider integration goes through `confirmPayment` server-only.
+- **New: fraud-flag false negatives.** Single-transaction threshold of 2000 pts. A user transferring 1999 pts repeatedly doesn't trigger. Rate-window detection is a Phase 18 add-on.
+
+---
+
 ## Phase 9 mitigation snapshot
 
 - **Risk #1 (Firebase security rules gaps)** — narrow allow-list addition. `users.update` accepts `smsOptOut` (owner-scoped boolean) so the Settings toggle can persist it. All other Phase 2 protections stay in force.

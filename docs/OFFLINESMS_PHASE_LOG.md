@@ -4,6 +4,110 @@ Running log of phased work. Newest first.
 
 ---
 
+## Phase 10 — Points purchase and transfer flows
+
+**Branch:** `claude/repo-audit-architecture-MiZDX`
+**Status:** Complete. App builds end-to-end (typecheck + lint + build green across workspaces).
+
+### What was done
+
+- **Closed the free-points exploit.** The Phase 0 `buyPoints` callable that credited the wallet directly is **deleted**. The new flow is two-step:
+  - `createPurchase({ packageId })` creates `payments/{id}` with `status: 'pending'`, a server-generated `idempotencyKey`, and `totalPoints` / `amount` / `currency`. **Never credits.**
+  - `confirmPayment({ paymentId, idempotencyKey, status, signature })` requires `PAYMENT_WEBHOOK_SECRET` (constant-time `crypto.timingSafeEqual`), is idempotent on the doc's `idempotencyKey`, and on `'completed'` credits the wallet + writes a canonical `purchase` transaction in a single Firestore transaction.
+  - `confirmPaymentMock({ paymentId, status })` reuses the same internal credit path but **refuses unless `process.env.FUNCTIONS_EMULATOR === 'true'`**. Production deploys return `permission-denied`.
+- **Hardened the transfer flow.** `transferPoints` (`functions/src/points/transferPoints.ts`, replaces the Phase 0 `transfer.ts`) now enforces self-transfer / frozen-wallet / closed-wallet / daily caps (`DAILY_TRANSFER_CAP_COUNT = 20`, `DAILY_TRANSFER_CAP_POINTS = 5000`), insufficient-balance against `balance - reserved`, and writes:
+  - `pointsTransfers/{id}` authoritative transfer record (status, idempotencyKey, flagged).
+  - Canonical `transfer_out` / `transfer_in` transactions on both sides with `relatedTransferId` and `relatedUserId`.
+  - `transferQuotaUsage/{uid}/days/{yyyymmdd}` increment.
+  - `flags/{id}` when `amount >= FRAUD_FLAG_THRESHOLD_POINTS = 2000`.
+- **Canonical transaction lifecycle.** `onSmsBatchAccepted` now emits `reservation_release` (credit) + `sms_spend` (debit) + `refund` (credit when applicable) **alongside** the legacy `type: 'sms'` row so older clients still parse during the migration window. `escalateSms` emits a `reservation` (debit) transaction when reserving. The Phase 9 mobile lib's `canonicaliseType` already accepts both legacy and canonical strings.
+- **Data model.** Added `pointsPackages/{id}`, `pointsTransfers/{id}`, `transferQuotaUsage/{uid}/days/{yyyymmdd}`. `wallets/{uid}` gains optional `status` ('active' | 'frozen' | 'closed'; missing == 'active'). `transactions` carry `relatedPaymentId` and `relatedTransferId`.
+- **Rules.** Added `pointsPackages` (signed-in read, admin write), `pointsTransfers` (sender/recipient/admin read; `allow write: if false`), `transferQuotaUsage/{uid}/days/{yyyymmdd}` (owner-read, server-only write). No previous rule loosened.
+- **Indexes.** `pointsTransfers(fromUserId, createdAt DESC)` and `pointsTransfers(toUserId, createdAt DESC)` added.
+- **Mobile UI.**
+  - `apps/mobile/src/lib/points.ts` extended with `subscribePackages`, `subscribePayment`, `createPurchase`, `confirmPaymentMock`, `transferPoints`, and `pointsErrorCopy` / `pointsErrorReason` helpers.
+  - `BuyPoints.tsx` — package picker → pending → success/failure. Emulator-only "Confirm payment (dev)" + "Simulate failure (dev)" buttons drive the mock callable. No provider names in copy.
+  - `TransferPoints.tsx` — recipient search → amount → confirm → result. Available balance uses `balance - reserved`. Result step surfaces the fraud-flag advisory when the callable returns `flagged: true`.
+  - `Points.tsx` flips `BUY_ENABLED = true` and `TRANSFER_ENABLED = true`, wires the buttons.
+  - `TransactionDetail.tsx` renders `Payment` and `Transfer` cards keyed off the new `relatedPaymentId` / `relatedTransferId` fields.
+- **No third-party provider names** anywhere in user-visible copy, audit logs, or transaction data.
+
+### Files created
+
+- `docs/OFFLINESMS_PHASE_10_PLAN.md`
+- `functions/src/points/createPurchase.ts`
+- `functions/src/points/confirmPayment.ts`
+- `functions/src/points/confirmPaymentMock.ts`
+- `functions/src/points/transferPoints.ts`
+- `apps/mobile/src/screens/BuyPoints.tsx`
+- `apps/mobile/src/screens/TransferPoints.tsx`
+
+### Files deleted
+
+- `functions/src/points/buy.ts` (Phase 0 unsafe direct-credit callable)
+- `functions/src/points/transfer.ts` (Phase 0 transfer without caps / fraud flag)
+
+### Files edited
+
+- `functions/src/sms/escalate.ts` (emit `reservation`)
+- `functions/src/sms/onSmsBatchAccepted.ts` (emit canonical lifecycle)
+- `functions/src/index.ts` (exports)
+- `apps/mobile/src/lib/points.ts`
+- `apps/mobile/src/screens/{Points,TransactionDetail}.tsx`
+- `apps/mobile/App.tsx`
+- `firestore.rules`
+- `firestore.indexes.json`
+- Docs: data model, phase log (this file), technical architecture, risk register, design map.
+
+### Commits
+
+| Hash | Message |
+|---|---|
+| `7430f6c` | docs: add OfflineSMS phase 10 implementation plan |
+| `706154b` | feat(data): add points packages, payments, and transfer contracts |
+| `2404dab` | security: harden points purchase and transfer rules |
+| `6bd182f` | feat(functions): add webhook-driven points purchase flow |
+| `1a19de5` | feat(functions): add points transfer flow with quota and fraud flags |
+| `62c0808` | feat(functions): canonicalize points transaction lifecycle |
+| `6cd8ab6` | feat(mobile): add buy points flow |
+| `97c3d78` | feat(mobile): add transfer points flow |
+| `dcf2351` | feat(mobile): enable wallet actions and link payments/transfers in detail |
+
+Tail commit (this docs update) lands next.
+
+### Checks run
+
+```
+npm run typecheck --workspaces --if-present   → ok (dashboard, mobile, functions)
+npm run lint --workspaces --if-present        → ok
+npm run build --workspaces --if-present       → ok
+```
+
+### Known limitations
+
+- **No real payment provider integrated.** `confirmPayment` is the production webhook stand-in (requires `PAYMENT_WEBHOOK_SECRET`). `confirmPaymentMock` is the emulator-only dev path. Integrating a real provider is a deployment-time concern; only `confirmPayment` will be invoked, and only by the webhook handler (which can be a Cloud Functions HTTP function added when the provider lands).
+- **`pointsPackages` collection is empty until seeded.** Phase 15 will add an admin UI; for now `npm run seed` can be extended (it isn't in Phase 10).
+- **Phase 0's `'sms'` legacy transaction row is still emitted** alongside the canonical `reservation_release` / `sms_spend` / `refund` rows. Phase 11 drops it.
+- **Reservation event is per-batch** (not per-recipient). For multi-recipient SMS batches the wallet UI shows a single reservation row for the total cost.
+- **Daily caps are UTC-day** and not user-tz-aware. Acceptable for Phase 10; localisation is a Phase 19 concern.
+- **No admin freeze / unfreeze callable.** `wallets.{status}` is honoured by `transferPoints`, but only an Admin SDK script can set it. Phase 15.
+- **Fraud-flag emission is single-transaction-based.** A user repeatedly transferring just under the threshold won't trigger. A rate-window check is a Phase 18 add-on.
+- **No "Load more" pagination** on the wallet history yet — the Phase 9 25-row default remains. Phase 18 will revisit alongside the audit log explorer.
+
+### Recommended Phase 11 scope
+
+Phase 11 = **SMS delivery reports and retry failed SMS** (per the roadmap):
+
+1. Drop the legacy `type: 'sms'` row from `onSmsBatchAccepted` now that Phase 10 emits the canonical lifecycle.
+2. `gatewayWebhook` HTTP function that ingests provider DLRs (Delivery Receipts), HMAC-verified, and updates per-recipient `smsStatus` + `deliveredAt`/`failedAt`.
+3. `SmsBatchReport.tsx` standalone screen (currently the Phase 8 result step is reachable only mid-flow); deep-link from `TransactionDetail` for `sms_spend` rows lands here.
+4. Reaper: a scheduled function that flags `smsBatches` stuck in `sending` for more than 15 minutes and releases their reservation (Risk #5).
+5. Cross-batch dedupe for `already-sent-for-message` skipReason (currently unused by Phase 8).
+
+Defer: media messages, calls, dashboard moderation, admin wallet operations.
+
+---
+
 ## Phase 9 — OfflineSMS Points Wallet (read-only foundation)
 
 **Branch:** `claude/repo-audit-architecture-MiZDX`
