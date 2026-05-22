@@ -4,6 +4,137 @@ Running log of phased work. Newest first.
 
 ---
 
+## Phase 17 — Global Search, Export Foundation, Reporting, and Filter Improvements
+
+**Branch:** `claude/repo-audit-architecture-MiZDX`  
+**Status:** Complete. TypeScript clean (dashboard + functions), next build passes (all routes).
+
+### Commits
+
+1. `docs: add OfflineSMS phase 17 implementation plan` — `395b360`
+2. `feat(admin): add global search route and UI` — `9d4bbfc`
+3. `feat(admin): add reports foundation and Phase 17 Firestore indexes` — `743d8fd`
+4. `docs: update phase log for phase 17` — (this commit)
+
+### Files changed
+
+**New files:**
+- `docs/OFFLINESMS_PHASE_17_PLAN.md` — implementation plan
+- `apps/dashboard/lib/exportHelper.ts` — shared CSV export helper
+- `apps/dashboard/app/admin/search/route.ts` — global search API route
+- `apps/dashboard/app/admin/users/export/route.ts`
+- `apps/dashboard/app/admin/groups/export/route.ts`
+- `apps/dashboard/app/admin/sms/export/route.ts`
+- `apps/dashboard/app/admin/points/transactions/export/route.ts`
+- `apps/dashboard/app/admin/points/payments/export/route.ts`
+- `apps/dashboard/app/admin/support/export/route.ts`
+
+**Modified files:**
+- `apps/dashboard/lib/adminPermissions.ts` — 7 new capabilities: search:global, export:users, export:groups, export:sms, export:points, export:support, view:reports
+- `apps/dashboard/lib/adminData.ts` — listUsers/listGroups/listTransactions/listPayments accept new filter params
+- `apps/dashboard/components/AdminGlobalSearchShell.tsx` — fully functional with debounce + grouped results UI
+- `apps/dashboard/app/admin/reports/page.tsx` — real implementation (was placeholder)
+- `apps/dashboard/app/admin/users/page.tsx` — status FilterBar + Export CSV button
+- `apps/dashboard/app/admin/groups/page.tsx` — status FilterBar + Export CSV button
+- `apps/dashboard/app/admin/sms/page.tsx` — Export CSV button
+- `apps/dashboard/app/admin/support/page.tsx` — Export CSV button
+- `apps/dashboard/app/admin/points/transactions/page.tsx` — type FilterBar + Export CSV button
+- `apps/dashboard/app/admin/points/payments/page.tsx` — status FilterBar + Export CSV button
+- `firestore.indexes.json` — 6 new composite indexes
+
+### What was done
+
+**1. Global search foundation:**
+- `GET /admin/search?q=<query>&type=<optional>` — capability-aware Firestore search
+- Searches: users (usernameLower prefix + exact uid), organizations (slug prefix), groups (name prefix), smsBatches (exact ID), wallets (exact uid), payments (exact ID), tickets (exact ID), auditLogs (action prefix)
+- Max 5 results per group, 50 total; 300ms client debounce
+- Each collection gated by the role's existing view capability
+- AdminGlobalSearchShell: debounced fetch, grouped results with status dots, keyboard nav (↑↓↵ Esc), loading spinner
+
+**2. New capabilities (7 added):**
+- `search:global` — all roles
+- `export:users` — super_admin, auditor, legacy_admin, bootstrap_admin
+- `export:groups` — super_admin, organization_admin, auditor, legacy_admin, bootstrap_admin
+- `export:sms` — super_admin, organization_admin, auditor, legacy_admin, bootstrap_admin
+- `export:points` — super_admin, finance_admin, auditor, legacy_admin, bootstrap_admin
+- `export:support` — super_admin, support_agent, auditor, legacy_admin, bootstrap_admin
+- `view:reports` — super_admin, finance_admin, organization_admin, auditor, legacy_admin, bootstrap_admin
+
+**3. Filter/pagination improvements:**
+- Users: status filter (active/inactive/suspended) via FilterBar + URL params
+- Groups: status filter (active/locked/archived) via FilterBar + URL params
+- Transactions: type filter (purchase/spend/transfer/refund/bonus) via FilterBar + URL params
+- Payments: status filter (pending/completed/failed/refunded) via FilterBar + URL params
+- All pages forward active filter to export href
+
+**4. Export routes (6 new):**
+All exports: GET routes, permission-gated, max 1,000 rows, CSV, audit-logged as export.*
+
+| Route | Columns | Capability |
+|---|---|---|
+| /admin/users/export | uid, displayName, username, maskedEmail, maskedPhone, status, profileCompleted, smsOptOut, createdAt | export:users |
+| /admin/groups/export | id, name, status, memberCount, organizationId, ownerUid, createdAt, updatedAt | export:groups |
+| /admin/sms/export | id, status, totalCount, sentCount, deliveredCount, failedCount, skippedCount, pointsCost, attemptNumber, createdAt | export:sms |
+| /admin/points/transactions/export | id, uid, type, direction, amount, status, createdAt | export:points |
+| /admin/points/payments/export | id, userId, packageId, totalPoints, amount, currency, status, createdAt | export:points |
+| /admin/support/export | id, subject, category, status, createdBy, createdAt, updatedAt | export:support |
+
+No description body in support export. No phone numbers in any export. No message bodies anywhere.
+
+**5. Reports foundation (/admin/reports):**
+- 8 overview cards: total users, new users this week/month, active groups, SMS batches this week, failed SMS this week (amber if > 0), point-spend transactions this week, open tickets (amber if > 0)
+- Two 7-day trend tables with inline bar visualization: SMS batches and new users
+- Support tickets by status: open/pending/resolved/closed counts
+- All counts use Firestore aggregation (count().get()), all soft-fail showing `—` on error
+- Gated by `view:reports` capability
+
+**6. Firestore indexes (6 new):**
+- `users`: status ASC, createdAt DESC — users status filter
+- `conversations`: type ASC, createdAt DESC — groups base query ordering
+- `conversations`: type ASC, status ASC, createdAt DESC — groups with status filter
+- `transactions`: type ASC, createdAt DESC — transactions type-only filter + reports
+- `payments`: status ASC, createdAt DESC — payments status filter
+- (smsBatches status+createdAt added in Phase 16 covers reports failed SMS query)
+
+**7. Shared export helper (`lib/exportHelper.ts`):**
+- `csvCell`, `csvRow`, `buildCsvResponse`, `writeExportAudit`, `EXPORT_LIMIT=1000`
+- All export routes use this helper; single place to change row limit or CSV format
+
+### Security posture
+
+- Search results: no full phones, no message bodies, no SMS bodies, no secrets
+- Exports: no description body, no phone numbers, no message content, no payment secrets
+- Reports: pure aggregate counts, no personal data
+- All routes re-verify session server-side
+- Capability enforcement on every route (not just UI-level)
+
+### Checks run
+
+- `tsc --noEmit` — clean (dashboard + functions)
+- `next build` — passes (all new routes included)
+
+### Known limitations
+
+1. Search uses Firestore prefix scan on lowercase fields; group name search is case-sensitive (usernameLower is lowercase, but group `name` field has mixed case). Documented in plan.
+2. Reports 7-day trend queries run 14 sequential date-range count queries; adds ~1-2s render time on cold path.
+3. Export routes do not stream; 1000 rows loaded into memory before sending. Acceptable for admin use.
+4. Search does not index SMS message body or support ticket descriptions by design.
+5. `usernameLower` field may be absent on users created before Phase 5 (claimUsername). Those users won't appear in username-prefix search but can be found by exact UID.
+6. Finance_admin lost `view:reports` in Phase 15 (had it as `view:reports` but it was removed from capability mapping). Restored in Phase 17.
+
+### Recommended Phase 18 Scope
+
+1. **Organization-scoped admin roles** — organization_admin should be scoped to their own org's data; currently sees cross-org data.
+2. **Rate limiting on export/search routes** — document Phase 16's deferred throttling work and implement token-bucket or per-user rate limits.
+3. **Audit export pagination** — current audit export is capped at 1000 rows; add cursor-based pagination for compliance use cases.
+4. **Search improvements** — add `displayNameLower` field to user documents for display-name prefix search; add organization-level result scoping.
+5. **Report date-range picker** — allow admins to pick a custom date range instead of fixed 7/30 days.
+6. **Support ticket assignment** — allow support agents to claim/assign tickets without a code change.
+7. **Webhook delivery logs** — surface webhook/delivery report results in the admin dashboard.
+8. **Mobile notifications settings** — admin can broadcast system notifications.
+
+---
+
 ## Phase 16 — Firestore Indexes, Scheduled Jobs, Wallet Detail, Mobile Support, Audit Export, and Operational Foundations
 
 **Branch:** `claude/repo-audit-architecture-MiZDX`  
