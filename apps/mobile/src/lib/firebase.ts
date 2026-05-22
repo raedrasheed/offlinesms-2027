@@ -4,11 +4,12 @@ import {
   initializeAuth, getAuth,
   signInWithPhoneNumber, RecaptchaVerifier,
 } from 'firebase/auth';
-// `getReactNativePersistence` moved out of the main `firebase/auth` entry
-// in JS SDK 10.x; it now lives at `firebase/auth/react-native`. The
-// metro bundler will pick this up at runtime on native.
+// In Firebase JS SDK 11+, `getReactNativePersistence` is exposed from the
+// main `firebase/auth` entry via the package's `react-native` conditional
+// export. Metro resolves to the RN bundle automatically. The subpath
+// `firebase/auth/react-native` was removed.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { getReactNativePersistence } = require('firebase/auth/react-native');
+const { getReactNativePersistence } = require('firebase/auth');
 import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
