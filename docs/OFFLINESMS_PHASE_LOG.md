@@ -4,6 +4,38 @@ Running log of phased work. Newest first.
 
 ---
 
+## Phase 12 — Admin Dashboard Foundation
+
+**Branch:** `claude/repo-audit-architecture-MiZDX`  
+**Status:** Complete. TypeScript clean, Next.js build green (17 static + dynamic routes).
+
+### What was done
+
+- **`lib/adminPermissions.ts` (new).** Capability map (`AdminCapability` union) with `getCapabilities(role)` and `canDo(role, capability)` helpers. 11 capabilities across 7 role keys. UX-only — security remains in server-side `verifySession`.
+- **`lib/adminNav.ts` (new).** Central nav config (`NAV_ITEMS`) mapping each route to a `LucideIcon` and a required `AdminCapability`. Single source of truth for both sidebar and any future breadcrumb resolution.
+- **`components/Sidebar.tsx` (updated).** Now accepts a `role` prop from the server layout. Filters `NAV_ITEMS` via `canDo()` so lower-privilege roles see only relevant routes. Role badge (`RoleBadge`) and sign-out rendered at bottom below a divider.
+- **`components/RoleBadge.tsx` (new).** Inline pill showing friendly role label with per-role colour (red = super_admin, blue = org_admin, green = support, yellow = finance, purple = auditor, orange = bootstrap).
+- **`components/AdminBreadcrumbs.tsx` (new, client).** Derives breadcrumb trail from `usePathname()` using `SEGMENT_LABEL` map. Renders nothing on the root `/admin` route.
+- **`components/AdminUserMenu.tsx` (new, client).** Avatar dropdown: shows email + role badge, click-outside to close, sign-out flow (DELETE /api/session → Firebase signOut → push /login).
+- **`components/AdminGlobalSearchShell.tsx` (new, client).** ⌘K / Ctrl+K opens a modal stub; Escape closes. Real search deferred to a future phase; placeholder says so explicitly.
+- **`components/AdminTopbar.tsx` (new).** Server-passthrough layout bar: `AdminBreadcrumbs` + `AdminGlobalSearchShell` + bell icon (static) + `AdminUserMenu`. Sticky top-0, z-30.
+- **`app/admin/layout.tsx` (updated).** Extracts `{ user, role }` from the authorized session and passes `role` to `<Sidebar>` and both `email` + `role` to `<AdminTopbar>`. Layout now: sidebar | flex-col(topbar + main).
+- **`app/admin/audit/page.tsx` (new, server component).** Read-only audit log skeleton:
+  - Re-verifies session + checks `canDo(role, 'view:audit')` server-side; renders `PermissionState` if lacking.
+  - Reads up to 50 `auditLogs` docs via `adminDb`, descending `createdAt`.
+  - Cursor-based pagination via `?cursor=<docId>`.
+  - Table columns: timestamp, actor email, action, resource type + truncated ID, severity pill, payload field count.
+  - Raw `payload` object is never rendered — only its key count.
+
+### Security posture maintained
+
+- No admin module content pages were added (users, groups, orgs, etc.)
+- No private message content or full phone numbers are exposed
+- Audit log shows only metadata; payload fields are counted, not displayed
+- `canDo()` check in audit page is additive — `verifySession()` Phase 1 guard still runs first
+
+---
+
 ## Phase 11 — SMS delivery reports, retry failed, stuck-batch reaper
 
 **Branch:** `claude/repo-audit-architecture-MiZDX`

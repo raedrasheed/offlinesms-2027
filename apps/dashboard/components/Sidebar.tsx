@@ -2,35 +2,30 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { signOut } from 'firebase/auth';
+import { LogOut } from 'lucide-react';
 import { auth } from '@/lib/firebase';
-import {
-  MessageCircle, Users, Inbox, Phone, Coins, Send,
-  BarChart3, Shield, LifeBuoy, Settings, LogOut,
-} from 'lucide-react';
+import { NAV_ITEMS } from '@/lib/adminNav';
+import { canDo } from '@/lib/adminPermissions';
+import RoleBadge from './RoleBadge';
 import clsx from 'clsx';
+import type { AdminRole } from '@/lib/session';
 
-const nav = [
-  { href: '/admin',           label: 'Overview',      icon: BarChart3 },
-  { href: '/admin/users',     label: 'Users',         icon: Users },
-  { href: '/admin/chats',     label: 'Chats',         icon: Inbox },
-  { href: '/admin/groups',    label: 'Groups',        icon: MessageCircle },
-  { href: '/admin/calls',     label: 'Calls',         icon: Phone },
-  { href: '/admin/sms',       label: 'SMS Gateway',   icon: Send },
-  { href: '/admin/points',    label: 'Points',        icon: Coins },
-  { href: '/admin/reports',   label: 'Reports',       icon: BarChart3 },
-  { href: '/admin/support',   label: 'Support',       icon: LifeBuoy },
-  { href: '/admin/roles',     label: 'Roles',         icon: Shield },
-  { href: '/admin/settings',  label: 'Settings',      icon: Settings },
-];
+type RoleKey = AdminRole | 'legacy_admin' | 'bootstrap_admin';
 
-export default function Sidebar() {
+type Props = { role: RoleKey };
+
+export default function Sidebar({ role }: Props) {
   const path = usePathname();
   const router = useRouter();
+
   async function handleSignOut() {
     try { await fetch('/api/session', { method: 'DELETE' }); } catch { /* ignore */ }
     try { await signOut(auth); } catch { /* ignore */ }
     router.push('/login');
   }
+
+  const visibleItems = NAV_ITEMS.filter(item => canDo(role, item.capability));
+
   return (
     <aside className="w-60 bg-ink text-white flex flex-col p-4 gap-1 h-screen sticky top-0">
       <div className="flex items-center gap-3 px-2 py-3 mb-2">
@@ -39,21 +34,36 @@ export default function Sidebar() {
           Offline<span className="text-[#5BB6DE]">SMS</span>
         </span>
       </div>
-      {nav.map(n => {
-        const active = path === n.href || (n.href !== '/admin' && path?.startsWith(n.href));
+
+      {visibleItems.map(item => {
+          const finalActive = item.exact
+          ? path === item.href
+          : path?.startsWith(item.href) ?? false;
         return (
-          <Link key={n.href} href={n.href as any}
+          <Link
+            key={item.href}
+            href={item.href as any}
             className={clsx(
               'flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition',
-              active ? 'bg-primary text-white' : 'text-white/70 hover:bg-white/5'
-            )}>
-            <n.icon size={16}/> {n.label}
+              finalActive ? 'bg-primary text-white' : 'text-white/70 hover:bg-white/5'
+            )}
+          >
+            <item.icon size={16} /> {item.label}
           </Link>
         );
       })}
-      <button onClick={handleSignOut} className="mt-auto flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-white/70 hover:bg-white/5">
-        <LogOut size={16}/> Sign out
-      </button>
+
+      <div className="mt-auto flex flex-col gap-2 pt-3 border-t border-white/10">
+        <div className="px-3">
+          <RoleBadge role={role} />
+        </div>
+        <button
+          onClick={handleSignOut}
+          className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-white/70 hover:bg-white/5"
+        >
+          <LogOut size={16} /> Sign out
+        </button>
+      </div>
     </aside>
   );
 }

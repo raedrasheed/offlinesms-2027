@@ -1,18 +1,12 @@
 // Server-rendered guard for `/admin/*`.
 //
-// Phase 1: this layout enforces authentication + an admin claim **server-side**
-// using the Firebase session cookie set by `/api/session`. It is intentionally
-// dynamic (no static prerender) so each request goes through `verifySession`.
-//
-// Behaviour:
-//   - No session cookie → redirect to /login (preserves `next`).
-//   - Cookie verifies but user has no admin role → render PermissionState
-//     (no redirect loop; the user is signed in, just unauthorised).
-//   - Authorised → render the admin shell as before.
+// Phase 1: enforces authentication + admin claim via Firebase session cookie.
+// Phase 12: passes session user/role to client components (Sidebar, AdminTopbar).
 
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
+import AdminTopbar from '@/components/AdminTopbar';
 import { PermissionState } from '@/components/state';
 import { verifySession } from '@/lib/session';
 
@@ -35,8 +29,8 @@ export default async function AdminLayout({ children }: { children: React.ReactN
             title="Admin access required"
             description={
               session.user.email
-                ? `Signed in as ${session.user.email}, but this account isn’t an admin. Ask an administrator to grant the role, then reload.`
-                : 'This account isn’t an admin. Ask an administrator to grant the role, then reload.'
+                ? `Signed in as ${session.user.email}, but this account is not an admin. Ask an administrator to grant the role, then reload.`
+                : "This account isn't an admin. Ask an administrator to grant the role, then reload."
             }
             primaryAction={{ label: 'Switch account', href: '/login' }}
           />
@@ -45,10 +39,15 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     );
   }
 
+  const { user, role } = session;
+
   return (
     <div className="flex min-h-screen bg-canvas">
-      <Sidebar />
-      <main className="flex-1 min-w-0">{children}</main>
+      <Sidebar role={role} />
+      <div className="flex-1 min-w-0 flex flex-col">
+        <AdminTopbar email={user.email} role={role} />
+        <main className="flex-1">{children}</main>
+      </div>
     </div>
   );
 }
