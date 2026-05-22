@@ -55,15 +55,28 @@ async function searchUsers(q: string, role: string): Promise<SearchResult[]> {
     return results;
   }
 
-  const snap = await adminDb.collection('users')
-    .where('usernameLower', '>=', ql)
-    .where('usernameLower', '<=', prefix(ql))
-    .limit(GROUP_LIMIT)
-    .get()
-    .catch(() => null);
+  // Search by usernameLower (always indexed) and displayNameLower (indexed post-Phase 18).
+  const [usernameSnap, displayNameSnap] = await Promise.all([
+    adminDb.collection('users')
+      .where('usernameLower', '>=', ql)
+      .where('usernameLower', '<=', ql + '')
+      .limit(GROUP_LIMIT)
+      .get()
+      .catch(() => null),
+    adminDb.collection('users')
+      .where('displayNameLower', '>=', ql)
+      .where('displayNameLower', '<=', ql + '')
+      .limit(GROUP_LIMIT)
+      .get()
+      .catch(() => null),
+  ]);
 
-  if (snap) {
+  const seen = new Set<string>();
+  for (const snap of [usernameSnap, displayNameSnap]) {
+    if (!snap) continue;
     for (const d of snap.docs) {
+      if (seen.has(d.id) || results.length >= GROUP_LIMIT) break;
+      seen.add(d.id);
       const data = d.data();
       results.push({
         type:     'user',
@@ -99,13 +112,23 @@ async function searchOrganizations(q: string): Promise<SearchResult[]> {
 }
 
 async function searchGroups(q: string): Promise<SearchResult[]> {
+  const ql = q.toLowerCase();
+  // Prefer nameLower (indexed post-Phase 18); fall back to case-sensitive name prefix.
   const snap = await adminDb.collection('conversations')
     .where('type', '==', 'group')
-    .where('name', '>=', q)
-    .where('name', '<=', prefix(q))
+    .where('nameLower', '>=', ql)
+    .where('nameLower', '<=', ql + '')
     .limit(GROUP_LIMIT)
     .get()
-    .catch(() => null);
+    .catch(() =>
+      adminDb.collection('conversations')
+        .where('type', '==', 'group')
+        .where('name', '>=', q)
+        .where('name', '<=', q + '')
+        .limit(GROUP_LIMIT)
+        .get()
+        .catch(() => null)
+    );
   if (!snap) return [];
   return snap.docs.map(d => {
     const data = d.data();
