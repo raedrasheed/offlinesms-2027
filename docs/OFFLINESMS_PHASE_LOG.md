@@ -4,6 +4,108 @@ Running log of phased work. Newest first.
 
 ---
 
+## Phase 14 — Admin Controls, SMS Dashboard, Points Overview, Roles
+
+**Branch:** `claude/repo-audit-architecture-MiZDX`  
+**Status:** Complete. TypeScript clean (dashboard + functions), Next.js build green (30 routes).
+
+### Commits
+
+1. `docs: add OfflineSMS phase 14 implementation plan` — `b0d3003`
+2. `feat(admin): add admin-native group lock and role assignment callables` — `bea126a`
+3. `feat(admin): add organization create and edit flows` — `630c4f8`
+4. `feat(admin): add SMS batch dashboard foundation` — `3f22506`
+5. `feat(admin): add points overview dashboard foundation` — `4a7430f`
+6. `feat(admin): add roles assignment foundation` — `5a1d2ef`
+7. `docs: update phase log for phase 14`
+
+### Files changed (25 total)
+
+**New files (18):**
+- `functions/src/admin/adminLockGroup.ts`
+- `functions/src/admin/adminSetRole.ts`
+- `functions/src/lib/roles.ts`
+- `apps/dashboard/lib/orgActions.ts`
+- `apps/dashboard/components/admin/OrgForm.tsx`
+- `apps/dashboard/app/admin/organizations/new/page.tsx`
+- `apps/dashboard/app/admin/organizations/[orgId]/edit/page.tsx`
+- `apps/dashboard/app/admin/sms/[batchId]/page.tsx`
+- `apps/dashboard/app/admin/points/wallets/page.tsx`
+- `apps/dashboard/app/admin/points/transactions/page.tsx`
+- `apps/dashboard/app/admin/points/payments/page.tsx`
+- `apps/dashboard/app/admin/points/packages/page.tsx`
+- `apps/dashboard/app/admin/roles/[uid]/page.tsx`
+- `apps/dashboard/app/admin/roles/[uid]/RoleAssignAction.tsx`
+- `apps/dashboard/app/admin/roles/[uid]/roleOptions.ts`
+
+**Updated files (10):**
+- `functions/src/index.ts`
+- `apps/dashboard/lib/adminPermissions.ts` — 3 new capabilities
+- `apps/dashboard/lib/adminData.ts` — 8 new helpers
+- `apps/dashboard/app/admin/groups/[conversationId]/GroupLockAction.tsx` — adminLockGroup
+- `apps/dashboard/app/admin/organizations/page.tsx` — + New org button
+- `apps/dashboard/app/admin/organizations/[orgId]/page.tsx` — Edit button
+- `apps/dashboard/app/admin/sms/page.tsx` — replaced placeholder
+- `apps/dashboard/app/admin/points/page.tsx` — replaced placeholder
+- `apps/dashboard/app/admin/roles/page.tsx` — replaced placeholder
+
+### What was done
+
+- **`adminLockGroup` callable (new).** Admin-native group lock that does not require
+  the caller to be a group member. Requires `admin=true` claim. Validates conversation
+  type=group. Audits `admin.group.locked` / `admin.group.unlocked`. `GroupLockAction.tsx`
+  updated to call this instead of the member-only `lockGroup`.
+- **`adminSetRole` callable (new).** Assigns/removes admin role; callable only by
+  `role==='super_admin'` callers; prevents self-modification; counts remaining
+  super_admins before allowing last-one demotion; updates Firebase Auth custom claims;
+  audit-logged for all outcomes.
+- **Organization create/edit (new).** `'use server'` actions (`orgActions.ts`) with slug
+  regex validation, uniqueness check, settings validation, audit log. `OrgForm.tsx`
+  client form with `useFormState`. Create page at `/admin/organizations/new`;
+  edit page at `/admin/organizations/[orgId]/edit`.
+- **SMS dashboard (new).** `sms/page.tsx` replaced with real server-side batch list
+  (status filter chips, counts, points). `sms/[batchId]/page.tsx` batch detail: stat
+  cards, metadata with group/sender links, recipient table with masked phones, SMS
+  status, skip/failure reason. Retry action shows disabled with clear deferred note.
+- **Points overview (new).** Hub page + 4 sub-pages (wallets, transactions, payments,
+  packages). All read-only. No wallet adjustment. Transactions show direction-signed
+  amounts. Payments show total points + currency. Packages show catalog.
+- **Roles foundation (new).** `roles/page.tsx` lists admin users (fetched via Admin SDK
+  Auth + Firestore). `roles/[uid]/page.tsx` shows live claims + `RoleAssignAction`
+  client component for super_admins to assign/clear roles.
+
+### Security posture
+
+- Every page re-verifies session + capability server-side.
+- `adminLockGroup` and `adminSetRole` validate admin claims in the callable.
+- Organization server actions re-verify inside each action.
+- Phones masked in all SMS recipient tables.
+- No SMS/message bodies, payment secrets, or provider names in any page.
+
+### Known limitations
+
+1. `listAdminUsers()` scans the first 200 users in Firestore and fetches Auth records
+   in batches. Large deployments (1000+ users) should use `Auth.listUsers()` instead.
+2. `adminSetRole` counts super_admins by scanning up to 500 Firestore user docs —
+   may miss Auth users without a Firestore document. Production deployments should
+   maintain an index.
+3. OrgForm `Toggle` uses a hidden `false` input + checkbox `true` pattern; in some
+   browsers the last value wins. Should be tested across targets.
+4. `listTransactions` accepts a `uid` filter but the page does not yet expose it;
+   per-user transaction filtering is a future enhancement.
+
+### Recommended Phase 15 scope
+
+1. Wallet freeze/unfreeze action (callable + admin UI).
+2. Points package create/edit UI (currently read-only).
+3. SMS retry from dashboard (new admin callable, no sender-auth restriction).
+4. Support queue/ticket management foundation.
+5. Settings page (gateway policy, rate limits — read/write for super_admin).
+6. Dashboard overview with real Firestore-backed counts (replace static mocks).
+7. Admin audit log improvements (filter by actor, action, target type).
+
+---
+
 ## Phase 13 — Admin Management Foundations
 
 **Branch:** `claude/repo-audit-architecture-MiZDX`  
