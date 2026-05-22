@@ -71,3 +71,6 @@ export { adminSetRole }   from './admin/adminSetRole';
 
 // Phase 15 — wallet freeze/unfreeze.
 export { adminSetWalletStatus } from './admin/adminSetWalletStatus';
+
+// Phase 18 — org-scoped role assignment.
+export { adminSetOrgRole } from './admin/adminSetOrgRole';
