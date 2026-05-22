@@ -267,6 +267,11 @@ export default function Conversation({ route, navigation }: any) {
               onForward={startForward}
               onJumpTo={jumpTo}
               onInfo={openInfo}
+              onSendViaSms={msg => navigation.navigate('SmsEscalation', {
+                conversationId: id,
+                messageId:      msg.id,
+                messageText:    msg.text,
+              })}
             />
           );
         }}

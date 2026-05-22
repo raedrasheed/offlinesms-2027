@@ -124,6 +124,20 @@ export default function MessageInfo({ route, navigation }: any) {
           <Stat label="Failed"    value={a.failedCount} />
         </View>
 
+        {info.isSender && !info.deletedForEveryone
+          && (a.pendingCount > 0 || a.failedCount > 0 || a.deliveredCount > a.readCount) ? (
+          <Pressable
+            style={s.escalateBtn}
+            onPress={() => navigation.navigate('SmsEscalation', {
+              conversationId: id,
+              messageId:      messageId,
+            })}
+          >
+            <Text style={s.escalateText}>Send via OfflineSMS</Text>
+            <Text style={s.escalateSub}>Reach recipients who haven’t read or received this message.</Text>
+          </Pressable>
+        ) : null}
+
         {info.isSender && info.recipients ? (
           <>
             <View style={s.tabs}>
@@ -195,6 +209,9 @@ const s = StyleSheet.create({
   label:   { fontSize: 12, color: colors.ink500, fontWeight: '600' },
   value:   { fontSize: 12, color: colors.ink, fontWeight: '600', maxWidth: '60%', textAlign: 'right' },
   sectionLabel: { fontSize: 11, fontWeight: '700', color: colors.ink500, letterSpacing: 0.6, marginTop: 12, marginBottom: 6 },
+  escalateBtn:  { marginTop: 14, padding: 14, borderRadius: radius.md, backgroundColor: colors.primary },
+  escalateText: { color: '#fff', fontWeight: '800', fontSize: 14 },
+  escalateSub:  { color: 'rgba(255,255,255,.85)', fontSize: 11, marginTop: 4 },
   statsGrid:{ flexDirection: 'row', gap: 8 },
   statCard: { flex: 1, backgroundColor: '#fff', borderRadius: radius.md, borderWidth: 1, borderColor: colors.ink100, padding: 10, alignItems: 'center' },
   statValue:{ fontSize: 22, fontWeight: '800', color: colors.ink },

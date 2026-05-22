@@ -48,6 +48,7 @@ export type MessageBubbleProps = {
   onForward:  (msg: Message) => void;
   onJumpTo:   (messageId: string) => void;
   onInfo:     (msg: Message) => void;
+  onSendViaSms?: (msg: Message) => void;
 };
 
 function createdAtMillis(value: any): number {
@@ -57,7 +58,7 @@ function createdAtMillis(value: any): number {
 }
 
 export function MessageBubble({
-  message: m, context, showSender, onReply, onEditStart, onForward, onJumpTo, onInfo,
+  message: m, context, showSender, onReply, onEditStart, onForward, onJumpTo, onInfo, onSendViaSms,
 }: MessageBubbleProps) {
   const mine    = context.isMyMessage;
   const deleted = m.deletedForEveryone === true;
@@ -134,6 +135,9 @@ export function MessageBubble({
     buttons.push({ text: 'Copy',    onPress: copyText });
     buttons.push({ text: 'Reply',   onPress: () => onReply(m) });
     buttons.push({ text: 'Forward', onPress: () => onForward(m) });
+    if (mine && onSendViaSms) {
+      buttons.push({ text: 'Send via OfflineSMS', onPress: () => onSendViaSms(m) });
+    }
     buttons.push({ text: context.isStarred ? 'Unstar' : 'Star', onPress: toggleStar });
     if (canPin) buttons.push({ text: context.isPinned ? 'Unpin' : 'Pin', onPress: togglePin });
     buttons.push({ text: 'React', onPress: () => setReacting(true) });
