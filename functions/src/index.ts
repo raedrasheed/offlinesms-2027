@@ -40,12 +40,12 @@ export { onSmsBatchAccepted } from './sms/onSmsBatchAccepted';
 
 // Phase 11 — OfflineSMS Delivery Report ingestion. HTTP function that
 // validates HMAC + replay window before touching Firestore.
-//
-// reapStuckBatches is implemented at functions/src/sms/reapStuckBatches
-// but NOT exported here — operators opt in by adding the export when
-// they're ready to register the schedule. Same pattern as Phase 6's
-// sweepExpiredMessages.
 export { gatewayWebhook } from './sms/gatewayWebhook';
+
+// Phase 16 — reap stuck SMS batches every 30 minutes.
+// Idempotency is guarded inside the function by the pointsRefunded field.
+// sweepExpiredMessages remains deferred until Phase 20 (no client TTL UI yet).
+export { reapStuckBatches } from './sms/reapStuckBatches';
 
 // Phase 10 — points purchase + transfer.
 // The Phase 0 buyPoints callable (which credited the wallet directly)
