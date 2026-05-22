@@ -365,6 +365,95 @@ the client to mark `delivered` / `read` / `played` / `viewed`.
 
 ---
 
+## Phase 8 — OfflineSMS escalation
+
+### `smsBatches/{batchId}` (extended in place — same collection as Phase 0)
+
+Phase 0 created the collection; Phase 8 fills out the schema and keeps
+the original name. The data model spec's `smsEscalationBatches` and our
+`smsBatches` refer to the same documents.
+
+```ts
+{
+  // Phase 0
+  messageId:           string,
+  conversationId:      string,
+  senderId:            string,                  // alias of senderUid
+  audience:            'unread' | 'undelivered' | 'everyone'
+                     | 'unread_only' | 'undelivered_only',
+  smsBody:             string,                  // never logged
+  recipientCount:      number,
+  estimatedCost:       number,
+  status:              'sending' | 'accepted' | 'partial' | 'completed' | 'failed',
+  createdAt:           timestamp,
+  gatewayBatchId:      string | null,           // surfaced as 'OfflineSMS batch ID'
+
+  // Phase 8 additions
+  audienceCanonical:   'everyone' | 'unread_only' | 'undelivered_only',
+  eligibleCount:       number,
+  excludedCount:       number,
+  pointsCost:          number,                  // == estimatedCost
+  pointsReserved:      number,
+  pointsDeducted:      number | null,           // set by onSmsBatchAccepted
+  pointsRefunded:      number | null,
+  offlineSmsBatchId:   string | null,           // == gatewayBatchId
+  retryOfBatchId:      string | null,
+  updatedAt:           timestamp,
+}
+```
+
+### `smsBatches/{b}/recipients/{uid}` (extended)
+
+```ts
+{
+  // Phase 0
+  userId:              string,                  // == uid (doc id)
+  maskedPhone:         string,                  // e.g. '+970 *** *** 123'
+  smsStatus:           'queued' | 'delivered' | 'failed' | 'undelivered' | 'sent' | 'skipped',
+  reason:              string | null,
+  updatedAt:           timestamp,
+
+  // Phase 8 additions
+  appReceiptStatus:    'pending' | 'delivered' | 'read' | 'viewed' | 'played' | 'failed' | null,
+  skipReason:          'no-phone' | 'unverified-phone' | 'opt-out'
+                     | 'duplicate-phone' | 'already-sent-for-message'
+                     | 'rate-limited' | 'policy-blocked'
+                     | null,
+}
+```
+
+### `smsQuotaUsage/{uid}/days/{yyyymmdd}` (writer added in Phase 8)
+
+Schema and rules from Phase 3 are unchanged; Phase 8 wires the writer.
+
+```ts
+{
+  uid:              string,                     // matches parent path
+  date:             string,                     // 'yyyy-mm-dd'
+  batchCount:       number,
+  recipientCount:   number,
+  pointsSpent:      number,
+  updatedAt:        timestamp,
+}
+```
+
+### Caps
+
+- `MAX_BATCHES_PER_DAY = 20` per uid.
+- `MAX_RECIPIENTS_PER_BATCH = 200`.
+- `COOLDOWN_MS = 60 * 1000` — refuses another escalation for the same
+  `(messageId, senderUid)` pair within 60 s. `retryFailedSmsRecipients`
+  bypasses the cooldown (it creates a `retryOfBatchId`-linked batch).
+
+### Cost model
+
+- `COST_PER_SMS = 28` points (Phase 0 default).
+- `pointsCost = eligibleCount * COST_PER_SMS`.
+- Refund settled by `onSmsBatchAccepted` based on per-recipient delivery
+  outcomes (Phase 0 already wires this).
+
+---
+
 ## Phase 7 — Receipts, message views, status views
 
 ### `conversations/{c}/messages/{m}/receipts/{uid}` (extended)
