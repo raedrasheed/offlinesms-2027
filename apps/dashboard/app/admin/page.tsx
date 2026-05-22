@@ -24,8 +24,8 @@ function fmt(n: number | null, approx = false): string {
   return approx ? `~${formatted}` : formatted;
 }
 
-const CARD = '#131B27';
-const BORDER = '#1A2437';
+const CARD = 'var(--c-card)';
+const BORDER = 'var(--c-border)';
 
 export default async function AdminOverview() {
   const cookie = cookies().get('__session')?.value;
@@ -116,17 +116,17 @@ export default async function AdminOverview() {
   ];
 
   const statusConfig: Record<string, { label: string; bg: string; text: string }> = {
-    success: { label: 'Sent',    bg: '#052E1B', text: '#22C55E' },
-    sending: { label: 'Sending', bg: '#1C1405', text: '#F59E0B' },
-    failed:  { label: 'Failed',  bg: '#2D0D0D', text: '#EF4444' },
+    success: { label: 'Sent',    bg: 'var(--c-success-bg)', text: '#22C55E' },
+    sending: { label: 'Sending', bg: 'var(--c-warning-bg)', text: '#F59E0B' },
+    failed:  { label: 'Failed',  bg: 'var(--c-error-bg)', text: '#EF4444' },
   };
 
   return (
-    <div className="p-6 space-y-6" style={{ color: '#E2E8F2' }}>
+    <div className="p-6 space-y-6" style={{ color: 'var(--c-text)' }}>
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="text-[12px] font-medium mb-0.5" style={{ color: '#64748B' }}>
+          <p className="text-[12px] font-medium mb-0.5" style={{ color: 'var(--c-text-3)' }}>
             Admin / Dashboard
           </p>
           <h1 className="text-[22px] font-extrabold tracking-tight">
@@ -145,7 +145,7 @@ export default async function AdminOverview() {
               style={{ background: CARD, border: `1px solid ${BORDER}` }}
             >
               <div className="flex items-center justify-between">
-                <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: '#64748B' }}>
+                <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--c-text-3)' }}>
                   {k.label}
                 </span>
                 <div
@@ -196,7 +196,7 @@ export default async function AdminOverview() {
             <thead>
               <tr style={{ borderBottom: `1px solid ${BORDER}` }}>
                 {['Batch', 'Group', 'Recipients', 'Status', 'Cost', 'Time'].map(h => (
-                  <th key={h} className="px-5 py-2.5 text-left font-semibold" style={{ color: '#475569' }}>{h}</th>
+                  <th key={h} className="px-5 py-2.5 text-left font-semibold" style={{ color: 'var(--c-text-4)' }}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -210,15 +210,15 @@ export default async function AdminOverview() {
                     style={i < recentBatches.length - 1 ? { borderBottom: `1px solid ${BORDER}` } : {}}
                   >
                     <td className="px-5 py-3 font-mono font-semibold" style={{ color: '#5BB6DE' }}>{b.id}</td>
-                    <td className="px-5 py-3" style={{ color: '#94A3B8' }}>{b.group}</td>
-                    <td className="px-5 py-3 font-semibold" style={{ color: '#E2E8F2' }}>{b.recipients}</td>
+                    <td className="px-5 py-3" style={{ color: 'var(--c-text-2)' }}>{b.group}</td>
+                    <td className="px-5 py-3 font-semibold" style={{ color: 'var(--c-text)' }}>{b.recipients}</td>
                     <td className="px-5 py-3">
                       <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold" style={{ background: s.bg, color: s.text }}>
                         {s.label}
                       </span>
                     </td>
-                    <td className="px-5 py-3" style={{ color: '#94A3B8' }}>{b.cost}</td>
-                    <td className="px-5 py-3" style={{ color: '#475569' }}>{b.time}</td>
+                    <td className="px-5 py-3" style={{ color: 'var(--c-text-2)' }}>{b.cost}</td>
+                    <td className="px-5 py-3" style={{ color: 'var(--c-text-4)' }}>{b.time}</td>
                   </tr>
                 );
               })}
@@ -246,16 +246,16 @@ export default async function AdminOverview() {
             ].map(m => (
               <div key={m.label} className="flex items-center justify-between">
                 <div>
-                  <p className="text-[11px]" style={{ color: '#64748B' }}>{m.label}</p>
-                  <p className="text-[10px]" style={{ color: '#475569' }}>{m.sub}</p>
+                  <p className="text-[11px]" style={{ color: 'var(--c-text-3)' }}>{m.label}</p>
+                  <p className="text-[10px]" style={{ color: 'var(--c-text-4)' }}>{m.sub}</p>
                 </div>
-                <span className="font-mono font-bold text-[16px]" style={{ color: '#E2E8F2' }}>{m.value}</span>
+                <span className="font-mono font-bold text-[16px]" style={{ color: 'var(--c-text)' }}>{m.value}</span>
               </div>
             ))}
           </div>
 
           <div className="pt-2" style={{ borderTop: `1px solid ${BORDER}` }}>
-            <p className="text-[11px] font-semibold mb-2" style={{ color: '#64748B' }}>Quick actions</p>
+            <p className="text-[11px] font-semibold mb-2" style={{ color: 'var(--c-text-3)' }}>Quick actions</p>
             <div className="grid grid-cols-2 gap-2">
               {[
                 { label: 'New batch',   href: '/admin/sms' },

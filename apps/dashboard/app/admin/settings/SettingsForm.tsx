@@ -10,11 +10,11 @@ type Props = {
   initial: SystemSettings;
 };
 
-const CARD   = '#131B27';
-const BORDER = '#1A2437';
+const CARD   = 'var(--c-card)';
+const BORDER = 'var(--c-border)';
 
 const inputCls = 'w-full rounded-lg px-3 py-2 text-sm outline-none';
-const inputStyle = { background: '#0D1117', border: '1px solid #1A2437', color: '#E2E8F2' };
+const inputStyle = { background: 'var(--c-bg)', border: '1px solid var(--c-border)', color: 'var(--c-text)' };
 
 function SubmitButton() {
   const { pending } = useFormStatus();
@@ -46,8 +46,8 @@ function Toggle({
   return (
     <div className="flex items-center justify-between">
       <div>
-        <p className="text-sm font-semibold" style={{ color: '#E2E8F2' }}>{label}</p>
-        <p className="text-xs mt-0.5" style={{ color: '#64748B' }}>{description}</p>
+        <p className="text-sm font-semibold" style={{ color: 'var(--c-text)' }}>{label}</p>
+        <p className="text-xs mt-0.5" style={{ color: 'var(--c-text-3)' }}>{description}</p>
       </div>
       <label className="relative inline-flex items-center cursor-pointer select-none">
         <input type="hidden" name={name} value={checked ? 'true' : 'false'} />
@@ -57,11 +57,11 @@ function Toggle({
           aria-checked={checked}
           onClick={() => setChecked(v => !v)}
           className="w-11 h-6 rounded-full transition-colors"
-          style={{ background: checked ? '#1F7BA8' : '#1A2437' }}
+          style={{ background: checked ? '#1F7BA8' : 'var(--c-border)' }}
         >
           <span
             className={`block w-5 h-5 rounded-full shadow transition-transform mx-0.5 ${checked ? 'translate-x-5' : 'translate-x-0'}`}
-            style={{ background: '#E2E8F2' }}
+            style={{ background: 'var(--c-text)' }}
           />
         </button>
       </label>
@@ -75,21 +75,21 @@ export default function SettingsForm({ action, initial }: Props) {
   return (
     <form action={formAction} className="space-y-5">
       {state?.error   && (
-        <div className="rounded-lg px-4 py-3 text-sm" style={{ background: '#2D0D0D', border: '1px solid #3D1515', color: '#EF4444' }}>
+        <div className="rounded-lg px-4 py-3 text-sm" style={{ background: 'var(--c-error-bg)', border: '1px solid var(--c-error-border)', color: '#EF4444' }}>
           {state.error}
         </div>
       )}
       {state?.success && (
-        <div className="rounded-lg px-4 py-3 text-sm" style={{ background: '#052E1B', border: '1px solid #0A4428', color: '#22C55E' }}>
+        <div className="rounded-lg px-4 py-3 text-sm" style={{ background: 'var(--c-success-bg)', border: '1px solid var(--c-success-border)', color: '#22C55E' }}>
           Settings saved.
         </div>
       )}
 
       <div className="rounded-2xl p-6 space-y-4" style={{ background: CARD, border: `1px solid ${BORDER}` }}>
-        <h2 className="text-sm font-extrabold tracking-tight" style={{ color: '#E2E8F2' }}>General</h2>
+        <h2 className="text-sm font-extrabold tracking-tight" style={{ color: 'var(--c-text)' }}>General</h2>
 
         <div>
-          <label className="block text-xs font-bold mb-1" style={{ color: '#94A3B8' }}>
+          <label className="block text-xs font-bold mb-1" style={{ color: 'var(--c-text-2)' }}>
             App name <span style={{ color: '#EF4444' }}>*</span>
           </label>
           <input
@@ -103,7 +103,7 @@ export default function SettingsForm({ action, initial }: Props) {
         </div>
 
         <div>
-          <label className="block text-xs font-bold mb-1" style={{ color: '#94A3B8' }}>Support email</label>
+          <label className="block text-xs font-bold mb-1" style={{ color: 'var(--c-text-2)' }}>Support email</label>
           <input
             name="supportEmail"
             type="email"
@@ -117,7 +117,7 @@ export default function SettingsForm({ action, initial }: Props) {
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs font-bold mb-1" style={{ color: '#94A3B8' }}>Default language</label>
+            <label className="block text-xs font-bold mb-1" style={{ color: 'var(--c-text-2)' }}>Default language</label>
             <select
               name="defaultLanguage"
               defaultValue={initial.defaultLanguage}
@@ -130,7 +130,7 @@ export default function SettingsForm({ action, initial }: Props) {
             </select>
           </div>
           <div>
-            <label className="block text-xs font-bold mb-1" style={{ color: '#94A3B8' }}>Default timezone</label>
+            <label className="block text-xs font-bold mb-1" style={{ color: 'var(--c-text-2)' }}>Default timezone</label>
             <input
               name="defaultTimezone"
               defaultValue={initial.defaultTimezone}
@@ -144,7 +144,7 @@ export default function SettingsForm({ action, initial }: Props) {
       </div>
 
       <div className="rounded-2xl p-6 space-y-5" style={{ background: CARD, border: `1px solid ${BORDER}` }}>
-        <h2 className="text-sm font-extrabold tracking-tight" style={{ color: '#E2E8F2' }}>Feature flags</h2>
+        <h2 className="text-sm font-extrabold tracking-tight" style={{ color: 'var(--c-text)' }}>Feature flags</h2>
 
         <Toggle
           label="SMS escalation"
@@ -161,7 +161,7 @@ export default function SettingsForm({ action, initial }: Props) {
         />
 
         {initial.maintenanceMode && (
-          <div className="rounded-lg px-3 py-2 text-xs" style={{ background: '#1C1405', border: '1px solid #2A2005', color: '#F59E0B' }}>
+          <div className="rounded-lg px-3 py-2 text-xs" style={{ background: 'var(--c-warning-bg)', border: '1px solid var(--c-warning-border)', color: '#F59E0B' }}>
             Maintenance mode is currently <strong>on</strong>. Toggle is read-only here; change via server config.
           </div>
         )}
@@ -169,7 +169,7 @@ export default function SettingsForm({ action, initial }: Props) {
 
       <div className="flex items-center gap-3 pt-2">
         <SubmitButton />
-        <p className="text-xs" style={{ color: '#475569' }}>All changes are audit-logged.</p>
+        <p className="text-xs" style={{ color: 'var(--c-text-4)' }}>All changes are audit-logged.</p>
       </div>
     </form>
   );

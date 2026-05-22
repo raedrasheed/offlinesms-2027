@@ -57,25 +57,25 @@ export default function AdminUserMenu({ email, role }: Props) {
           {initials}
         </div>
         <div className="text-left hidden sm:block">
-          <p className="text-[12px] font-semibold leading-tight" style={{ color: '#E2E8F2' }}>{name}</p>
-          <p className="text-[10px] leading-tight" style={{ color: '#64748B' }}>{ROLE_LABELS[role] ?? role}</p>
+          <p className="text-[12px] font-semibold leading-tight" style={{ color: 'var(--c-text)' }}>{name}</p>
+          <p className="text-[10px] leading-tight" style={{ color: 'var(--c-text-3)' }}>{ROLE_LABELS[role] ?? role}</p>
         </div>
-        <ChevronDown size={12} style={{ color: '#475569' }} />
+        <ChevronDown size={12} style={{ color: 'var(--c-text-4)' }} />
       </button>
 
       {open && (
         <div
           className="absolute right-0 top-full mt-1 w-56 rounded-xl z-50 overflow-hidden"
-          style={{ background: '#131B27', border: '1px solid #1A2437', boxShadow: '0 8px 32px rgba(0,0,0,0.4)' }}
+          style={{ background: 'var(--c-card)', border: '1px solid var(--c-border)', boxShadow: '0 8px 32px rgba(0,0,0,0.4)' }}
         >
-          <div className="px-4 py-3" style={{ borderBottom: '1px solid #1A2437' }}>
-            <p className="text-[12px] font-semibold truncate" style={{ color: '#E2E8F2' }}>{email ?? 'Admin'}</p>
-            <p className="text-[11px] mt-0.5" style={{ color: '#64748B' }}>{ROLE_LABELS[role] ?? role}</p>
+          <div className="px-4 py-3" style={{ borderBottom: '1px solid var(--c-border)' }}>
+            <p className="text-[12px] font-semibold truncate" style={{ color: 'var(--c-text)' }}>{email ?? 'Admin'}</p>
+            <p className="text-[11px] mt-0.5" style={{ color: 'var(--c-text-3)' }}>{ROLE_LABELS[role] ?? role}</p>
           </div>
           <button
             onClick={handleSignOut}
             className="w-full flex items-center gap-2 px-4 py-2.5 text-[13px] transition hover:bg-white/5"
-            style={{ color: '#94A3B8' }}
+            style={{ color: 'var(--c-text-2)' }}
           >
             <LogOut size={13} /> Sign out
           </button>

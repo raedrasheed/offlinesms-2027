@@ -8,7 +8,7 @@ type Props = {
   currentAssignee: string | null;
 };
 
-const inputStyle = { background: '#0D1117', border: '1px solid #1A2437', color: '#E2E8F2' };
+const inputStyle = { background: 'var(--c-bg)', border: '1px solid var(--c-border)', color: 'var(--c-text)' };
 
 function SubmitButton({ label }: { label: string }) {
   const { pending } = useFormStatus();
@@ -30,8 +30,8 @@ export default function TicketAssignAction({ action, currentAssignee }: Props) {
   return (
     <div className="space-y-3">
       {currentAssignee && (
-        <p className="text-xs" style={{ color: '#64748B' }}>
-          Currently assigned to: <span className="font-mono" style={{ color: '#E2E8F2' }}>{currentAssignee}</span>
+        <p className="text-xs" style={{ color: 'var(--c-text-3)' }}>
+          Currently assigned to: <span className="font-mono" style={{ color: 'var(--c-text)' }}>{currentAssignee}</span>
         </p>
       )}
 
@@ -69,7 +69,7 @@ function UnassignButton({ action }: { action: (data: FormData) => void }) {
         action(fd);
       }}
       className="px-3 py-2 text-sm font-bold rounded-lg transition hover:brightness-110 disabled:opacity-50"
-      style={{ background: '#131B27', color: '#94A3B8', border: '1px solid #1A2437' }}
+      style={{ background: 'var(--c-card)', color: 'var(--c-text-2)', border: '1px solid var(--c-border)' }}
     >
       Unassign
     </button>

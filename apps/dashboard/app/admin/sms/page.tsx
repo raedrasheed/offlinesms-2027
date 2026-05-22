@@ -13,8 +13,8 @@ import StatusBadge from '@/components/admin/StatusBadge';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-const CARD   = '#131B27';
-const BORDER = '#1A2437';
+const CARD   = 'var(--c-card)';
+const BORDER = 'var(--c-border)';
 
 export default async function SmsAdminPage({
   searchParams,
@@ -42,12 +42,12 @@ export default async function SmsAdminPage({
   const exportHref   = `/admin/sms/export${searchParams?.status ? `?status=${searchParams.status}` : ''}`;
 
   return (
-    <div className="p-6 space-y-5" style={{ color: '#E2E8F2' }}>
+    <div className="p-6 space-y-5" style={{ color: 'var(--c-text)' }}>
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-[12px] font-medium mb-0.5" style={{ color: '#64748B' }}>Admin / SMS</p>
+          <p className="text-[12px] font-medium mb-0.5" style={{ color: 'var(--c-text-3)' }}>Admin / SMS</p>
           <h1 className="text-[22px] font-extrabold tracking-tight">SMS Gateway</h1>
-          <p className="text-[13px] mt-0.5" style={{ color: '#64748B' }}>Batch history — no message bodies shown</p>
+          <p className="text-[13px] mt-0.5" style={{ color: 'var(--c-text-3)' }}>Batch history — no message bodies shown</p>
         </div>
         {canExport && (
           <a
@@ -71,7 +71,7 @@ export default async function SmsAdminPage({
               className="px-3 py-1.5 rounded-lg text-[11px] font-bold transition"
               style={active
                 ? { background: '#1F7BA8', color: '#fff' }
-                : { background: '#131B27', color: '#94A3B8', border: '1px solid #1A2437' }
+                : { background: 'var(--c-card)', color: 'var(--c-text-2)', border: '1px solid var(--c-border)' }
               }
             >
               {s === '' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}
@@ -81,7 +81,7 @@ export default async function SmsAdminPage({
       </div>
 
       {fetchError ? (
-        <div className="rounded-xl px-4 py-3 text-sm" style={{ background: '#2D0D0D', border: '1px solid #3D1515', color: '#EF4444' }}>
+        <div className="rounded-xl px-4 py-3 text-sm" style={{ background: 'var(--c-error-bg)', border: '1px solid var(--c-error-border)', color: '#EF4444' }}>
           {fetchError}
         </div>
       ) : rows.length === 0 ? (
@@ -97,7 +97,7 @@ export default async function SmsAdminPage({
                   <th
                     key={h}
                     className={`px-4 py-3 text-[10px] font-semibold uppercase tracking-wider ${idx >= 2 ? 'text-right' : 'text-left'}`}
-                    style={{ color: '#475569' }}
+                    style={{ color: 'var(--c-text-4)' }}
                   >
                     {h}
                   </th>
@@ -115,18 +115,18 @@ export default async function SmsAdminPage({
                     <Link href={`/admin/sms/${b.id}` as any} className="block">
                       <div className="font-mono text-[11px] hover:underline" style={{ color: '#5BB6DE' }}>{b.id.slice(0, 14)}…</div>
                       {b.conversationId && (
-                        <div className="text-[10px] mt-0.5" style={{ color: '#475569' }}>
+                        <div className="text-[10px] mt-0.5" style={{ color: 'var(--c-text-4)' }}>
                           group: {b.conversationId.slice(0, 10)}
                         </div>
                       )}
                     </Link>
                   </td>
                   <td className="px-4 py-3"><StatusBadge status={b.status} /></td>
-                  <td className="px-4 py-3 text-right font-mono text-[11px]" style={{ color: '#94A3B8' }}>{b.totalCount}</td>
+                  <td className="px-4 py-3 text-right font-mono text-[11px]" style={{ color: 'var(--c-text-2)' }}>{b.totalCount}</td>
                   <td className="px-4 py-3 text-right font-mono text-[11px]" style={{ color: '#22C55E' }}>{b.deliveredCount}</td>
                   <td className="px-4 py-3 text-right font-mono text-[11px]" style={{ color: '#EF4444' }}>{b.failedCount}</td>
-                  <td className="px-4 py-3 text-right font-mono text-[11px]" style={{ color: '#94A3B8' }}>{b.pointsCost}</td>
-                  <td className="px-4 py-3 whitespace-nowrap text-[11px]" style={{ color: '#475569' }}>{b.createdAt}</td>
+                  <td className="px-4 py-3 text-right font-mono text-[11px]" style={{ color: 'var(--c-text-2)' }}>{b.pointsCost}</td>
+                  <td className="px-4 py-3 whitespace-nowrap text-[11px]" style={{ color: 'var(--c-text-4)' }}>{b.createdAt}</td>
                 </tr>
               ))}
             </tbody>

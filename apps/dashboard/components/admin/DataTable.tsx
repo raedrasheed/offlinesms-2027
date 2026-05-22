@@ -32,8 +32,8 @@ export default function DataTable<T extends Record<string, any>>({
   if (loading) return <LoadingState compact title="Loading…" />;
   if (error)   return <ErrorState compact title="Load error" description={error} />;
 
-  const CARD = '#131B27';
-  const BORDER = '#1A2437';
+  const CARD = 'var(--c-card)';
+  const BORDER = 'var(--c-border)';
 
   return (
     <div className="overflow-x-auto rounded-xl" style={{ background: CARD, border: `1px solid ${BORDER}` }}>
@@ -44,7 +44,7 @@ export default function DataTable<T extends Record<string, any>>({
               <th
                 key={col.key}
                 className={`px-4 py-3 text-left text-[10px] font-bold tracking-wide uppercase whitespace-nowrap ${col.className ?? ''}`}
-                style={{ color: '#475569' }}
+                style={{ color: 'var(--c-text-4)' }}
               >
                 {col.label}
               </th>
@@ -68,9 +68,9 @@ export default function DataTable<T extends Record<string, any>>({
                   style={i < rows.length - 1 ? { borderBottom: `1px solid ${BORDER}` } : {}}
                 >
                   {columns.map(col => (
-                    <td key={col.key} className={`px-4 py-3 ${col.className ?? ''}`} style={{ color: '#94A3B8' }}>
+                    <td key={col.key} className={`px-4 py-3 ${col.className ?? ''}`} style={{ color: 'var(--c-text-2)' }}>
                       {rowHref && col === columns[0] ? (
-                        <Link href={rowHref as any} className="block" style={{ color: '#E2E8F2' }}>
+                        <Link href={rowHref as any} className="block" style={{ color: 'var(--c-text)' }}>
                           {col.render ? col.render(row) : String(row[col.key] ?? '—')}
                         </Link>
                       ) : (

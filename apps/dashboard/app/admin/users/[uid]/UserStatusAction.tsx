@@ -15,8 +15,8 @@ export default function UserStatusAction({ uid, currentStatus }: Props) {
   const label = isSuspended ? 'Reactivate user' : 'Suspend user';
   const nextStatus = isSuspended ? 'active' : 'suspended';
   const btnStyle = isSuspended
-    ? { background: '#052E1B', color: '#22C55E', border: '1px solid #0A4428' }
-    : { background: '#2D0D0D', color: '#EF4444', border: '1px solid #3D1515' };
+    ? { background: 'var(--c-success-bg)', color: '#22C55E', border: '1px solid var(--c-success-border)' }
+    : { background: 'var(--c-error-bg)', color: '#EF4444', border: '1px solid var(--c-error-border)' };
 
   async function handleClick() {
     if (!confirm(`${label}? This action is logged.`)) return;

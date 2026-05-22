@@ -99,7 +99,7 @@ export default function Sidebar({ role }: Props) {
   return (
     <aside
       className="w-[240px] flex flex-col h-screen sticky top-0 overflow-y-auto shrink-0"
-      style={{ background: '#090D16', borderRight: '1px solid #1A2437' }}
+      style={{ background: 'var(--c-sidebar)', borderRight: '1px solid var(--c-border)' }}
     >
       <div className="flex items-center gap-2.5 px-4 py-4 shrink-0">
         <span className="brand-mark shrink-0" />
@@ -125,20 +125,20 @@ export default function Sidebar({ role }: Props) {
           >
             A
           </div>
-          <span className="text-[12px] font-medium flex-1 truncate" style={{ color: '#94A3B8' }}>
+          <span className="text-[12px] font-medium flex-1 truncate" style={{ color: 'var(--c-text-2)' }}>
             Acme Co workspace
           </span>
-          <ChevronDown size={13} style={{ color: '#475569' }} className="shrink-0" />
+          <ChevronDown size={13} style={{ color: 'var(--c-text-4)' }} className="shrink-0" />
         </button>
       </div>
 
       <div className="px-3 pb-3 shrink-0">
         <div
           className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg"
-          style={{ background: '#111827', border: '1px solid #1A2437' }}
+          style={{ background: '#111827', border: '1px solid var(--c-border)' }}
         >
-          <Search size={12} style={{ color: '#475569' }} className="shrink-0" />
-          <span className="text-[12px]" style={{ color: '#475569' }}>Search...</span>
+          <Search size={12} style={{ color: 'var(--c-text-4)' }} className="shrink-0" />
+          <span className="text-[12px]" style={{ color: 'var(--c-text-4)' }}>Search...</span>
         </div>
       </div>
 
@@ -171,7 +171,7 @@ export default function Sidebar({ role }: Props) {
                     style={
                       isActive
                         ? { background: '#162032', color: '#7CC8EC' }
-                        : { color: '#64748B' }
+                        : { color: 'var(--c-text-3)' }
                     }
                   >
                     <item.icon size={14} className="shrink-0" />
@@ -192,11 +192,11 @@ export default function Sidebar({ role }: Props) {
         })}
       </nav>
 
-      <div className="px-3 py-3 shrink-0" style={{ borderTop: '1px solid #1A2437' }}>
+      <div className="px-3 py-3 shrink-0" style={{ borderTop: '1px solid var(--c-border)' }}>
         <button
           onClick={handleSignOut}
           className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium transition hover:bg-white/5"
-          style={{ color: '#475569' }}
+          style={{ color: 'var(--c-text-4)' }}
         >
           <LogOut size={14} />
           Sign out

@@ -10,8 +10,8 @@ import StatusBadge from '@/components/admin/StatusBadge';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-const CARD   = '#131B27';
-const BORDER = '#1A2437';
+const CARD   = 'var(--c-card)';
+const BORDER = 'var(--c-border)';
 
 export default async function PackagesPage() {
   const cookie = cookies().get('__session')?.value;
@@ -29,16 +29,16 @@ export default async function PackagesPage() {
   catch (e: any) { fetchError = e?.message ?? 'Failed to load packages.'; }
 
   return (
-    <div className="p-6 space-y-5" style={{ color: '#E2E8F2' }}>
+    <div className="p-6 space-y-5" style={{ color: 'var(--c-text)' }}>
       <div className="flex items-center justify-between">
         <div>
           <div className="flex items-center gap-2 text-[12px] mb-2">
             <Link href={'/admin/points' as any} className="hover:underline" style={{ color: '#5BB6DE' }}>← Points</Link>
-            <span style={{ color: '#475569' }}>/</span>
-            <span style={{ color: '#64748B' }}>Packages</span>
+            <span style={{ color: 'var(--c-text-4)' }}>/</span>
+            <span style={{ color: 'var(--c-text-3)' }}>Packages</span>
           </div>
           <h1 className="text-[22px] font-extrabold tracking-tight">Points packages</h1>
-          <p className="text-[13px] mt-0.5" style={{ color: '#64748B' }}>{rows.length} package{rows.length !== 1 ? 's' : ''}</p>
+          <p className="text-[13px] mt-0.5" style={{ color: 'var(--c-text-3)' }}>{rows.length} package{rows.length !== 1 ? 's' : ''}</p>
         </div>
         {canManage && (
           <Link
@@ -52,7 +52,7 @@ export default async function PackagesPage() {
       </div>
 
       {fetchError ? (
-        <div className="rounded-xl px-4 py-3 text-sm" style={{ background: '#2D0D0D', border: '1px solid #3D1515', color: '#EF4444' }}>{fetchError}</div>
+        <div className="rounded-xl px-4 py-3 text-sm" style={{ background: 'var(--c-error-bg)', border: '1px solid var(--c-error-border)', color: '#EF4444' }}>{fetchError}</div>
       ) : rows.length === 0 ? (
         <div className="rounded-xl p-12" style={{ background: CARD, border: `1px solid ${BORDER}` }}>
           <EmptyState title="No packages configured" />
@@ -66,7 +66,7 @@ export default async function PackagesPage() {
                   <th
                     key={h}
                     className={`px-4 py-3 text-[10px] font-semibold uppercase tracking-wider ${[1,2,3,6].includes(idx) ? 'text-right' : 'text-left'}`}
-                    style={{ color: '#475569' }}
+                    style={{ color: 'var(--c-text-4)' }}
                   >
                     {h}
                   </th>
@@ -80,13 +80,13 @@ export default async function PackagesPage() {
                   className="transition hover:bg-white/[0.03]"
                   style={i < rows.length - 1 ? { borderBottom: `1px solid ${BORDER}` } : {}}
                 >
-                  <td className="px-4 py-3 font-semibold" style={{ color: '#E2E8F2' }}>{p.name}</td>
+                  <td className="px-4 py-3 font-semibold" style={{ color: 'var(--c-text)' }}>{p.name}</td>
                   <td className="px-4 py-3 text-right font-mono text-[11px] font-bold" style={{ color: '#22C55E' }}>{p.points}</td>
                   <td className="px-4 py-3 text-right font-mono text-[11px]" style={{ color: '#F59E0B' }}>{p.bonusPoints || '—'}</td>
-                  <td className="px-4 py-3 text-right font-mono text-[11px]" style={{ color: '#94A3B8' }}>{p.price}</td>
-                  <td className="px-4 py-3 font-mono text-[11px]" style={{ color: '#94A3B8' }}>{p.currency}</td>
+                  <td className="px-4 py-3 text-right font-mono text-[11px]" style={{ color: 'var(--c-text-2)' }}>{p.price}</td>
+                  <td className="px-4 py-3 font-mono text-[11px]" style={{ color: 'var(--c-text-2)' }}>{p.currency}</td>
                   <td className="px-4 py-3"><StatusBadge status={p.status} /></td>
-                  <td className="px-4 py-3 text-right text-[11px]" style={{ color: '#475569' }}>{p.sortOrder}</td>
+                  <td className="px-4 py-3 text-right text-[11px]" style={{ color: 'var(--c-text-4)' }}>{p.sortOrder}</td>
                   {canManage && (
                     <td className="px-4 py-3">
                       <Link href={`/admin/points/packages/${p.id}/edit` as any} className="text-[11px] font-semibold hover:underline" style={{ color: '#5BB6DE' }}>

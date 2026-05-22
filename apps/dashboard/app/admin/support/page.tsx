@@ -13,8 +13,8 @@ import StatusBadge from '@/components/admin/StatusBadge';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-const CARD   = '#131B27';
-const BORDER = '#1A2437';
+const CARD   = 'var(--c-card)';
+const BORDER = 'var(--c-border)';
 
 const STATUS_TABS = [
   { label: 'All',      value: '' },
@@ -58,18 +58,18 @@ export default async function SupportPage({
   const exportHref = `/admin/support/export${statusFilter ? `?status=${statusFilter}` : ''}${categoryFilter ? `${statusFilter ? '&' : '?'}category=${categoryFilter}` : ''}`;
 
   const selectStyle = {
-    background: '#131B27',
-    border: '1px solid #1A2437',
-    color: '#E2E8F2',
+    background: 'var(--c-card)',
+    border: '1px solid var(--c-border)',
+    color: 'var(--c-text)',
   };
 
   return (
-    <div className="p-6 space-y-5" style={{ color: '#E2E8F2' }}>
+    <div className="p-6 space-y-5" style={{ color: 'var(--c-text)' }}>
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-[12px] font-medium mb-0.5" style={{ color: '#64748B' }}>Admin / Support</p>
+          <p className="text-[12px] font-medium mb-0.5" style={{ color: 'var(--c-text-3)' }}>Admin / Support</p>
           <h1 className="text-[22px] font-extrabold tracking-tight">Support queue</h1>
-          <p className="text-[13px] mt-0.5" style={{ color: '#64748B' }}>
+          <p className="text-[13px] mt-0.5" style={{ color: 'var(--c-text-3)' }}>
             {rows.length}{nextCursor ? '+' : ''} ticket{rows.length !== 1 ? 's' : ''}
           </p>
         </div>
@@ -98,7 +98,7 @@ export default async function SupportPage({
               className="px-3 py-1.5 rounded-lg text-[11px] font-bold transition"
               style={active
                 ? { background: '#1F7BA8', color: '#fff' }
-                : { background: '#131B27', color: '#94A3B8', border: '1px solid #1A2437' }
+                : { background: 'var(--c-card)', color: 'var(--c-text-2)', border: '1px solid var(--c-border)' }
               }
             >
               {t.label}
@@ -143,7 +143,7 @@ export default async function SupportPage({
       </div>
 
       {fetchError ? (
-        <div className="rounded-xl px-4 py-3 text-sm" style={{ background: '#2D0D0D', border: '1px solid #3D1515', color: '#EF4444' }}>
+        <div className="rounded-xl px-4 py-3 text-sm" style={{ background: 'var(--c-error-bg)', border: '1px solid var(--c-error-border)', color: '#EF4444' }}>
           {fetchError}
         </div>
       ) : rows.length === 0 ? (
@@ -156,7 +156,7 @@ export default async function SupportPage({
             <thead>
               <tr style={{ borderBottom: `1px solid ${BORDER}` }}>
                 {['Subject', 'Category', 'Status', 'User', 'Assigned', 'Created', 'Updated'].map(h => (
-                  <th key={h} className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#475569' }}>{h}</th>
+                  <th key={h} className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--c-text-4)' }}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -168,23 +168,23 @@ export default async function SupportPage({
                   style={i < rows.length - 1 ? { borderBottom: `1px solid ${BORDER}` } : {}}
                 >
                   <td className="px-4 py-3">
-                    <Link href={`/admin/support/${t.id}` as any} className="font-semibold hover:underline block truncate max-w-[200px]" style={{ color: '#E2E8F2' }}>
+                    <Link href={`/admin/support/${t.id}` as any} className="font-semibold hover:underline block truncate max-w-[200px]" style={{ color: 'var(--c-text)' }}>
                       {t.subject}
                     </Link>
-                    <div className="text-[10px] font-mono mt-0.5" style={{ color: '#475569' }}>{t.id.slice(0, 12)}…</div>
+                    <div className="text-[10px] font-mono mt-0.5" style={{ color: 'var(--c-text-4)' }}>{t.id.slice(0, 12)}…</div>
                   </td>
-                  <td className="px-4 py-3 capitalize" style={{ color: '#94A3B8' }}>{t.category}</td>
+                  <td className="px-4 py-3 capitalize" style={{ color: 'var(--c-text-2)' }}>{t.category}</td>
                   <td className="px-4 py-3"><StatusBadge status={t.status} /></td>
                   <td className="px-4 py-3">
                     <Link href={`/admin/users/${t.createdBy}` as any} className="font-mono text-[11px] hover:underline" style={{ color: '#5BB6DE' }}>
                       {t.createdBy.slice(0, 10)}…
                     </Link>
                   </td>
-                  <td className="px-4 py-3" style={{ color: '#475569' }}>
+                  <td className="px-4 py-3" style={{ color: 'var(--c-text-4)' }}>
                     {t.assignedTo ? <span className="font-mono text-[11px]">{t.assignedTo.slice(0, 10)}…</span> : '—'}
                   </td>
-                  <td className="px-4 py-3 whitespace-nowrap text-[11px]" style={{ color: '#475569' }}>{t.createdAt}</td>
-                  <td className="px-4 py-3 whitespace-nowrap text-[11px]" style={{ color: '#475569' }}>{t.updatedAt}</td>
+                  <td className="px-4 py-3 whitespace-nowrap text-[11px]" style={{ color: 'var(--c-text-4)' }}>{t.createdAt}</td>
+                  <td className="px-4 py-3 whitespace-nowrap text-[11px]" style={{ color: 'var(--c-text-4)' }}>{t.updatedAt}</td>
                 </tr>
               ))}
             </tbody>

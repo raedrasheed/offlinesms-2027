@@ -61,15 +61,15 @@ export default async function CallsPage() {
 
   const { rows, empty } = await fetchCallLogs();
 
-  const CARD = '#131B27';
-  const BORDER = '#1A2437';
+  const CARD = 'var(--c-card)';
+  const BORDER = 'var(--c-border)';
 
   return (
-    <div className="p-6 space-y-5" style={{ color: '#E2E8F2' }}>
+    <div className="p-6 space-y-5" style={{ color: 'var(--c-text)' }}>
       <div className="mb-6">
-        <p className="text-[12px] font-medium mb-0.5" style={{ color: '#64748B' }}>Admin / Calls</p>
+        <p className="text-[12px] font-medium mb-0.5" style={{ color: 'var(--c-text-3)' }}>Admin / Calls</p>
         <h1 className="text-[22px] font-extrabold tracking-tight">Calls</h1>
-        <p className="text-sm mt-0.5" style={{ color: '#64748B' }}>Voice and video call logs.</p>
+        <p className="text-sm mt-0.5" style={{ color: 'var(--c-text-3)' }}>Voice and video call logs.</p>
       </div>
 
       {empty || rows.length === 0 ? (
@@ -83,7 +83,7 @@ export default async function CallsPage() {
         <div className="overflow-x-auto rounded-xl" style={{ border: `1px solid ${BORDER}`, background: CARD }}>
           <table className="w-full text-sm border-collapse">
             <thead>
-              <tr className="text-left text-[10px] font-bold tracking-wide uppercase" style={{ borderBottom: `1px solid ${BORDER}`, color: '#475569' }}>
+              <tr className="text-left text-[10px] font-bold tracking-wide uppercase" style={{ borderBottom: `1px solid ${BORDER}`, color: 'var(--c-text-4)' }}>
                 <th className="px-4 py-3">Initiator</th>
                 <th className="px-4 py-3">Conversation</th>
                 <th className="px-4 py-3 text-right">Duration</th>
@@ -94,11 +94,11 @@ export default async function CallsPage() {
             <tbody>
               {rows.map((r, i) => (
                 <tr key={r.id} className="transition hover:bg-white/[0.03]" style={i < rows.length - 1 ? { borderBottom: `1px solid ${BORDER}` } : {}}>
-                  <td className="px-4 py-3 font-mono text-xs" style={{ color: '#94A3B8' }}>{r.initiatorUid?.slice(0, 12) ?? '—'}…</td>
-                  <td className="px-4 py-3 font-mono text-xs" style={{ color: '#64748B' }}>{r.conversationId?.slice(0, 10) ?? '—'}…</td>
-                  <td className="px-4 py-3 text-right text-xs font-mono" style={{ color: '#E2E8F2' }}>{r.durationSeconds}s</td>
-                  <td className="px-4 py-3 text-xs capitalize" style={{ color: '#94A3B8' }}>{r.status}</td>
-                  <td className="px-4 py-3 text-xs whitespace-nowrap" style={{ color: '#64748B' }}>{r.startedAt}</td>
+                  <td className="px-4 py-3 font-mono text-xs" style={{ color: 'var(--c-text-2)' }}>{r.initiatorUid?.slice(0, 12) ?? '—'}…</td>
+                  <td className="px-4 py-3 font-mono text-xs" style={{ color: 'var(--c-text-3)' }}>{r.conversationId?.slice(0, 10) ?? '—'}…</td>
+                  <td className="px-4 py-3 text-right text-xs font-mono" style={{ color: 'var(--c-text)' }}>{r.durationSeconds}s</td>
+                  <td className="px-4 py-3 text-xs capitalize" style={{ color: 'var(--c-text-2)' }}>{r.status}</td>
+                  <td className="px-4 py-3 text-xs whitespace-nowrap" style={{ color: 'var(--c-text-3)' }}>{r.startedAt}</td>
                 </tr>
               ))}
             </tbody>

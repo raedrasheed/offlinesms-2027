@@ -32,16 +32,16 @@ const pointsData = [
   { day: 'Sun', pts: 20000 },
 ];
 
-const CARD_BG = '#131B27';
-const BORDER  = '#1A2437';
+const CARD_BG = 'var(--c-card)';
+const BORDER  = 'var(--c-border)';
 
 export function MessagesChart() {
   return (
     <div className="rounded-xl p-4 flex flex-col gap-3" style={{ background: CARD_BG, border: `1px solid ${BORDER}` }}>
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-[13px] font-semibold" style={{ color: '#E2E8F2' }}>Messages over time</p>
-          <p className="text-[11px]" style={{ color: '#64748B' }}>Last 7 days</p>
+          <p className="text-[13px] font-semibold" style={{ color: 'var(--c-text)' }}>Messages over time</p>
+          <p className="text-[11px]" style={{ color: 'var(--c-text-3)' }}>Last 7 days</p>
         </div>
         <span className="text-[11px] font-semibold px-2 py-0.5 rounded" style={{ background: '#0A2035', color: '#5BB6DE' }}>
           +12% vs last week
@@ -58,9 +58,9 @@ export function MessagesChart() {
           <XAxis dataKey="day" tick={{ fill: '#475569', fontSize: 10 }} axisLine={false} tickLine={false} />
           <YAxis tick={{ fill: '#475569', fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
           <Tooltip
-            contentStyle={{ background: '#0D1117', border: '1px solid #1A2437', borderRadius: 8, fontSize: 12, color: '#E2E8F2' }}
+            contentStyle={{ background: 'var(--c-bg)', border: '1px solid var(--c-border)', borderRadius: 8, fontSize: 12, color: 'var(--c-text)' }}
             formatter={(v: number) => [`${v.toLocaleString()} msgs`, '']}
-            labelStyle={{ color: '#94A3B8' }}
+            labelStyle={{ color: 'var(--c-text-2)' }}
           />
           <Area type="monotone" dataKey="msgs" stroke="#1F7BA8" strokeWidth={2} fill="url(#msgGrad)" dot={false} />
         </AreaChart>
@@ -73,8 +73,8 @@ export function DeliveryChart() {
   return (
     <div className="rounded-xl p-4 flex flex-col gap-3" style={{ background: CARD_BG, border: `1px solid ${BORDER}` }}>
       <div>
-        <p className="text-[13px] font-semibold" style={{ color: '#E2E8F2' }}>SMS delivery rate</p>
-        <p className="text-[11px]" style={{ color: '#64748B' }}>Last 7d</p>
+        <p className="text-[13px] font-semibold" style={{ color: 'var(--c-text)' }}>SMS delivery rate</p>
+        <p className="text-[11px]" style={{ color: 'var(--c-text-3)' }}>Last 7d</p>
       </div>
       <div className="flex items-center gap-3">
         <ResponsiveContainer width={110} height={110}>
@@ -89,9 +89,9 @@ export function DeliveryChart() {
             <div key={d.name} className="flex items-center justify-between text-[11px]">
               <div className="flex items-center gap-1.5">
                 <div className="w-2 h-2 rounded-full shrink-0" style={{ background: d.color }} />
-                <span style={{ color: '#94A3B8' }}>{d.name}</span>
+                <span style={{ color: 'var(--c-text-2)' }}>{d.name}</span>
               </div>
-              <span className="font-semibold" style={{ color: '#E2E8F2' }}>{d.value}%</span>
+              <span className="font-semibold" style={{ color: 'var(--c-text)' }}>{d.value}%</span>
             </div>
           ))}
         </div>
@@ -105,8 +105,8 @@ export function PointsChart() {
     <div className="rounded-xl p-4 flex flex-col gap-3" style={{ background: CARD_BG, border: `1px solid ${BORDER}` }}>
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-[13px] font-semibold" style={{ color: '#E2E8F2' }}>Points usage</p>
-          <p className="text-[11px]" style={{ color: '#64748B' }}>Last 7d</p>
+          <p className="text-[13px] font-semibold" style={{ color: 'var(--c-text)' }}>Points usage</p>
+          <p className="text-[11px]" style={{ color: 'var(--c-text-3)' }}>Last 7d</p>
         </div>
         <span className="text-[11px] font-semibold" style={{ color: '#EF4444' }}>-4% last 7d</span>
       </div>
@@ -115,9 +115,9 @@ export function PointsChart() {
           <XAxis dataKey="day" tick={{ fill: '#475569', fontSize: 10 }} axisLine={false} tickLine={false} />
           <YAxis tick={{ fill: '#475569', fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
           <Tooltip
-            contentStyle={{ background: '#0D1117', border: '1px solid #1A2437', borderRadius: 8, fontSize: 12, color: '#E2E8F2' }}
+            contentStyle={{ background: 'var(--c-bg)', border: '1px solid var(--c-border)', borderRadius: 8, fontSize: 12, color: 'var(--c-text)' }}
             formatter={(v: number) => [`${v.toLocaleString()} pts`, '']}
-            labelStyle={{ color: '#94A3B8' }}
+            labelStyle={{ color: 'var(--c-text-2)' }}
           />
           <Bar dataKey="pts" fill="#1F7BA8" radius={[3, 3, 0, 0]} />
         </BarChart>

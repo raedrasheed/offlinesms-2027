@@ -39,16 +39,16 @@ export default async function RoleDetailPage({ params }: { params: { uid: string
   const isLegacyAdmin = claims.admin === true;
   const canManage = canDo(session.role, 'manage:roles') && params.uid !== session.user.uid;
 
-  const CARD = '#131B27';
-  const BORDER = '#1A2437';
+  const CARD = 'var(--c-card)';
+  const BORDER = 'var(--c-border)';
 
   return (
-    <div className="p-6 space-y-5 max-w-2xl" style={{ color: '#E2E8F2' }}>
+    <div className="p-6 space-y-5 max-w-2xl" style={{ color: 'var(--c-text)' }}>
       <div className="flex items-center gap-3 mb-6">
-        <p className="text-[12px] font-medium mb-0.5" style={{ color: '#64748B' }}>Admin / Roles</p>
-        <Link href={'/admin/roles' as any} className="text-sm hover:underline" style={{ color: '#64748B' }}>← Roles</Link>
-        <span style={{ color: '#475569' }}>/</span>
-        <span className="text-sm font-semibold truncate" style={{ color: '#E2E8F2' }}>{user.displayName ?? params.uid}</span>
+        <p className="text-[12px] font-medium mb-0.5" style={{ color: 'var(--c-text-3)' }}>Admin / Roles</p>
+        <Link href={'/admin/roles' as any} className="text-sm hover:underline" style={{ color: 'var(--c-text-3)' }}>← Roles</Link>
+        <span style={{ color: 'var(--c-text-4)' }}>/</span>
+        <span className="text-sm font-semibold truncate" style={{ color: 'var(--c-text)' }}>{user.displayName ?? params.uid}</span>
       </div>
 
       <div className="flex items-center gap-4 mb-6">
@@ -57,7 +57,7 @@ export default async function RoleDetailPage({ params }: { params: { uid: string
         </div>
         <div>
           <h1 className="text-[22px] font-extrabold tracking-tight">{user.displayName ?? '—'}</h1>
-          <p className="text-sm" style={{ color: '#64748B' }}>{maskEmail(user.email, session.role)}</p>
+          <p className="text-sm" style={{ color: 'var(--c-text-3)' }}>{maskEmail(user.email, session.role)}</p>
         </div>
         {currentRole && <RoleBadge role={currentRole as AdminRole} />}
       </div>
@@ -74,13 +74,13 @@ export default async function RoleDetailPage({ params }: { params: { uid: string
         {canManage ? (
           <DetailCard title="Assign role" subtitle="Changes are audit-logged. You cannot modify your own role.">
             <RoleAssignAction targetUid={params.uid} currentRole={currentRole} />
-            <p className="text-xs mt-3" style={{ color: '#475569' }}>
+            <p className="text-xs mt-3" style={{ color: 'var(--c-text-4)' }}>
               Removing the last super_admin is blocked. Legacy admin claim is not affected by this form.
             </p>
           </DetailCard>
         ) : (
           <DetailCard title="Role assignment">
-            <p className="text-sm" style={{ color: '#64748B' }}>
+            <p className="text-sm" style={{ color: 'var(--c-text-3)' }}>
               {params.uid === session.user.uid
                 ? 'You cannot modify your own role.'
                 : 'Only super admins can assign roles.'}

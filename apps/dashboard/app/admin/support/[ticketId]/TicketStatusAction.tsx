@@ -10,7 +10,7 @@ type Props = {
 
 const STATUSES = ['open', 'pending', 'resolved', 'closed'] as const;
 
-const inputStyle = { background: '#0D1117', border: '1px solid #1A2437', color: '#E2E8F2' };
+const inputStyle = { background: 'var(--c-bg)', border: '1px solid var(--c-border)', color: 'var(--c-text)' };
 
 function SubmitButton() {
   const { pending } = useFormStatus();

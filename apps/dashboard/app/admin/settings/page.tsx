@@ -14,8 +14,8 @@ import { updateSystemSettings } from '@/lib/settingsActions';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-const CARD   = '#131B27';
-const BORDER = '#1A2437';
+const CARD   = 'var(--c-card)';
+const BORDER = 'var(--c-border)';
 
 export default async function SettingsPage() {
   const cookie = cookies().get('__session')?.value;
@@ -41,11 +41,11 @@ export default async function SettingsPage() {
   }
 
   return (
-    <div className="p-6 max-w-2xl space-y-5" style={{ color: '#E2E8F2' }}>
+    <div className="p-6 max-w-2xl space-y-5" style={{ color: 'var(--c-text)' }}>
       <div>
-        <p className="text-[12px] font-medium mb-0.5" style={{ color: '#64748B' }}>Admin / Settings</p>
+        <p className="text-[12px] font-medium mb-0.5" style={{ color: 'var(--c-text-3)' }}>Admin / Settings</p>
         <h1 className="text-[22px] font-extrabold tracking-tight">System settings</h1>
-        <p className="text-[13px] mt-0.5" style={{ color: '#64748B' }}>
+        <p className="text-[13px] mt-0.5" style={{ color: 'var(--c-text-3)' }}>
           {canManage
             ? 'Update safe system configuration. Changes are audit-logged.'
             : 'Read-only — super admin required to update settings.'}
@@ -71,9 +71,9 @@ export default async function SettingsPage() {
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex justify-between items-center pb-3 last:pb-0" style={{ borderBottom: '1px solid #1A2437' }}>
-      <span className="text-sm" style={{ color: '#64748B' }}>{label}</span>
-      <span className="text-sm font-semibold" style={{ color: '#E2E8F2' }}>{value}</span>
+    <div className="flex justify-between items-center pb-3 last:pb-0" style={{ borderBottom: '1px solid var(--c-border)' }}>
+      <span className="text-sm" style={{ color: 'var(--c-text-3)' }}>{label}</span>
+      <span className="text-sm font-semibold" style={{ color: 'var(--c-text)' }}>{value}</span>
     </div>
   );
 }

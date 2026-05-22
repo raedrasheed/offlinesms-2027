@@ -41,11 +41,11 @@ export default async function UserDetailPage({ params }: { params: { uid: string
   const canManage = canDo(session.role, 'manage:users');
 
   return (
-    <div className="p-6 max-w-4xl space-y-5" style={{ color: '#E2E8F2' }}>
+    <div className="p-6 max-w-4xl space-y-5" style={{ color: 'var(--c-text)' }}>
       <div className="flex items-center gap-2 text-[12px]">
         <Link href="/admin/users" className="hover:underline" style={{ color: '#5BB6DE' }}>← Users</Link>
-        <span style={{ color: '#475569' }}>/</span>
-        <span className="font-semibold truncate" style={{ color: '#64748B' }}>{user.displayName ?? user.uid}</span>
+        <span style={{ color: 'var(--c-text-4)' }}>/</span>
+        <span className="font-semibold truncate" style={{ color: 'var(--c-text-3)' }}>{user.displayName ?? user.uid}</span>
       </div>
 
       <div className="grid gap-5">
@@ -63,8 +63,8 @@ export default async function UserDetailPage({ params }: { params: { uid: string
               {(user.displayName ?? user.uid).slice(0, 1).toUpperCase()}
             </div>
             <div>
-              <p className="text-lg font-extrabold" style={{ color: '#E2E8F2' }}>{user.displayName ?? '—'}</p>
-              <p className="text-sm" style={{ color: '#64748B' }}>{user.username ? `@${user.username}` : 'No username'}</p>
+              <p className="text-lg font-extrabold" style={{ color: 'var(--c-text)' }}>{user.displayName ?? '—'}</p>
+              <p className="text-sm" style={{ color: 'var(--c-text-3)' }}>{user.username ? `@${user.username}` : 'No username'}</p>
               <div className="mt-1"><StatusBadge status={user.status} /></div>
             </div>
           </div>
@@ -83,33 +83,33 @@ export default async function UserDetailPage({ params }: { params: { uid: string
           {wallet ? (
             <div className="flex gap-6">
               <div>
-                <p className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: '#64748B' }}>Balance</p>
-                <p className="text-2xl font-extrabold" style={{ color: '#E2E8F2' }}>
-                  {wallet.balance} <span className="text-sm font-bold" style={{ color: '#475569' }}>pts</span>
+                <p className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--c-text-3)' }}>Balance</p>
+                <p className="text-2xl font-extrabold" style={{ color: 'var(--c-text)' }}>
+                  {wallet.balance} <span className="text-sm font-bold" style={{ color: 'var(--c-text-4)' }}>pts</span>
                 </p>
               </div>
               <div>
-                <p className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: '#64748B' }}>Reserved</p>
-                <p className="text-2xl font-extrabold" style={{ color: '#E2E8F2' }}>
-                  {wallet.reserved} <span className="text-sm font-bold" style={{ color: '#475569' }}>pts</span>
+                <p className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--c-text-3)' }}>Reserved</p>
+                <p className="text-2xl font-extrabold" style={{ color: 'var(--c-text)' }}>
+                  {wallet.reserved} <span className="text-sm font-bold" style={{ color: 'var(--c-text-4)' }}>pts</span>
                 </p>
               </div>
             </div>
           ) : (
-            <p className="text-sm" style={{ color: '#64748B' }}>No wallet found.</p>
+            <p className="text-sm" style={{ color: 'var(--c-text-3)' }}>No wallet found.</p>
           )}
-          <p className="text-xs mt-3" style={{ color: '#475569' }}>Full transaction history is available in the Points module.</p>
+          <p className="text-xs mt-3" style={{ color: 'var(--c-text-4)' }}>Full transaction history is available in the Points module.</p>
         </DetailCard>
 
         {/* Groups */}
         <DetailCard title="Group memberships" subtitle={`${groups.length} group${groups.length !== 1 ? 's' : ''}`}>
           {groups.length === 0 ? (
-            <p className="text-sm" style={{ color: '#64748B' }}>Not a member of any groups.</p>
+            <p className="text-sm" style={{ color: 'var(--c-text-3)' }}>Not a member of any groups.</p>
           ) : (
             <ul className="space-y-2">
               {groups.map(g => (
                 <li key={g.id} className="flex items-center justify-between text-sm">
-                  <Link href={`/admin/groups/${g.id}` as any} className="font-medium hover:underline truncate" style={{ color: '#E2E8F2' }}>
+                  <Link href={`/admin/groups/${g.id}` as any} className="font-medium hover:underline truncate" style={{ color: 'var(--c-text)' }}>
                     {g.name ?? g.id.slice(0, 12)}
                   </Link>
                   <StatusBadge status={g.role} />
@@ -122,19 +122,19 @@ export default async function UserDetailPage({ params }: { params: { uid: string
         {/* Recent audit */}
         <DetailCard title="Recent activity" subtitle="Last 5 audit log entries by this user">
           {audit.length === 0 ? (
-            <p className="text-sm" style={{ color: '#64748B' }}>No recent activity.</p>
+            <p className="text-sm" style={{ color: 'var(--c-text-3)' }}>No recent activity.</p>
           ) : (
             <ul className="space-y-2">
               {audit.map(a => (
                 <li key={a.id} className="flex items-center justify-between text-xs gap-4">
-                  <span className="font-mono truncate" style={{ color: '#94A3B8' }}>{a.action}</span>
-                  <span className="whitespace-nowrap" style={{ color: '#475569' }}>{a.createdAt}</span>
+                  <span className="font-mono truncate" style={{ color: 'var(--c-text-2)' }}>{a.action}</span>
+                  <span className="whitespace-nowrap" style={{ color: 'var(--c-text-4)' }}>{a.createdAt}</span>
                   <StatusBadge status={a.result} />
                 </li>
               ))}
             </ul>
           )}
-          <p className="text-xs mt-3" style={{ color: '#475569' }}>Full audit history is available in the Audit Log.</p>
+          <p className="text-xs mt-3" style={{ color: 'var(--c-text-4)' }}>Full audit history is available in the Audit Log.</p>
         </DetailCard>
       </div>
     </div>

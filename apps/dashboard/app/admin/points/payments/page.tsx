@@ -15,8 +15,8 @@ import FilterBar from '@/components/admin/FilterBar';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-const CARD   = '#131B27';
-const BORDER = '#1A2437';
+const CARD   = 'var(--c-card)';
+const BORDER = 'var(--c-border)';
 
 export default async function PaymentsPage({
   searchParams,
@@ -48,16 +48,16 @@ export default async function PaymentsPage({
   }
 
   return (
-    <div className="p-6 space-y-5" style={{ color: '#E2E8F2' }}>
+    <div className="p-6 space-y-5" style={{ color: 'var(--c-text)' }}>
       <div className="flex items-center justify-between">
         <div>
           <div className="flex items-center gap-2 text-[12px] mb-2">
             <Link href={'/admin/points' as any} className="hover:underline" style={{ color: '#5BB6DE' }}>← Points</Link>
-            <span style={{ color: '#475569' }}>/</span>
-            <span style={{ color: '#64748B' }}>Payments</span>
+            <span style={{ color: 'var(--c-text-4)' }}>/</span>
+            <span style={{ color: 'var(--c-text-3)' }}>Payments</span>
           </div>
           <h1 className="text-[22px] font-extrabold tracking-tight">Payments</h1>
-          <p className="text-[13px] mt-0.5" style={{ color: '#64748B' }}>Read-only payment records — no refund actions</p>
+          <p className="text-[13px] mt-0.5" style={{ color: 'var(--c-text-3)' }}>Read-only payment records — no refund actions</p>
         </div>
         {canExport && (
           <a
@@ -85,7 +85,7 @@ export default async function PaymentsPage({
       </Suspense>
 
       {fetchError ? (
-        <div className="rounded-xl px-4 py-3 text-sm" style={{ background: '#2D0D0D', border: '1px solid #3D1515', color: '#EF4444' }}>{fetchError}</div>
+        <div className="rounded-xl px-4 py-3 text-sm" style={{ background: 'var(--c-error-bg)', border: '1px solid var(--c-error-border)', color: '#EF4444' }}>{fetchError}</div>
       ) : rows.length === 0 ? (
         <div className="rounded-xl p-12" style={{ background: CARD, border: `1px solid ${BORDER}` }}>
           <EmptyState title={statusFilter ? 'No payments match the current filter.' : 'No payments yet'} />
@@ -99,7 +99,7 @@ export default async function PaymentsPage({
                   <th
                     key={h}
                     className={`px-4 py-3 text-[10px] font-semibold uppercase tracking-wider ${[2,3].includes(idx) ? 'text-right' : 'text-left'}`}
-                    style={{ color: '#475569' }}
+                    style={{ color: 'var(--c-text-4)' }}
                   >
                     {h}
                   </th>
@@ -113,17 +113,17 @@ export default async function PaymentsPage({
                   className="transition hover:bg-white/[0.03]"
                   style={i < rows.length - 1 ? { borderBottom: `1px solid ${BORDER}` } : {}}
                 >
-                  <td className="px-4 py-3 font-mono text-[11px]" style={{ color: '#475569' }}>{p.id.slice(0, 12)}…</td>
+                  <td className="px-4 py-3 font-mono text-[11px]" style={{ color: 'var(--c-text-4)' }}>{p.id.slice(0, 12)}…</td>
                   <td className="px-4 py-3">
                     <Link href={`/admin/users/${p.userId}` as any} className="font-mono text-[11px] hover:underline" style={{ color: '#5BB6DE' }}>
                       {p.userId.slice(0, 12)}
                     </Link>
                   </td>
                   <td className="px-4 py-3 text-right font-mono text-[11px] font-bold" style={{ color: '#22C55E' }}>{p.totalPoints}</td>
-                  <td className="px-4 py-3 text-right font-mono text-[11px]" style={{ color: '#94A3B8' }}>{p.amount}</td>
-                  <td className="px-4 py-3 font-mono text-[11px]" style={{ color: '#94A3B8' }}>{p.currency}</td>
+                  <td className="px-4 py-3 text-right font-mono text-[11px]" style={{ color: 'var(--c-text-2)' }}>{p.amount}</td>
+                  <td className="px-4 py-3 font-mono text-[11px]" style={{ color: 'var(--c-text-2)' }}>{p.currency}</td>
                   <td className="px-4 py-3"><StatusBadge status={p.status} /></td>
-                  <td className="px-4 py-3 text-[11px] whitespace-nowrap" style={{ color: '#475569' }}>{p.createdAt}</td>
+                  <td className="px-4 py-3 text-[11px] whitespace-nowrap" style={{ color: 'var(--c-text-4)' }}>{p.createdAt}</td>
                 </tr>
               ))}
             </tbody>

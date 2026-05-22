@@ -17,8 +17,8 @@ import FilterBar from '@/components/admin/FilterBar';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-const CARD   = '#131B27';
-const BORDER = '#1A2437';
+const CARD   = 'var(--c-card)';
+const BORDER = 'var(--c-border)';
 
 export default async function UsersAdminPage({
   searchParams,
@@ -53,12 +53,12 @@ export default async function UsersAdminPage({
   }
 
   return (
-    <div className="p-6 space-y-5" style={{ color: '#E2E8F2' }}>
+    <div className="p-6 space-y-5" style={{ color: 'var(--c-text)' }}>
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-[12px] font-medium mb-0.5" style={{ color: '#64748B' }}>Admin / Users</p>
+          <p className="text-[12px] font-medium mb-0.5" style={{ color: 'var(--c-text-3)' }}>Admin / Users</p>
           <h1 className="text-[22px] font-extrabold tracking-tight">Users</h1>
-          <p className="text-[13px] mt-0.5" style={{ color: '#64748B' }}>
+          <p className="text-[13px] mt-0.5" style={{ color: 'var(--c-text-3)' }}>
             {rows.length === 50 ? '50+ users' : `${rows.length} user${rows.length !== 1 ? 's' : ''}`}
           </p>
         </div>
@@ -87,7 +87,7 @@ export default async function UsersAdminPage({
       </Suspense>
 
       {fetchError ? (
-        <div className="rounded-xl px-4 py-3 text-sm" style={{ background: '#2D0D0D', border: '1px solid #3D1515', color: '#EF4444' }}>
+        <div className="rounded-xl px-4 py-3 text-sm" style={{ background: 'var(--c-error-bg)', border: '1px solid var(--c-error-border)', color: '#EF4444' }}>
           {fetchError}
         </div>
       ) : (
@@ -96,14 +96,14 @@ export default async function UsersAdminPage({
             <thead>
               <tr style={{ borderBottom: `1px solid ${BORDER}` }}>
                 {['User', 'Phone', 'Email', 'Status', 'Profile', 'Joined'].map(h => (
-                  <th key={h} className="px-4 py-3 text-left font-semibold uppercase tracking-wider text-[10px]" style={{ color: '#475569' }}>{h}</th>
+                  <th key={h} className="px-4 py-3 text-left font-semibold uppercase tracking-wider text-[10px]" style={{ color: 'var(--c-text-4)' }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-12 text-center text-sm" style={{ color: '#64748B' }}>
+                  <td colSpan={6} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--c-text-3)' }}>
                     {statusFilter ? 'No users match the current filter.' : 'No users yet.'}
                   </td>
                 </tr>
@@ -122,22 +122,22 @@ export default async function UsersAdminPage({
                         {(u.displayName ?? u.uid).slice(0, 1).toUpperCase()}
                       </div>
                       <div className="min-w-0">
-                        <div className="font-semibold truncate" style={{ color: '#E2E8F2' }}>{u.displayName ?? '—'}</div>
-                        <div className="text-[10px] font-mono truncate" style={{ color: '#475569' }}>
+                        <div className="font-semibold truncate" style={{ color: 'var(--c-text)' }}>{u.displayName ?? '—'}</div>
+                        <div className="text-[10px] font-mono truncate" style={{ color: 'var(--c-text-4)' }}>
                           {u.username ? `@${u.username}` : u.uid.slice(0, 10)}
                         </div>
                       </div>
                     </Link>
                   </td>
-                  <td className="px-4 py-3 font-mono text-[11px]" style={{ color: '#94A3B8' }}>{maskPhone(u.phoneNumber)}</td>
-                  <td className="px-4 py-3 text-[11px] max-w-[160px] truncate" style={{ color: '#94A3B8' }}>{maskEmail(u.email, session.role)}</td>
+                  <td className="px-4 py-3 font-mono text-[11px]" style={{ color: 'var(--c-text-2)' }}>{maskPhone(u.phoneNumber)}</td>
+                  <td className="px-4 py-3 text-[11px] max-w-[160px] truncate" style={{ color: 'var(--c-text-2)' }}>{maskEmail(u.email, session.role)}</td>
                   <td className="px-4 py-3"><StatusBadge status={u.status} /></td>
                   <td className="px-4 py-3">
                     <span className="text-[10px] font-bold" style={{ color: u.profileCompleted ? '#22C55E' : '#F59E0B' }}>
                       {u.profileCompleted ? 'Complete' : 'Pending'}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-[11px] whitespace-nowrap" style={{ color: '#475569' }}>{u.createdAt}</td>
+                  <td className="px-4 py-3 text-[11px] whitespace-nowrap" style={{ color: 'var(--c-text-4)' }}>{u.createdAt}</td>
                 </tr>
               ))}
             </tbody>

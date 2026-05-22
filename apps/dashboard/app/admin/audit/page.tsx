@@ -18,8 +18,8 @@ import { PermissionState } from '@/components/state';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-const CARD   = '#131B27';
-const BORDER = '#1A2437';
+const CARD   = 'var(--c-card)';
+const BORDER = 'var(--c-border)';
 
 type AuditEntry = {
   id: string;
@@ -112,8 +112,8 @@ function fmtTs(ts: Timestamp | null | undefined): string {
 }
 
 const RESULT_STYLE: Record<string, { bg: string; color: string }> = {
-  success: { bg: '#052E1B', color: '#22C55E' },
-  failure: { bg: '#2D0D0D', color: '#EF4444' },
+  success: { bg: 'var(--c-success-bg)', color: '#22C55E' },
+  failure: { bg: 'var(--c-error-bg)', color: '#EF4444' },
 };
 
 export default async function AuditLogPage({
@@ -175,15 +175,15 @@ export default async function AuditLogPage({
   }
 
   const inputStyle = 'rounded-lg px-3 py-2 text-[12px] outline-none';
-  const inputSx = { background: '#131B27', border: '1px solid #1A2437', color: '#E2E8F2' };
+  const inputSx = { background: 'var(--c-card)', border: '1px solid var(--c-border)', color: 'var(--c-text)' };
 
   return (
-    <div className="p-6 space-y-5" style={{ color: '#E2E8F2' }}>
+    <div className="p-6 space-y-5" style={{ color: 'var(--c-text)' }}>
       <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="text-[12px] font-medium mb-0.5" style={{ color: '#64748B' }}>Admin / Audit</p>
+          <p className="text-[12px] font-medium mb-0.5" style={{ color: 'var(--c-text-3)' }}>Admin / Audit</p>
           <h1 className="text-[22px] font-extrabold tracking-tight">Audit Log</h1>
-          <p className="text-[13px] mt-0.5" style={{ color: '#64748B' }}>Read-only record of administrative actions. Payload contents are not shown.</p>
+          <p className="text-[13px] mt-0.5" style={{ color: 'var(--c-text-3)' }}>Read-only record of administrative actions. Payload contents are not shown.</p>
         </div>
         {canExport && (
           <a
@@ -219,7 +219,7 @@ export default async function AuditLogPage({
           <a
             href="/admin/audit"
             className="px-4 py-2 text-sm font-bold rounded-lg transition"
-            style={{ background: '#131B27', color: '#94A3B8', border: '1px solid #1A2437' }}
+            style={{ background: 'var(--c-card)', color: 'var(--c-text-2)', border: '1px solid var(--c-border)' }}
           >
             Clear
           </a>
@@ -227,17 +227,17 @@ export default async function AuditLogPage({
       </form>
 
       {indexError && (
-        <div className="rounded-xl px-4 py-3 text-sm" style={{ background: '#1C1405', border: '1px solid #2A2005', color: '#F59E0B' }}>
+        <div className="rounded-xl px-4 py-3 text-sm" style={{ background: 'var(--c-warning-bg)', border: '1px solid var(--c-warning-border)', color: '#F59E0B' }}>
           This filter combination requires a Firestore composite index that has not been deployed. Try fewer simultaneous filters or use the date range alone.
         </div>
       )}
 
       {fetchError ? (
-        <div className="rounded-xl px-4 py-3 text-sm" style={{ background: '#2D0D0D', border: '1px solid #3D1515', color: '#EF4444' }}>
+        <div className="rounded-xl px-4 py-3 text-sm" style={{ background: 'var(--c-error-bg)', border: '1px solid var(--c-error-border)', color: '#EF4444' }}>
           {fetchError}
         </div>
       ) : entries.length === 0 && !indexError ? (
-        <div className="rounded-xl p-8 text-center text-sm" style={{ background: CARD, border: `1px solid ${BORDER}`, color: '#64748B' }}>
+        <div className="rounded-xl p-8 text-center text-sm" style={{ background: CARD, border: `1px solid ${BORDER}`, color: 'var(--c-text-3)' }}>
           {hasFilters ? 'No entries match the current filters.' : 'No audit log entries yet.'}
         </div>
       ) : (
@@ -249,7 +249,7 @@ export default async function AuditLogPage({
                   <th
                     key={h}
                     className={`px-4 py-3 text-[10px] font-semibold uppercase tracking-wider ${idx === 5 ? 'text-right' : 'text-left'}`}
-                    style={{ color: '#475569' }}
+                    style={{ color: 'var(--c-text-4)' }}
                   >
                     {h}
                   </th>
@@ -263,25 +263,25 @@ export default async function AuditLogPage({
                   className="transition hover:bg-white/[0.03]"
                   style={i < entries.length - 1 ? { borderBottom: `1px solid ${BORDER}` } : {}}
                 >
-                  <td className="px-4 py-2.5 font-mono text-[11px] whitespace-nowrap" style={{ color: '#475569' }}>
+                  <td className="px-4 py-2.5 font-mono text-[11px] whitespace-nowrap" style={{ color: 'var(--c-text-4)' }}>
                     {fmtTs(entry.createdAt)}
                   </td>
                   <td className="px-4 py-2.5">
-                    <p className="font-semibold text-[11px] truncate max-w-[140px]" style={{ color: '#E2E8F2' }}>
+                    <p className="font-semibold text-[11px] truncate max-w-[140px]" style={{ color: 'var(--c-text)' }}>
                       {entry.actorEmail ?? entry.actorUid ?? '—'}
                     </p>
                   </td>
                   <td className="px-4 py-2.5">
-                    <span className="font-mono text-[11px]" style={{ color: '#94A3B8' }}>{entry.action}</span>
+                    <span className="font-mono text-[11px]" style={{ color: 'var(--c-text-2)' }}>{entry.action}</span>
                   </td>
-                  <td className="px-4 py-2.5 text-[11px]" style={{ color: '#64748B' }}>
+                  <td className="px-4 py-2.5 text-[11px]" style={{ color: 'var(--c-text-3)' }}>
                     {entry.targetType
-                      ? <span>{entry.targetType}{entry.targetId ? <span className="font-mono ml-1" style={{ color: '#475569' }}>·{entry.targetId.slice(0, 8)}</span> : null}</span>
+                      ? <span>{entry.targetType}{entry.targetId ? <span className="font-mono ml-1" style={{ color: 'var(--c-text-4)' }}>·{entry.targetId.slice(0, 8)}</span> : null}</span>
                       : '—'}
                   </td>
                   <td className="px-4 py-2.5">
                     {(() => {
-                      const s = RESULT_STYLE[entry.result ?? ''] ?? { bg: '#1A2437', color: '#94A3B8' };
+                      const s = RESULT_STYLE[entry.result ?? ''] ?? { bg: 'var(--c-border)', color: 'var(--c-text-2)' };
                       return (
                         <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: s.bg, color: s.color }}>
                           {entry.result ?? '—'}
@@ -289,7 +289,7 @@ export default async function AuditLogPage({
                       );
                     })()}
                   </td>
-                  <td className="px-4 py-2.5 text-right text-[11px]" style={{ color: '#475569' }}>
+                  <td className="px-4 py-2.5 text-right text-[11px]" style={{ color: 'var(--c-text-4)' }}>
                     {entry.payloadFieldCount ?? 0}
                   </td>
                 </tr>

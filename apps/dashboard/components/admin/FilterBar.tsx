@@ -24,9 +24,9 @@ export default function FilterBar({ searchPlaceholder = 'Search…', filters = [
   }, [router, pathname, searchParams]);
 
   const inputStyle = {
-    background: '#131B27',
-    border: '1px solid #1A2437',
-    color: '#E2E8F2',
+    background: 'var(--c-card)',
+    border: '1px solid var(--c-border)',
+    color: 'var(--c-text)',
   } as const;
 
   return (
@@ -35,13 +35,13 @@ export default function FilterBar({ searchPlaceholder = 'Search…', filters = [
         className="flex items-center gap-2 rounded-lg px-3 py-2 min-w-[200px] flex-1 max-w-xs"
         style={inputStyle}
       >
-        <Search size={13} style={{ color: '#475569' }} />
+        <Search size={13} style={{ color: 'var(--c-text-4)' }} />
         <input
           placeholder={searchPlaceholder}
           defaultValue={searchParams?.get('q') ?? ''}
           onChange={e => update('q', e.target.value)}
           className="bg-transparent text-sm flex-1 outline-none"
-          style={{ color: '#E2E8F2' }}
+          style={{ color: 'var(--c-text)' }}
         />
       </div>
       {filters.map(f => (

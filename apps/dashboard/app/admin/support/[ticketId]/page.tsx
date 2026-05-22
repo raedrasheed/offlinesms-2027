@@ -19,8 +19,8 @@ import { updateTicketStatus, assignSupportTicket } from '@/lib/supportActions';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-const CARD   = '#131B27';
-const BORDER = '#1A2437';
+const CARD   = 'var(--c-card)';
+const BORDER = 'var(--c-border)';
 
 export default async function TicketDetailPage({ params }: { params: { ticketId: string } }) {
   const cookie = cookies().get('__session')?.value;
@@ -38,17 +38,17 @@ export default async function TicketDetailPage({ params }: { params: { ticketId:
   const boundAssign = assignSupportTicket.bind(null, params.ticketId);
 
   return (
-    <div className="p-6 max-w-2xl space-y-5" style={{ color: '#E2E8F2' }}>
+    <div className="p-6 max-w-2xl space-y-5" style={{ color: 'var(--c-text)' }}>
       <div className="flex items-center gap-2 text-[12px]">
         <Link href={'/admin/support' as any} className="hover:underline" style={{ color: '#5BB6DE' }}>← Support</Link>
-        <span style={{ color: '#475569' }}>/</span>
-        <span className="font-semibold truncate" style={{ color: '#64748B' }}>{ticket.subject}</span>
+        <span style={{ color: 'var(--c-text-4)' }}>/</span>
+        <span className="font-semibold truncate" style={{ color: 'var(--c-text-3)' }}>{ticket.subject}</span>
       </div>
 
       <div className="flex items-center gap-4">
         <div>
           <h1 className="text-[22px] font-extrabold tracking-tight">{ticket.subject}</h1>
-          <p className="font-mono text-[11px] mt-0.5" style={{ color: '#475569' }}>{params.ticketId}</p>
+          <p className="font-mono text-[11px] mt-0.5" style={{ color: 'var(--c-text-4)' }}>{params.ticketId}</p>
         </div>
         <StatusBadge status={ticket.status} />
       </div>
@@ -73,7 +73,7 @@ export default async function TicketDetailPage({ params }: { params: { ticketId:
 
         {ticket.description && (
           <DetailCard title="Description" subtitle="User-submitted content">
-            <p className="text-sm whitespace-pre-wrap leading-relaxed" style={{ color: '#94A3B8' }}>{ticket.description}</p>
+            <p className="text-sm whitespace-pre-wrap leading-relaxed" style={{ color: 'var(--c-text-2)' }}>{ticket.description}</p>
           </DetailCard>
         )}
 
@@ -83,7 +83,7 @@ export default async function TicketDetailPage({ params }: { params: { ticketId:
           </DetailCard>
         ) : (
           <DetailCard title="Update status">
-            <p className="text-sm" style={{ color: '#64748B' }}>Only support agents and super admins can update ticket status.</p>
+            <p className="text-sm" style={{ color: 'var(--c-text-3)' }}>Only support agents and super admins can update ticket status.</p>
           </DetailCard>
         )}
 

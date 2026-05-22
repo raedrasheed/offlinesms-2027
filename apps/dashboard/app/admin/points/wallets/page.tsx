@@ -11,8 +11,8 @@ import WalletFreezeAction from './WalletFreezeAction';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-const CARD   = '#131B27';
-const BORDER = '#1A2437';
+const CARD   = 'var(--c-card)';
+const BORDER = 'var(--c-border)';
 
 export default async function WalletsPage({ searchParams }: { searchParams?: { cursor?: string; status?: string } }) {
   const cookie = cookies().get('__session')?.value;
@@ -39,15 +39,15 @@ export default async function WalletsPage({ searchParams }: { searchParams?: { c
   ];
 
   return (
-    <div className="p-6 space-y-5" style={{ color: '#E2E8F2' }}>
+    <div className="p-6 space-y-5" style={{ color: 'var(--c-text)' }}>
       <div>
         <div className="flex items-center gap-2 text-[12px] mb-2">
           <Link href={'/admin/points' as any} className="hover:underline" style={{ color: '#5BB6DE' }}>← Points</Link>
-          <span style={{ color: '#475569' }}>/</span>
-          <span style={{ color: '#64748B' }}>Wallets</span>
+          <span style={{ color: 'var(--c-text-4)' }}>/</span>
+          <span style={{ color: 'var(--c-text-3)' }}>Wallets</span>
         </div>
         <h1 className="text-[22px] font-extrabold tracking-tight">Wallets</h1>
-        <p className="text-[13px] mt-0.5" style={{ color: '#64748B' }}>
+        <p className="text-[13px] mt-0.5" style={{ color: 'var(--c-text-3)' }}>
           {canFreeze ? 'Freeze or unfreeze wallets. Balance is never modified here.' : 'Read-only — no adjustment actions.'}
         </p>
       </div>
@@ -63,7 +63,7 @@ export default async function WalletsPage({ searchParams }: { searchParams?: { c
               className="px-3 py-1.5 rounded-lg text-[11px] font-bold transition"
               style={active
                 ? { background: '#1F7BA8', color: '#fff' }
-                : { background: CARD, color: '#94A3B8', border: `1px solid ${BORDER}` }
+                : { background: CARD, color: 'var(--c-text-2)', border: `1px solid ${BORDER}` }
               }
             >
               {t.label}
@@ -73,7 +73,7 @@ export default async function WalletsPage({ searchParams }: { searchParams?: { c
       </div>
 
       {fetchError ? (
-        <div className="rounded-xl px-4 py-3 text-sm" style={{ background: '#2D0D0D', border: '1px solid #3D1515', color: '#EF4444' }}>{fetchError}</div>
+        <div className="rounded-xl px-4 py-3 text-sm" style={{ background: 'var(--c-error-bg)', border: '1px solid var(--c-error-border)', color: '#EF4444' }}>{fetchError}</div>
       ) : rows.length === 0 ? (
         <div className="rounded-xl p-12" style={{ background: CARD, border: `1px solid ${BORDER}` }}>
           <EmptyState title="No wallets yet" />
@@ -83,13 +83,13 @@ export default async function WalletsPage({ searchParams }: { searchParams?: { c
           <table className="w-full text-[12px] border-collapse">
             <thead>
               <tr style={{ borderBottom: `1px solid ${BORDER}` }}>
-                <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#475569' }}>User</th>
-                <th className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#475569' }}>Balance</th>
-                <th className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#475569' }}>Reserved</th>
-                <th className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#475569' }}>Available</th>
-                <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#475569' }}>Status</th>
-                <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#475569' }}>Updated</th>
-                {canFreeze && <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#475569' }}>Actions</th>}
+                <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--c-text-4)' }}>User</th>
+                <th className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--c-text-4)' }}>Balance</th>
+                <th className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--c-text-4)' }}>Reserved</th>
+                <th className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--c-text-4)' }}>Available</th>
+                <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--c-text-4)' }}>Status</th>
+                <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--c-text-4)' }}>Updated</th>
+                {canFreeze && <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--c-text-4)' }}>Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -104,11 +104,11 @@ export default async function WalletsPage({ searchParams }: { searchParams?: { c
                       {w.uid.slice(0, 14)}…
                     </Link>
                   </td>
-                  <td className="px-4 py-3 text-right font-mono text-[11px] font-bold" style={{ color: '#E2E8F2' }}>{w.balance}</td>
+                  <td className="px-4 py-3 text-right font-mono text-[11px] font-bold" style={{ color: 'var(--c-text)' }}>{w.balance}</td>
                   <td className="px-4 py-3 text-right font-mono text-[11px]" style={{ color: '#F59E0B' }}>{w.reserved}</td>
                   <td className="px-4 py-3 text-right font-mono text-[11px]" style={{ color: '#22C55E' }}>{w.available}</td>
                   <td className="px-4 py-3"><StatusBadge status={w.status} /></td>
-                  <td className="px-4 py-3 text-[11px] whitespace-nowrap" style={{ color: '#475569' }}>{w.updatedAt}</td>
+                  <td className="px-4 py-3 text-[11px] whitespace-nowrap" style={{ color: 'var(--c-text-4)' }}>{w.updatedAt}</td>
                   {canFreeze && (
                     <td className="px-4 py-3">
                       <WalletFreezeAction uid={w.uid} currentStatus={w.status} />

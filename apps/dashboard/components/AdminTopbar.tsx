@@ -2,6 +2,7 @@ import { Bell } from 'lucide-react';
 import AdminBreadcrumbs from './AdminBreadcrumbs';
 import AdminUserMenu from './AdminUserMenu';
 import AdminGlobalSearchShell from './AdminGlobalSearchShell';
+import ThemeToggle from './ThemeToggle';
 import type { AdminRole } from '@/lib/session';
 
 type RoleKey = AdminRole | 'legacy_admin' | 'bootstrap_admin';
@@ -11,16 +12,17 @@ export default function AdminTopbar({ email, role }: Props) {
   return (
     <header
       className="px-6 py-3 flex items-center gap-4 sticky top-0 z-30 shrink-0"
-      style={{ background: '#0D1117', borderBottom: '1px solid #1A2437' }}
+      style={{ background: 'var(--c-bg)', borderBottom: '1px solid var(--c-border)' }}
     >
       <div className="flex-1 min-w-0">
         <AdminBreadcrumbs />
       </div>
       <AdminGlobalSearchShell />
+      <ThemeToggle />
       <button
         aria-label="Notifications"
         className="w-9 h-9 rounded-lg grid place-items-center transition shrink-0 hover:opacity-80"
-        style={{ background: '#131B27', color: '#64748B', border: '1px solid #1A2437' }}
+        style={{ background: 'var(--c-card)', color: 'var(--c-text-3)', border: '1px solid var(--c-border)' }}
       >
         <Bell size={15} />
       </button>

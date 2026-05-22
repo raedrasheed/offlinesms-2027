@@ -32,8 +32,8 @@ export default function WalletFreezeAction({ uid, currentStatus }: Props) {
   }
 
   const btnStyle = isFrozen
-    ? { background: '#052E1B', color: '#22C55E', border: '1px solid #0A4428' }
-    : { background: '#1C1405', color: '#F59E0B', border: '1px solid #2A2005' };
+    ? { background: 'var(--c-success-bg)', color: '#22C55E', border: '1px solid var(--c-success-border)' }
+    : { background: 'var(--c-warning-bg)', color: '#F59E0B', border: '1px solid var(--c-warning-border)' };
 
   return (
     <div className="flex items-center gap-2">

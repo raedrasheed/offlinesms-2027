@@ -11,8 +11,8 @@ import { Wallet, ArrowLeftRight, CreditCard, Package } from 'lucide-react';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-const CARD   = '#131B27';
-const BORDER = '#1A2437';
+const CARD   = 'var(--c-card)';
+const BORDER = 'var(--c-border)';
 
 const sections = [
   { href: '/admin/points/wallets',      label: 'Wallets',       icon: Wallet,          desc: 'User wallet balances and reserved amounts.' },
@@ -30,11 +30,11 @@ export default async function PointsHubPage() {
   }
 
   return (
-    <div className="p-6 space-y-5" style={{ color: '#E2E8F2' }}>
+    <div className="p-6 space-y-5" style={{ color: 'var(--c-text)' }}>
       <div>
-        <p className="text-[12px] font-medium mb-0.5" style={{ color: '#64748B' }}>Admin / Points</p>
+        <p className="text-[12px] font-medium mb-0.5" style={{ color: 'var(--c-text-3)' }}>Admin / Points</p>
         <h1 className="text-[22px] font-extrabold tracking-tight">Points</h1>
-        <p className="text-[13px] mt-0.5" style={{ color: '#64748B' }}>Read-only overview — no wallet adjustment actions</p>
+        <p className="text-[13px] mt-0.5" style={{ color: 'var(--c-text-3)' }}>Read-only overview — no wallet adjustment actions</p>
       </div>
       <div className="grid grid-cols-2 gap-4 max-w-2xl">
         {sections.map(s => (
@@ -45,12 +45,12 @@ export default async function PointsHubPage() {
             style={{ background: CARD, border: `1px solid ${BORDER}` }}
           >
             <s.icon size={20} style={{ color: '#5BB6DE' }} className="mb-3" />
-            <div className="font-bold" style={{ color: '#E2E8F2' }}>{s.label}</div>
-            <p className="text-[12px] mt-1" style={{ color: '#64748B' }}>{s.desc}</p>
+            <div className="font-bold" style={{ color: 'var(--c-text)' }}>{s.label}</div>
+            <p className="text-[12px] mt-1" style={{ color: 'var(--c-text-3)' }}>{s.desc}</p>
           </Link>
         ))}
       </div>
-      <p className="text-[11px]" style={{ color: '#475569' }}>
+      <p className="text-[11px]" style={{ color: 'var(--c-text-4)' }}>
         Wallet adjustment, refunds, and package editing are deferred to a later phase.
       </p>
     </div>

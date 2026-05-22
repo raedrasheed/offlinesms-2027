@@ -15,8 +15,8 @@ import FilterBar from '@/components/admin/FilterBar';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-const CARD   = '#131B27';
-const BORDER = '#1A2437';
+const CARD   = 'var(--c-card)';
+const BORDER = 'var(--c-border)';
 
 export default async function GroupsAdminPage({
   searchParams,
@@ -51,12 +51,12 @@ export default async function GroupsAdminPage({
   }
 
   return (
-    <div className="p-6 space-y-5" style={{ color: '#E2E8F2' }}>
+    <div className="p-6 space-y-5" style={{ color: 'var(--c-text)' }}>
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-[12px] font-medium mb-0.5" style={{ color: '#64748B' }}>Admin / Groups</p>
+          <p className="text-[12px] font-medium mb-0.5" style={{ color: 'var(--c-text-3)' }}>Admin / Groups</p>
           <h1 className="text-[22px] font-extrabold tracking-tight">Groups</h1>
-          <p className="text-[13px] mt-0.5" style={{ color: '#64748B' }}>
+          <p className="text-[13px] mt-0.5" style={{ color: 'var(--c-text-3)' }}>
             {rows.length === 50 ? '50+ groups' : `${rows.length} group${rows.length !== 1 ? 's' : ''}`}
           </p>
         </div>
@@ -85,7 +85,7 @@ export default async function GroupsAdminPage({
       </Suspense>
 
       {fetchError ? (
-        <div className="rounded-xl px-4 py-3 text-sm" style={{ background: '#2D0D0D', border: '1px solid #3D1515', color: '#EF4444' }}>
+        <div className="rounded-xl px-4 py-3 text-sm" style={{ background: 'var(--c-error-bg)', border: '1px solid var(--c-error-border)', color: '#EF4444' }}>
           {fetchError}
         </div>
       ) : rows.length === 0 ? (
@@ -98,7 +98,7 @@ export default async function GroupsAdminPage({
             <thead>
               <tr style={{ borderBottom: `1px solid ${BORDER}` }}>
                 {['Name', 'Members', 'Status', 'Org', 'Created'].map(h => (
-                  <th key={h} className="px-4 py-3 text-left font-semibold uppercase tracking-wider text-[10px]" style={{ color: '#475569' }}>{h}</th>
+                  <th key={h} className="px-4 py-3 text-left font-semibold uppercase tracking-wider text-[10px]" style={{ color: 'var(--c-text-4)' }}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -110,17 +110,17 @@ export default async function GroupsAdminPage({
                   style={i < rows.length - 1 ? { borderBottom: `1px solid ${BORDER}` } : {}}
                 >
                   <td className="px-4 py-3">
-                    <Link href={`/admin/groups/${g.id}` as any} className="font-semibold hover:underline" style={{ color: '#E2E8F2' }}>
+                    <Link href={`/admin/groups/${g.id}` as any} className="font-semibold hover:underline" style={{ color: 'var(--c-text)' }}>
                       {g.name ?? '—'}
                     </Link>
-                    <div className="text-[10px] font-mono mt-0.5" style={{ color: '#475569' }}>{g.id.slice(0, 12)}</div>
+                    <div className="text-[10px] font-mono mt-0.5" style={{ color: 'var(--c-text-4)' }}>{g.id.slice(0, 12)}</div>
                   </td>
-                  <td className="px-4 py-3" style={{ color: '#94A3B8' }}>{g.memberCount}</td>
+                  <td className="px-4 py-3" style={{ color: 'var(--c-text-2)' }}>{g.memberCount}</td>
                   <td className="px-4 py-3"><StatusBadge status={g.status} /></td>
-                  <td className="px-4 py-3 font-mono text-[11px]" style={{ color: '#475569' }}>
+                  <td className="px-4 py-3 font-mono text-[11px]" style={{ color: 'var(--c-text-4)' }}>
                     {g.organizationId ? g.organizationId.slice(0, 10) : '—'}
                   </td>
-                  <td className="px-4 py-3 whitespace-nowrap" style={{ color: '#475569' }}>{g.createdAt}</td>
+                  <td className="px-4 py-3 whitespace-nowrap" style={{ color: 'var(--c-text-4)' }}>{g.createdAt}</td>
                 </tr>
               ))}
             </tbody>
