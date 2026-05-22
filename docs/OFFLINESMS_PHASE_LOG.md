@@ -4,6 +4,63 @@ Running log of phased work. Newest first.
 
 ---
 
+## Phase 19 — Localization Hardening, RTL, Dark Mode, Accessibility, User Preferences
+
+**Branch:** `claude/repo-audit-architecture-MiZDX`
+**Status:** Complete.
+
+### What was done
+
+1. **i18n parity checker** (`scripts/checkI18n.ts`) — recursively flattens all locale JSON keys and fails CI if EN/AR diverge. `npm run i18n:check` at root.
+2. **EN/AR translations** — added `settings.*` (33 keys), `support.*` (18 keys), `points.filter*`, `points.smsBatch`, `points.buySubtitle`, `points.transferSubtitle`, `points.loadingWallet`, `points.loadingTransactions`, `points.emptyDescription`. Total: 276 keys per locale.
+3. **`apps/mobile/src/i18n/index.ts`** — exports `isRTL` (module-level boolean) and `changeLanguage(locale)` async helper that also calls `I18nManager.forceRTL`.
+4. **`apps/mobile/src/lib/user.ts`** — added `ThemePreference`, `TimeFormat`, `LanguageCode` types; `setPreferredLanguage`, `setPreferredTheme`, `setInAppNotifications`, `setTimeFormat` setters.
+5. **`firestore.rules`** — added `preferredLanguage`, `preferredTheme`, `inAppNotifications`, `timeFormat` to `allowedProfileFields()`.
+6. **`apps/mobile/src/context/ThemeContext.tsx`** — `ThemeProvider` reads `userPreference` from Firestore via `App.tsx` prop; falls back to `useColorScheme()`; caches to AsyncStorage. `useTheme()` returns semantic color tokens.
+7. **`apps/mobile/App.tsx`** — wrapped with `<ThemeProvider userPreference={userTheme}>`.
+8. **Settings screen** — full rewrite with `useTranslation`, `useTheme`, language/theme/time-format chip selectors, in-app notifications toggle, accessibility labels, `buildStyles(colors, isRTL)`.
+9. **ChatsList screen** — `buildStyles(colors, rtl)` with semantic tokens; RTL-aware FAB; accessibility on rows and chips; translated filter labels.
+10. **Conversation screen** — `buildStyles(colors, rtl)` with semantic tokens; RTL-aware back chevron, composer, header; accessibility on back button, send button, reply/edit previews; fixed curly-quote artifacts.
+11. **Points screen** — `buildStyles(colors, rtl)` with semantic tokens; all strings use `t('points.*')`; accessibility on filter chips and action buttons; translated filter labels.
+12. **SupportTicket screen** — `buildStyles(colors, rtl)` with semantic tokens; all strings use `t('support.*')`; RTL-aware layout; accessibility on category chips, tabs, inputs, and submit button.
+13. **Dashboard `tailwind.config.ts`** — `darkMode: 'class'` scaffold.
+14. **Dashboard `app/layout.tsx`** — `dir="ltr"`, skip-to-main-content link.
+15. **Dashboard `app/globals.css`** — `:focus-visible` ring (2px primary, offset 2px); `.skip-nav` helper class.
+16. **Dashboard admin layout** — `id="main-content"` on `<main>`.
+17. **`AdminGlobalSearchShell`** — ARIA: `role=dialog/aria-modal` on overlay, `role=combobox/aria-controls/aria-expanded` on input, `role=listbox/option/aria-selected` on results, `aria-live="polite"` on dynamic content.
+18. **`apps/dashboard/lib/i18n.ts`** — `ADMIN_LABELS` central label map for nav, actions, and statuses.
+19. **`docs/OFFLINESMS_ACCESSIBILITY_CHECKLIST.md`** — mobile and dashboard review gates.
+20. **`docs/OFFLINESMS_LOCALIZATION_CHECKLIST.md`** — how to add strings, parity check usage, RTL rules, Arabic guidelines.
+
+### Commits
+
+- `docs(phase19): add phase 19 implementation plan` — `3ee698c`
+- `feat(mobile): add i18n parity checker and EN/AR settings translations` — `f68e9cd`
+- `feat(mobile): add theme context, user preferences, and settings screen` — `4b65700`
+- `feat(mobile): improve RTL and dark mode across core screens` — `25a4c54`
+- `feat(dashboard): add theme and accessibility foundations` — `10bf6dd`
+- `docs: add localization and accessibility checklists` — `c3f7903`
+- `docs: update phase log for phase 19` — _(this commit)_
+
+### Scope respected (did NOT implement)
+
+- No new business features, media messages, or mobile calls
+- No real notification broadcast sending (draft-only, send disabled from Phase 18)
+- No payment-provider UI changes
+- No admin wallet adjustment
+- No Phase 8–18 feature breakage
+
+### Acceptance criteria met
+
+- i18n:check passes (276 keys, EN=AR parity)
+- All new mobile screens use semantic color tokens via `useTheme()`
+- All new mobile screens use `buildStyles(colors, rtl)` pattern
+- All major interactive elements on updated screens have `accessibilityRole` + `accessibilityLabel`
+- Dashboard has `:focus-visible` ring, skip-nav, ARIA search dialog
+- TypeScript passes cleanly across all workspaces
+
+---
+
 ## Phase 18 — Org Scoping, Rate Limiting, Search Normalization, Date-Range Reports, Support Assignment, Webhook Logs, Notifications
 
 **Branch:** `claude/repo-audit-architecture-MiZDX`  

@@ -363,19 +363,19 @@ Legend for "Recommended phase" matches `OFFLINESMS_IMPLEMENTATION_ROADMAP.md`.
 
 | | |
 |---|---|
-| **Status** | 🟡 Mobile yes, dashboard no |
-| **Existing** | `I18nManager.forceRTL` in mobile i18n |
-| **Missing** | Dashboard direction prop, RTL-aware spacing utilities, mirrored icons, layout regression suite |
-| **Phase** | 19 |
+| **Status** | 🟡 Mobile substantially complete, dashboard LTR-only |
+| **Existing** | `I18nManager.forceRTL` in `changeLanguage()`; `isRTL` module-level export; `buildStyles(colors, rtl)` pattern on all updated screens (ChatsList, Conversation, Points, SupportTicket, Settings) |
+| **Missing** | Dashboard `dir` RTL support; layout regression suite for RTL screens |
+| **Phase** | 19 ✓ (mobile); 20 (dashboard RTL + regression) |
 
 ## 35. Dark mode
 
 | | |
 |---|---|
-| **Status** | ❌ Missing (placeholder tokens only) |
-| **Existing** | `colors.darkBg/darkSurface/darkInk` |
-| **Missing** | Theme provider, system-preference detection, manual toggle, semantic role tokens |
-| **Phase** | 1 (token layer) + 19 (full theming pass) |
+| **Status** | 🟡 Mobile substantially complete, dashboard scaffold only |
+| **Existing** | `ThemeContext` wired with `lightSemantic`/`darkSemantic`; all updated screens use `useTheme()`; user preference persisted to Firestore + AsyncStorage; Settings chip selector; dashboard `darkMode: 'class'` scaffold |
+| **Missing** | Dashboard dark palette wiring; dark-mode regression tests |
+| **Phase** | 19 ✓ (mobile); 20 (dashboard dark wiring) |
 
 ## 36. Edge states
 

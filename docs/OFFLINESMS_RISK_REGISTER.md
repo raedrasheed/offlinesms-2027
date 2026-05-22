@@ -117,8 +117,8 @@ Risks ranked across the surfaces present today and planned for later phases. Lik
 ## Phase 1 mitigation snapshot
 
 - **Risk #4 (admin permission leakage at the route boundary)** — partially mitigated. `apps/dashboard/app/admin/layout.tsx` is now a server-rendered guard that verifies a Firebase session cookie and admin role; non-admin traffic gets a `PermissionState` page rather than admin UI. Full RBAC (beyond `admin: true`) still lands in Phase 18.
-- **Risk #12 (dark mode inconsistencies)** — token-level groundwork laid. Semantic tokens with paired `lightSemantic` / `darkSemantic` are exported; no provider yet, so visible UI is unchanged. Phase 19 wires the toggle.
-- **Risk #11 (RTL layout drift)** — partially mitigated for the mobile state primitives (use `I18nManager.isRTL` for alignment). Dashboard RTL still pending.
+- **Risk #12 (dark mode inconsistencies)** — **substantially mitigated (Phase 19).** `ThemeContext` wired with `lightSemantic`/`darkSemantic` token sets; all core mobile screens use `useTheme()` + `buildStyles(colors, rtl)` pattern. Dashboard has `darkMode: 'class'` scaffold. Remaining risk: dashboard palette not yet wired; deferred to Phase 20.
+- **Risk #11 (RTL layout drift)** — **substantially mitigated (Phase 19).** All updated mobile screens use `buildStyles(colors, rtl)` with `flexDirection`/`textAlign` flipping, RTL-aware chevrons, FAB mirroring, and timestamp `writingDirection: 'ltr'`. Dashboard remains LTR-only. Visual regression suite for RTL deferred to Phase 20.
 - **Risk #13 (incomplete TODO screens)** — replaced ad-hoc TODO copy on 7 dashboard scaffold pages and 5 mobile screens with token-aware `EmptyState` / `LoadingState` primitives. No regressions in product behaviour.
 
 ---

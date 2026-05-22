@@ -493,17 +493,21 @@ Provider → sms/webhook (HMAC) → smsBatches/{b}/recipients/{uid} update
 
 ## P. RTL & localisation architecture
 
-- **Mobile:** i18next; locale detection at boot; `I18nManager.forceRTL` for Arabic. Token-based spacing avoids hard-coded left/right; logical properties (`marginStart` / `marginEnd`) used everywhere.
-- **Dashboard:** `dir` attribute on `<html>` driven by user preference (falls back to `navigator.language`). Tailwind RTL plugin or manual mirroring for icons. Logical CSS properties throughout.
-- **Strings:** every user-visible string passes through `t()`. CI lints for raw English strings in JSX after Phase 19.
+- **Mobile:** i18next + react-i18next; `expo-localization` for device locale at boot. `I18nManager.forceRTL` is called inside `changeLanguage()` (exported from `src/i18n/index.ts`) when switching to Arabic. A restart prompt is shown to the user since `I18nManager` changes require a cold start.
+- **Layout RTL pattern:** `buildStyles(colors, rtl)` — `flexDirection: rtl ? 'row-reverse' : 'row'`, `textAlign: rtl ? 'right' : 'left'`. Timestamps always use `writingDirection: 'ltr'` to prevent digit reversal.
+- **Dashboard:** `dir="ltr"` on `<html>` (Phase 19, English-only). RTL support deferred to a future phase.
+- **Strings:** every user-visible string passes through `t()` on mobile. Dashboard strings are centralized in `apps/dashboard/lib/i18n.ts` (`ADMIN_LABELS`). Parity enforced by `scripts/checkI18n.ts` (`npm run i18n:check`).
+- **Supported locales (Phase 19):** English (`en`), Arabic (`ar`). Current key count: 276 per locale.
 
 ---
 
 ## Q. Dark mode architecture
 
-- **Semantic tokens (Phase 1)** decouple components from raw colors:
-  - `text.primary / secondary / muted`, `surface.canvas / raised / sunken`, `border.subtle / strong`, `state.danger / warn / ok / info`, plus interactive (`action.primary`, `action.primaryHover`).
-- **Theme provider** sets light/dark variant via CSS variables on `<html>` (dashboard) and a React Context provider (mobile). System preference is the default; manual toggle in settings.
+- **Semantic tokens** (`packages/design-tokens/src/semantic.ts`) decouple components from raw colors. Light and dark token sets (`lightSemantic`, `darkSemantic`) are exported and consumed by `ThemeContext`.
+- **Mobile ThemeContext** (`apps/mobile/src/context/ThemeContext.tsx`): reads `userPreference` from Firestore via `App.tsx`; falls back to `useColorScheme()` for system preference; caches to `AsyncStorage` for cold-start flash prevention. `useTheme()` returns `{ preference, resolved, colors, setPreference }`.
+- **Component pattern:** `const { colors } = useTheme()` then `buildStyles(colors, isRTL)` — `StyleSheet.create` is called inside the component, not at module level, so color tokens are resolved at render time.
+- **User preference persistence:** `setPreferredTheme(uid, theme)` writes `users/{uid}.preferredTheme` to Firestore; `App.tsx` subscribes and passes the value down to `ThemeProvider`.
+- **Dashboard dark mode:** `darkMode: 'class'` scaffold added in `tailwind.config.ts` (Phase 19). Actual dark palette wiring deferred to a later phase.
 - **Tokens for elevation** so mobile shadows map to RN `elevation` cleanly.
 
 ---
