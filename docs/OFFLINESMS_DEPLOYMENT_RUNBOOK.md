@@ -157,9 +157,10 @@ Expected jobs:
 
 | Job | Schedule | Purpose |
 |---|---|---|
-| `pruneExpiredReservations` | Every 5 min | Release stale point reservations |
-| `aggregateDailyStats` | Daily 00:05 UTC | Roll up daily stats for reports |
-| `cleanupExpiredSessions` | Hourly | Prune expired admin session records |
+| `reapStuckBatches` | Every 30 min | Reap SMS batches stuck in `sending` state past the timeout threshold |
+
+> `sweepExpiredMessages` is implemented but **not exported** in `functions/src/index.ts` (deferred — no TTL UI yet). It will not appear in the deployed functions list, which is correct.
+> The functions list should contain exactly **39 callable/trigger functions** plus `reapStuckBatches` as the only scheduled function.
 
 **Verification:**
 - Each job appears in the Scheduled Functions list.

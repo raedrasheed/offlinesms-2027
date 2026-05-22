@@ -34,9 +34,8 @@ Run these checks at the following intervals after go-live:
 - [ ] All functions execution success rate > 99% (Cloud Functions → Dashboard)
 - [ ] No function execution timeout spikes
 - [ ] Cold-start latency within acceptable range (< 5 s for HTTP functions)
-- [ ] `pruneExpiredReservations` scheduler running on schedule (check Logs)
-- [ ] `aggregateDailyStats` ran at scheduled time and completed without error
-- [ ] `cleanupExpiredSessions` ran on schedule
+- [ ] `reapStuckBatches` ran on schedule (every 30 min) — check Logs for `sms.batch.reaped` entries
+- [ ] No `sweepExpiredMessages` errors (deferred / not exported; confirm it does not appear in deployed functions list)
 
 ### SMS Gateway
 
