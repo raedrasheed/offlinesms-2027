@@ -3,6 +3,7 @@ import {
   FlatList, View, Text, TextInput, Pressable, StyleSheet, Alert,
   KeyboardAvoidingView, Platform,
 } from 'react-native';
+import { useTranslation } from 'react-i18next';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 import {
@@ -22,7 +23,8 @@ import {
   UserState,
 } from '../lib/conversations';
 import { MessageBubble } from '../components/MessageBubble';
-import { colors } from '../theme';
+import { useTheme } from '../context/ThemeContext';
+import { isRTL } from '../i18n';
 import { LoadingState, EmptyState, ErrorState } from '../components/state';
 
 type ComposerGate =
@@ -37,7 +39,7 @@ function gateFor(
   if (!convo) return { kind: 'allowed' };
   if (convo.status === 'disabled') return { kind: 'blocked', reason: 'This conversation is disabled.' };
   if (convo.type !== 'group')      return { kind: 'allowed' };
-  if (!isMember)                   return { kind: 'blocked', reason: 'You aren’t a member of this group.' };
+  if (!isMember)                   return { kind: 'blocked', reason: "You aren't a member of this group." };
   const isPriv = myRole === 'owner' || myRole === 'admin';
   if (convo.status === 'locked' && !isPriv) return { kind: 'blocked', reason: 'Group is locked. Only admins can send.' };
   if (convo.settings?.onlyAdminsCanSend && !isPriv) return { kind: 'blocked', reason: 'Only admins can send messages here.' };
@@ -50,6 +52,8 @@ function buildPreview(text: string): string {
 }
 
 export default function Conversation({ route, navigation }: any) {
+  const { t } = useTranslation();
+  const { colors } = useTheme();
   const { id } = route.params as { id: string };
   const me = auth.currentUser?.uid ?? '';
 
@@ -198,7 +202,7 @@ export default function Conversation({ route, navigation }: any) {
     const messageId = convo?.pinnedMessage?.messageId;
     if (!messageId) return;
     try { await pinMessage(id, messageId, false); }
-    catch (e: any) { Alert.alert('Couldn’t unpin', e?.message ?? 'try-again'); }
+    catch (e: any) { Alert.alert("Couldn't unpin", e?.message ?? 'try-again'); }
   }
 
   async function send() {
@@ -279,13 +283,25 @@ export default function Conversation({ route, navigation }: any) {
     );
   }, [visibleMsgs, me, isGroup, id, myRoleIsAdmin, starred, convo?.pinnedMessage]);
 
+  const s = buildStyles(colors, isRTL);
+
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.root}>
       <View style={s.header}>
-        <Pressable onPress={() => navigation.goBack()}><Text style={s.back}>‹</Text></Pressable>
+        <Pressable
+          onPress={() => navigation.goBack()}
+          accessible={true}
+          accessibilityRole="button"
+          accessibilityLabel={t('common.back')}
+        >
+          <Text style={s.back}>{isRTL ? '›' : '‹'}</Text>
+        </Pressable>
         <Pressable
           style={{ flex: 1 }}
           onPress={() => { if (isGroup) navigation.navigate('GroupInfo', { id }); }}
+          accessible={true}
+          accessibilityRole={isGroup ? 'button' : 'text'}
+          accessibilityLabel={isGroup ? `${peerName}, ${t('group.info')}` : peerName}
         >
           <Text style={s.title} numberOfLines={1}>{peerName}</Text>
           {headerSubtitle ? <Text style={s.subtitle}>{headerSubtitle}</Text> : null}
@@ -293,21 +309,33 @@ export default function Conversation({ route, navigation }: any) {
       </View>
 
       {convo?.pinnedMessage ? (
-        <Pressable style={s.pinBanner} onPress={() => jumpTo(convo.pinnedMessage!.messageId)}>
-          <Text style={s.pinIcon}>📌</Text>
+        <Pressable
+          style={s.pinBanner}
+          onPress={() => jumpTo(convo.pinnedMessage!.messageId)}
+          accessible={true}
+          accessibilityRole="button"
+          accessibilityLabel={`${t('messageActions.pinnedTitle')}: ${convo.pinnedMessage.preview}`}
+        >
+          <Text style={s.pinIcon} accessibilityElementsHidden>📌</Text>
           <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={s.pinTitle} numberOfLines={1}>Pinned message</Text>
+            <Text style={s.pinTitle} numberOfLines={1}>{t('messageActions.pinnedTitle')}</Text>
             <Text style={s.pinPreview} numberOfLines={1}>{convo.pinnedMessage.preview}</Text>
           </View>
           {(!isGroup || myRoleIsAdmin) ? (
-            <Pressable onPress={unpin}><Text style={s.pinClose}>×</Text></Pressable>
+            <Pressable
+              onPress={unpin}
+              accessibilityRole="button"
+              accessibilityLabel={t('messageActions.unpin')}
+            >
+              <Text style={s.pinClose}>×</Text>
+            </Pressable>
           ) : null}
         </Pressable>
       ) : null}
 
       {body}
 
-      {err ? <ErrorState compact title="Couldn’t send" description={err} /> : null}
+      {err ? <ErrorState compact title="Couldn't send" description={err} /> : null}
 
       {gate.kind === 'blocked' && !editing ? (
         <View style={s.gate}>
@@ -318,31 +346,53 @@ export default function Conversation({ route, navigation }: any) {
           {editing ? (
             <View style={s.composerPreview}>
               <View style={{ flex: 1 }}>
-                <Text style={s.composerPreviewTitle}>Editing message</Text>
+                <Text style={s.composerPreviewTitle}>{t('messageActions.editingMessage')}</Text>
                 <Text style={s.composerPreviewBody} numberOfLines={1}>{editing.originalText}</Text>
               </View>
-              <Pressable onPress={cancelEdit}><Text style={s.composerPreviewClose}>×</Text></Pressable>
+              <Pressable
+                onPress={cancelEdit}
+                accessibilityRole="button"
+                accessibilityLabel={t('common.cancel')}
+              >
+                <Text style={s.composerPreviewClose}>×</Text>
+              </Pressable>
             </View>
           ) : replyTo ? (
             <View style={s.composerPreview}>
               <View style={{ flex: 1 }}>
-                <Text style={s.composerPreviewTitle}>Replying to {replyTo.senderDisplayName}</Text>
+                <Text style={s.composerPreviewTitle}>{t('messageActions.replyingTo', { name: replyTo.senderDisplayName })}</Text>
                 <Text style={s.composerPreviewBody} numberOfLines={1}>{replyTo.preview}</Text>
               </View>
-              <Pressable onPress={() => setReplyTo(null)}><Text style={s.composerPreviewClose}>×</Text></Pressable>
+              <Pressable
+                onPress={() => setReplyTo(null)}
+                accessibilityRole="button"
+                accessibilityLabel={t('common.cancel')}
+              >
+                <Text style={s.composerPreviewClose}>×</Text>
+              </Pressable>
             </View>
           ) : null}
           <View style={s.composer}>
             <TextInput
               value={draft}
               onChangeText={setDraft}
-              placeholder={editing ? 'Edit message' : 'Message'}
+              placeholder={editing ? t('messageActions.editingMessage') : t('convo.composerPlaceholder')}
               style={s.input}
               multiline
               maxLength={4000}
+              textAlign={isRTL ? 'right' : 'left'}
+              accessibilityLabel={t('convo.composerPlaceholder')}
             />
-            <Pressable style={[s.sendBtn, (!draft.trim() || busy) && { opacity: 0.4 }]} onPress={send} disabled={!draft.trim() || busy}>
-              <Text style={{ color: '#fff', fontWeight: '700' }}>{editing ? '✓' : '↑'}</Text>
+            <Pressable
+              style={[s.sendBtn, (!draft.trim() || busy) && { opacity: 0.4 }]}
+              onPress={send}
+              disabled={!draft.trim() || busy}
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel={editing ? t('common.save') : t('common.send')}
+              accessibilityState={{ disabled: !draft.trim() || busy }}
+            >
+              <Text style={{ color: colors.action.primaryFg, fontWeight: '700' }}>{editing ? '✓' : '↑'}</Text>
             </Pressable>
           </View>
         </View>
@@ -351,24 +401,26 @@ export default function Conversation({ route, navigation }: any) {
   );
 }
 
-const s = StyleSheet.create({
-  root:     { flex: 1, backgroundColor: colors.surface2 },
-  header:   { paddingTop: 50, paddingBottom: 12, paddingHorizontal: 14, backgroundColor: colors.primaryLight, flexDirection: 'row', alignItems: 'center', gap: 12 },
-  back:     { fontSize: 24, color: colors.primary },
-  title:    { fontSize: 15, fontWeight: '700', color: colors.ink },
-  subtitle: { fontSize: 11, color: colors.primary, marginTop: 2 },
-  pinBanner: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, paddingHorizontal: 14, backgroundColor: '#FEF3C7', borderBottomWidth: 1, borderColor: '#F59E0B' },
-  pinIcon:   { fontSize: 16 },
-  pinTitle:  { fontSize: 11, fontWeight: '700', color: '#A16207' },
-  pinPreview:{ fontSize: 12, color: colors.ink, marginTop: 2 },
-  pinClose:  { fontSize: 18, color: '#A16207', fontWeight: '700', paddingHorizontal: 4 },
-  composerPreview: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, backgroundColor: '#fff', borderTopWidth: 1, borderColor: colors.ink100 },
-  composerPreviewTitle: { fontSize: 11, fontWeight: '700', color: colors.primaryDark },
-  composerPreviewBody:  { fontSize: 12, color: colors.ink, marginTop: 2 },
-  composerPreviewClose: { fontSize: 18, color: colors.ink500, fontWeight: '700', paddingHorizontal: 6 },
-  composer: { padding: 12, paddingBottom: 24, flexDirection: 'row', gap: 8, alignItems: 'flex-end', backgroundColor: colors.surface2 },
-  input:    { flex: 1, minHeight: 40, maxHeight: 120, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: '#fff', borderRadius: 22, borderWidth: 1, borderColor: colors.ink100, fontSize: 14 },
-  sendBtn:  { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
-  gate:     { padding: 16, paddingBottom: 28, backgroundColor: colors.surface2, borderTopWidth: 1, borderColor: colors.ink100 },
-  gateText: { fontSize: 12, color: colors.ink500, textAlign: 'center' },
-});
+function buildStyles(colors: any, rtl: boolean) {
+  return StyleSheet.create({
+    root:     { flex: 1, backgroundColor: colors.background.subtle },
+    header:   { paddingTop: 50, paddingBottom: 12, paddingHorizontal: 14, backgroundColor: colors.background.surface, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 12, borderBottomWidth: 1, borderColor: colors.border.subtle },
+    back:     { fontSize: 24, color: colors.action.primary, minWidth: 32, textAlign: 'center' },
+    title:    { fontSize: 15, fontWeight: '700', color: colors.text.primary, textAlign: rtl ? 'right' : 'left' },
+    subtitle: { fontSize: 11, color: colors.action.primary, marginTop: 2, textAlign: rtl ? 'right' : 'left' },
+    pinBanner: { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 10, paddingVertical: 8, paddingHorizontal: 14, backgroundColor: '#FEF3C7', borderBottomWidth: 1, borderColor: '#F59E0B' },
+    pinIcon:   { fontSize: 16 },
+    pinTitle:  { fontSize: 11, fontWeight: '700', color: '#A16207', textAlign: rtl ? 'right' : 'left' },
+    pinPreview:{ fontSize: 12, color: colors.text.primary, marginTop: 2, textAlign: rtl ? 'right' : 'left' },
+    pinClose:  { fontSize: 18, color: '#A16207', fontWeight: '700', paddingHorizontal: 4, minWidth: 32, minHeight: 32, textAlignVertical: 'center', textAlign: 'center' },
+    composerPreview: { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 10, padding: 10, backgroundColor: colors.background.surface, borderTopWidth: 1, borderColor: colors.border.subtle },
+    composerPreviewTitle: { fontSize: 11, fontWeight: '700', color: colors.action.primary, textAlign: rtl ? 'right' : 'left' },
+    composerPreviewBody:  { fontSize: 12, color: colors.text.primary, marginTop: 2, textAlign: rtl ? 'right' : 'left' },
+    composerPreviewClose: { fontSize: 18, color: colors.text.muted, fontWeight: '700', paddingHorizontal: 6, minWidth: 36, minHeight: 36, textAlignVertical: 'center', textAlign: 'center' },
+    composer: { padding: 12, paddingBottom: 24, flexDirection: rtl ? 'row-reverse' : 'row', gap: 8, alignItems: 'flex-end', backgroundColor: colors.background.subtle },
+    input:    { flex: 1, minHeight: 40, maxHeight: 120, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: colors.background.surface, borderRadius: 22, borderWidth: 1, borderColor: colors.border.subtle, fontSize: 14, color: colors.text.primary },
+    sendBtn:  { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.action.primary, alignItems: 'center', justifyContent: 'center' },
+    gate:     { padding: 16, paddingBottom: 28, backgroundColor: colors.background.subtle, borderTopWidth: 1, borderColor: colors.border.subtle },
+    gateText: { fontSize: 12, color: colors.text.muted, textAlign: 'center' },
+  });
+}

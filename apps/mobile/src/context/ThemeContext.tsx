@@ -21,10 +21,12 @@ import type { ThemePreference } from '../lib/user';
 
 const STORAGE_KEY = '@offlinesms/theme';
 
+type SemanticColors = typeof lightSemantic.color | typeof darkSemantic.color;
+
 type ThemeContextValue = {
   preference: ThemePreference;
   resolved:   'light' | 'dark';
-  colors:     typeof lightSemantic.color;
+  colors:     SemanticColors;
   setPreference: (p: ThemePreference) => void;
 };
 
