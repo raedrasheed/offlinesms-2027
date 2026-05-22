@@ -365,6 +365,87 @@ the client to mark `delivered` / `read` / `played` / `viewed`.
 
 ---
 
+## Phase 11 — SMS delivery reports, retry, reaper
+
+### `smsDeliveryEvents/{eventId}` (new)
+
+```ts
+{
+  eventId:             string,           // == doc id
+  offlineSmsBatchId:   string,           // provider batch reference
+  offlineSmsMessageId: string | null,    // provider per-recipient reference
+  batchId:             string | null,    // resolved internal smsBatches/{batchId}
+  recipientUid:        string | null,    // resolved recipient
+  status:              'queued' | 'sent' | 'delivered' | 'undelivered' | 'failed',
+  receivedAt:          timestamp,
+  processedAt:         timestamp | null,
+  rawHash:             string,           // SHA-256 of the signed payload
+  result:              'processed' | 'duplicate' | 'ignored' | 'failed',
+  errorCode:           string | null,
+  errorMessage:        string | null,    // sanitised
+}
+```
+
+**Rules.** Admin read; `allow write: if false`. Only the
+`gatewayWebhook` HTTP function (Admin SDK) writes.
+
+### `smsBatches/{batchId}` and recipients (extended in Phase 11)
+
+Adds (batch): `attemptNumber`, `acceptedAt`, `failedAt`, `completedAt`,
+`lastDeliveryReportAt`, `queuedCount`, `sentCount`, `deliveredCount`,
+`failedCount`, `skippedCount`.
+
+Adds (recipient): `attemptNumber`, `offlineSmsMessageId`, `phoneHash`
+(server-only, not surfaced to clients), `gatewayErrorCode`,
+`gatewayErrorMessage` (sanitised, ≤200 chars), `deliveryReportEventId`.
+
+### Delivery webhook signature
+
+`POST https://…/gatewayWebhook` requires:
+
+- `x-offlinesms-timestamp: <unix seconds>` (within 5 min of server clock).
+- `x-offlinesms-signature: sha256=<hex>` over `${timestamp}.${rawBody}` using `OFFLINESMS_WEBHOOK_SECRET`.
+
+### Monotonic status transition
+
+```
+queued  →  sent  →  delivered                 (forward only)
+queued / sent →  failed / undelivered          (terminal; can overwrite non-terminal)
+delivered / failed / undelivered are terminal  (later events ignored)
+```
+
+### Cross-batch dedupe
+
+Recipients whose status is `queued`, `sent`, or `delivered` on any
+prior batch for the same `(messageId, senderId)` pair are excluded
+from new escalations with `skipReason: 'already-sent-for-message'`.
+
+### Reaper
+
+`reapStuckBatches` is a scheduled callable (defined as code; opt-in
+export). Flags `sending` / `accepted` batches older than 15 minutes,
+releases the reservation, and emits canonical `reservation_release` +
+`refund` rows. Idempotent on `pointsRefunded`.
+
+### Canonical SMS transaction lifecycle (Phase 11 final)
+
+Phase 0's `type: 'sms'` row is **dropped**. The full set is:
+
+```
+reservation              (debit,  emitted by escalateSms)
+reservation_release      (credit, emitted by onSmsBatchAccepted / reaper)
+sms_spend                (debit,  emitted by onSmsBatchAccepted)
+refund                   (credit, emitted by onSmsBatchAccepted / reaper)
+```
+
+### New composite index
+
+| Collection | Fields | Used by |
+|---|---|---|
+| `smsBatches` | `(senderId ASC, messageId ASC, createdAt DESC)` | cross-batch dedupe + retry's "prior batches for this message" lookup |
+
+---
+
 ## Phase 10 — Points purchase, transfer, lifecycle
 
 ### `pointsPackages/{packageId}` (new)
