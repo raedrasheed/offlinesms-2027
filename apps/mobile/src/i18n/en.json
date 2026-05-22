@@ -254,5 +254,33 @@
     "send": "Send",
     "back": "Back",
     "retry": "Retry"
+  },
+  "settings": {
+    "title": "Settings",
+    "points": "OfflineSMS Points",
+    "pointsSubtitle": "Balance, reservations, and transaction history",
+    "smsReminders": "Allow important SMS reminders",
+    "smsRemindersOn": "OfflineSMS may send you SMS reminders for important messages.",
+    "smsRemindersOff": "You won't receive SMS reminders from OfflineSMS.",
+    "privacy": "Privacy",
+    "linkedDevices": "Linked devices",
+    "helpSupport": "Help & Support",
+    "signOut": "Sign out",
+    "language": "Language",
+    "languageSubtitle": "App display language",
+    "theme": "Theme",
+    "themeSubtitle": "Color scheme",
+    "themeSystem": "System",
+    "themeLight": "Light",
+    "themeDark": "Dark",
+    "notifications": "Notifications",
+    "notificationsSubtitle": "Manage in-app notifications",
+    "inAppNotifications": "In-app notifications",
+    "inAppNotificationsSubtitle": "Show alerts for new messages and activity.",
+    "timeFormat": "Time format",
+    "timeFormatSystem": "System default",
+    "timeFormat12": "12-hour (1:30 PM)",
+    "timeFormat24": "24-hour (13:30)",
+    "updateFailed": "Couldn't update setting. Please try again."
   }
 }

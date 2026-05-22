@@ -9,7 +9,8 @@
     "ios": "expo run:ios",
     "android": "expo run:android",
     "build:web": "expo export -p web",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "i18n:check": "ts-node ../../scripts/checkI18n.ts"
   },
   "dependencies": {
     "@react-navigation/native": "^6.1.18",

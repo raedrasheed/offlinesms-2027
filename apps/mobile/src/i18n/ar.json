@@ -254,5 +254,33 @@
     "send": "إرسال",
     "back": "رجوع",
     "retry": "إعادة المحاولة"
+  },
+  "settings": {
+    "title": "الإعدادات",
+    "points": "نقاط OfflineSMS",
+    "pointsSubtitle": "الرصيد والحجوزات وسجل العمليات",
+    "smsReminders": "السماح بتذكيرات SMS المهمة",
+    "smsRemindersOn": "قد يرسل OfflineSMS تذكيرات SMS للرسائل المهمة.",
+    "smsRemindersOff": "لن تتلقى تذكيرات SMS من OfflineSMS.",
+    "privacy": "الخصوصية",
+    "linkedDevices": "الأجهزة المرتبطة",
+    "helpSupport": "المساعدة والدعم",
+    "signOut": "تسجيل الخروج",
+    "language": "اللغة",
+    "languageSubtitle": "لغة عرض التطبيق",
+    "theme": "المظهر",
+    "themeSubtitle": "نظام الألوان",
+    "themeSystem": "النظام",
+    "themeLight": "فاتح",
+    "themeDark": "داكن",
+    "notifications": "الإشعارات",
+    "notificationsSubtitle": "إدارة الإشعارات داخل التطبيق",
+    "inAppNotifications": "الإشعارات داخل التطبيق",
+    "inAppNotificationsSubtitle": "عرض تنبيهات للرسائل الجديدة والأنشطة.",
+    "timeFormat": "تنسيق الوقت",
+    "timeFormatSystem": "الإعداد الافتراضي للنظام",
+    "timeFormat12": "12 ساعة (1:30 م)",
+    "timeFormat24": "24 ساعة (13:30)",
+    "updateFailed": "تعذّر تحديث الإعداد. يرجى المحاولة مرة أخرى."
   }
 }
