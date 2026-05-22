@@ -13,6 +13,7 @@ import './src/i18n';
 import Welcome from './src/screens/Welcome';
 import PhoneEntry from './src/screens/PhoneEntry';
 import Otp from './src/screens/Otp';
+import EmailLogin from './src/screens/EmailLogin';
 import ProfileCompletion from './src/screens/ProfileCompletion';
 import ChatsList from './src/screens/ChatsList';
 import Conversation from './src/screens/Conversation';
@@ -46,6 +47,7 @@ function AuthFlow() {
       <AuthStack.Screen name="Welcome" component={Welcome} />
       <AuthStack.Screen name="PhoneEntry" component={PhoneEntry} />
       <AuthStack.Screen name="Otp" component={Otp} />
+      <AuthStack.Screen name="EmailLogin" component={EmailLogin} />
     </AuthStack.Navigator>
   );
 }

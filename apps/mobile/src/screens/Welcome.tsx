@@ -14,7 +14,7 @@ export default function Welcome({ navigation }: any) {
       <Pressable style={s.primaryBtn} onPress={() => navigation.navigate('PhoneEntry')}>
         <Text style={s.primaryBtnText}>{t('welcome.continuePhone')}</Text>
       </Pressable>
-      <Pressable style={s.secondaryBtn}>
+      <Pressable style={s.secondaryBtn} onPress={() => navigation.navigate('EmailLogin')}>
         <Text style={s.secondaryBtnText}>{t('welcome.continueEmail')}</Text>
       </Pressable>
     </View>

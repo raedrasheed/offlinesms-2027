@@ -10,7 +10,7 @@ function otpErrorCopy(code: OtpError['code']): string {
     case 'too-many-attempts':      return 'Too many attempts. Please wait a few minutes and try again.';
     case 'network-error':          return 'Network error. Check your connection and try again.';
     case 'quota-exceeded':         return 'OfflineSMS is at capacity right now. Please try again shortly.';
-    case 'recaptcha-unavailable':  return 'Phone verification is unavailable on this device. Try the web app or another sign-in method.';
+    case 'recaptcha-unavailable':  return 'Phone verification isn’t available in this build yet. Please go back and use “Use email instead”.';
     default:                       return 'We couldn’t send the code. Please try again.';
   }
 }
