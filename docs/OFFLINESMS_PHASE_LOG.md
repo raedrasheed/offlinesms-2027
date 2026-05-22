@@ -4,6 +4,75 @@ Running log of phased work. Newest first.
 
 ---
 
+## Phase 20 — Final Hardening: Testing, Security, Performance, Release Readiness
+
+**Branch:** `claude/repo-audit-architecture-MiZDX`
+**Status:** Complete.
+
+### What was done
+
+1. **Test infrastructure** — added `vitest` at root, `@firebase/rules-unit-testing` for rules tests, root `vitest.config.ts` for unit suites and `vitest.rules.config.ts` for rules suites.
+2. **Helper extraction** — pulled pure helpers from `apps/mobile/src/lib/points.ts` and `sms.ts` into `.helpers.ts` siblings so they can be unit-tested without pulling in firebase. Both files re-export the helpers; no behavior change.
+3. **Dashboard utility tests** (52 tests): redaction, adminPermissions, adminScope, rateLimit, exportHelper.
+4. **Mobile utility tests** (26 tests): username, points, sms (helpers only).
+5. **Functions helper tests** (26 tests): auditLog redaction/sanitisation, SMS recipient filtering / audience canonicalization / phone masking.
+6. **Firestore rules test scaffolding** — 60 rules tests across 6 files: users, conversations, sms, wallet, support, system collections (`auditLogs`, `gatewayHealth`, `smsDeliveryEvents`, quotas). All read/write deny paths covered. Run locally with `npm run test:rules` after `firebase emulators:start --only firestore`.
+7. **CI updates** — added `i18n:check` and `test` steps to `.github/workflows/ci.yml`. Rules tests remain local-only (Java/emulator requirement; documented in inline comment).
+8. **Validation script** — `npm run validate` runs `typecheck && lint && i18n:check && test && build`.
+9. **Security review** (`docs/OFFLINESMS_SECURITY_REVIEW.md`) — admin guard, RBAC matrix, org scoping, rules per-collection table, Admin SDK bypass mitigations, webhook security, payment idempotency, wallet double-spend prevention, SMS abuse controls, rate limiting, redaction, audit logging, explicit "no client can …" checks, 7-row residual risk register, 12-point production gate checklist.
+10. **Performance review** (`docs/OFFLINESMS_PERFORMANCE_REVIEW.md`) — Firestore query audit per surface, composite index coverage (Phase 18 indexes), dashboard count strategy, export memory cap (1000 rows / 5MB/hr), global search limits, large-group receipt aggregation hotspot, scheduled-function cost, rate-limit limitations, Phase 21+ optimization roadmap.
+11. **Release checklist** (`docs/OFFLINESMS_RELEASE_CHECKLIST.md`) — env vars, deployment order, admin bootstrap, data setup, 14-point smoke test, rollback plan, post-deploy monitoring.
+12. **QA checklist** (`docs/OFFLINESMS_QA_CHECKLIST.md`) — 16-section manual test matrix across mobile (A-I) and dashboard (J-M), plus security negative tests (N), perf spot checks (O), regression scope (P).
+
+### Commits
+
+- `docs: add OfflineSMS phase 20 implementation plan` — `e0ed454`
+- `test: add vitest foundation with dashboard/mobile/functions unit tests` — `54d0988`
+- `test: add Firestore rules test foundation` — `1901bab`
+- `ci: add i18n parity check and unit tests to validation workflow` — `ab69887`
+- `docs: add security and performance reviews` — `ff07a18`
+- `docs: add release and QA checklists` — `c574456`
+- `docs: update phase log for phase 20` — _(this commit)_
+
+### Files changed
+
+- New: `vitest.config.ts`, `vitest.rules.config.ts`, `tests/helpers/rules-helpers.ts`, `tests/rules/*.test.ts` (6), `tests/rules/README.md`
+- New: `apps/dashboard/__tests__/*.test.ts` (5)
+- New: `apps/mobile/__tests__/*.test.ts` (3), `apps/mobile/src/lib/points.helpers.ts`, `apps/mobile/src/lib/sms.helpers.ts`
+- New: `functions/__tests__/*.test.ts` (2)
+- New: `docs/OFFLINESMS_PHASE_20_PLAN.md`, `OFFLINESMS_SECURITY_REVIEW.md`, `OFFLINESMS_PERFORMANCE_REVIEW.md`, `OFFLINESMS_RELEASE_CHECKLIST.md`, `OFFLINESMS_QA_CHECKLIST.md`
+- Modified: `package.json` (vitest devDep, test/validate scripts), `.github/workflows/ci.yml`
+- Modified: `apps/mobile/src/lib/points.ts`, `sms.ts` (re-export from helpers — no behavior change)
+
+### Checks run
+
+- `npm run typecheck` ✓ (all workspaces)
+- `npm run i18n:check` ✓ (276 keys, EN=AR parity)
+- `npm run test` ✓ (104 unit tests across 10 files)
+- `npm run lint` ✓ (no new lint errors introduced)
+
+### Known limitations
+
+- **Rules tests CI.** Firestore rules tests live in `tests/rules/` but are NOT run in CI — they require Java and the Firestore emulator. Run locally before merging any change to `firestore.rules`. A CI job that boots the emulator in a Java-enabled image is the recommended Phase 21 follow-up.
+- **Functions emulator tests.** Full callable-handler integration tests would require the Functions emulator (Java) and Admin SDK mocking. Phase 20 covers the pure-helper layer; full integration tests are tracked for Phase 21.
+- **In-memory rate limit.** Per-instance state; documented as acceptable for admin-only traffic.
+- **Dashboard dark mode wiring.** Token scaffold exists (`darkMode: 'class'`) but actual palette wiring is deferred.
+- **2FA enforcement on admin accounts.** Not enforced at the app layer; relies on operational policy (Phase 21 candidate).
+
+### Final release readiness recommendation
+
+The repository is **release-ready for a controlled rollout** with the following gates:
+
+1. Bootstrap a single `super_admin` in production via `npm run promote:admin`
+2. Verify webhook secrets are set in the production environment
+3. Run the production smoke-test section (E) of the release checklist end-to-end
+4. Tag the release commit (`git tag v1.0.0`)
+5. Schedule a 48-hour observation window for the first cohort
+
+The known limitations above do not block release; they are tracked optimizations and operational hardening, not blocking defects.
+
+---
+
 ## Phase 19 — Localization Hardening, RTL, Dark Mode, Accessibility, User Preferences
 
 **Branch:** `claude/repo-audit-architecture-MiZDX`

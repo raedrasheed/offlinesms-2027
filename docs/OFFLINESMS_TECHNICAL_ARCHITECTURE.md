@@ -514,19 +514,46 @@ Provider → sms/webhook (HMAC) → smsBatches/{b}/recipients/{uid} update
 
 ## R. Testing strategy
 
-| Layer | Tool | Coverage goal |
-|---|---|---|
-| Type checks | `tsc` per workspace | 100% in CI |
-| Unit (functions) | `vitest` | Business logic in `functions/src/lib/*`, every callable's happy + error paths |
-| Firestore rules | `@firebase/rules-unit-testing` | Every collection, every actor variant |
-| Component (mobile) | `@testing-library/react-native` | Edge-state primitives, screens with logic (Conversation, SmsEscalation) |
-| Component (dashboard) | `@testing-library/react` + Playwright component | Auth guard, role-based menu, redaction UI |
-| E2E mobile | Detox (iOS + Android) | Auth → send a message → escalate SMS → wallet flow |
-| E2E dashboard | Playwright | Login → users list → user detail → audit log |
-| Load | k6 against emulator + staging | `escalateSms`, `markReceipt`, `webhook` |
-| Visual | Chromatic / Percy (optional) | RTL × dark mode matrix |
+### Current (Phase 20 baseline)
 
-CI runs typecheck + lint + unit + rules on every PR; e2e nightly.
+| Layer | Tool | Status |
+|---|---|---|
+| Type checks | `tsc` per workspace | ✅ runs in CI |
+| Lint | per-workspace `next lint` | ✅ runs in CI |
+| i18n parity | `scripts/checkI18n.ts` | ✅ runs in CI |
+| Unit (dashboard) | `vitest` — redaction, permissions, scope, rateLimit, exportHelper | ✅ runs in CI (52 tests) |
+| Unit (mobile) | `vitest` — username, points helpers, sms helpers | ✅ runs in CI (26 tests) |
+| Unit (functions) | `vitest` — auditLog redaction/sanitisation, SMS recipient filtering | ✅ runs in CI (26 tests) |
+| Firestore rules | `@firebase/rules-unit-testing` — users, conversations, sms, wallet, support, system | ⚠️ local only (`npm run test:rules`); CI deferred to Phase 21 (Java requirement) |
+| Build | `next build` + `tsc` (functions) | ✅ runs in CI |
+
+Total CI test count: **104 unit tests** across dashboard, mobile, and functions.
+
+CI invocation: `.github/workflows/ci.yml` runs `npm ci && npm run typecheck && npm run lint && npm run i18n:check && npm run test && npm run build` on every PR.
+
+### Single-command pre-merge
+
+```sh
+npm run validate
+```
+
+Runs the same chain locally.
+
+### Helper extraction pattern
+
+Pure mobile helpers that don't depend on firebase or React Native are extracted into `.helpers.ts` siblings (`points.helpers.ts`, `sms.helpers.ts`) so vitest can import them without pulling in native modules. The parent files re-export the helpers so consumers don't need to change their imports.
+
+### Deferred (Phase 21+)
+
+| Layer | Reason |
+|---|---|
+| Functions emulator integration tests | requires Java + emulator + Admin SDK mock harness |
+| Mobile component tests | needs `@testing-library/react-native` setup + jest-expo |
+| Dashboard component tests | needs `@testing-library/react` setup with Next.js |
+| E2E mobile (Detox) | full device simulator setup |
+| E2E dashboard (Playwright) | needs browser runner + test admin accounts |
+| Load tests (k6) | needs staging environment access |
+| Visual regression (Chromatic / Percy) | needs SaaS account |
 
 ---
 

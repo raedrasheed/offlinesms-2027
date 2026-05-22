@@ -418,3 +418,28 @@ Legend for "Recommended phase" matches `OFFLINESMS_IMPLEMENTATION_ROADMAP.md`.
 | **Existing** | `FilterBar` component added to: users (status filter), groups (status filter), transactions (type filter), payments (status filter) pages. All filter state is URL-param driven — shareable links, browser back/forward compatible. `listUsers`, `listGroups`, `listTransactions`, `listPayments` in `adminData.ts` updated to accept and forward filter params. |
 | **Missing** | Date-range filter, free-text filter on list pages |
 | **Phase** | 17 ✓ |
+
+### 40. Testing infrastructure
+
+| | |
+|---|---|
+| **Status** | ✅ Phase 20 landed |
+| **Existing** | `vitest` at root with `vitest.config.ts` (unit) and `vitest.rules.config.ts` (rules). 104 unit tests passing across dashboard (redaction, permissions, scope, rateLimit, exportHelper), mobile (username, points helpers, sms helpers), and functions (auditLog redaction, SMS recipient filtering). 60 rules tests in `tests/rules/` (users, conversations, sms, wallet, support, system collections) covering deny paths. Pure mobile helpers extracted into `.helpers.ts` siblings so vitest can import without firebase. CI runs typecheck + lint + i18n:check + test + build. `npm run validate` is the single-command pre-merge gate. |
+| **Missing** | Rules tests in CI (Java/emulator requirement; Phase 21), Functions emulator integration tests, mobile/dashboard component tests, E2E tests, load tests |
+| **Phase** | 20 ✓ |
+
+### 41. Security & performance review
+
+| | |
+|---|---|
+| **Status** | ✅ Phase 20 landed |
+| **Existing** | `docs/OFFLINESMS_SECURITY_REVIEW.md` — admin guard, RBAC, org scoping, rules per-collection table, Admin SDK bypass mitigations, webhook security, payment idempotency, wallet double-spend prevention, SMS abuse controls, rate limiting, redaction, audit logging, 7-row residual risk register, 12-point production gate. `docs/OFFLINESMS_PERFORMANCE_REVIEW.md` — Firestore query audit, composite index coverage, dashboard count strategy, export memory cap, global search limits, large-group aggregation hotspot, scheduled-function cost, rate-limit limitations, Phase 21+ optimization roadmap. |
+| **Phase** | 20 ✓ |
+
+### 42. Release readiness
+
+| | |
+|---|---|
+| **Status** | ✅ Phase 20 landed |
+| **Existing** | `docs/OFFLINESMS_RELEASE_CHECKLIST.md` — env vars, deployment order (rules → indexes → storage → functions → hosting), admin bootstrap, data setup, 14-point smoke test, rollback plan, post-deploy monitoring. `docs/OFFLINESMS_QA_CHECKLIST.md` — 16-section manual test matrix covering mobile (A-I), dashboard (J-M), security negatives (N), performance spot checks (O), regression scope (P). |
+| **Phase** | 20 ✓ |

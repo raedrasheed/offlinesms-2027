@@ -117,8 +117,19 @@ Risks ranked across the surfaces present today and planned for later phases. Lik
 ## Phase 1 mitigation snapshot
 
 - **Risk #4 (admin permission leakage at the route boundary)** — partially mitigated. `apps/dashboard/app/admin/layout.tsx` is now a server-rendered guard that verifies a Firebase session cookie and admin role; non-admin traffic gets a `PermissionState` page rather than admin UI. Full RBAC (beyond `admin: true`) still lands in Phase 18.
-- **Risk #12 (dark mode inconsistencies)** — **substantially mitigated (Phase 19).** `ThemeContext` wired with `lightSemantic`/`darkSemantic` token sets; all core mobile screens use `useTheme()` + `buildStyles(colors, rtl)` pattern. Dashboard has `darkMode: 'class'` scaffold. Remaining risk: dashboard palette not yet wired; deferred to Phase 20.
-- **Risk #11 (RTL layout drift)** — **substantially mitigated (Phase 19).** All updated mobile screens use `buildStyles(colors, rtl)` with `flexDirection`/`textAlign` flipping, RTL-aware chevrons, FAB mirroring, and timestamp `writingDirection: 'ltr'`. Dashboard remains LTR-only. Visual regression suite for RTL deferred to Phase 20.
+- **Risk #12 (dark mode inconsistencies)** — **substantially mitigated (Phase 19).** `ThemeContext` wired with `lightSemantic`/`darkSemantic` token sets; all core mobile screens use `useTheme()` + `buildStyles(colors, rtl)` pattern. Dashboard has `darkMode: 'class'` scaffold. Remaining risk: dashboard palette not yet wired; tracked for Phase 21.
+- **Risk #11 (RTL layout drift)** — **substantially mitigated (Phase 19).** All updated mobile screens use `buildStyles(colors, rtl)` with `flexDirection`/`textAlign` flipping, RTL-aware chevrons, FAB mirroring, and timestamp `writingDirection: 'ltr'`. Dashboard remains LTR-only. Visual regression suite for RTL deferred to Phase 21.
+
+## Phase 20 mitigation snapshot
+
+- **Risk #1 (Firestore rules gaps)** — **substantially mitigated.** Rules test foundation added (`tests/rules/*.rules.test.ts`) covering users, conversations, sms, wallet, support, and system-owned collections (auditLogs, gatewayHealth, smsDeliveryEvents, smsQuotaUsage, transferQuotaUsage). 60 deny-path tests verify the server-only contract. Rules tests run locally via `npm run test:rules`; CI integration deferred to Phase 21 due to Java/emulator requirement.
+- **Risk #15 (audit log gaps)** — **substantially mitigated.** Audit log helper has unit tests for the redaction layer; the `sanitiseMetadata` allow-list ensures `password`, `token`, `otp`, `secret`, `phoneNumber`, `messageText`, `body`, `content` never enter the log. Forbidden-key drops verified in `functions/__tests__/auditLog.test.ts`.
+- **Risk #16 (payment security)** — **closed at the rules layer.** `payments/{id}` is `allow write: if false` for all clients including admins; the only credit path is the server webhook with HMAC + idempotency. Webhook idempotency table is `smsDeliveryEvents` for SMS, `processedEventIds` array on payment docs. Rules tests prove no client mutation succeeds.
+- **Risk #10 (phone number privacy)** — **closed.** `maskPhone()` and `maskEmail()` cover all admin list/detail/export surfaces; `safeUserSummary()` is the only allowed user-shape serializer in admin routes. Unit tests (`redaction.test.ts`) prove no last-4-or-more leaks through the mask.
+- **Risk #14 (admin permission leakage)** — **closed.** Capability matrix (`adminPermissions.ts`) is unit-tested per role. `canDo()` is the only gate used in pages.
+- **Risk #4 (admin permission leakage at the route boundary)** — **closed.** Route guard at `app/admin/layout.tsx` enforces session + role; org scoping via `adminScope.ts` is unit-tested.
+
+A 7-row residual-risk table is now maintained in `docs/OFFLINESMS_SECURITY_REVIEW.md` §14 with severity, current mitigation, and Phase 21 future-work pointers for each.
 - **Risk #13 (incomplete TODO screens)** — replaced ad-hoc TODO copy on 7 dashboard scaffold pages and 5 mobile screens with token-aware `EmptyState` / `LoadingState` primitives. No regressions in product behaviour.
 
 ---
