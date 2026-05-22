@@ -129,9 +129,12 @@ service cloud.firestore {
     function allowedProfileFields() {
       // `username` / `usernameLower` deliberately omitted — only the
       // `claimUsername` callable (Admin SDK) writes those.
+      // `smsOptOut` (Phase 9) is owner-controlled by the Settings
+      // toggle and consumed by Phase 8's escalateSms eligibility.
       return [
         'displayName', 'photoURL', 'about', 'profileCompleted',
-        'fcmTokens', 'lastSeen', 'updatedAt'
+        'fcmTokens', 'lastSeen', 'updatedAt',
+        'smsOptOut'
       ];
     }
     function bannedProfileFields() {
