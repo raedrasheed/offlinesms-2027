@@ -6,6 +6,8 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { auth, db } from './src/lib/firebase';
+import { ThemeProvider } from './src/context/ThemeContext';
+import type { ThemePreference } from './src/lib/user';
 import './src/i18n';
 
 import Welcome from './src/screens/Welcome';
@@ -72,23 +74,27 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   // null  = not loaded yet, false = needs onboarding, true = complete.
   const [profileCompleted, setProfileCompleted] = useState<boolean | null>(null);
+  const [userTheme, setUserTheme] = useState<ThemePreference | null>(null);
 
   useEffect(() => onAuthStateChanged(auth, u => {
     setUser(u);
     setReady(true);
-    if (!u) setProfileCompleted(null);
+    if (!u) { setProfileCompleted(null); setUserTheme(null); }
   }), []);
 
   useEffect(() => {
     if (!user) return;
     return onSnapshot(doc(db, 'users', user.uid), snap => {
       setProfileCompleted(snap.exists() ? snap.data()?.profileCompleted === true : false);
+      const pref = snap.data()?.preferredTheme as ThemePreference | undefined;
+      if (pref) setUserTheme(pref);
     });
   }, [user]);
 
   if (!ready) return null;
 
   return (
+    <ThemeProvider userPreference={userTheme}>
     <SafeAreaProvider>
       <NavigationContainer>
         {!user ? (
@@ -120,5 +126,6 @@ export default function App() {
         )}
       </NavigationContainer>
     </SafeAreaProvider>
+    </ThemeProvider>
   );
 }

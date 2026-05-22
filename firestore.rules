@@ -131,10 +131,13 @@ service cloud.firestore {
       // `claimUsername` callable (Admin SDK) writes those.
       // `smsOptOut` (Phase 9) is owner-controlled by the Settings
       // toggle and consumed by Phase 8's escalateSms eligibility.
+      // Phase 19: preferredLanguage, preferredTheme, inAppNotifications,
+      // timeFormat are user-controlled preference fields.
       return [
         'displayName', 'photoURL', 'about', 'profileCompleted',
         'fcmTokens', 'lastSeen', 'updatedAt',
-        'smsOptOut'
+        'smsOptOut',
+        'preferredLanguage', 'preferredTheme', 'inAppNotifications', 'timeFormat'
       ];
     }
     function bannedProfileFields() {
