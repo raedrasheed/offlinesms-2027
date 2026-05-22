@@ -5,7 +5,7 @@
 // claimed username so the UI can confirm what the server actually stored.
 
 import { getFunctions, httpsCallable } from 'firebase/functions';
-import { app } from './firebase';
+import { app, auth } from './firebase';
 
 export type ClaimUsernameRequest = {
   username: string;
@@ -29,8 +29,16 @@ export class ClaimUsernameError extends Error {
 }
 
 export async function claimUsername(req: ClaimUsernameRequest): Promise<ClaimUsernameResult> {
+  // Force-refresh the ID token before calling the function. On freshly
+  // created accounts (especially email sign-up) the cached token can lag
+  // by a few seconds, causing the callable to arrive without a valid
+  // auth context and the function to throw `unauthenticated`.
+  const user = auth.currentUser;
+  if (!user) throw new ClaimUsernameError('unauthenticated', 'No signed-in user.');
+  await user.getIdToken(true);
+
   const fn = httpsCallable<ClaimUsernameRequest, ClaimUsernameResult>(
-    getFunctions(app),
+    getFunctions(app, 'us-central1'),
     'claimUsername',
   );
   try {
