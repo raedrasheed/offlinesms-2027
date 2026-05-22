@@ -1,6 +1,6 @@
 import {
   BarChart3, Users, Inbox, MessageCircle, Phone,
-  Send, Coins, FileText, LifeBuoy, Shield, Settings, ScrollText, Building2, Globe,
+  Send, Coins, FileText, LifeBuoy, Shield, Settings, ScrollText, Building2, Globe, Flag,
   type LucideIcon,
 } from 'lucide-react';
 import type { AdminCapability } from './adminPermissions';
@@ -28,4 +28,5 @@ export const NAV_ITEMS: NavItem[] = [
   { href: '/admin/roles',         label: 'Roles',         icon: Shield,       capability: 'view:roles' },
   { href: '/admin/settings',      label: 'Settings',      icon: Settings,     capability: 'view:settings' },
   { href: '/admin/audit',         label: 'Audit Log',     icon: ScrollText,   capability: 'view:audit' },
+  { href: '/admin/moderation',   label: 'Moderation',    icon: Flag,         capability: 'view:moderation' },
 ];

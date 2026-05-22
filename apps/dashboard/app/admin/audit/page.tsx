@@ -160,11 +160,35 @@ export default async function AuditLogPage({
 
   const hasFilters = !!(filters.actor || filters.action || filters.targetType || filters.result || filters.from || filters.to);
 
+  const canExport = canDo(session.role, 'export:audit');
+
+  function buildExportHref() {
+    const p = new URLSearchParams();
+    if (filters.actor)      p.set('actor',      filters.actor);
+    if (filters.action)     p.set('action',     filters.action);
+    if (filters.targetType) p.set('targetType', filters.targetType);
+    if (filters.result)     p.set('result',     filters.result);
+    if (filters.from)       p.set('from',       filters.from);
+    if (filters.to)         p.set('to',         filters.to);
+    const qs = p.toString();
+    return `/admin/audit/export${qs ? `?${qs}` : ''}`;
+  }
+
   return (
     <div className="p-7">
-      <div className="mb-6">
-        <h1 className="text-xl font-extrabold tracking-tight text-ink-900">Audit Log</h1>
-        <p className="text-sm text-ink-500 mt-0.5">Read-only record of administrative actions. Payload contents are not shown.</p>
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-extrabold tracking-tight text-ink-900">Audit Log</h1>
+          <p className="text-sm text-ink-500 mt-0.5">Read-only record of administrative actions. Payload contents are not shown.</p>
+        </div>
+        {canExport && (
+          <a
+            href={buildExportHref()}
+            className="shrink-0 px-4 py-2 bg-surface3 border border-ink-200 text-ink-700 text-sm font-bold rounded-lg hover:bg-ink-100 transition"
+          >
+            Export CSV
+          </a>
+        )}
       </div>
 
       {/* Filters */}
