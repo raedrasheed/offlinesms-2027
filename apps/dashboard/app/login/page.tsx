@@ -55,12 +55,12 @@ function LoginForm() {
 
   return (
     <form onSubmit={signIn} className="bg-white rounded-2xl shadow-sh3 p-8 w-[380px]">
-      <div className="flex items-center gap-3 mb-6">
-        <Image src="/logo.png" alt="OfflineSMS" width={32} height={32} className="rounded-lg" />
+      <div className="flex flex-col items-center gap-2 mb-6">
+        <Image src="/logo.png" alt="OfflineSMS" width={72} height={72} className="rounded-2xl" />
         <span className="font-extrabold text-xl tracking-tight">Offline<span className="text-primary">SMS</span></span>
       </div>
-      <h1 className="text-2xl font-extrabold tracking-tight">Sign in</h1>
-      <p className="text-sm text-ink-500 mt-1">Admin dashboard access.</p>
+      <h1 className="text-2xl font-extrabold tracking-tight text-center">Sign in</h1>
+      <p className="text-sm text-ink-500 mt-1 text-center">Admin dashboard access.</p>
       <input className="mt-5 w-full px-3 py-2.5 rounded-lg border border-ink-200 focus:border-primary outline-none text-sm" placeholder="Email"
         type="email" value={email} onChange={e => setEmail(e.target.value)} required />
       <input className="mt-2 w-full px-3 py-2.5 rounded-lg border border-ink-200 focus:border-primary outline-none text-sm" placeholder="Password"
