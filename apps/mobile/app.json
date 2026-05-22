@@ -10,14 +10,30 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "app.offlinesms.mobile"
+      "bundleIdentifier": "app.offlinesms.mobile",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSCameraUsageDescription": "OfflineSMS uses your camera to capture and share photos in conversations.",
+        "NSMicrophoneUsageDescription": "OfflineSMS uses your microphone to record and send voice messages.",
+        "NSPhotoLibraryUsageDescription": "OfflineSMS accesses your photo library to share images in conversations.",
+        "NSPhotoLibraryAddUsageDescription": "OfflineSMS saves received media to your photo library.",
+        "NSContactsUsageDescription": "OfflineSMS uses your contacts to help you find and message people."
+      }
     },
     "android": {
       "package": "app.offlinesms.mobile",
+      "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#1F7BA8"
-      }
+      },
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.READ_CONTACTS"
+      ]
     },
     "web": {
       "bundler": "metro",
