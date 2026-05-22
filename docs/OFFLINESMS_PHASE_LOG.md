@@ -4,6 +4,133 @@ Running log of phased work. Newest first.
 
 ---
 
+## Phase 16 — Firestore Indexes, Scheduled Jobs, Wallet Detail, Mobile Support, Audit Export, and Operational Foundations
+
+**Branch:** `claude/repo-audit-architecture-MiZDX`  
+**Status:** Complete. TypeScript clean (dashboard + functions), tsc passes.
+
+### Commits
+
+1. `chore(firebase): add composite indexes for admin filters and counts` — `3f93c56`
+2. `feat(functions): activate stuck SMS batch reaper` — `928ba7b`
+3. `feat(admin): add wallet detail page and mobile support ticket creation` — `d145673`
+4. `feat(admin): add audit export, calls foundation, and moderation page` — `e78af87`
+5. `feat(admin): add dashboard count refresh button` — `23efaaf`
+6. `docs: update phase log for phase 16` — (this commit)
+
+### Files changed
+
+**New files:**
+- `docs/OFFLINESMS_PHASE_16_PLAN.md` — implementation plan
+- `apps/dashboard/app/admin/points/wallets/[uid]/page.tsx` — wallet detail page
+- `apps/dashboard/app/admin/audit/export/route.ts` — redacted CSV export route
+- `apps/dashboard/app/admin/moderation/page.tsx` — moderation foundation page
+- `apps/dashboard/app/admin/RefreshButton.tsx` — client refresh button
+- `apps/mobile/src/lib/support.ts` — support ticket Firestore helpers
+- `apps/mobile/src/screens/SupportTicket.tsx` — mobile support ticket screen
+
+**Modified files:**
+- `firestore.indexes.json` — 8 new composite indexes
+- `functions/src/index.ts` — exports reapStuckBatches
+- `apps/dashboard/lib/adminPermissions.ts` — export:audit, view:moderation capabilities
+- `apps/dashboard/lib/adminData.ts` — getWallet added; tickets collection fix (supportTickets→tickets, userId→createdBy); getDashboardCounts tickets fix
+- `apps/dashboard/lib/supportActions.ts` — tickets collection fix
+- `apps/dashboard/lib/adminNav.ts` — Moderation nav item
+- `apps/dashboard/app/admin/page.tsx` — RefreshButton added
+- `apps/dashboard/app/admin/audit/page.tsx` — Export CSV button for export:audit roles
+- `apps/dashboard/app/admin/calls/page.tsx` — real session guard, soft-fail callLogs read, EmptyState
+- `apps/dashboard/app/admin/points/wallets/page.tsx` — rows link to detail page
+- `apps/dashboard/app/admin/support/page.tsx` — createdBy field fix
+- `apps/dashboard/app/admin/support/[ticketId]/page.tsx` — createdBy field fix
+- `apps/mobile/App.tsx` — registers SupportTicket screen
+- `apps/mobile/src/screens/Settings.tsx` — Help & Support nav row
+
+### What was done
+
+**1. Firestore composite indexes (8 new):**
+- `auditLogs`: action + createdAt DESC — audit filter: action=
+- `auditLogs`: result + createdAt DESC — audit filter: result=
+- `conversations`: type + status — dashboard count: active groups
+- `smsBatches`: status + createdAt DESC — SMS status filter
+- `wallets`: status + updatedAt DESC — wallets status filter
+- `tickets`: status + createdAt DESC — support list status filter
+- `tickets`: category + createdAt DESC — support list category filter
+- `tickets`: createdBy + createdAt DESC — mobile: user's own tickets
+
+**2. reapStuckBatches activated:**
+- Exported from `functions/src/index.ts`; registers as every-30-minute scheduled function
+- Idempotency guarded by `pointsRefunded != null` inside the function
+- `sweepExpiredMessages` remains deferred (Phase 20) — no client TTL UI exists
+
+**3. Wallet detail page (`/admin/points/wallets/[uid]`):**
+- Wallet summary (balance, reserved, available, status, updated)
+- User info with `maskEmail(role)` and `maskPhone()` always applied
+- Recent transactions (up to 50)
+- Freeze/unfreeze action for `manage:wallets` roles; read-only note for others
+- Balance adjustment not available anywhere in the admin UI
+- Wallets list rows now link to detail page
+
+**4. Tickets collection fix:**
+- `adminData.ts`, `supportActions.ts`, support UI pages all updated from `supportTickets` → `tickets`
+- Field `userId` → `createdBy` throughout
+- `getDashboardCounts` openTickets query fixed to `tickets` collection
+
+**5. Mobile support ticket creation:**
+- `apps/mobile/src/lib/support.ts` — `createSupportTicket` writes to `tickets` collection with correct schema: `createdBy`, `status: 'open'`, no `assignedTo`
+- `SupportTicket.tsx` — two-tab screen: new ticket form (subject, description, category) + my tickets history
+- `Settings.tsx` — Help & Support row navigates to SupportTicket
+- `App.tsx` — SupportTicket registered in RootStack
+
+**6. Audit export (`GET /admin/audit/export`):**
+- Gated by `export:audit` capability (super_admin, auditor, legacy_admin, bootstrap_admin)
+- Hard row limit: 1 000 rows
+- Columns: id, timestamp, actorUid, actorEmail, action, targetType, targetId (first 16 chars), result, metadataFieldCount
+- No raw metadata values, no SMS body, no phone numbers, no secrets
+- Writes `audit.exported` audit log entry on each export
+- Export CSV button on audit log page (shown only to eligible roles)
+- Accepts same filters as the audit log page (actor, action, targetType, result, from, to)
+
+**7. Calls dashboard foundation:**
+- Real session guard with `verifySession` + `canDo(role, 'view:calls')`
+- `callLogs` collection read soft-fails: missing collection or Firestore error shows EmptyState
+- Table columns: initiator (truncated), conversation (truncated), duration, status, started
+
+**8. Moderation foundation (`/admin/moderation`):**
+- Reads `flags` collection, gated by `view:moderation`
+- Columns: flagId (truncated), type, targetType, targetId (max 16 chars), status, createdAt
+- Status filter tabs: All / Open / Reviewed / Dismissed
+- No private content, no message bodies
+- Moderation nav item added to adminNav.ts
+
+**9. Dashboard refresh button:**
+- `RefreshButton` client component calls `router.refresh()` to re-run server component
+- Displays as "Refresh counts" button in the Overview header
+
+**10. New capabilities:**
+- `export:audit` — super_admin, auditor, legacy_admin, bootstrap_admin
+- `view:moderation` — super_admin, support_agent, organization_admin (via plan), auditor, legacy_admin, bootstrap_admin
+
+### Security posture
+
+- No admin wallet balance adjustment (wallet detail shows summary only)
+- No raw metadata in CSV export (field count only)
+- No full phone numbers (maskPhone always applied)
+- No SMS body exposed
+- No private message content
+- No secrets in any page
+- No provider names
+- All write actions re-verify session server-side
+
+### sweepExpiredMessages deferral
+
+`functions/src/chats/sweepExpiredMessages.ts` is implemented but NOT exported. Activating it would silently clear the `text` field of messages with `expiresAt` set. No client-side TTL setting UI exists yet. Scheduled for Phase 20 alongside the TTL setting screen.
+
+### Checks run
+
+- `tsc --noEmit` — clean (dashboard + functions)
+
+---
+
 ## Phase 15 — Admin Operations Hardening and Controlled Admin Actions
 
 **Branch:** `claude/repo-audit-architecture-MiZDX`  
