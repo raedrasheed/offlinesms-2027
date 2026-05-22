@@ -2,12 +2,9 @@
 // Refund any per-recipient failures and record the points settlement on
 // the batch doc so the OfflineSMS Delivery Report has the final numbers.
 //
-// Phase 10: emit canonical Phase 9 transaction lifecycle rows
-// (reservation_release, sms_spend, refund) in addition to the
-// back-compat 'sms' row, so the Phase 9 wallet UI shows the full
-// reservation → settle lifecycle. The Phase 9 canonicaliseType helper
-// accepts both legacy and canonical strings, so older clients still
-// parse this transition; Phase 11 will drop the legacy emission.
+// Phase 11: emits only the canonical Phase 9 transaction lifecycle
+// rows (reservation_release, sms_spend, refund). The Phase 0
+// legacy 'sms' row was dropped here.
 
 import { onDocumentUpdated } from 'firebase-functions/v2/firestore';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
@@ -51,19 +48,11 @@ export const onSmsBatchAccepted = onDocumentUpdated('smsBatches/{batchId}', asyn
   const now = FieldValue.serverTimestamp();
   const txCol = db.collection('transactions');
 
-  // Legacy single-row emission (kept one phase for back-compat).
-  await txCol.add({
-    userId:            after.senderId,
-    type:              'sms',
-    amount:            -actualCost,
-    refund,
-    sent,
-    failed,
-    batchId:           event.params.batchId,
-    relatedSmsBatchId: event.params.batchId,
-    createdAt:         now,
-  });
-
+  // Phase 11: legacy { type: 'sms' } row dropped. The canonical
+  // lifecycle below is the only emission path now. The Phase 9
+  // mobile lib's canonicaliseType still tolerates legacy 'sms'
+  // docs for any pre-Phase-11 data sitting in dev / staging.
+  //
   // Phase 10 canonical lifecycle rows.
   // 1) reservation_release — clears the reserve hold (whole amount).
   if (reserved > 0) {
