@@ -24,7 +24,7 @@
       "package": "app.offlinesms.mobile",
       "versionCode": 1,
       "adaptiveIcon": {
-        "foregroundImage": "./assets/icon.png",
+        "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#1F7BA8"
       },
       "permissions": [
