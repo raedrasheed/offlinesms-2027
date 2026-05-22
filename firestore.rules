@@ -456,5 +456,41 @@ service cloud.firestore {
         allow write: if false;
       }
     }
+
+    // ════════════════════════════════════════════════════════════
+    // POINTS PACKAGES — public-read catalogue for signed-in users.
+    // Admin writes only; Phase 15 will add management UI.
+    // ════════════════════════════════════════════════════════════
+    match /pointsPackages/{packageId} {
+      allow read:  if isAuthed();
+      allow write: if isAdmin();
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // POINTS TRANSFERS — sender or recipient reads own; writes are
+    // server-only via the transferPoints callable. Admin escape
+    // hatch retained for moderation in later phases.
+    // ════════════════════════════════════════════════════════════
+    match /pointsTransfers/{transferId} {
+      allow read:  if isAdmin()
+                    || (isAuthed() && (
+                          resource.data.fromUserId == request.auth.uid ||
+                          resource.data.toUserId   == request.auth.uid
+                       ));
+      allow write: if false;
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // TRANSFER QUOTA USAGE — mirrors the smsQuotaUsage shape.
+    // ════════════════════════════════════════════════════════════
+    match /transferQuotaUsage/{uid} {
+      allow read:  if isSelf(uid) || isAdmin();
+      allow write: if false;
+
+      match /days/{yyyymmdd} {
+        allow read:  if isSelf(uid) || isAdmin();
+        allow write: if false;
+      }
+    }
   }
 }
