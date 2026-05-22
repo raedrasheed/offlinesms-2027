@@ -5,7 +5,7 @@
 // ("ink"), so theming (dark mode, brand variants) becomes a single-file change
 // in a later phase. Raw exports remain in place — this layer is additive.
 
-import { colors } from './index';
+import { colors } from './colors';
 
 export const lightSemantic = {
   color: {
