@@ -4,6 +4,19 @@ System-level blueprint for the build-out described in `OFFLINESMS_IMPLEMENTATION
 
 ---
 
+## Phase 11 — SMS delivery reports, retry, reaper
+
+- **Legacy `type: 'sms'` transaction row dropped.** `onSmsBatchAccepted` emits only the canonical lifecycle (`reservation_release`, `sms_spend`, `refund`).
+- **Webhook ingestion.** `gatewayWebhook` (HTTP function) validates a constant-time HMAC of `${timestamp}.${rawBody}` against `OFFLINESMS_WEBHOOK_SECRET` (5-min replay window), looks up the batch by `gatewayBatchId`, resolves the recipient by `offlineSmsMessageId` (fall back to `recipientUid`), applies a monotonic status transition (`queued < sent < delivered`; terminal `failed` / `undelivered` can overwrite), and maintains aggregate counts on the batch in the same Firestore transaction. `smsDeliveryEvents/{eventId}` is the dedupe table; doc id IS the event id.
+- **Cross-batch dedupe.** `findAlreadySentUids` (new helper) scans prior batches for the (sender, message) pair and excludes recipients whose `smsStatus ∈ { queued, sent, delivered }` with `skipReason: 'already-sent-for-message'`. Wired into `escalateSms`, `previewSmsEscalation`, and `retryFailedSmsRecipients`.
+- **`retryFailedSmsRecipients`** stamps `attemptNumber = source + 1`, drops recipients caught by the cross-batch dedupe, and audits as `sms.retry.created` / `sms.retry.failed`.
+- **`reapStuckBatches`** is a scheduled cron-stub for the `'sending'` / `'accepted'` recovery path. Code-only; activation is opt-in (operator adds an export). Idempotent on `pointsRefunded`. Emits canonical `reservation_release` + `sms_spend` (+ `refund`) with `note: 'reaper'`. Audits `sms.batch.reaped`.
+- **Mobile.** New `SmsBatchReport.tsx` is the dedicated OfflineSMS Delivery Report; deep-linked from `TransactionDetail`, `SmsEscalation` (result step), and `MessageInfo` ("OfflineSMS reminders" card backed by the new `smsBatches(senderId, messageId, createdAt)` composite index).
+- **Indexes.** `smsBatches(senderId, messageId, createdAt DESC)` added.
+- **Rules.** `smsDeliveryEvents` is admin-read, server-only write. Nothing else changes.
+
+---
+
 ## Phase 10 — Points purchase and transfer
 
 - **Free-points exploit closed.** Phase 0's `buyPoints` callable is removed. The new flow is `createPurchase` (creates pending `payments/{id}`, never credits) → `confirmPayment` (shared-secret-gated, idempotent, credits + writes canonical `purchase` transaction in one Firestore transaction). `confirmPaymentMock` reuses the same internal credit path and refuses unless `process.env.FUNCTIONS_EMULATOR === 'true'`.

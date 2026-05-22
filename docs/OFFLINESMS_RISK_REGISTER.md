@@ -2,6 +2,15 @@
 
 Risks ranked across the surfaces present today and planned for later phases. Likelihood/impact are qualitative.
 
+## Phase 11 mitigation snapshot
+
+- **Risk #5 (stuck reservations) — code shipped; activation opt-in.** `reapStuckBatches` exists; operators flip on the schedule when a real provider is wired. Idempotent on `pointsRefunded`; reads `status` inside the transaction and exits if `onSmsBatchAccepted` raced ahead.
+- **Risk #9 (SMS delivery report accuracy) — addressed.** `gatewayWebhook` is HMAC-verified, idempotent via `smsDeliveryEvents/{eventId}` (doc id == event id), and applies a monotonic status transition so stale events can't downgrade. Aggregate counts on the batch are maintained inside the same Firestore transaction as the recipient update so they can't drift.
+- **Risk #3 (SMS escalation abuse) — further reduced.** Cross-batch dedupe (`already-sent-for-message`) prevents the same recipient from being re-spammed for the same message across separate escalations or retries.
+- **Risk #10 (phone privacy)** — unchanged: phones stay masked everywhere visible, never logged, never in the audit log. Provider error messages are sanitised + clamped at 200 chars before persistence.
+
+---
+
 ## Phase 10 mitigation snapshot
 
 - **Risk #16 (payment / points-purchase security) — CLOSED.** Phase 0's `buyPoints` direct-credit callable is removed. Purchase credits now require a `confirmPayment` event guarded by a constant-time shared-secret check, with idempotency on the doc's `idempotencyKey` and a single Firestore transaction that credits + writes the canonical `purchase` row atomically. `confirmPaymentMock` is hard-gated to the Functions emulator. Production must set `PAYMENT_WEBHOOK_SECRET` before any credit can fire.

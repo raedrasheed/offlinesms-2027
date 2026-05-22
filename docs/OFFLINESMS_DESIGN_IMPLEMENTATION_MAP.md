@@ -223,12 +223,13 @@ Legend for "Recommended phase" matches `OFFLINESMS_IMPLEMENTATION_ROADMAP.md`.
 
 | | |
 |---|---|
-| **Status** | 🟧 Backend captures status; no UI |
-| **Existing** | `smsBatches/{b}/recipients/{uid}.smsStatus` |
-| **Missing** | Mobile batch report, retry failed action, dashboard analytics |
-| **Frontend** | `SmsBatchReport.tsx` (mobile), `/admin/sms/[batchId]` (dashboard) |
-| **Backend** | Callable `retryFailedRecipients`; webhook ingestion of provider statuses |
-| **Phase** | 11 |
+| **Status** | ✅ Phase 11 landed: dedicated mobile report, retry-failed callable hardened, HMAC-verified delivery webhook, cross-batch dedupe, opt-in stuck-batch reaper. |
+| **Existing** | `apps/mobile/src/screens/SmsBatchReport.tsx`, `functions/src/sms/{gatewayWebhook,retryFailed,recipients,reapStuckBatches}.ts`, `smsDeliveryEvents/{id}`, canonical Phase 9 lifecycle |
+| **Missing** | Dashboard `/admin/sms/[batchId]` (Phase 15), production provider wiring (deployment-time), reaper schedule activation (operator opt-in) |
+| **Frontend** | Mobile report + retry + deep-links from TransactionDetail / SmsEscalation / MessageInfo |
+| **Backend** | webhook + retry + reaper + cross-batch dedupe (Phase 11 ✓) |
+| **Indexes** | `smsBatches(senderId, messageId, createdAt DESC)` (Phase 11 ✓) |
+| **Phase** | 11 ✓ |
 
 ## 20. Admin dashboard (shell)
 

@@ -4,6 +4,100 @@ Running log of phased work. Newest first.
 
 ---
 
+## Phase 11 — SMS delivery reports, retry failed, stuck-batch reaper
+
+**Branch:** `claude/repo-audit-architecture-MiZDX`
+**Status:** Complete. App builds end-to-end (typecheck + lint + build green across workspaces).
+
+### What was done
+
+- **Dropped the legacy `type: 'sms'` transaction row.** `onSmsBatchAccepted` now emits only the canonical lifecycle (`reservation_release`, `sms_spend`, `refund`). The Phase 9 `canonicaliseType` mapping still parses pre-Phase-11 docs for back-compat.
+- **`gatewayWebhook` HTTP function (new).** HMAC-verified, idempotent, transactionally consistent:
+  - Headers: `x-offlinesms-timestamp` (5-min replay window) + `x-offlinesms-signature` (`sha256=<hex>` over `${timestamp}.${rawBody}`).
+  - `smsDeliveryEvents/{eventId}` is the dedupe table — doc id IS the event id.
+  - Monotonic status transitions (`queued < sent < delivered`; terminal `failed` / `undelivered` may overwrite earlier non-terminal states).
+  - Maintains `queuedCount` / `sentCount` / `deliveredCount` / `failedCount` on the batch in the same Firestore transaction as the recipient update.
+  - When every recipient is terminal, flips batch status to `completed` / `partial` / `failed`.
+  - Phone numbers, SMS body, message body are never logged. Provider error messages are sanitised + length-clamped at 200 chars.
+- **Cross-batch dedupe.** `findAlreadySentUids(db, senderUid, messageId)` (new helper) returns the set of recipients with `smsStatus ∈ { queued, sent, delivered }` across any prior batch. `classifyRecipients` excludes them with `skipReason: 'already-sent-for-message'`. Used by `escalateSms`, `previewSmsEscalation`, and `retryFailedSmsRecipients`.
+- **`retryFailedSmsRecipients` hardened.** Adds the cross-batch dedupe (so a recipient who succeeded via a separate batch in between isn't re-spammed), stamps `attemptNumber = source + 1` on the retry batch, and renames the audit lineage to `sms.retry.created` (success) + `sms.retry.failed` (gateway-error).
+- **`reapStuckBatches` (scheduled, opt-in).** Code-only — not exported from `functions/src/index.ts`. When activated, runs every 30 min and flips batches in `sending` / `accepted` older than 15 minutes to `completed` / `partial` / `failed` per the recipient roster, releases the unspent reservation, and emits canonical `reservation_release` + `sms_spend` (+ `refund`) rows with `note: 'reaper'`. Idempotent on `pointsRefunded`.
+- **Mobile UI.**
+  - `SmsBatchReport.tsx` (new) — dedicated OfflineSMS Delivery Report with summary cards, batch metadata, recipient rows with status pills, filter chips, and a Retry-failed action.
+  - `TransactionDetail` deep-links into `SmsBatchReport`.
+  - `SmsEscalation` result step gains a "View OfflineSMS Delivery Report" primary button.
+  - `MessageInfo` shows an "OfflineSMS reminders" card pointing at the most recent batch for the (message, sender) pair, backed by the new `smsBatches(senderId, messageId, createdAt)` composite index.
+- **i18n.** New `smsReport.*` namespace in `en.json` + `ar.json`.
+
+### Files created
+
+- `docs/OFFLINESMS_PHASE_11_PLAN.md`
+- `functions/src/sms/gatewayWebhook.ts`
+- `functions/src/sms/reapStuckBatches.ts`
+- `apps/mobile/src/screens/SmsBatchReport.tsx`
+
+### Files edited
+
+- `functions/src/sms/onSmsBatchAccepted.ts`
+- `functions/src/sms/recipients.ts`
+- `functions/src/sms/escalate.ts`
+- `functions/src/sms/previewEscalation.ts`
+- `functions/src/sms/retryFailed.ts`
+- `functions/src/index.ts`
+- `apps/mobile/src/screens/{TransactionDetail,SmsEscalation,MessageInfo}.tsx`
+- `apps/mobile/App.tsx`
+- `apps/mobile/src/i18n/{en,ar}.json`
+- `firestore.rules`
+- `firestore.indexes.json`
+- Docs: data model, phase log (this file), technical architecture, risk register, design map.
+
+### Commits
+
+| Hash | Message |
+|---|---|
+| `e6460ce` | docs: add OfflineSMS phase 11 implementation plan |
+| `695e0f4` | feat(data): formalize SMS delivery event and report contracts |
+| `6a10db2` | security: lock delivery event and SMS report writes |
+| `dba290e` | feat(functions): drop legacy SMS transaction row |
+| `ac6b766` | feat(functions): add OfflineSMS delivery webhook ingestion |
+| `0c77e7e` | feat(functions): add cross-batch dedupe and hardened retry |
+| `3f7fe77` | feat(functions): add stuck SMS batch reaper |
+| `b0dbbe9` | feat(mobile): add SMS batch report screen |
+| `711d6de` | feat(mobile): link delivery reports from transactions, escalation, info |
+
+Tail commit (this docs update) lands next.
+
+### Checks run
+
+```
+npm run typecheck --workspaces --if-present   → ok (dashboard, mobile, functions)
+npm run lint --workspaces --if-present        → ok
+npm run build --workspaces --if-present       → ok
+```
+
+### Known limitations
+
+- **No automated tests** for the webhook / dedupe / reaper. Manual emulator checklist documented in the Phase 11 plan; `@firebase/rules-unit-testing` lands in Phase 20.
+- **Real provider integration is deployment-time.** `gatewayWebhook` ships ready (HMAC fully implemented). The mock `gateway.sendBatch` doesn't deliver real SMS, so there's no production traffic to ingest yet. Provider integration is a one-file change to `functions/src/sms/gateway.ts` plus pointing the provider at the webhook URL and setting `OFFLINESMS_WEBHOOK_SECRET`.
+- **`reapStuckBatches` not registered as a schedule.** Code is in place; operators flip it on by adding the export to `functions/src/index.ts`. Same opt-in pattern as Phase 6's `sweepExpiredMessages`.
+- **`MessageInfo` latest-batch link** shows only the most recent batch for a (sender, message) pair. A full multi-batch list with retry lineage is a Phase 18 enhancement.
+- **Cross-batch dedupe scans prior batches.** Bounded by daily-cap (20 batches per uid per day); worst case is ≤ 20 recipient-sub-collection reads per escalation. Phase 20 perf pass can replace this with a hash-set on the message doc if it becomes a hotspot.
+- **Aggregate counts on the batch** are only maintained by the Phase 11 webhook (not back-filled by `escalateSms`). A batch with no DLR events reads `0` for the new fields until the first event arrives; the `SmsBatchReport` falls back to live recipient sub-collection counts so the UI is always correct.
+
+### Recommended Phase 12 scope
+
+Phase 12 = **Admin dashboard foundation** (per the roadmap):
+
+1. RBAC-aware sidebar in `apps/dashboard/components/Sidebar.tsx` — hide menu items the role can't access. Today every `/admin/*` route is gated by the Phase 1 admin guard; per-route capability checks land here.
+2. `app/admin/layout.tsx` — add a user menu + breadcrumb shell.
+3. Server-side global search bar shell (no implementation yet — Phase 17 wires it).
+4. `app/admin/audit/page.tsx` skeleton listing `auditLogs/{id}` rows with redacted metadata. Read-only.
+5. No new product features in this phase.
+
+Defer: dashboard chat / SMS / points modules (Phases 13–17).
+
+---
+
 ## Phase 10 — Points purchase and transfer flows
 
 **Branch:** `claude/repo-audit-architecture-MiZDX`
