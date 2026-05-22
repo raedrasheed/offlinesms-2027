@@ -1,5 +1,5 @@
 // Admin SMS batch detail — server component.
-// Phones masked. No SMS/message body. Retry action is deferred.
+// Phones masked. No SMS/message body shown.
 
 import { cookies } from 'next/headers';
 import { redirect, notFound } from 'next/navigation';
@@ -12,6 +12,7 @@ import { PermissionState } from '@/components/state';
 import DetailCard from '@/components/admin/DetailCard';
 import MetadataList from '@/components/admin/MetadataList';
 import StatusBadge from '@/components/admin/StatusBadge';
+import SmsRetryAction from './SmsRetryAction';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -29,6 +30,8 @@ export default async function SmsBatchDetailPage({
   if (!canDo(session.role, 'view:sms')) {
     return <div className="p-8"><PermissionState title="SMS access required" /></div>;
   }
+
+  const canRetry = canDo(session.role, 'retry:sms');
 
   const [batch, recipients] = await Promise.all([
     getSmsBatch(params.batchId),
@@ -95,17 +98,21 @@ export default async function SmsBatchDetailPage({
           ]} />
         </DetailCard>
 
-        {/* Retry action — deferred */}
-        {(batch.failedCount > 0) && (
-          <div className="rounded-xl border border-ink-100 bg-surface3/50 p-4 flex items-center justify-between">
-            <div>
-              <p className="text-sm font-bold text-ink-900">{batch.failedCount} failed recipient{batch.failedCount !== 1 ? 's' : ''}</p>
-              <p className="text-xs text-ink-500">Retry via the mobile app. Dashboard retry is deferred to a later phase.</p>
+        {/* Retry action */}
+        {batch.failedCount > 0 && (
+          canRetry ? (
+            <SmsRetryAction batchId={params.batchId} failedCount={batch.failedCount} />
+          ) : (
+            <div className="rounded-xl border border-ink-100 bg-surface3/50 p-4 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-bold text-ink-900">{batch.failedCount} failed recipient{batch.failedCount !== 1 ? 's' : ''}</p>
+                <p className="text-xs text-ink-500">Retry requires the retry:sms capability (super_admin or organization_admin).</p>
+              </div>
+              <button disabled className="px-3 py-1.5 bg-ink-100 text-ink-400 text-xs font-bold rounded-lg cursor-not-allowed">
+                Retry failed
+              </button>
             </div>
-            <button disabled className="px-3 py-1.5 bg-ink-100 text-ink-400 text-xs font-bold rounded-lg cursor-not-allowed">
-              Retry failed (coming later)
-            </button>
-          </div>
+          )
         )}
 
         {/* Recipients */}
