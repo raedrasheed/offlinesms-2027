@@ -68,3 +68,6 @@ export { setUserStatus } from './admin/setUserStatus';
 // Phase 14 — admin-native group lock + role assignment.
 export { adminLockGroup } from './admin/adminLockGroup';
 export { adminSetRole }   from './admin/adminSetRole';
+
+// Phase 15 — wallet freeze/unfreeze.
+export { adminSetWalletStatus } from './admin/adminSetWalletStatus';

@@ -549,8 +549,9 @@ export type AdminPackageRow = {
   sortOrder: number;
 };
 
-export async function listWallets(cursor?: string): Promise<AdminWalletRow[]> {
+export async function listWallets(cursor?: string, status?: string): Promise<AdminWalletRow[]> {
   let q = adminDb.collection('wallets').orderBy('updatedAt', 'desc').limit(50);
+  if (status) q = q.where('status', '==', status) as typeof q;
   if (cursor) {
     const snap = await adminDb.collection('wallets').doc(cursor).get();
     if (snap.exists) q = q.startAfter(snap);
@@ -646,41 +647,204 @@ export type AdminRoleUserRow = {
 };
 
 export async function listAdminUsers(): Promise<AdminRoleUserRow[]> {
-  // Fetch all users from Firestore and then enrich with auth claims for role.
-  // We limit to 200 and filter client-side for those with admin claims.
-  // Auth.listUsers() would be more accurate but is slower; this is sufficient
-  // for a dashboard that shows ~10–50 admins.
-  const snap = await adminDb.collection('users').orderBy('createdAt', 'desc').limit(200).get();
-  const uids = snap.docs.map(d => d.id);
-
-  // Fetch auth records in parallel batches of 10.
+  // Phase 15: Use Firebase Auth.listUsers() pagination to cover all users
+  // regardless of whether they have a Firestore doc. We scan up to 3 pages
+  // (3 000 users) which is adequate for admin dashboards; larger deployments
+  // should use the export tool.
   const { getAuth } = await import('firebase-admin/auth');
   const auth = getAuth();
   const results: AdminRoleUserRow[] = [];
+  let pageToken: string | undefined;
+  let pages = 0;
+  const MAX_PAGES = 3;
 
-  for (let i = 0; i < uids.length; i += 10) {
-    const batch = uids.slice(i, i + 10);
-    await Promise.all(batch.map(async uid => {
+  do {
+    const page = await auth.listUsers(1000, pageToken);
+    for (const u of page.users) {
+      const claims = (u.customClaims ?? {}) as Record<string, unknown>;
+      const role = typeof claims.role === 'string' ? claims.role : null;
+      const isLegacyAdmin = claims.admin === true;
+      if (!role && !isLegacyAdmin) continue;
+
+      // Fetch display name from Firestore if available; fall back to Auth.displayName.
+      let displayName: string | null = u.displayName ?? null;
       try {
-        const u = await auth.getUser(uid);
-        const claims = (u.customClaims ?? {}) as Record<string, unknown>;
-        const role = typeof claims.role === 'string' ? claims.role : null;
-        const isLegacyAdmin = claims.admin === true;
-        if (!role && !isLegacyAdmin) return;
-        const fsData = snap.docs.find(d => d.id === uid)?.data() ?? {};
-        results.push({
-          uid,
-          displayName: (fsData.displayName as string | null) ?? null,
-          email:       (u.email as string | null) ?? null,
-          role,
-          isLegacyAdmin,
-        });
-      } catch { /* user may have been deleted from Auth */ }
-    }));
-  }
+        const snap = await adminDb.collection('users').doc(u.uid).get();
+        if (snap.exists) {
+          displayName = (snap.data()!.displayName as string | null) ?? displayName;
+        }
+      } catch { /* Firestore doc may not exist */ }
+
+      results.push({
+        uid:           u.uid,
+        displayName,
+        email:         u.email ?? null,
+        role,
+        isLegacyAdmin,
+      });
+    }
+    pageToken = page.pageToken;
+    pages++;
+  } while (pageToken && pages < MAX_PAGES);
 
   return results.sort((a, b) => {
     const order = ['super_admin', 'organization_admin', 'support_agent', 'finance_admin', 'auditor'];
     return (order.indexOf(a.role ?? '') - order.indexOf(b.role ?? ''));
   });
+}
+
+// ─── Support tickets ──────────────────────────────────────────────────────────
+
+export type AdminSupportTicketRow = {
+  id: string;
+  subject: string;
+  category: string;
+  status: string;
+  userId: string;
+  assignedTo: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AdminSupportTicketDetail = AdminSupportTicketRow & {
+  description: string;
+};
+
+type SupportTicketFilters = {
+  status?: string;
+  category?: string;
+  cursor?: string;
+};
+
+export async function listSupportTickets(filters: SupportTicketFilters = {}): Promise<AdminSupportTicketRow[]> {
+  let q = adminDb.collection('supportTickets').orderBy('createdAt', 'desc').limit(50);
+  if (filters.status)   q = q.where('status',   '==', filters.status)   as typeof q;
+  if (filters.category) q = q.where('category', '==', filters.category) as typeof q;
+  if (filters.cursor) {
+    const snap = await adminDb.collection('supportTickets').doc(filters.cursor).get();
+    if (snap.exists) q = q.startAfter(snap);
+  }
+  const result = await q.get();
+  return result.docs.map(d => {
+    const data = d.data();
+    return {
+      id:         d.id,
+      subject:    (data.subject    as string) ?? '—',
+      category:   (data.category   as string) ?? 'other',
+      status:     (data.status     as string) ?? 'open',
+      userId:     (data.userId     as string) ?? '—',
+      assignedTo: (data.assignedTo as string | null) ?? null,
+      createdAt:  safeDate(data.createdAt),
+      updatedAt:  safeDate(data.updatedAt),
+    };
+  });
+}
+
+export async function getSupportTicket(ticketId: string): Promise<AdminSupportTicketDetail | null> {
+  const snap = await adminDb.collection('supportTickets').doc(ticketId).get();
+  if (!snap.exists) return null;
+  const data = snap.data()!;
+  return {
+    id:          snap.id,
+    subject:     (data.subject     as string) ?? '—',
+    category:    (data.category    as string) ?? 'other',
+    status:      (data.status      as string) ?? 'open',
+    userId:      (data.userId      as string) ?? '—',
+    assignedTo:  (data.assignedTo  as string | null) ?? null,
+    description: (data.description as string) ?? '',
+    createdAt:   safeDate(data.createdAt),
+    updatedAt:   safeDate(data.updatedAt),
+  };
+}
+
+// ─── System settings ──────────────────────────────────────────────────────────
+
+export type SystemSettings = {
+  appName: string;
+  supportEmail: string;
+  defaultLanguage: string;
+  defaultTimezone: string;
+  smsEscalationEnabled: boolean;
+  pointsEnabled: boolean;
+  maintenanceMode: boolean;
+};
+
+const SETTINGS_DEFAULTS: SystemSettings = {
+  appName:              'OfflineSMS',
+  supportEmail:         '',
+  defaultLanguage:      'en',
+  defaultTimezone:      'UTC',
+  smsEscalationEnabled: true,
+  pointsEnabled:        true,
+  maintenanceMode:      false,
+};
+
+export async function getSystemSettings(): Promise<SystemSettings> {
+  const snap = await adminDb.collection('systemSettings').doc('general').get();
+  if (!snap.exists) return { ...SETTINGS_DEFAULTS };
+  const d = snap.data()!;
+  return {
+    appName:              (d.appName              as string  | undefined) ?? SETTINGS_DEFAULTS.appName,
+    supportEmail:         (d.supportEmail         as string  | undefined) ?? SETTINGS_DEFAULTS.supportEmail,
+    defaultLanguage:      (d.defaultLanguage      as string  | undefined) ?? SETTINGS_DEFAULTS.defaultLanguage,
+    defaultTimezone:      (d.defaultTimezone      as string  | undefined) ?? SETTINGS_DEFAULTS.defaultTimezone,
+    smsEscalationEnabled: (d.smsEscalationEnabled as boolean | undefined) ?? SETTINGS_DEFAULTS.smsEscalationEnabled,
+    pointsEnabled:        (d.pointsEnabled        as boolean | undefined) ?? SETTINGS_DEFAULTS.pointsEnabled,
+    maintenanceMode:      (d.maintenanceMode      as boolean | undefined) ?? SETTINGS_DEFAULTS.maintenanceMode,
+  };
+}
+
+// ─── Dashboard counts ─────────────────────────────────────────────────────────
+
+export type DashboardCounts = {
+  totalUsers:       number | null;
+  activeGroups:     number | null;
+  smsBatchesToday:  number | null;
+  failedSmsBatches: number | null;
+  openTickets:      number | null;
+  totalWallets:     number | null;
+  pendingPayments:  number | null;
+};
+
+export async function getDashboardCounts(): Promise<DashboardCounts> {
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const { Timestamp } = await import('firebase-admin/firestore');
+  const todayTs = Timestamp.fromDate(todayStart);
+
+  const safe = async (fn: () => Promise<number>): Promise<number | null> => {
+    try { return await fn(); }
+    catch { return null; }
+  };
+
+  const [totalUsers, activeGroups, smsBatchesToday, failedSmsBatches, openTickets, totalWallets, pendingPayments] =
+    await Promise.all([
+      safe(() => adminDb.collection('users').count().get().then(s => s.data().count)),
+      safe(() => adminDb.collection('conversations').where('type', '==', 'group').where('status', '==', 'active').count().get().then(s => s.data().count)),
+      safe(() => adminDb.collection('smsBatches').where('createdAt', '>=', todayTs).count().get().then(s => s.data().count)),
+      safe(() => adminDb.collection('smsBatches').where('status', '==', 'failed').count().get().then(s => s.data().count)),
+      safe(() => adminDb.collection('supportTickets').where('status', '==', 'open').count().get().then(s => s.data().count)),
+      safe(() => adminDb.collection('wallets').count().get().then(s => s.data().count)),
+      safe(() => adminDb.collection('payments').where('status', '==', 'pending').count().get().then(s => s.data().count)),
+    ]);
+
+  return { totalUsers, activeGroups, smsBatchesToday, failedSmsBatches, openTickets, totalWallets, pendingPayments };
+}
+
+// ─── Points package helpers ───────────────────────────────────────────────────
+
+export async function getPointsPackage(packageId: string): Promise<AdminPackageRow | null> {
+  const snap = await adminDb.collection('pointsPackages').doc(packageId).get();
+  if (!snap.exists) return null;
+  const data = snap.data()!;
+  return {
+    id:          snap.id,
+    name:        (data.name        as string) ?? '—',
+    points:      (data.points      as number) ?? 0,
+    bonusPoints: (data.bonusPoints as number) ?? 0,
+    price:       (data.price       as number) ?? 0,
+    currency:    (data.currency    as string) ?? '—',
+    status:      (data.status      as string) ?? 'active',
+    sortOrder:   (data.sortOrder   as number) ?? 0,
+  };
 }

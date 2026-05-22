@@ -34,7 +34,10 @@ export const retryFailedSmsRecipients = onCall({ region: 'us-central1' }, async 
     audience?: string;
     audienceCanonical?: string;
   };
-  const senderIsAdmin = request.auth?.token?.admin === true;
+  const token = (request.auth?.token ?? {}) as Record<string, unknown>;
+  const senderIsAdmin =
+    token.admin === true ||
+    ['super_admin', 'organization_admin'].includes((token.role as string) ?? '');
   if (source.senderId !== uid && !senderIsAdmin) {
     throw new HttpsError('permission-denied', 'not-batch-owner');
   }

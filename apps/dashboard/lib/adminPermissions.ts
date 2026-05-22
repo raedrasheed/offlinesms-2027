@@ -18,7 +18,13 @@ export type AdminCapability =
   | 'manage:roles'
   | 'view:settings'
   | 'view:audit'
-  | 'view:communities';
+  | 'view:communities'
+  // Phase 15
+  | 'manage:wallets'
+  | 'manage:packages'
+  | 'retry:sms'
+  | 'manage:support'
+  | 'manage:settings';
 
 type RoleKey = AdminRole | 'legacy_admin' | 'bootstrap_admin';
 
@@ -31,6 +37,7 @@ const ROLE_CAPABILITIES: Record<RoleKey, readonly AdminCapability[]> = {
     'view:points', 'view:reports', 'view:support',
     'view:roles', 'manage:roles',
     'view:settings', 'view:audit', 'view:communities',
+    'manage:wallets', 'manage:packages', 'retry:sms', 'manage:support', 'manage:settings',
   ],
   organization_admin: [
     'view:overview', 'view:users',
@@ -38,14 +45,17 @@ const ROLE_CAPABILITIES: Record<RoleKey, readonly AdminCapability[]> = {
     'view:groups', 'manage:groups',
     'view:calls', 'view:sms', 'view:reports', 'view:support',
     'view:settings', 'view:communities',
+    'retry:sms',
   ],
   support_agent: [
     'view:overview', 'view:users', 'view:support',
     'view:sms',
+    'manage:support',
   ],
   finance_admin: [
     'view:overview', 'view:points', 'view:reports',
     'view:sms',
+    'manage:wallets', 'manage:packages',
   ],
   auditor: [
     'view:overview', 'view:reports', 'view:audit',
@@ -59,6 +69,7 @@ const ROLE_CAPABILITIES: Record<RoleKey, readonly AdminCapability[]> = {
     'view:points', 'view:reports', 'view:support',
     'view:roles', 'manage:roles',
     'view:settings', 'view:audit', 'view:communities',
+    'manage:wallets', 'manage:packages', 'retry:sms', 'manage:support', 'manage:settings',
   ],
   bootstrap_admin: [
     'view:overview', 'view:users', 'manage:users',
@@ -68,6 +79,7 @@ const ROLE_CAPABILITIES: Record<RoleKey, readonly AdminCapability[]> = {
     'view:points', 'view:reports', 'view:support',
     'view:roles', 'manage:roles',
     'view:settings', 'view:audit', 'view:communities',
+    'manage:wallets', 'manage:packages', 'retry:sms', 'manage:support', 'manage:settings',
   ],
 };
 

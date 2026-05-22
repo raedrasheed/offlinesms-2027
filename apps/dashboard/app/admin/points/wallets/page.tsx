@@ -6,11 +6,12 @@ import { canDo } from '@/lib/adminPermissions';
 import { listWallets } from '@/lib/adminData';
 import { PermissionState, EmptyState } from '@/components/state';
 import StatusBadge from '@/components/admin/StatusBadge';
+import WalletFreezeAction from './WalletFreezeAction';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-export default async function WalletsPage({ searchParams }: { searchParams?: { cursor?: string } }) {
+export default async function WalletsPage({ searchParams }: { searchParams?: { cursor?: string; status?: string } }) {
   const cookie = cookies().get('__session')?.value;
   const session = await verifySession(cookie);
   if (session.state !== 'authorized') redirect('/login?next=/admin/points/wallets');
@@ -18,12 +19,21 @@ export default async function WalletsPage({ searchParams }: { searchParams?: { c
     return <div className="p-8"><PermissionState title="Points access required" /></div>;
   }
 
+  const canFreeze = canDo(session.role, 'manage:wallets');
+  const statusFilter = searchParams?.status ?? '';
+
   let rows: Awaited<ReturnType<typeof listWallets>> = [];
   let fetchError: string | null = null;
-  try { rows = await listWallets(searchParams?.cursor); }
+  try { rows = await listWallets(searchParams?.cursor, statusFilter || undefined); }
   catch (e: any) { fetchError = e?.message ?? 'Failed to load wallets.'; }
 
   const nextCursor = rows.length === 50 ? rows[rows.length - 1].uid : null;
+
+  const STATUS_TABS = [
+    { label: 'All', value: '' },
+    { label: 'Active', value: 'active' },
+    { label: 'Frozen', value: 'frozen' },
+  ];
 
   return (
     <div className="p-7">
@@ -33,7 +43,26 @@ export default async function WalletsPage({ searchParams }: { searchParams?: { c
         <span className="text-sm font-semibold text-ink-900">Wallets</span>
       </div>
       <h1 className="text-xl font-extrabold tracking-tight text-ink-900 mb-1">Wallets</h1>
-      <p className="text-sm text-ink-500 mb-5">Read-only — no adjustment actions</p>
+      <p className="text-sm text-ink-500 mb-5">
+        {canFreeze ? 'Freeze or unfreeze wallets. Balance is never modified here.' : 'Read-only — no adjustment actions.'}
+      </p>
+
+      {/* Status tabs */}
+      <div className="flex gap-1 mb-5">
+        {STATUS_TABS.map(t => (
+          <a
+            key={t.value}
+            href={t.value ? `/admin/points/wallets?status=${t.value}` : '/admin/points/wallets'}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+              statusFilter === t.value
+                ? 'bg-primary text-white'
+                : 'bg-surface3 text-ink-600 hover:bg-ink-100'
+            }`}
+          >
+            {t.label}
+          </a>
+        ))}
+      </div>
 
       {fetchError ? (
         <div className="rounded-xl bg-red-50 border border-red-200 p-4 text-sm text-red-700">{fetchError}</div>
@@ -52,6 +81,7 @@ export default async function WalletsPage({ searchParams }: { searchParams?: { c
                 <th className="px-4 py-3 text-right">Available</th>
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3">Updated</th>
+                {canFreeze && <th className="px-4 py-3">Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -67,13 +97,21 @@ export default async function WalletsPage({ searchParams }: { searchParams?: { c
                   <td className="px-4 py-3 text-right font-mono text-xs text-emerald-700">{w.available}</td>
                   <td className="px-4 py-3"><StatusBadge status={w.status} /></td>
                   <td className="px-4 py-3 text-xs text-ink-500 whitespace-nowrap">{w.updatedAt}</td>
+                  {canFreeze && (
+                    <td className="px-4 py-3">
+                      <WalletFreezeAction uid={w.uid} currentStatus={w.status} />
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
           </table>
           {nextCursor && (
             <div className="px-4 py-3 border-t border-ink-100 text-center">
-              <Link href={`/admin/points/wallets?cursor=${nextCursor}` as any} className="text-sm text-primary font-semibold hover:underline">
+              <Link
+                href={`/admin/points/wallets?cursor=${nextCursor}${statusFilter ? `&status=${statusFilter}` : ''}` as any}
+                className="text-sm text-primary font-semibold hover:underline"
+              >
                 Load more →
               </Link>
             </div>
