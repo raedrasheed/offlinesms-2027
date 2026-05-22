@@ -41,9 +41,12 @@ export default async function OrgsAdminPage({
           <h1 className="text-xl font-extrabold tracking-tight text-ink-900">Organizations</h1>
           <p className="text-sm text-ink-500 mt-0.5">Read-only overview</p>
         </div>
-        <div className="text-xs text-ink-400 bg-surface3 border border-ink-100 rounded-lg px-3 py-2">
-          Write actions available in a later phase
-        </div>
+        {canDo(session.role, 'manage:organizations') && (
+          <Link href={'/admin/organizations/new' as any}
+            className="px-4 py-2 bg-primary text-white text-sm font-bold rounded-xl hover:bg-primary-dark transition">
+            + New organization
+          </Link>
+        )}
       </div>
 
       {fetchError ? (

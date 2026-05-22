@@ -62,7 +62,15 @@ export default async function OrgDetailPage({
           <h1 className="text-xl font-extrabold tracking-tight text-ink-900">{org.name}</h1>
           <p className="text-sm text-ink-500 font-mono">{org.slug}</p>
         </div>
-        <StatusBadge status={org.status} />
+        <div className="flex items-center gap-3">
+          <StatusBadge status={org.status} />
+          {canDo(session.role, 'manage:organizations') && (
+            <Link href={`/admin/organizations/${params.orgId}/edit` as any}
+              className="px-3 py-1.5 bg-primary text-white text-xs font-bold rounded-lg hover:bg-primary-dark transition">
+              Edit
+            </Link>
+          )}
+        </div>
       </div>
 
       {/* Tab bar */}

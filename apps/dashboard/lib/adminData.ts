@@ -386,3 +386,301 @@ export async function getCommunity(id: string): Promise<AdminCommunityRow | null
     createdAt:   safeDate(data.createdAt),
   };
 }
+
+// ─── SMS batches ──────────────────────────────────────────────────────────────
+
+export type AdminSmsBatchRow = {
+  id: string;
+  conversationId: string | null;
+  senderId: string | null;
+  audience: string | null;
+  status: string;
+  totalCount: number;
+  queuedCount: number;
+  sentCount: number;
+  deliveredCount: number;
+  failedCount: number;
+  skippedCount: number;
+  pointsCost: number;
+  attemptNumber: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AdminSmsBatchRecipientRow = {
+  uid: string;
+  displayName: string | null;
+  phone: string | null;   // raw — caller masks
+  appReceiptStatus: string | null;
+  smsStatus: string | null;
+  skipReason: string | null;
+  failureReason: string | null;
+  updatedAt: string;
+};
+
+type SmsBatchFilters = {
+  status?: string;
+  cursor?: string;
+};
+
+export async function listSmsBatches(filters: SmsBatchFilters = {}): Promise<AdminSmsBatchRow[]> {
+  let q = adminDb.collection('smsBatches').orderBy('createdAt', 'desc').limit(50);
+  if (filters.status) q = q.where('status', '==', filters.status) as typeof q;
+  if (filters.cursor) {
+    const snap = await adminDb.collection('smsBatches').doc(filters.cursor).get();
+    if (snap.exists) q = q.startAfter(snap);
+  }
+  const result = await q.get();
+  return result.docs.map(d => {
+    const data = d.data();
+    return {
+      id:             d.id,
+      conversationId: (data.conversationId as string | null) ?? null,
+      senderId:       (data.senderId as string | null) ?? null,
+      audience:       (data.audience as string | null) ?? null,
+      status:         (data.status as string) ?? 'unknown',
+      totalCount:     (data.totalCount as number) ?? 0,
+      queuedCount:    (data.queuedCount as number) ?? 0,
+      sentCount:      (data.sentCount as number) ?? 0,
+      deliveredCount: (data.deliveredCount as number) ?? 0,
+      failedCount:    (data.failedCount as number) ?? 0,
+      skippedCount:   (data.skippedCount as number) ?? 0,
+      pointsCost:     (data.pointsCost as number) ?? 0,
+      attemptNumber:  (data.attemptNumber as number) ?? 1,
+      createdAt:      safeDate(data.createdAt),
+      updatedAt:      safeDate(data.updatedAt),
+    };
+  });
+}
+
+export async function getSmsBatch(batchId: string): Promise<AdminSmsBatchRow | null> {
+  const snap = await adminDb.collection('smsBatches').doc(batchId).get();
+  if (!snap.exists) return null;
+  const data = snap.data()!;
+  return {
+    id:             snap.id,
+    conversationId: (data.conversationId as string | null) ?? null,
+    senderId:       (data.senderId as string | null) ?? null,
+    audience:       (data.audience as string | null) ?? null,
+    status:         (data.status as string) ?? 'unknown',
+    totalCount:     (data.totalCount as number) ?? 0,
+    queuedCount:    (data.queuedCount as number) ?? 0,
+    sentCount:      (data.sentCount as number) ?? 0,
+    deliveredCount: (data.deliveredCount as number) ?? 0,
+    failedCount:    (data.failedCount as number) ?? 0,
+    skippedCount:   (data.skippedCount as number) ?? 0,
+    pointsCost:     (data.pointsCost as number) ?? 0,
+    attemptNumber:  (data.attemptNumber as number) ?? 1,
+    createdAt:      safeDate(data.createdAt),
+    updatedAt:      safeDate(data.updatedAt),
+  };
+}
+
+export async function listSmsBatchRecipients(batchId: string, cursor?: string): Promise<AdminSmsBatchRecipientRow[]> {
+  let q = adminDb
+    .collection('smsBatches').doc(batchId)
+    .collection('recipients')
+    .orderBy('updatedAt', 'desc')
+    .limit(100);
+  if (cursor) {
+    const snap = await adminDb.collection('smsBatches').doc(batchId)
+      .collection('recipients').doc(cursor).get();
+    if (snap.exists) q = q.startAfter(snap);
+  }
+  const result = await q.get();
+  return result.docs.map(d => {
+    const data = d.data();
+    return {
+      uid:              d.id,
+      displayName:      (data.displayName as string | null) ?? null,
+      phone:            (data.phone as string | null) ?? null,       // raw — caller masks
+      appReceiptStatus: (data.appReceiptStatus as string | null) ?? null,
+      smsStatus:        (data.smsStatus as string | null) ?? null,
+      skipReason:       (data.skipReason as string | null) ?? null,
+      failureReason:    (data.gatewayErrorMessage as string | null) ?? null,
+      updatedAt:        safeDate(data.updatedAt),
+    };
+  });
+}
+
+// ─── Points / Wallets ─────────────────────────────────────────────────────────
+
+export type AdminWalletRow = {
+  uid: string;
+  balance: number;
+  reserved: number;
+  available: number;
+  status: string;
+  updatedAt: string;
+};
+
+export type AdminTransactionRow = {
+  id: string;
+  uid: string;
+  type: string;
+  direction: string | null;
+  amount: number;
+  status: string;
+  relatedBatchId: string | null;
+  relatedPaymentId: string | null;
+  createdAt: string;
+};
+
+export type AdminPaymentRow = {
+  id: string;
+  userId: string;
+  packageId: string | null;
+  totalPoints: number;
+  amount: number;
+  currency: string;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AdminPackageRow = {
+  id: string;
+  name: string;
+  points: number;
+  bonusPoints: number;
+  price: number;
+  currency: string;
+  status: string;
+  sortOrder: number;
+};
+
+export async function listWallets(cursor?: string): Promise<AdminWalletRow[]> {
+  let q = adminDb.collection('wallets').orderBy('updatedAt', 'desc').limit(50);
+  if (cursor) {
+    const snap = await adminDb.collection('wallets').doc(cursor).get();
+    if (snap.exists) q = q.startAfter(snap);
+  }
+  const result = await q.get();
+  return result.docs.map(d => {
+    const data = d.data();
+    const balance  = (data.balance  as number) ?? 0;
+    const reserved = (data.reserved as number) ?? 0;
+    return {
+      uid:       d.id,
+      balance,
+      reserved,
+      available: Math.max(0, balance - reserved),
+      status:    (data.status as string | null) ?? 'active',
+      updatedAt: safeDate(data.updatedAt),
+    };
+  });
+}
+
+export async function listTransactions(cursor?: string, uid?: string): Promise<AdminTransactionRow[]> {
+  let q = adminDb.collection('transactions').orderBy('createdAt', 'desc').limit(50) as FirebaseFirestore.Query;
+  if (uid) q = q.where('uid', '==', uid);
+  if (cursor) {
+    const snap = await adminDb.collection('transactions').doc(cursor).get();
+    if (snap.exists) q = q.startAfter(snap);
+  }
+  const result = await (q as any).get();
+  return result.docs.map((d: any) => {
+    const data = d.data();
+    return {
+      id:              d.id,
+      uid:             (data.uid as string) ?? '—',
+      type:            (data.type as string) ?? '—',
+      direction:       (data.direction as string | null) ?? null,
+      amount:          (data.amount as number) ?? 0,
+      status:          (data.status as string) ?? 'completed',
+      relatedBatchId:  (data.smsBatchId as string | null) ?? null,
+      relatedPaymentId:(data.paymentId as string | null) ?? null,
+      createdAt:       safeDate(data.createdAt),
+    };
+  });
+}
+
+export async function listPayments(cursor?: string): Promise<AdminPaymentRow[]> {
+  let q = adminDb.collection('payments').orderBy('createdAt', 'desc').limit(50);
+  if (cursor) {
+    const snap = await adminDb.collection('payments').doc(cursor).get();
+    if (snap.exists) q = q.startAfter(snap);
+  }
+  const result = await q.get();
+  return result.docs.map(d => {
+    const data = d.data();
+    return {
+      id:          d.id,
+      userId:      (data.userId as string) ?? '—',
+      packageId:   (data.packageId as string | null) ?? null,
+      totalPoints: (data.totalPoints as number) ?? 0,
+      amount:      (data.amount as number) ?? 0,
+      currency:    (data.currency as string) ?? '—',
+      status:      (data.status as string) ?? '—',
+      createdAt:   safeDate(data.createdAt),
+      updatedAt:   safeDate(data.updatedAt),
+    };
+  });
+}
+
+export async function listPointsPackages(): Promise<AdminPackageRow[]> {
+  const result = await adminDb.collection('pointsPackages').orderBy('sortOrder', 'asc').limit(50).get();
+  return result.docs.map(d => {
+    const data = d.data();
+    return {
+      id:          d.id,
+      name:        (data.name as string) ?? '—',
+      points:      (data.points as number) ?? 0,
+      bonusPoints: (data.bonusPoints as number) ?? 0,
+      price:       (data.price as number) ?? 0,
+      currency:    (data.currency as string) ?? '—',
+      status:      (data.status as string) ?? 'active',
+      sortOrder:   (data.sortOrder as number) ?? 0,
+    };
+  });
+}
+
+// ─── Admin users (roles page) ─────────────────────────────────────────────────
+
+export type AdminRoleUserRow = {
+  uid: string;
+  displayName: string | null;
+  email: string | null;    // raw — shown on roles page (admin-only)
+  role: string | null;
+  isLegacyAdmin: boolean;
+};
+
+export async function listAdminUsers(): Promise<AdminRoleUserRow[]> {
+  // Fetch all users from Firestore and then enrich with auth claims for role.
+  // We limit to 200 and filter client-side for those with admin claims.
+  // Auth.listUsers() would be more accurate but is slower; this is sufficient
+  // for a dashboard that shows ~10–50 admins.
+  const snap = await adminDb.collection('users').orderBy('createdAt', 'desc').limit(200).get();
+  const uids = snap.docs.map(d => d.id);
+
+  // Fetch auth records in parallel batches of 10.
+  const { getAuth } = await import('firebase-admin/auth');
+  const auth = getAuth();
+  const results: AdminRoleUserRow[] = [];
+
+  for (let i = 0; i < uids.length; i += 10) {
+    const batch = uids.slice(i, i + 10);
+    await Promise.all(batch.map(async uid => {
+      try {
+        const u = await auth.getUser(uid);
+        const claims = (u.customClaims ?? {}) as Record<string, unknown>;
+        const role = typeof claims.role === 'string' ? claims.role : null;
+        const isLegacyAdmin = claims.admin === true;
+        if (!role && !isLegacyAdmin) return;
+        const fsData = snap.docs.find(d => d.id === uid)?.data() ?? {};
+        results.push({
+          uid,
+          displayName: (fsData.displayName as string | null) ?? null,
+          email:       (u.email as string | null) ?? null,
+          role,
+          isLegacyAdmin,
+        });
+      } catch { /* user may have been deleted from Auth */ }
+    }));
+  }
+
+  return results.sort((a, b) => {
+    const order = ['super_admin', 'organization_admin', 'support_agent', 'finance_admin', 'auditor'];
+    return (order.indexOf(a.role ?? '') - order.indexOf(b.role ?? ''));
+  });
+}
