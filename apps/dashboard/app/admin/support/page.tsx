@@ -49,12 +49,21 @@ export default async function SupportPage({
   }
 
   const nextCursor = rows.length === 50 ? rows[rows.length - 1].id : null;
+  const canExport  = canDo(session.role, 'export:support');
+  const exportHref = `/admin/support/export${statusFilter ? `?status=${statusFilter}` : ''}${categoryFilter ? `${statusFilter ? '&' : '?'}category=${categoryFilter}` : ''}`;
 
   return (
     <div className="p-7">
-      <div className="mb-6">
-        <h1 className="text-xl font-extrabold tracking-tight text-ink-900">Support queue</h1>
-        <p className="text-sm text-ink-500 mt-0.5">{rows.length}{nextCursor ? '+' : ''} ticket{rows.length !== 1 ? 's' : ''}</p>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-xl font-extrabold tracking-tight text-ink-900">Support queue</h1>
+          <p className="text-sm text-ink-500 mt-0.5">{rows.length}{nextCursor ? '+' : ''} ticket{rows.length !== 1 ? 's' : ''}</p>
+        </div>
+        {canExport && (
+          <a href={exportHref} className="px-4 py-2 bg-surface3 border border-ink-200 text-ink-700 text-sm font-bold rounded-lg hover:bg-ink-100 transition">
+            Export CSV
+          </a>
+        )}
       </div>
 
       {/* Status tabs */}

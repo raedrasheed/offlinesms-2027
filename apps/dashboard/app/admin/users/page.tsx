@@ -1,15 +1,18 @@
 // Admin users list — server component.
 // Reads users via Admin SDK. Phones masked. Email shown to super/support roles.
+// Phase 17: adds status filter via FilterBar and Export CSV button.
 
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
+import { Suspense } from 'react';
 import { verifySession } from '@/lib/session';
 import { canDo } from '@/lib/adminPermissions';
 import { listUsers } from '@/lib/adminData';
 import { maskPhone, maskEmail } from '@/lib/redaction';
 import { PermissionState } from '@/components/state';
 import StatusBadge from '@/components/admin/StatusBadge';
+import FilterBar from '@/components/admin/FilterBar';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -17,7 +20,7 @@ export const runtime = 'nodejs';
 export default async function UsersAdminPage({
   searchParams,
 }: {
-  searchParams?: { cursor?: string };
+  searchParams?: { cursor?: string; status?: string };
 }) {
   const cookie = cookies().get('__session')?.value;
   const session = await verifySession(cookie);
@@ -26,24 +29,52 @@ export default async function UsersAdminPage({
     return <div className="p-8"><PermissionState title="Users access required" /></div>;
   }
 
+  const statusFilter = searchParams?.status ?? '';
+  const canExport    = canDo(session.role, 'export:users');
+
   let rows: Awaited<ReturnType<typeof listUsers>> = [];
   let fetchError: string | null = null;
   try {
-    rows = await listUsers(searchParams?.cursor);
+    rows = await listUsers(searchParams?.cursor, statusFilter || undefined);
   } catch (e: any) {
     fetchError = e?.message ?? 'Failed to load users.';
   }
 
   const nextCursor = rows.length === 50 ? rows[rows.length - 1].uid : null;
 
+  function buildExportHref() {
+    const p = new URLSearchParams();
+    if (statusFilter) p.set('status', statusFilter);
+    const qs = p.toString();
+    return `/admin/users/export${qs ? `?${qs}` : ''}`;
+  }
+
   return (
     <div className="p-7">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-extrabold tracking-tight text-ink-900">Users</h1>
-          <p className="text-sm text-ink-500 mt-0.5">{rows.length === 50 ? '50+ users' : `${rows.length} users`}</p>
+          <p className="text-sm text-ink-500 mt-0.5">{rows.length === 50 ? '50+ users' : `${rows.length} user${rows.length !== 1 ? 's' : ''}`}</p>
         </div>
+        {canExport && (
+          <a href={buildExportHref()} className="px-4 py-2 bg-surface3 border border-ink-200 text-ink-700 text-sm font-bold rounded-lg hover:bg-ink-100 transition">
+            Export CSV
+          </a>
+        )}
       </div>
+
+      <Suspense>
+        <FilterBar
+          searchPlaceholder="Search by username or UID in global search (⌘K)"
+          filters={[
+            { key: 'status', label: 'All statuses', options: [
+              { value: 'active',    label: 'Active' },
+              { value: 'inactive', label: 'Inactive' },
+              { value: 'suspended', label: 'Suspended' },
+            ]},
+          ]}
+        />
+      </Suspense>
 
       {fetchError ? (
         <div className="rounded-xl bg-red-50 border border-red-200 p-4 text-sm text-red-700">{fetchError}</div>
@@ -64,7 +95,7 @@ export default async function UsersAdminPage({
               {rows.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="px-4 py-12 text-center text-sm text-ink-500">
-                    No users yet.
+                    {statusFilter ? 'No users match the current filter.' : 'No users yet.'}
                   </td>
                 </tr>
               ) : rows.map((u, i) => (
@@ -97,7 +128,7 @@ export default async function UsersAdminPage({
           </table>
           {nextCursor && (
             <div className="px-4 py-3 border-t border-ink-100 text-center">
-              <Link href={`/admin/users?cursor=${nextCursor}` as any} className="text-sm text-primary font-semibold hover:underline">
+              <Link href={`/admin/users?cursor=${nextCursor}${statusFilter ? `&status=${statusFilter}` : ''}` as any} className="text-sm text-primary font-semibold hover:underline">
                 Load more →
               </Link>
             </div>

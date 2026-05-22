@@ -71,8 +71,9 @@ export type AdminAuditRow = {
 
 // ─── Users ───────────────────────────────────────────────────────────────────
 
-export async function listUsers(cursor?: string): Promise<AdminUserRow[]> {
-  let q = adminDb.collection('users').orderBy('createdAt', 'desc').limit(50);
+export async function listUsers(cursor?: string, status?: string): Promise<AdminUserRow[]> {
+  let q = adminDb.collection('users').orderBy('createdAt', 'desc').limit(50) as FirebaseFirestore.Query;
+  if (status) q = q.where('status', '==', status);
   if (cursor) {
     const snap = await adminDb.collection('users').doc(cursor).get();
     if (snap.exists) q = q.startAfter(snap);
@@ -262,12 +263,13 @@ export async function listOrgGroups(orgId: string): Promise<AdminGroupRow[]> {
 
 // ─── Groups ───────────────────────────────────────────────────────────────────
 
-export async function listGroups(cursor?: string): Promise<AdminGroupRow[]> {
+export async function listGroups(cursor?: string, status?: string): Promise<AdminGroupRow[]> {
   let q = adminDb
     .collection('conversations')
     .where('type', '==', 'group')
     .orderBy('createdAt', 'desc')
-    .limit(50);
+    .limit(50) as FirebaseFirestore.Query;
+  if (status) q = q.where('status', '==', status);
   if (cursor) {
     const snap = await adminDb.collection('conversations').doc(cursor).get();
     if (snap.exists) q = q.startAfter(snap);
@@ -588,9 +590,10 @@ export async function listWallets(cursor?: string, status?: string): Promise<Adm
   });
 }
 
-export async function listTransactions(cursor?: string, uid?: string): Promise<AdminTransactionRow[]> {
+export async function listTransactions(cursor?: string, uid?: string, type?: string): Promise<AdminTransactionRow[]> {
   let q = adminDb.collection('transactions').orderBy('createdAt', 'desc').limit(50) as FirebaseFirestore.Query;
-  if (uid) q = q.where('uid', '==', uid);
+  if (uid)  q = q.where('uid',  '==', uid);
+  if (type) q = q.where('type', '==', type);
   if (cursor) {
     const snap = await adminDb.collection('transactions').doc(cursor).get();
     if (snap.exists) q = q.startAfter(snap);
@@ -612,8 +615,9 @@ export async function listTransactions(cursor?: string, uid?: string): Promise<A
   });
 }
 
-export async function listPayments(cursor?: string): Promise<AdminPaymentRow[]> {
-  let q = adminDb.collection('payments').orderBy('createdAt', 'desc').limit(50);
+export async function listPayments(cursor?: string, status?: string): Promise<AdminPaymentRow[]> {
+  let q = adminDb.collection('payments').orderBy('createdAt', 'desc').limit(50) as FirebaseFirestore.Query;
+  if (status) q = q.where('status', '==', status);
   if (cursor) {
     const snap = await adminDb.collection('payments').doc(cursor).get();
     if (snap.exists) q = q.startAfter(snap);

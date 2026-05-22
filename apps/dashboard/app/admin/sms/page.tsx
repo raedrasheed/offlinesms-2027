@@ -1,4 +1,5 @@
 // Admin SMS batch list — server component. No SMS/message bodies shown.
+// Phase 17: Export CSV button for export:sms roles.
 
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
@@ -32,8 +33,10 @@ export default async function SmsAdminPage({
     fetchError = e?.message ?? 'Failed to load SMS batches.';
   }
 
-  const nextCursor = rows.length === 50 ? rows[rows.length - 1].id : null;
+  const nextCursor   = rows.length === 50 ? rows[rows.length - 1].id : null;
   const statusFilters = ['', 'sending', 'completed', 'failed', 'partial'];
+  const canExport    = canDo(session.role, 'export:sms');
+  const exportHref   = `/admin/sms/export${searchParams?.status ? `?status=${searchParams.status}` : ''}`;
 
   return (
     <div className="p-7">
@@ -42,6 +45,11 @@ export default async function SmsAdminPage({
           <h1 className="text-xl font-extrabold tracking-tight text-ink-900">SMS Gateway</h1>
           <p className="text-sm text-ink-500 mt-0.5">Batch history — no message bodies shown</p>
         </div>
+        {canExport && (
+          <a href={exportHref} className="px-4 py-2 bg-surface3 border border-ink-200 text-ink-700 text-sm font-bold rounded-lg hover:bg-ink-100 transition">
+            Export CSV
+          </a>
+        )}
       </div>
 
       {/* Status filter */}

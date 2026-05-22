@@ -27,7 +27,15 @@ export type AdminCapability =
   | 'manage:settings'
   // Phase 16
   | 'export:audit'
-  | 'view:moderation';
+  | 'view:moderation'
+  // Phase 17
+  | 'search:global'
+  | 'export:users'
+  | 'export:groups'
+  | 'export:sms'
+  | 'export:points'
+  | 'export:support'
+  | 'view:reports';
 
 type RoleKey = AdminRole | 'legacy_admin' | 'bootstrap_admin';
 
@@ -42,29 +50,34 @@ const ROLE_CAPABILITIES: Record<RoleKey, readonly AdminCapability[]> = {
     'view:settings', 'view:audit', 'view:communities',
     'manage:wallets', 'manage:packages', 'retry:sms', 'manage:support', 'manage:settings',
     'export:audit', 'view:moderation',
+    'search:global', 'export:users', 'export:groups', 'export:sms', 'export:points', 'export:support', 'view:reports',
   ],
   organization_admin: [
     'view:overview', 'view:users',
     'view:organizations', 'manage:organizations',
     'view:groups', 'manage:groups',
-    'view:calls', 'view:sms', 'view:reports', 'view:support',
+    'view:calls', 'view:sms', 'view:support',
     'view:settings', 'view:communities',
     'retry:sms',
+    'search:global', 'export:groups', 'export:sms', 'view:reports',
   ],
   support_agent: [
     'view:overview', 'view:users', 'view:support',
     'view:sms',
     'manage:support', 'view:moderation',
+    'search:global', 'export:support',
   ],
   finance_admin: [
-    'view:overview', 'view:points', 'view:reports',
+    'view:overview', 'view:points',
     'view:sms',
     'manage:wallets', 'manage:packages',
+    'search:global', 'export:points', 'view:reports',
   ],
   auditor: [
-    'view:overview', 'view:reports', 'view:audit',
+    'view:overview', 'view:audit',
     'view:sms', 'view:points',
     'export:audit', 'view:moderation',
+    'search:global', 'export:users', 'export:groups', 'export:sms', 'export:points', 'export:support', 'view:reports',
   ],
   legacy_admin: [
     'view:overview', 'view:users', 'manage:users',
@@ -76,6 +89,7 @@ const ROLE_CAPABILITIES: Record<RoleKey, readonly AdminCapability[]> = {
     'view:settings', 'view:audit', 'view:communities',
     'manage:wallets', 'manage:packages', 'retry:sms', 'manage:support', 'manage:settings',
     'export:audit', 'view:moderation',
+    'search:global', 'export:users', 'export:groups', 'export:sms', 'export:points', 'export:support', 'view:reports',
   ],
   bootstrap_admin: [
     'view:overview', 'view:users', 'manage:users',
@@ -87,6 +101,7 @@ const ROLE_CAPABILITIES: Record<RoleKey, readonly AdminCapability[]> = {
     'view:settings', 'view:audit', 'view:communities',
     'manage:wallets', 'manage:packages', 'retry:sms', 'manage:support', 'manage:settings',
     'export:audit', 'view:moderation',
+    'search:global', 'export:users', 'export:groups', 'export:sms', 'export:points', 'export:support', 'view:reports',
   ],
 };
 

@@ -1,16 +1,25 @@
+// Admin payments — server component.
+// Phase 17: adds status filter via FilterBar and Export CSV button.
+
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
+import { Suspense } from 'react';
 import { verifySession } from '@/lib/session';
 import { canDo } from '@/lib/adminPermissions';
 import { listPayments } from '@/lib/adminData';
 import { PermissionState, EmptyState } from '@/components/state';
 import StatusBadge from '@/components/admin/StatusBadge';
+import FilterBar from '@/components/admin/FilterBar';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-export default async function PaymentsPage({ searchParams }: { searchParams?: { cursor?: string } }) {
+export default async function PaymentsPage({
+  searchParams,
+}: {
+  searchParams?: { cursor?: string; status?: string };
+}) {
   const cookie = cookies().get('__session')?.value;
   const session = await verifySession(cookie);
   if (session.state !== 'authorized') redirect('/login?next=/admin/points/payments');
@@ -18,12 +27,22 @@ export default async function PaymentsPage({ searchParams }: { searchParams?: { 
     return <div className="p-8"><PermissionState title="Points access required" /></div>;
   }
 
+  const statusFilter = searchParams?.status ?? '';
+  const canExport    = canDo(session.role, 'export:points');
+
   let rows: Awaited<ReturnType<typeof listPayments>> = [];
   let fetchError: string | null = null;
-  try { rows = await listPayments(searchParams?.cursor); }
+  try { rows = await listPayments(searchParams?.cursor, statusFilter || undefined); }
   catch (e: any) { fetchError = e?.message ?? 'Failed to load payments.'; }
 
   const nextCursor = rows.length === 50 ? rows[rows.length - 1].id : null;
+
+  function buildExportHref() {
+    const p = new URLSearchParams();
+    if (statusFilter) p.set('status', statusFilter);
+    const qs = p.toString();
+    return `/admin/points/payments/export${qs ? `?${qs}` : ''}`;
+  }
 
   return (
     <div className="p-7">
@@ -31,14 +50,33 @@ export default async function PaymentsPage({ searchParams }: { searchParams?: { 
         <Link href={'/admin/points' as any} className="text-sm text-ink-500 hover:text-ink-900">← Points</Link>
         <span className="text-ink-300">/</span>
         <span className="text-sm font-semibold text-ink-900">Payments</span>
+        {canExport && (
+          <a href={buildExportHref()} className="ml-auto px-4 py-2 bg-surface3 border border-ink-200 text-ink-700 text-sm font-bold rounded-lg hover:bg-ink-100 transition">
+            Export CSV
+          </a>
+        )}
       </div>
       <h1 className="text-xl font-extrabold tracking-tight text-ink-900 mb-1">Payments</h1>
       <p className="text-sm text-ink-500 mb-5">Read-only payment records — no refund actions</p>
 
+      <Suspense>
+        <FilterBar
+          searchPlaceholder="Search by payment ID in global search (⌘K)"
+          filters={[
+            { key: 'status', label: 'All statuses', options: [
+              { value: 'pending',   label: 'Pending' },
+              { value: 'completed', label: 'Completed' },
+              { value: 'failed',    label: 'Failed' },
+              { value: 'refunded',  label: 'Refunded' },
+            ]},
+          ]}
+        />
+      </Suspense>
+
       {fetchError ? (
         <div className="rounded-xl bg-red-50 border border-red-200 p-4 text-sm text-red-700">{fetchError}</div>
       ) : rows.length === 0 ? (
-        <div className="rounded-xl border border-ink-100 bg-white p-12"><EmptyState title="No payments yet" /></div>
+        <div className="rounded-xl border border-ink-100 bg-white p-12"><EmptyState title={statusFilter ? 'No payments match the current filter.' : 'No payments yet'} /></div>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-ink-100 bg-white">
           <table className="w-full text-sm border-collapse">
@@ -73,7 +111,7 @@ export default async function PaymentsPage({ searchParams }: { searchParams?: { 
           </table>
           {nextCursor && (
             <div className="px-4 py-3 border-t border-ink-100 text-center">
-              <Link href={`/admin/points/payments?cursor=${nextCursor}` as any} className="text-sm text-primary font-semibold hover:underline">Load more →</Link>
+              <Link href={`/admin/points/payments?cursor=${nextCursor}${statusFilter ? `&status=${statusFilter}` : ''}` as any} className="text-sm text-primary font-semibold hover:underline">Load more →</Link>
             </div>
           )}
         </div>
