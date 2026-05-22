@@ -1,6 +1,7 @@
 'use client';
 
 import { Suspense, useState } from 'react';
+import Image from 'next/image';
 import { signInWithEmailAndPassword, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -55,7 +56,7 @@ function LoginForm() {
   return (
     <form onSubmit={signIn} className="bg-white rounded-2xl shadow-sh3 p-8 w-[380px]">
       <div className="flex items-center gap-3 mb-6">
-        <span className="brand-mark"/>
+        <Image src="/logo.png" alt="OfflineSMS" width={32} height={32} className="rounded-lg" />
         <span className="font-extrabold text-xl tracking-tight">Offline<span className="text-primary">SMS</span></span>
       </div>
       <h1 className="text-2xl font-extrabold tracking-tight">Sign in</h1>
