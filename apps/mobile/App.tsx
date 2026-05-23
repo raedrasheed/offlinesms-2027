@@ -3,6 +3,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { auth, db } from './src/lib/firebase';
@@ -61,9 +62,27 @@ function OnboardingFlow() {
   );
 }
 
+const TAB_ICONS: Record<string, { active: keyof typeof Ionicons.glyphMap; inactive: keyof typeof Ionicons.glyphMap }> = {
+  Chats:    { active: 'chatbubbles',       inactive: 'chatbubbles-outline' },
+  Status:   { active: 'radio',             inactive: 'radio-outline' },
+  Calls:    { active: 'call',              inactive: 'call-outline' },
+  Settings: { active: 'settings',          inactive: 'settings-outline' },
+};
+
 function MainTabs() {
   return (
-    <Tabs.Navigator screenOptions={{ headerShown: false }}>
+    <Tabs.Navigator
+      screenOptions={({ route }) => ({
+        headerShown: false,
+        tabBarActiveTintColor:   '#1F7BA8',
+        tabBarInactiveTintColor: '#6B7488',
+        tabBarIcon: ({ focused, color, size }) => {
+          const set = TAB_ICONS[route.name];
+          const name = focused ? set.active : set.inactive;
+          return <Ionicons name={name} size={size ?? 22} color={color} />;
+        },
+      })}
+    >
       <Tabs.Screen name="Chats" component={ChatsList} />
       <Tabs.Screen name="Status" component={Status} />
       <Tabs.Screen name="Calls" component={Calls} />

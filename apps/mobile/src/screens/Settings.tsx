@@ -5,7 +5,7 @@
 
 import { useEffect, useState } from 'react';
 import {
-  View, Text, Pressable, Switch, StyleSheet, Alert,
+  View, Text, Pressable, Switch, StyleSheet, Alert, ScrollView,
   I18nManager,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
@@ -98,7 +98,11 @@ export default function Settings({ navigation }: any) {
   const s = buildStyles(colors, isRTL);
 
   return (
-    <View style={s.root} accessibilityLabel={t('settings.title')} accessible={false}>
+    <ScrollView
+      style={s.root}
+      contentContainerStyle={s.content}
+      accessibilityLabel={t('settings.title')}
+    >
 
       {/* Profile */}
       <Pressable
@@ -267,7 +271,7 @@ export default function Settings({ navigation }: any) {
 
       {/* Sign out */}
       <Pressable
-        style={[s.row, s.signOut]}
+        style={s.row}
         onPress={() => signOut()}
         accessible={true}
         accessibilityRole="button"
@@ -275,19 +279,19 @@ export default function Settings({ navigation }: any) {
       >
         <Text style={[s.title, { color: colors.state.error }]}>{t('settings.signOut')}</Text>
       </Pressable>
-    </View>
+    </ScrollView>
   );
 }
 
 function buildStyles(colors: any, rtl: boolean) {
   return StyleSheet.create({
-    root:         { flex: 1, padding: 14, backgroundColor: colors.background.app, gap: 8 },
-    row:          { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', padding: 14, backgroundColor: colors.background.surface, borderRadius: radius.md, gap: 10, minHeight: 52 },
-    toggleRow:    { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', padding: 14, backgroundColor: colors.background.surface, borderRadius: radius.md, gap: 12, minHeight: 52 },
-    title:        { fontSize: 14, fontWeight: '700', color: colors.text.primary, flex: 1, textAlign: rtl ? 'right' : 'left' },
-    sub:          { fontSize: 12, color: colors.text.muted, marginTop: 2, textAlign: rtl ? 'right' : 'left' },
+    root:         { flex: 1, backgroundColor: colors.background.app },
+    content:      { padding: 14, paddingBottom: 96, gap: 8 },
+    row:          { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', paddingVertical: 16, paddingHorizontal: 14, backgroundColor: colors.background.surface, borderRadius: radius.md, gap: 10 },
+    toggleRow:    { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', paddingVertical: 16, paddingHorizontal: 14, backgroundColor: colors.background.surface, borderRadius: radius.md, gap: 12 },
+    title:        { fontSize: 14, fontWeight: '700', color: colors.text.primary, flex: 1, textAlign: rtl ? 'right' : 'left', lineHeight: 20 },
+    sub:          { fontSize: 12, color: colors.text.muted, marginTop: 2, textAlign: rtl ? 'right' : 'left', lineHeight: 16 },
     chev:         { fontSize: 18, color: colors.text.disabled, fontWeight: '700' },
-    signOut:      { marginTop: 'auto' },
     section:      { backgroundColor: colors.background.surface, borderRadius: radius.md, padding: 14 },
     sectionLabel: { fontSize: 12, fontWeight: '700', color: colors.text.muted, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5, textAlign: rtl ? 'right' : 'left' },
     chipRow:      { flexDirection: rtl ? 'row-reverse' : 'row', gap: 8, flexWrap: 'wrap' },

@@ -160,8 +160,16 @@ export function subscribeConversations(
     orderBy('updatedAt', 'desc'),
     limit(50),
   );
-  return onSnapshot(q, snap =>
-    cb(snap.docs.map(d => ({ id: d.id, ...d.data() }) as Conversation))
+  return onSnapshot(
+    q,
+    snap => cb(snap.docs.map(d => ({ id: d.id, ...d.data() }) as Conversation)),
+    err => {
+      // Don't leave the UI hung on a permanent loader: surface the empty
+      // state so the user sees something actionable, and log the cause.
+      // eslint-disable-next-line no-console
+      console.warn('subscribeConversations error:', err?.code ?? err?.message ?? err);
+      cb([]);
+    },
   );
 }
 
