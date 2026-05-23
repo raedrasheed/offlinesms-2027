@@ -22,10 +22,12 @@ import {
   ReplyTo,
   UserState,
 } from '../lib/conversations';
+import { Ionicons } from '@expo/vector-icons';
 import { MessageBubble } from '../components/MessageBubble';
 import { useTheme } from '../context/ThemeContext';
 import { isRTL } from '../i18n';
 import { LoadingState, EmptyState, ErrorState } from '../components/state';
+import { avatarColor, initials } from '../lib/avatar';
 
 type ComposerGate =
   | { kind: 'allowed' }
@@ -64,6 +66,8 @@ export default function Conversation({ route, navigation }: any) {
 
   const [convo, setConvo] = useState<ConversationDoc | null | undefined>(undefined);
   const [peerName, setPeerName] = useState<string>('Chat');
+  const [peerUsername, setPeerUsername] = useState<string | null>(null);
+  const [peerUid, setPeerUid] = useState<string | null>(null);
   const [peerTyping, setPeerTyping] = useState(false);
   const [myRole, setMyRole] = useState<GroupRole | null>(null);
   const [memberStatus, setMemberStatus] = useState<'active' | 'removed' | 'left' | 'unknown'>('unknown');
@@ -113,9 +117,11 @@ export default function Conversation({ route, navigation }: any) {
     if (convo.type === 'group') { setPeerName(convo.name ?? 'Group'); return; }
     const peers = (convo.participantUids ?? convo.memberIds ?? []).filter(u => u !== me);
     if (!peers[0]) return;
+    setPeerUid(peers[0]);
     return onSnapshot(doc(db, 'users', peers[0]), userSnap => {
       const u = userSnap.data() as { displayName?: string; username?: string } | undefined;
       setPeerName(u?.displayName ?? (u?.username ? `@${u.username}` : 'Chat'));
+      setPeerUsername(u?.username ?? null);
     });
   }, [convo, me]);
 
@@ -236,11 +242,18 @@ export default function Conversation({ route, navigation }: any) {
   const body = useMemo(() => {
     if (visibleMsgs === null) return <LoadingState fullPage title="Loading messages…" />;
     if (visibleMsgs.length === 0) return (
-      <EmptyState
-        fullPage
-        title="Say hello"
-        description="Send the first message to start the conversation."
-      />
+      <View style={s.emptyConvo}>
+        <View style={[s.emptyAvatar, { backgroundColor: avatarColor(peerUid ?? peerName) }]}>
+          <Text style={s.emptyAvatarText}>{initials(peerName)}</Text>
+        </View>
+        <Text style={s.emptyName}>{peerName}</Text>
+        {peerUsername ? <Text style={s.emptyHandle}>@{peerUsername}</Text> : null}
+        <View style={s.e2eNotice}>
+          <Ionicons name="lock-closed" size={12} color={colors.text.muted} />
+          <Text style={s.e2eText}>Messages here are end-to-end encrypted</Text>
+        </View>
+        <Text style={s.emptyNudge}>Say hi — your first message will start the chat.</Text>
+      </View>
     );
     return (
       <FlatList
@@ -404,6 +417,14 @@ export default function Conversation({ route, navigation }: any) {
 function buildStyles(colors: any, rtl: boolean) {
   return StyleSheet.create({
     root:     { flex: 1, backgroundColor: colors.background.subtle },
+    emptyConvo:    { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40, gap: 6 },
+    emptyAvatar:   { width: 96, height: 96, borderRadius: 48, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
+    emptyAvatarText:{ color: '#fff', fontSize: 34, fontWeight: '800' },
+    emptyName:     { fontSize: 20, fontWeight: '800', color: colors.text.primary, textAlign: 'center' },
+    emptyHandle:   { fontSize: 13, color: colors.text.muted, textAlign: 'center' },
+    e2eNotice:     { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.background.subtle, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, marginTop: 16 },
+    e2eText:       { fontSize: 12, color: colors.text.muted },
+    emptyNudge:    { fontSize: 13, color: colors.text.muted, textAlign: 'center', marginTop: 14, lineHeight: 19 },
     header:   { paddingTop: 50, paddingBottom: 12, paddingHorizontal: 14, backgroundColor: colors.background.surface, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 12, borderBottomWidth: 1, borderColor: colors.border.subtle },
     back:     { fontSize: 24, color: colors.action.primary, minWidth: 32, textAlign: 'center' },
     title:    { fontSize: 15, fontWeight: '700', color: colors.text.primary, textAlign: rtl ? 'right' : 'left' },
