@@ -16,6 +16,7 @@ import {
 import { useTheme } from '../context/ThemeContext';
 import { isRTL } from '../i18n';
 import { radius } from '../theme';
+import { avatarColor, initials } from '../lib/avatar';
 import { LoadingState, EmptyState } from '../components/state';
 
 type Filter = 'all' | 'unread' | 'favorites' | 'groups' | 'archived';
@@ -44,6 +45,7 @@ export default function ChatsList({ navigation }: any) {
   const [rows, setRows] = useState<Conversation[] | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
   const [search, setSearch] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
 
   // Per-conversation state + typing + peer profile, keyed by conversation id.
   const [states, setStates]   = useState<Record<string, UserState | undefined>>({});
@@ -136,16 +138,29 @@ export default function ChatsList({ navigation }: any) {
   return (
     <View style={s.root}>
       <View style={s.header}>
-        <Text style={s.h1}>{t('chats.title')}</Text>
-        <TextInput
-          style={s.search}
-          placeholder={t('chats.search')}
-          value={search}
-          onChangeText={setSearch}
-          autoCapitalize="none"
-          textAlign={isRTL ? 'right' : 'left'}
-          accessibilityLabel={t('chats.search')}
-        />
+        <View style={s.titleRow}>
+          <Text style={s.h1}>{t('chats.title')}</Text>
+          <Pressable
+            onPress={() => { setSearchOpen(o => { if (o) setSearch(''); return !o; }); }}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel={t('chats.search')}
+          >
+            <Ionicons name={searchOpen ? 'close' : 'search'} size={22} color={colors.text.primary} />
+          </Pressable>
+        </View>
+        {searchOpen ? (
+          <TextInput
+            style={s.search}
+            placeholder={t('chats.search')}
+            value={search}
+            onChangeText={setSearch}
+            autoCapitalize="none"
+            autoFocus
+            textAlign={isRTL ? 'right' : 'left'}
+            accessibilityLabel={t('chats.search')}
+          />
+        ) : null}
         <View style={s.chips}>
           {(['all','unread','favorites','groups','archived'] as Filter[]).map(f => (
             <Pressable
@@ -183,7 +198,7 @@ export default function ChatsList({ navigation }: any) {
         <FlatList
           data={filtered}
           keyExtractor={r => r.id}
-          contentContainerStyle={{ padding: 12, paddingBottom: 96 }}
+          contentContainerStyle={{ paddingTop: 4, paddingBottom: 96 }}
           renderItem={({ item }) => (
             <Pressable
               style={s.row}
@@ -192,8 +207,11 @@ export default function ChatsList({ navigation }: any) {
               accessibilityRole="button"
               accessibilityLabel={`${item.peerName}${(item.state?.unreadCount ?? 0) > 0 ? `, ${item.state?.unreadCount} unread` : ''}`}
             >
-              <View style={s.av} accessibilityElementsHidden>
-                <Text style={s.avText}>{(item.peerName ?? '?').slice(0, 1).toUpperCase()}</Text>
+              <View style={s.avWrap} accessibilityElementsHidden>
+                <View style={[s.av, item.type === 'group' && s.avGroup, { backgroundColor: avatarColor(item.id) }]}>
+                  <Text style={s.avText}>{initials(item.peerName ?? '?')}</Text>
+                </View>
+                {item.type !== 'group' ? <View style={s.onlineDot} /> : null}
               </View>
               <View style={{ flex: 1, minWidth: 0 }}>
                 <View style={s.rowTop}>
@@ -254,27 +272,31 @@ export default function ChatsList({ navigation }: any) {
 function buildStyles(colors: any, rtl: boolean) {
   return StyleSheet.create({
     root:        { flex: 1, backgroundColor: colors.background.app },
-    header:      { padding: 14, paddingTop: 50, backgroundColor: colors.background.surface, borderBottomWidth: 1, borderColor: colors.border.subtle, gap: 10 },
-    h1:          { fontSize: 24, fontWeight: '800', color: colors.text.primary, textAlign: rtl ? 'right' : 'left' },
-    search:      { padding: 10, backgroundColor: colors.background.subtle, borderRadius: radius.md, fontSize: 14, color: colors.text.primary },
+    header:      { padding: 14, paddingTop: 50, backgroundColor: colors.background.app, gap: 12 },
+    titleRow:    { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', justifyContent: 'space-between' },
+    h1:          { fontSize: 26, fontWeight: '800', color: colors.text.primary, textAlign: rtl ? 'right' : 'left' },
+    search:      { padding: 12, backgroundColor: colors.background.subtle, borderRadius: radius.md, fontSize: 14, color: colors.text.primary },
     chips:       { flexDirection: rtl ? 'row-reverse' : 'row', gap: 8, flexWrap: 'wrap' },
-    chip:        { paddingHorizontal: 12, paddingVertical: 6, borderRadius: radius.pill, backgroundColor: colors.background.subtle, borderWidth: 1, borderColor: colors.border.default, minHeight: 32 },
-    chipActive:  { backgroundColor: colors.action.primary, borderColor: colors.action.primary },
-    chipText:    { fontSize: 12, color: colors.text.secondary, fontWeight: '600' },
+    chip:        { paddingHorizontal: 16, paddingVertical: 7, borderRadius: radius.pill, backgroundColor: colors.background.surface, minHeight: 32 },
+    chipActive:  { backgroundColor: colors.action.primary },
+    chipText:    { fontSize: 13, color: colors.text.secondary, fontWeight: '700' },
     chipTextActive: { color: colors.action.primaryFg },
-    row:         { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 12, padding: 12, borderRadius: radius.md, marginBottom: 6, backgroundColor: colors.background.surface, borderWidth: 1, borderColor: colors.border.subtle },
-    av:          { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.action.primary, alignItems: 'center', justifyContent: 'center' },
-    avText:      { color: colors.action.primaryFg, fontWeight: '700' },
+    row:         { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 14, paddingVertical: 12, paddingHorizontal: 16 },
+    avWrap:      { width: 52, height: 52 },
+    av:          { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
+    avGroup:     { borderRadius: 18 },
+    avText:      { color: '#fff', fontWeight: '800', fontSize: 17 },
+    onlineDot:   { position: 'absolute', bottom: 1, right: rtl ? undefined : 1, left: rtl ? 1 : undefined, width: 15, height: 15, borderRadius: 8, backgroundColor: '#22C55E', borderWidth: 2.5, borderColor: colors.background.app },
     rowTop:      { flexDirection: rtl ? 'row-reverse' : 'row', justifyContent: 'space-between', alignItems: 'center', gap: 6 },
     rowBot:      { flexDirection: rtl ? 'row-reverse' : 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 2, gap: 6 },
-    name:        { fontSize: 14, fontWeight: '700', color: colors.text.primary, flex: 1, textAlign: rtl ? 'right' : 'left' },
-    time:        { fontSize: 11, color: colors.text.muted, writingDirection: 'ltr' },
-    preview:     { fontSize: 12, color: colors.text.muted, flex: 1, textAlign: rtl ? 'right' : 'left' },
+    name:        { fontSize: 16, fontWeight: '800', color: colors.text.primary, flex: 1, textAlign: rtl ? 'right' : 'left' },
+    time:        { fontSize: 12, color: colors.text.muted, writingDirection: 'ltr' },
+    preview:     { fontSize: 14, color: colors.text.muted, flex: 1, textAlign: rtl ? 'right' : 'left' },
     badges:      { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 4 },
     tag:         { fontSize: 12 },
     unread:      { minWidth: 20, height: 20, paddingHorizontal: 6, borderRadius: 10, backgroundColor: colors.action.primary, alignItems: 'center', justifyContent: 'center' },
     unreadText:  { color: colors.action.primaryFg, fontSize: 11, fontWeight: '800' },
-    fab:         { position: 'absolute', right: 18, bottom: 22, width: 56, height: 56, borderRadius: 28, backgroundColor: colors.action.primary, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 8, elevation: 6 },
+    fab:         { position: 'absolute', right: 18, bottom: 22, width: 60, height: 60, borderRadius: 20, backgroundColor: colors.action.primary, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 6 },
     fabText:     { color: colors.action.primaryFg, fontSize: 28, fontWeight: '700', marginTop: -2 },
   });
 }
