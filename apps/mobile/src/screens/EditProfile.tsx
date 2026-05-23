@@ -3,7 +3,6 @@ import {
   View, Text, TextInput, Pressable, StyleSheet, KeyboardAvoidingView, Platform, ScrollView, Alert, Image, SafeAreaView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { colors, radius } from '../theme';
@@ -51,13 +50,25 @@ export default function EditProfile({ navigation }: any) {
   const canSubmit = displayNameOk && usernameCheck === 'ok' && !busy && !uploading;
 
   async function pickAvatar() {
+    // Loaded lazily so a missing/unlinked native module can't blank the
+    // whole screen on open — username editing must always work.
+    let ImagePicker: any;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      ImagePicker = require('expo-image-picker');
+    } catch {
+      Alert.alert('Unavailable', 'Photo picker isn’t available in this build.');
+      return;
+    }
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) {
       Alert.alert('Permission needed', 'Allow photo access to set a profile picture.');
       return;
     }
+    const mediaTypes =
+      (ImagePicker as any).MediaTypeOptions?.Images ?? (ImagePicker as any).MediaType?.Images ?? 'images';
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes,
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.7,
