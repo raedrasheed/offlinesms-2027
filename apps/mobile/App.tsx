@@ -21,6 +21,7 @@ import CreatePin from './src/screens/CreatePin';
 import Permissions from './src/screens/Permissions';
 import FindFriends from './src/screens/FindFriends';
 import IncomingCall from './src/screens/IncomingCall';
+import { ErrorBoundary } from './src/components/ErrorBoundary';
 import ChatsList from './src/screens/ChatsList';
 import Conversation from './src/screens/Conversation';
 import NewChat from './src/screens/NewChat';
@@ -124,6 +125,7 @@ export default function App() {
   return (
     <ThemeProvider userPreference={userTheme}>
     <SafeAreaProvider>
+      <ErrorBoundary>
       <NavigationContainer>
         {!user ? (
           <AuthFlow />
@@ -156,6 +158,7 @@ export default function App() {
           </RootStack.Navigator>
         )}
       </NavigationContainer>
+      </ErrorBoundary>
     </SafeAreaProvider>
     </ThemeProvider>
   );
