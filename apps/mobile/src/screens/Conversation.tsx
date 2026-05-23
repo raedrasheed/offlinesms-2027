@@ -233,6 +233,8 @@ export default function Conversation({ route, navigation }: any) {
     }
   }
 
+  const s = buildStyles(colors, isRTL);
+
   const headerSubtitle = useMemo(() => {
     if (peerTyping) return 'typing…';
     if (!isGroup) return null;
@@ -295,8 +297,6 @@ export default function Conversation({ route, navigation }: any) {
       />
     );
   }, [visibleMsgs, me, isGroup, id, myRoleIsAdmin, starred, convo?.pinnedMessage]);
-
-  const s = buildStyles(colors, isRTL);
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.root}>
