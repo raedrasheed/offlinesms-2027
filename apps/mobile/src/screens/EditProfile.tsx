@@ -22,7 +22,6 @@ function initials(name: string): string {
 
 export default function EditProfile({ navigation }: any) {
   const me = auth.currentUser?.uid;
-  const [loading, setLoading]         = useState(true);
   const [displayName, setDisplayName] = useState('');
   const [usernameRaw, setUsernameRaw] = useState('');
   const [photoURL, setPhotoURL]       = useState<string | null>(null);
@@ -32,13 +31,15 @@ export default function EditProfile({ navigation }: any) {
 
   useEffect(() => {
     if (!me) return;
+    // Pre-fill from the auth profile immediately so the form is never blank
+    // even if the Firestore snapshot is slow or errors.
+    if (auth.currentUser?.displayName) setDisplayName(auth.currentUser.displayName);
     return subscribeMe(me, m => {
       if (m) {
         setDisplayName(m.displayName ?? '');
         setUsernameRaw(m.username ?? '');
         setPhotoURL(m.photoURL ?? null);
       }
-      setLoading(false);
     });
   }, [me]);
 
@@ -105,8 +106,6 @@ export default function EditProfile({ navigation }: any) {
       setBusy(false);
     }
   }
-
-  if (loading) return <View style={s.root} />;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
