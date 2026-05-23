@@ -223,9 +223,18 @@ service cloud.firestore {
     // callables (which use Admin SDK) own most updates.
     // ════════════════════════════════════════════════════════════
     match /conversations/{convoId} {
-      allow read:   if isMember(convoId)
+      // `get` (single doc) can safely use the members-subcollection lookup.
+      allow get:    if isMember(convoId)
                        || isConversationParticipant(convoId)
                        || isAdmin();
+      // `list` (queries) must decide from the document's own data — cross-
+      // document get()/exists() lookups are unreliable for query auth, which
+      // caused "permission-denied" on the participant-scoped chats query.
+      allow list:   if isAuthed() && (
+                          (('participantUids' in resource.data) && request.auth.uid in resource.data.participantUids)
+                          || (('memberIds' in resource.data) && request.auth.uid in resource.data.memberIds)
+                          || isAdmin()
+                       );
       allow create: if isAuthed()
                        && isConversationParticipantData(request.resource.data)
                        && (!isGroupTypeData(request.resource.data) || safeGroupConversationCreate());
