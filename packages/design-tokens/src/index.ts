@@ -2,42 +2,8 @@
 // Single source of truth for color, type, spacing, radius, shadow.
 // Consumed by both the mobile (RN) app and the Next.js dashboard.
 
-export const colors = {
-  primary:        '#1F7BA8',
-  primaryDark:    '#155E83',
-  primaryHover:   '#186E97',
-  primaryTint:    '#C9E0EC',
-  primaryLight:   '#E6F1F7',
-  primarySoft:    '#F4F9FC',
-  primaryGrad:    'linear-gradient(135deg, #1F7BA8 0%, #155E83 100%)',
-
-  ink:            '#0B1220',
-  ink800:         '#16223A',
-  ink700:         '#2A3650',
-  ink600:         '#475067',
-  ink500:         '#6B7488',
-  ink400:         '#98A0B3',
-  ink300:         '#C7CCD7',
-  ink200:         '#E2E5EC',
-  ink100:         '#EEF0F4',
-
-  bgCanvas:       '#EEF1F6',
-  surface:        '#FFFFFF',
-  surface2:       '#F7F8FB',
-  surface3:       '#EFF2F7',
-  surfaceSunken:  '#F1F3F8',
-
-  ok:             '#22C55E',
-  warn:           '#F59E0B',
-  err:            '#EF4444',
-  online:         '#22C55E',
-
-  // Dark mode
-  darkBg:         '#0A0F1C',
-  darkSurface:    '#131A2C',
-  darkSurface2:   '#18203A',
-  darkInk:        '#F2F4FA',
-} as const;
+export { colors } from './colors';
+import { colors } from './colors';
 
 export const typography = {
   fontFamily: {
@@ -82,5 +48,13 @@ export const shadows = {
   shApp: '0 24px 80px -20px rgba(15,23,42,.18), 0 8px 24px -8px rgba(15,23,42,.08)',
 } as const;
 
-export const tokens = { colors, typography, spacing, radius, shadows };
+// Semantic, role-based tokens layered on top of the raw palette above.
+// Existing imports (`colors`, `typography`, `radius`, `spacing`, `shadows`)
+// remain untouched — semantic is additive.
+export { semantic, lightSemantic, darkSemantic } from './semantic';
+export type { SemanticTokens } from './semantic';
+
+import { semantic as _semantic } from './semantic';
+
+export const tokens = { colors, typography, spacing, radius, shadows, semantic: _semantic };
 export default tokens;

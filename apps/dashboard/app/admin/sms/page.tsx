@@ -1,54 +1,149 @@
-import Topbar from '@/components/Topbar';
+// Admin SMS batch list — server component. No SMS/message bodies shown.
+// Phase 17: Export CSV button for export:sms roles.
 
-export default function SmsAdmin() {
+import { cookies } from 'next/headers';
+import { redirect } from 'next/navigation';
+import Link from 'next/link';
+import { verifySession } from '@/lib/session';
+import { canDo } from '@/lib/adminPermissions';
+import { listSmsBatches } from '@/lib/adminData';
+import { PermissionState, EmptyState } from '@/components/state';
+import StatusBadge from '@/components/admin/StatusBadge';
+
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
+const CARD   = 'var(--c-card)';
+const BORDER = 'var(--c-border)';
+
+export default async function SmsAdminPage({
+  searchParams,
+}: {
+  searchParams?: { status?: string; cursor?: string };
+}) {
+  const cookie = cookies().get('__session')?.value;
+  const session = await verifySession(cookie);
+  if (session.state !== 'authorized') redirect('/login?next=/admin/sms');
+  if (!canDo(session.role, 'view:sms')) {
+    return <div className="p-8"><PermissionState title="SMS access required" /></div>;
+  }
+
+  let rows: Awaited<ReturnType<typeof listSmsBatches>> = [];
+  let fetchError: string | null = null;
+  try {
+    rows = await listSmsBatches({ status: searchParams?.status, cursor: searchParams?.cursor });
+  } catch (e: any) {
+    fetchError = e?.message ?? 'Failed to load SMS batches.';
+  }
+
+  const nextCursor   = rows.length === 50 ? rows[rows.length - 1].id : null;
+  const statusFilters = ['', 'sending', 'completed', 'failed', 'partial'];
+  const canExport    = canDo(session.role, 'export:sms');
+  const exportHref   = `/admin/sms/export${searchParams?.status ? `?status=${searchParams.status}` : ''}`;
+
   return (
-    <>
-      <Topbar title="SMS Gateway" subtitle="OfflineSMS Gateway · routing · webhooks · logs"/>
-      <div className="p-7 grid grid-cols-3 gap-4">
-        <div className="bg-white rounded-2xl shadow-sh1 p-5 col-span-2">
-          <div className="flex items-center gap-3">
-            <span className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-600 grid place-items-center font-bold">✓</span>
-            <div className="flex-1">
-              <div className="font-extrabold">OfflineSMS Gateway</div>
-              <div className="text-xs text-emerald-600 font-semibold">● Connected · last test 2m ago</div>
+    <div className="p-6 space-y-5" style={{ color: 'var(--c-text)' }}>
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-[12px] font-medium mb-0.5" style={{ color: 'var(--c-text-3)' }}>Admin / SMS</p>
+          <h1 className="text-[22px] font-extrabold tracking-tight">SMS Gateway</h1>
+          <p className="text-[13px] mt-0.5" style={{ color: 'var(--c-text-3)' }}>Batch history — no message bodies shown</p>
+        </div>
+        {canExport && (
+          <a
+            href={exportHref}
+            className="px-4 py-2 text-sm font-bold rounded-lg transition hover:brightness-110"
+            style={{ background: '#0A1828', color: '#5BB6DE', border: '1px solid #0E3A5A' }}
+          >
+            Export CSV
+          </a>
+        )}
+      </div>
+
+      {/* Status filter tabs */}
+      <div className="flex gap-2 flex-wrap">
+        {statusFilters.map(s => {
+          const active = (searchParams?.status ?? '') === s;
+          return (
+            <Link
+              key={s}
+              href={`/admin/sms${s ? `?status=${s}` : ''}` as any}
+              className="px-3 py-1.5 rounded-lg text-[11px] font-bold transition"
+              style={active
+                ? { background: '#1F7BA8', color: '#fff' }
+                : { background: 'var(--c-card)', color: 'var(--c-text-2)', border: '1px solid var(--c-border)' }
+              }
+            >
+              {s === '' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}
+            </Link>
+          );
+        })}
+      </div>
+
+      {fetchError ? (
+        <div className="rounded-xl px-4 py-3 text-sm" style={{ background: 'var(--c-error-bg)', border: '1px solid var(--c-error-border)', color: '#EF4444' }}>
+          {fetchError}
+        </div>
+      ) : rows.length === 0 ? (
+        <div className="rounded-xl p-12" style={{ background: CARD, border: `1px solid ${BORDER}` }}>
+          <EmptyState title="No SMS batches" description="Batches will appear here when SMS escalation is used." />
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-xl" style={{ background: CARD, border: `1px solid ${BORDER}` }}>
+          <table className="w-full text-[12px] border-collapse">
+            <thead>
+              <tr style={{ borderBottom: `1px solid ${BORDER}` }}>
+                {['Batch', 'Status', 'Total', 'Delivered', 'Failed', 'Points', 'Created'].map((h, idx) => (
+                  <th
+                    key={h}
+                    className={`px-4 py-3 text-[10px] font-semibold uppercase tracking-wider ${idx >= 2 ? 'text-right' : 'text-left'}`}
+                    style={{ color: 'var(--c-text-4)' }}
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((b, i) => (
+                <tr
+                  key={b.id}
+                  className="transition hover:bg-white/[0.03]"
+                  style={i < rows.length - 1 ? { borderBottom: `1px solid ${BORDER}` } : {}}
+                >
+                  <td className="px-4 py-3">
+                    <Link href={`/admin/sms/${b.id}` as any} className="block">
+                      <div className="font-mono text-[11px] hover:underline" style={{ color: '#5BB6DE' }}>{b.id.slice(0, 14)}…</div>
+                      {b.conversationId && (
+                        <div className="text-[10px] mt-0.5" style={{ color: 'var(--c-text-4)' }}>
+                          group: {b.conversationId.slice(0, 10)}
+                        </div>
+                      )}
+                    </Link>
+                  </td>
+                  <td className="px-4 py-3"><StatusBadge status={b.status} /></td>
+                  <td className="px-4 py-3 text-right font-mono text-[11px]" style={{ color: 'var(--c-text-2)' }}>{b.totalCount}</td>
+                  <td className="px-4 py-3 text-right font-mono text-[11px]" style={{ color: '#22C55E' }}>{b.deliveredCount}</td>
+                  <td className="px-4 py-3 text-right font-mono text-[11px]" style={{ color: '#EF4444' }}>{b.failedCount}</td>
+                  <td className="px-4 py-3 text-right font-mono text-[11px]" style={{ color: 'var(--c-text-2)' }}>{b.pointsCost}</td>
+                  <td className="px-4 py-3 whitespace-nowrap text-[11px]" style={{ color: 'var(--c-text-4)' }}>{b.createdAt}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {nextCursor && (
+            <div className="px-4 py-3 text-center" style={{ borderTop: `1px solid ${BORDER}` }}>
+              <Link
+                href={`/admin/sms?cursor=${nextCursor}${searchParams?.status ? `&status=${searchParams.status}` : ''}` as any}
+                className="text-sm font-semibold hover:underline"
+                style={{ color: '#5BB6DE' }}
+              >
+                Load more →
+              </Link>
             </div>
-            <button className="px-3 py-1.5 rounded-lg bg-primary-light text-primary text-xs font-bold">Send test SMS</button>
-          </div>
-          <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-            <Row k="Sender ID" v="OFLINSMS"/>
-            <Row k="Daily limit" v="2,400 SMS"/>
-            <Row k="API key" v="•••• 4f92"/>
-            <Row k="Webhook URL" v="…/dlr"/>
-            <Row k="Balance" v="1,250,000 pts"/>
-            <Row k="Average delay" v="1.8s"/>
-          </div>
+          )}
         </div>
-        <div className="bg-white rounded-2xl shadow-sh1 p-5">
-          <div className="text-sm font-extrabold">Policy</div>
-          <div className="text-xs text-ink-500 mt-0.5">Who can escalate, cooldown, limits</div>
-          <ul className="mt-4 text-sm space-y-2">
-            <li className="flex justify-between"><span className="text-ink-500">Allow escalation</span> <span className="font-semibold">Sender + admins</span></li>
-            <li className="flex justify-between"><span className="text-ink-500">Suggest after</span> <span className="font-semibold">30 min</span></li>
-            <li className="flex justify-between"><span className="text-ink-500">Max SMS / message</span> <span className="font-semibold">200</span></li>
-            <li className="flex justify-between"><span className="text-ink-500">Block in disappearing</span> <span className="font-semibold text-emerald-600">ON</span></li>
-          </ul>
-        </div>
-      </div>
-
-      <div className="px-7 mt-3">
-        <div className="bg-white rounded-2xl shadow-sh1 p-5">
-          <div className="flex items-center justify-between">
-            <div className="text-sm font-extrabold">Recent SMS batches</div>
-            <button className="text-xs text-primary font-bold">Export →</button>
-          </div>
-          {/* TODO: list /smsBatches ordered by createdAt desc */}
-          <div className="text-xs text-ink-500 mt-3">List the latest /smsBatches with status + delivery rate — TODO.</div>
-        </div>
-      </div>
-    </>
+      )}
+    </div>
   );
-}
-
-function Row({ k, v }: { k: string; v: string }) {
-  return <div className="flex justify-between text-ink-700"><span className="text-ink-500">{k}</span><span className="font-semibold font-mono">{v}</span></div>;
 }

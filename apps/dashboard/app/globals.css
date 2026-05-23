@@ -2,8 +2,79 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Theme tokens – dark by default; toggled by adding class "light" to <html> */
+:root {
+  --c-bg:              #0D1117;
+  --c-card:            #131B27;
+  --c-sidebar:         #090D16;
+  --c-sidebar-sub:     #111827;
+  --c-border:          #1A2437;
+  --c-text:            #E2E8F2;
+  --c-text-2:          #94A3B8;
+  --c-text-3:          #64748B;
+  --c-text-4:          #475569;
+  --c-nav-group:       #2D4057;
+  --c-nav-active-bg:   #162032;
+  --c-nav-active-text: #7CC8EC;
+  --c-success-bg:      #052E1B;
+  --c-success-border:  #0A4428;
+  --c-error-bg:        #2D0D0D;
+  --c-error-border:    #3D1515;
+  --c-warning-bg:      #1C1405;
+  --c-warning-border:  #2A2005;
+}
+html.light {
+  --c-bg:              #F1F5F9;
+  --c-card:            #FFFFFF;
+  --c-sidebar:         #FFFFFF;
+  --c-sidebar-sub:     #F1F5F9;
+  --c-border:          #E2E8F0;
+  --c-text:            #1E293B;
+  --c-text-2:          #475569;
+  --c-text-3:          #64748B;
+  --c-text-4:          #94A3B8;
+  --c-nav-group:       #94A3B8;
+  --c-nav-active-bg:   #EFF6FF;
+  --c-nav-active-text: #1D4ED8;
+  --c-success-bg:      #DCFCE7;
+  --c-success-border:  #86EFAC;
+  --c-error-bg:        #FEF2F2;
+  --c-error-border:    #FECACA;
+  --c-warning-bg:      #FFFBEB;
+  --c-warning-border:  #FDE68A;
+}
+
+/* Light mode: flip white-overlay hovers to dark-overlay */
+html.light .hover\:bg-white\/5:hover {
+  background-color: rgba(0, 0, 0, 0.05) !important;
+}
+
 @layer base {
-  html, body { font-family: theme(fontFamily.sans); background: theme(colors.canvas); color: theme(colors.ink.DEFAULT); }
+  html, body { font-family: theme(fontFamily.sans); background: var(--c-bg); color: var(--c-text); }
+
+  /* Visible focus ring for keyboard users on all interactive elements */
+  :focus-visible {
+    outline: 2px solid theme(colors.primary.DEFAULT);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+}
+
+/* Skip-to-main-content link: hidden until focused */
+.skip-nav {
+  position: absolute;
+  top: -9999px;
+  left: 0;
+  z-index: 100;
+  padding: 8px 16px;
+  background: theme(colors.primary.DEFAULT);
+  color: #fff;
+  font-weight: 700;
+  font-size: 14px;
+  border-radius: 0 0 4px 0;
+}
+.skip-nav:focus {
+  top: 0;
 }
 
 /* Brand mark in CSS so we don't have to ship an SVG just to render the logo */

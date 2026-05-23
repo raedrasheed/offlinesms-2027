@@ -2,6 +2,7 @@ import type { Config } from 'tailwindcss';
 import preset from '@offlinesms/design-tokens/tailwind';
 
 const config: Config = {
+  darkMode: 'class',
   presets: [preset as any],
   content: [
     './app/**/*.{ts,tsx}',

@@ -2,15 +2,15 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    function isAuthed() {
-      return request.auth != null;
-    }
-    function isSelf(uid) {
-      return isAuthed() && request.auth.uid == uid;
-    }
-    function isAdmin() {
-      return isAuthed() && request.auth.token.admin == true;
-    }
+    // ────────────────────────────────────────────────────────────
+    // Identity helpers
+    // ────────────────────────────────────────────────────────────
+    function isAuthed()      { return request.auth != null; }
+    function isSignedIn()    { return isAuthed(); }
+    function isSelf(uid)     { return isAuthed() && request.auth.uid == uid; }
+    function isAdmin()       { return isAuthed() && request.auth.token.get('admin', false) == true; }
+    function hasAdminRole()  { return isAdmin(); }   // alias for readability
+
     function isMember(convoId) {
       return isAuthed() &&
         exists(/databases/$(database)/documents/conversations/$(convoId)/members/$(request.auth.uid));
@@ -20,74 +20,499 @@ service cloud.firestore {
         get(/databases/$(database)/documents/conversations/$(convoId)/members/$(request.auth.uid)).data.role in ['admin', 'owner'];
     }
 
-    // USERS — profile readable by anyone authed; writeable only by self.
+    // ────────────────────────────────────────────────────────────
+    // Conversation participation (Phase 4)
+    //
+    // Accepts both the canonical Phase 4 `participantUids` array and
+    // the back-compat `memberIds` array so legacy seed data and the
+    // existing receipt trigger keep working alongside the new model.
+    // ────────────────────────────────────────────────────────────
+    function isConversationParticipantData(data) {
+      return isAuthed() && (
+        (('participantUids' in data) && request.auth.uid in data.participantUids) ||
+        (('memberIds'       in data) && request.auth.uid in data.memberIds)
+      );
+    }
+    function isConversationParticipant(convoId) {
+      return isConversationParticipantData(
+        get(/databases/$(database)/documents/conversations/$(convoId)).data
+      );
+    }
+    function isOwnUserState(uid)  { return isSelf(uid); }
+    function isOwnTyping(uid)     { return isSelf(uid); }
+
+    function allowedUserStateClientFields() {
+      // unreadCount / lastReadAt / lastMessagePreview / lastMessageAt are
+      // server-owned (mutated by the callable + trigger).
+      return ['uid', 'pinned', 'muted', 'archived', 'favorite', 'updatedAt'];
+    }
+    function onlyAllowedUserStateUpdates() {
+      return changedKeys().hasOnly(allowedUserStateClientFields());
+    }
+    function onlyAllowedUserStateCreate() {
+      return changedKeysOnCreate().hasOnly(allowedUserStateClientFields());
+    }
+    function isValidTextMessage() {
+      // Phase 4 only writes type='text'. Sender must equal caller. Text is
+      // 1..4000 chars. The fanout trigger does the rest.
+      return request.resource.data.type == 'text'
+          && request.resource.data.senderUid == request.auth.uid
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 4000;
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Group helpers (Phase 5)
+    //
+    // Roles are stored in the `members` sub-collection. The send-policy
+    // gates (locked / onlyAdminsCanSend) are enforced inside the
+    // sendTextMessage callable, not in rules, because rules-level
+    // reads of conversation settings cost an extra get() per write.
+    // ────────────────────────────────────────────────────────────
+    function getMemberRole(convoId) {
+      return get(/databases/$(database)/documents/conversations/$(convoId)/members/$(request.auth.uid)).data.role;
+    }
+    function memberExists(convoId, uid) {
+      return exists(/databases/$(database)/documents/conversations/$(convoId)/members/$(uid));
+    }
+    function isConversationOwner(convoId) {
+      return memberExists(convoId, request.auth.uid)
+          && getMemberRole(convoId) == 'owner';
+    }
+    function isConversationAdmin(convoId) {
+      return memberExists(convoId, request.auth.uid)
+          && getMemberRole(convoId) in ['owner', 'admin'];
+    }
+    function isValidGroupRole(role) {
+      return role in ['owner', 'admin', 'member'];
+    }
+    function isGroupTypeData(data) {
+      return ('type' in data) && data.type == 'group';
+    }
+    function safeGroupConversationCreate() {
+      // Group conversations can be created from a client only when the
+      // doc puts the caller as the owner AND lists them in
+      // participantUids. The createGroup callable goes through the
+      // Admin SDK so it bypasses this branch entirely.
+      return isGroupTypeData(request.resource.data)
+          && request.resource.data.ownerUid == request.auth.uid
+          && request.auth.uid in request.resource.data.participantUids;
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Message action validation helpers (Phase 6)
+    //
+    // The Phase 6 callables (editMessage, deleteMessage, reactToMessage,
+    // pinMessage, forwardMessages) use the Admin SDK and bypass these
+    // helpers entirely. They exist so that any future direct-write path
+    // that lands in client code can be validated for shape without a
+    // schema change.
+    // ────────────────────────────────────────────────────────────
+    function isValidReplyTo(obj) {
+      return obj == null || (
+        ('messageId' in obj) && obj.messageId is string &&
+        ('senderUid' in obj) && obj.senderUid is string &&
+        ('preview'   in obj) && obj.preview   is string && obj.preview.size() <= 200
+      );
+    }
+    function isValidForwardedFrom(obj) {
+      return obj == null || (
+        ('conversationId' in obj) && obj.conversationId is string &&
+        ('messageId'      in obj) && obj.messageId      is string
+      );
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // User profile field allow-list (Phase 2)
+    // ────────────────────────────────────────────────────────────
+    function allowedProfileFields() {
+      // `username` / `usernameLower` deliberately omitted — only the
+      // `claimUsername` callable (Admin SDK) writes those.
+      // `smsOptOut` (Phase 9) is owner-controlled by the Settings
+      // toggle and consumed by Phase 8's escalateSms eligibility.
+      // Phase 19: preferredLanguage, preferredTheme, inAppNotifications,
+      // timeFormat are user-controlled preference fields.
+      return [
+        'displayName', 'photoURL', 'about', 'profileCompleted',
+        'fcmTokens', 'lastSeen', 'updatedAt',
+        'smsOptOut',
+        'preferredLanguage', 'preferredTheme', 'inAppNotifications', 'timeFormat'
+      ];
+    }
+    function bannedProfileFields() {
+      return [
+        'role', 'roles', 'permissions', 'admin', 'isAdmin',
+        'points', 'pointsBalance', 'wallet', 'walletStatus',
+        'organizationId', 'organizationRole',
+        'createdAt', 'phoneVerified', 'status',
+        'phoneNumber', 'email',
+        'username', 'usernameLower'
+      ];
+    }
+    function changedKeys()          { return request.resource.data.diff(resource.data).affectedKeys(); }
+    function changedKeysOnCreate()  { return request.resource.data.keys(); }
+    function onlyAllowedUserProfileUpdates() {
+      return changedKeys().hasOnly(allowedProfileFields())
+          && !changedKeys().hasAny(bannedProfileFields());
+    }
+    function safeUserProfileCreate() {
+      return changedKeysOnCreate().hasOnly([
+        'displayName', 'phoneNumber', 'email', 'createdAt', 'status'
+      ]);
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Receipt enum (Phase 3)
+    // ────────────────────────────────────────────────────────────
+    function isValidReceiptStatus(s) {
+      return s in ['pending', 'delivered', 'read', 'viewed', 'played', 'failed'];
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Status audience + expiry (Phase 3)
+    // ────────────────────────────────────────────────────────────
+    function isStatusExpired(s) {
+      // `expiresAt` is a server timestamp. Missing => treat as non-expired
+      // (legacy docs) but a present timestamp in the past blocks the read.
+      return ('expiresAt' in s) && s.expiresAt != null && s.expiresAt < request.time;
+    }
+    function isStatusAudienceMember(s) {
+      // Default semantics (no audience fields): readable by any signed-in
+      // user — matches the pre-Phase-3 behaviour while still gated by the
+      // top-level auth check.
+      return !('audienceType' in s) ||
+             (s.audienceType == 'all_contacts'
+                && !( ('excludedViewerUids' in s) && request.auth.uid in s.excludedViewerUids )) ||
+             (s.audienceType == 'contacts_except'
+                && !( ('excludedViewerUids' in s) && request.auth.uid in s.excludedViewerUids )) ||
+             (s.audienceType == 'only_share_with'
+                && ('allowedViewerUids' in s) && request.auth.uid in s.allowedViewerUids);
+    }
+    function isStatusAuthor(s) {
+      return isAuthed() && s.authorId == request.auth.uid;
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // USERS
+    // ════════════════════════════════════════════════════════════
     match /users/{uid} {
-      allow read: if isAuthed();
-      allow create: if isSelf(uid);
-      allow update: if isSelf(uid) || isAdmin();
+      allow read:   if isAuthed();
+      allow create: if (isSelf(uid) && safeUserProfileCreate()) || isAdmin();
+      allow update: if isAdmin() ||
+                       (isSelf(uid) && onlyAllowedUserProfileUpdates());
       allow delete: if isAdmin();
     }
 
+    // ════════════════════════════════════════════════════════════
+    // USERNAMES — lookup table for `claimUsername` callable
+    // ════════════════════════════════════════════════════════════
+    match /usernames/{usernameLower} {
+      allow read:  if isAuthed();
+      allow write: if isAdmin();
+    }
+
+    // ════════════════════════════════════════════════════════════
     // CONVERSATIONS
+    //
+    // Reads are gated on participation (Phase 4 `participantUids` or
+    // legacy `memberIds` membership, or via the existing /members
+    // sub-collection for the group model). Direct conversation creates
+    // require the caller to be listed in participantUids/memberIds.
+    // Updates from clients are tolerated for legacy fields; the
+    // callables (which use Admin SDK) own most updates.
+    // ════════════════════════════════════════════════════════════
     match /conversations/{convoId} {
-      allow read: if isMember(convoId) || isAdmin();
-      allow create: if isAuthed();
-      allow update: if isMember(convoId) || isAdmin();
+      // `get` (single doc) can safely use the members-subcollection lookup.
+      allow get:    if isMember(convoId)
+                       || isConversationParticipant(convoId)
+                       || isAdmin();
+      // `list` (queries) must decide from the document's own data — cross-
+      // document get()/exists() lookups are unreliable for query auth, which
+      // caused "permission-denied" on the participant-scoped chats query.
+      allow list:   if isAuthed() && (
+                          (('participantUids' in resource.data) && request.auth.uid in resource.data.participantUids)
+                          || (('memberIds' in resource.data) && request.auth.uid in resource.data.memberIds)
+                          || isAdmin()
+                       );
+      allow create: if isAuthed()
+                       && isConversationParticipantData(request.resource.data)
+                       && (!isGroupTypeData(request.resource.data) || safeGroupConversationCreate());
+      allow update: if isMember(convoId)
+                       || isConversationParticipant(convoId)
+                       || isAdmin();
       allow delete: if isGroupAdmin(convoId) || isAdmin();
 
+      // /members:
+      //   - Read: any participant of the conversation (so members can see
+      //     the roster) or an admin.
+      //   - Write: for group conversations, server-only (createGroup,
+      //     addMembers, removeMember, changeRole, leaveGroup callables
+      //     use the Admin SDK and bypass these rules). Project admins
+      //     keep an escape hatch via the `admin` custom claim. The
+      //     legacy 1:1/channel paths still allow self-membership and
+      //     group-admin self-service for back-compat with seed data.
       match /members/{uid} {
-        allow read: if isMember(convoId) || isAdmin();
-        allow write: if isGroupAdmin(convoId) || isSelf(uid) || isAdmin();
+        allow read:  if isMember(convoId) || isConversationParticipant(convoId) || isAdmin();
+        allow write: if isAdmin()
+                       || (
+                            // Legacy path for non-group conversations: keep the
+                            // Phase 0 self-or-group-admin write. Group writes
+                            // are server-only.
+                            get(/databases/$(database)/documents/conversations/$(convoId)).data.type != 'group'
+                            && (isGroupAdmin(convoId) || isSelf(uid))
+                          );
+      }
+
+      // Per-user conversation state (Phase 4).
+      match /userState/{uid} {
+        allow read:   if isSelf(uid) || isAdmin();
+        allow create: if (isOwnUserState(uid) || isAdmin())
+                        && (isAdmin() || onlyAllowedUserStateCreate());
+        allow update: if (isOwnUserState(uid) || isAdmin())
+                        && (isAdmin() || onlyAllowedUserStateUpdates());
+        allow delete: if isAdmin();
+      }
+
+      // Typing indicator (Phase 4). Participant-read, owner-write.
+      match /typing/{uid} {
+        allow read:   if isMember(convoId) || isConversationParticipant(convoId) || isAdmin();
+        allow write:  if isOwnTyping(uid) || isAdmin();
       }
 
       match /messages/{messageId} {
-        allow read: if isMember(convoId) || isAdmin();
-        allow create: if isMember(convoId) && request.resource.data.senderId == request.auth.uid;
-        allow update: if isAdmin() ||
-                       (isMember(convoId) && resource.data.senderId == request.auth.uid);
-        allow delete: if isAdmin() ||
-                       (isMember(convoId) && resource.data.senderId == request.auth.uid);
+        allow read:   if isMember(convoId) || isConversationParticipant(convoId) || isAdmin();
+        allow create: if (isMember(convoId) || isConversationParticipant(convoId))
+                        && isValidTextMessage();
+        // Phase 6: every legitimate update flows through a callable
+        // (editMessage / deleteMessage / reactToMessage / pinMessage)
+        // using the Admin SDK. The pre-Phase-6 sender-may-update path
+        // is closed at the rules layer; admin escape hatch remains.
+        allow update: if isAdmin();
+        allow delete: if isAdmin();
 
-        // Receipts (per recipient)
+        // Receipts (per recipient).
+        //
+        // Phase 3 added the status enum check.
+        // Phase 7 tightens the read rule so participants can NOT enumerate
+        // each other's read status. Only the receipt owner, the message
+        // sender, or a project admin may read.
+        // Writes still allow the owner directly (Phase 3 path) so an
+        // offline client can refresh its own receipt without a callable;
+        // but the canonical write path is the markReceipt callable using
+        // the Admin SDK, which enforces monotonic status transitions.
         match /receipts/{uid} {
-          allow read: if isMember(convoId);
-          allow write: if isSelf(uid) || isAdmin(); // own receipts only
+          allow read:   if isSelf(uid)
+                           || isAdmin()
+                           || (get(/databases/$(database)/documents/conversations/$(convoId)/messages/$(messageId)).data.senderUid == request.auth.uid)
+                           || (get(/databases/$(database)/documents/conversations/$(convoId)/messages/$(messageId)).data.senderId == request.auth.uid);
+          allow create: if (isSelf(uid) || isAdmin())
+                          && (!('status' in request.resource.data)
+                              || isValidReceiptStatus(request.resource.data.status));
+          allow update: if (isSelf(uid) || isAdmin())
+                          && (!('status' in request.resource.data)
+                              || isValidReceiptStatus(request.resource.data.status));
+          allow delete: if isAdmin();
         }
       }
     }
 
+    // ════════════════════════════════════════════════════════════
     // POINTS — wallets, transactions
+    // ════════════════════════════════════════════════════════════
     match /wallets/{uid} {
-      allow read: if isSelf(uid) || isAdmin();
-      allow write: if isAdmin();                       // mutated via Cloud Function
+      allow read:  if isSelf(uid) || isAdmin();
+      allow write: if isAdmin();
     }
     match /transactions/{txId} {
-      allow read: if isAuthed() && (resource.data.userId == request.auth.uid || isAdmin());
-      allow write: if isAdmin();                       // via Cloud Function
+      allow read:  if isAuthed() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow write: if isAdmin();
     }
 
+    // ════════════════════════════════════════════════════════════
     // SMS BATCHES
+    // ════════════════════════════════════════════════════════════
     match /smsBatches/{batchId} {
-      allow read: if isAuthed() && (resource.data.senderId == request.auth.uid || isAdmin());
-      allow write: if isAdmin();                       // via Cloud Function
+      allow read:  if isAuthed() && (resource.data.senderId == request.auth.uid || isAdmin());
+      allow write: if isAdmin();
 
       match /recipients/{recipientId} {
-        allow read: if isAuthed();
+        allow read:  if isAuthed();
         allow write: if isAdmin();
       }
     }
 
-    // STATUS posts
+    // ════════════════════════════════════════════════════════════
+    // STATUSES — Phase 3 audience + expiry enforcement
+    // ════════════════════════════════════════════════════════════
     match /statuses/{statusId} {
-      allow read: if isAuthed();
-      allow create: if isAuthed() && request.resource.data.authorId == request.auth.uid;
-      allow delete: if isAuthed() && resource.data.authorId == request.auth.uid;
+      allow read:   if isAdmin()
+                    || (isAuthed()
+                        && isStatusAuthor(resource.data))
+                    || (isAuthed()
+                        && !isStatusExpired(resource.data)
+                        && isStatusAudienceMember(resource.data));
+
+      allow create: if isAuthed()
+                    && request.resource.data.authorId == request.auth.uid;
+
+      allow update: if isAdmin()
+                    || (isAuthed() && resource.data.authorId == request.auth.uid);
+
+      allow delete: if isAdmin()
+                    || (isAuthed() && resource.data.authorId == request.auth.uid);
+
+      // Status views (Phase 7) — server-only writes via markStatusViewed.
+      // Owner of the status can read the viewer list; a viewer can read
+      // their own row. Nobody else.
+      match /views/{viewerUid} {
+        allow read:  if isAdmin()
+                       || isSelf(viewerUid)
+                       || (get(/databases/$(database)/documents/statuses/$(statusId)).data.authorId == request.auth.uid);
+        allow write: if isAdmin();
+      }
     }
 
+    // ════════════════════════════════════════════════════════════
     // ADMIN settings
+    // ════════════════════════════════════════════════════════════
     match /settings/{doc} {
-      allow read: if isAuthed();
+      allow read:  if isAuthed();
       allow write: if isAdmin();
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // ORGANIZATIONS (Phase 3 scaffold — admin-only until Phase 13)
+    // ════════════════════════════════════════════════════════════
+    match /organizations/{organizationId} {
+      allow read:  if isAdmin();
+      allow write: if isAdmin();
+
+      match /members/{uid} {
+        allow read:  if isAdmin() || isSelf(uid);
+        allow write: if isAdmin();
+      }
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // ROLES (catalogue; live permission checks read from custom claims)
+    // ════════════════════════════════════════════════════════════
+    match /roles/{roleId} {
+      allow read:  if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // AUDIT LOGS — server-owned. Clients (incl. admins via web SDK)
+    // cannot write here. Writes always go through writeAuditLog().
+    // ════════════════════════════════════════════════════════════
+    match /auditLogs/{auditLogId} {
+      allow read:  if isAdmin();
+      allow write: if false;
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // TICKETS — owner creates, owner/admin read, admin updates.
+    // ════════════════════════════════════════════════════════════
+    match /tickets/{ticketId} {
+      allow read:   if isAdmin() ||
+                       (isAuthed() && resource.data.createdBy == request.auth.uid);
+      allow create: if isAuthed()
+                    && request.resource.data.createdBy == request.auth.uid
+                    && request.resource.data.status == 'open'
+                    && !('assignedTo' in request.resource.data);
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // FLAGS — owner creates, admin reads/updates.
+    // ════════════════════════════════════════════════════════════
+    match /flags/{flagId} {
+      allow read:   if isAdmin();
+      allow create: if isAuthed()
+                    && request.resource.data.createdBy == request.auth.uid
+                    && request.resource.data.status == 'open';
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // PAYMENTS — requester read, server-only write (even for admins,
+    // so idempotency stays in one webhook codepath in Phase 10).
+    // ════════════════════════════════════════════════════════════
+    match /payments/{paymentId} {
+      allow read:  if isAdmin() ||
+                      (isAuthed() && resource.data.userId == request.auth.uid);
+      allow write: if false;
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // GATEWAY HEALTH — admin read, server-only write.
+    // ════════════════════════════════════════════════════════════
+    match /gatewayHealth/{docId} {
+      allow read:  if isAdmin();
+      allow write: if false;
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // SMS QUOTA USAGE — requester reads own; server-only write.
+    // Stored under per-user roots so listing per-user is cheap.
+    // ════════════════════════════════════════════════════════════
+    match /smsQuotaUsage/{uid} {
+      allow read:  if isSelf(uid) || isAdmin();
+      allow write: if false;
+
+      match /days/{yyyymmdd} {
+        allow read:  if isSelf(uid) || isAdmin();
+        allow write: if false;
+      }
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // SMS DELIVERY EVENTS — Phase 11 webhook idempotency table.
+    // Admin-read; client writes denied. Only the gatewayWebhook HTTP
+    // function (Admin SDK) inserts.
+    // ════════════════════════════════════════════════════════════
+    match /smsDeliveryEvents/{eventId} {
+      allow read:  if isAdmin();
+      allow write: if false;
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // POINTS PACKAGES — public-read catalogue for signed-in users.
+    // Admin writes only; Phase 15 will add management UI.
+    // ════════════════════════════════════════════════════════════
+    match /pointsPackages/{packageId} {
+      allow read:  if isAuthed();
+      allow write: if isAdmin();
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // POINTS TRANSFERS — sender or recipient reads own; writes are
+    // server-only via the transferPoints callable. Admin escape
+    // hatch retained for moderation in later phases.
+    // ════════════════════════════════════════════════════════════
+    match /pointsTransfers/{transferId} {
+      allow read:  if isAdmin()
+                    || (isAuthed() && (
+                          resource.data.fromUserId == request.auth.uid ||
+                          resource.data.toUserId   == request.auth.uid
+                       ));
+      allow write: if false;
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // TRANSFER QUOTA USAGE — mirrors the smsQuotaUsage shape.
+    // ════════════════════════════════════════════════════════════
+    match /transferQuotaUsage/{uid} {
+      allow read:  if isSelf(uid) || isAdmin();
+      allow write: if false;
+
+      match /days/{yyyymmdd} {
+        allow read:  if isSelf(uid) || isAdmin();
+        allow write: if false;
+      }
     }
   }
 }
