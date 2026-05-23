@@ -116,6 +116,42 @@ export default function Settings({ navigation }: any) {
         <Text style={s.chev} accessibilityElementsHidden>{isRTL ? '‹' : '›'}</Text>
       </Pressable>
 
+      {/* Find friends */}
+      <Pressable
+        style={s.row}
+        onPress={() => navigation.navigate('FindFriends')}
+        accessible={true}
+        accessibilityRole="button"
+        accessibilityLabel={t('settings.findFriends')}
+      >
+        <Text style={s.title}>{t('settings.findFriends')}</Text>
+        <Text style={s.chev} accessibilityElementsHidden>{isRTL ? '‹' : '›'}</Text>
+      </Pressable>
+
+      {/* Security PIN */}
+      <Pressable
+        style={s.row}
+        onPress={() => navigation.navigate('CreatePin')}
+        accessible={true}
+        accessibilityRole="button"
+        accessibilityLabel={t('settings.securityPin')}
+      >
+        <Text style={s.title}>{t('settings.securityPin')}</Text>
+        <Text style={s.chev} accessibilityElementsHidden>{isRTL ? '‹' : '›'}</Text>
+      </Pressable>
+
+      {/* Permissions */}
+      <Pressable
+        style={s.row}
+        onPress={() => navigation.navigate('Permissions')}
+        accessible={true}
+        accessibilityRole="button"
+        accessibilityLabel={t('settings.permissions')}
+      >
+        <Text style={s.title}>{t('settings.permissions')}</Text>
+        <Text style={s.chev} accessibilityElementsHidden>{isRTL ? '‹' : '›'}</Text>
+      </Pressable>
+
       {/* Points */}
       <Pressable
         style={s.row}

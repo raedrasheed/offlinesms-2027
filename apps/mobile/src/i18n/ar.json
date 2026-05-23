@@ -294,6 +294,9 @@
   "settings": {
     "title": "الإعدادات",
     "profile": "الملف الشخصي",
+    "findFriends": "البحث عن الأصدقاء",
+    "securityPin": "رمز الأمان",
+    "permissions": "الأذونات",
     "points": "نقاط OfflineSMS",
     "pointsSubtitle": "الرصيد والحجوزات وسجل العمليات",
     "smsReminders": "السماح بتذكيرات SMS المهمة",

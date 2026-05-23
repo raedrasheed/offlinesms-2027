@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   FlatList, View, Text, Pressable, StyleSheet, TextInput, Alert,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import {
   collection, onSnapshot, doc, query, where,
 } from 'firebase/firestore';
@@ -128,6 +129,7 @@ export default function ChatsList({ navigation }: any) {
   };
 
   const s = buildStyles(colors, isRTL);
+  const firstName = (auth.currentUser?.displayName ?? '').trim().split(/\s+/)[0] || '';
 
   if (rows === null) return <LoadingState fullPage title="Loading chats…" />;
 
@@ -169,7 +171,12 @@ export default function ChatsList({ navigation }: any) {
             filter === 'unread'    ? 'Nothing unread' :
             filter === 'favorites' ? 'No favorite chats yet' :
             filter === 'archived'  ? 'No archived chats' :
-            t('chats.empty')
+            firstName ? `You’re all set, ${firstName}` : 'You’re all set'
+          }
+          description={
+            filter === 'all'
+              ? 'Tap the pencil to start your first conversation.'
+              : undefined
           }
         />
       ) : (
@@ -238,7 +245,7 @@ export default function ChatsList({ navigation }: any) {
         accessibilityRole="button"
         accessibilityLabel="New conversation"
       >
-        <Text style={s.fabText} accessibilityElementsHidden>+</Text>
+        <Ionicons name="pencil" size={22} color={colors.action.primaryFg} accessibilityElementsHidden />
       </Pressable>
     </View>
   );

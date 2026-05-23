@@ -11,11 +11,15 @@ import { ThemeProvider } from './src/context/ThemeContext';
 import type { ThemePreference } from './src/lib/user';
 import './src/i18n';
 
+import Splash from './src/screens/Splash';
 import Welcome from './src/screens/Welcome';
 import PhoneEntry from './src/screens/PhoneEntry';
 import Otp from './src/screens/Otp';
 import EmailLogin from './src/screens/EmailLogin';
 import ProfileCompletion from './src/screens/ProfileCompletion';
+import CreatePin from './src/screens/CreatePin';
+import Permissions from './src/screens/Permissions';
+import FindFriends from './src/screens/FindFriends';
 import ChatsList from './src/screens/ChatsList';
 import Conversation from './src/screens/Conversation';
 import NewChat from './src/screens/NewChat';
@@ -46,6 +50,7 @@ const RootStack = createNativeStackNavigator();
 function AuthFlow() {
   return (
     <AuthStack.Navigator screenOptions={{ headerShown: false }}>
+      <AuthStack.Screen name="Splash" component={Splash} />
       <AuthStack.Screen name="Welcome" component={Welcome} />
       <AuthStack.Screen name="PhoneEntry" component={PhoneEntry} />
       <AuthStack.Screen name="Otp" component={Otp} />
@@ -143,6 +148,9 @@ export default function App() {
             <RootStack.Screen name="SmsEscalation" component={SmsEscalation} />
             <RootStack.Screen name="SupportTicket" component={SupportTicket} />
             <RootStack.Screen name="EditProfile" component={EditProfile} />
+            <RootStack.Screen name="CreatePin" component={CreatePin} />
+            <RootStack.Screen name="Permissions" component={Permissions} />
+            <RootStack.Screen name="FindFriends" component={FindFriends} />
           </RootStack.Navigator>
         )}
       </NavigationContainer>

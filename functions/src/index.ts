@@ -61,6 +61,7 @@ export { transferPoints }      from './points/transferPoints';
 export { onUserCreate } from './auth/onUserCreate';
 export { setAdminClaim } from './auth/setAdminClaim';
 export { claimUsername } from './auth/claimUsername';
+export { matchContacts } from './contacts/matchContacts';
 
 // Phase 13 — admin management callables.
 export { setUserStatus } from './admin/setUserStatus';

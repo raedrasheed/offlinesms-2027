@@ -294,6 +294,9 @@
   "settings": {
     "title": "Settings",
     "profile": "Profile",
+    "findFriends": "Find friends",
+    "securityPin": "Security PIN",
+    "permissions": "Permissions",
     "points": "OfflineSMS Points",
     "pointsSubtitle": "Balance, reservations, and transaction history",
     "smsReminders": "Allow important SMS reminders",
