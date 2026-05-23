@@ -293,6 +293,7 @@
   },
   "settings": {
     "title": "Settings",
+    "profile": "Profile",
     "points": "OfflineSMS Points",
     "pointsSubtitle": "Balance, reservations, and transaction history",
     "smsReminders": "Allow important SMS reminders",

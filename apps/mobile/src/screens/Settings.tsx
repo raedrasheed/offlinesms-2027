@@ -100,6 +100,18 @@ export default function Settings({ navigation }: any) {
   return (
     <View style={s.root} accessibilityLabel={t('settings.title')} accessible={false}>
 
+      {/* Profile */}
+      <Pressable
+        style={s.row}
+        onPress={() => navigation.navigate('EditProfile')}
+        accessible={true}
+        accessibilityRole="button"
+        accessibilityLabel={t('settings.profile')}
+      >
+        <Text style={s.title}>{t('settings.profile')}</Text>
+        <Text style={s.chev} accessibilityElementsHidden>{isRTL ? '‹' : '›'}</Text>
+      </Pressable>
+
       {/* Points */}
       <Pressable
         style={s.row}

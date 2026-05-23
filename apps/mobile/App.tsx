@@ -35,6 +35,7 @@ import Privacy from './src/screens/Privacy';
 import Devices from './src/screens/Devices';
 import SmsEscalation from './src/screens/SmsEscalation';
 import SupportTicket from './src/screens/SupportTicket';
+import EditProfile from './src/screens/EditProfile';
 
 const AuthStack = createNativeStackNavigator();
 const OnboardingStack = createNativeStackNavigator();
@@ -122,6 +123,7 @@ export default function App() {
             <RootStack.Screen name="Devices" component={Devices} />
             <RootStack.Screen name="SmsEscalation" component={SmsEscalation} />
             <RootStack.Screen name="SupportTicket" component={SupportTicket} />
+            <RootStack.Screen name="EditProfile" component={EditProfile} />
           </RootStack.Navigator>
         )}
       </NavigationContainer>
