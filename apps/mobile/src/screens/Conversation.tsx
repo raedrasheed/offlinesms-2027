@@ -237,7 +237,7 @@ export default function Conversation({ route, navigation }: any) {
 
   const headerSubtitle = useMemo(() => {
     if (peerTyping) return 'typing…';
-    if (!isGroup) return null;
+    if (!isGroup) return 'Online';
     return convo?.memberCount ? `${convo.memberCount} members${convo?.status === 'locked' ? ' · locked' : ''}` : null;
   }, [peerTyping, isGroup, convo?.memberCount, convo?.status]);
 
@@ -251,7 +251,7 @@ export default function Conversation({ route, navigation }: any) {
         <Text style={s.emptyName}>{peerName}</Text>
         {peerUsername ? <Text style={s.emptyHandle}>@{peerUsername}</Text> : null}
         <View style={s.e2eNotice}>
-          <Ionicons name="lock-closed" size={12} color={colors.text.muted} />
+          <Ionicons name="lock-closed" size={12} color="#92400E" />
           <Text style={s.e2eText}>Messages here are end-to-end encrypted</Text>
         </View>
         <Text style={s.emptyNudge}>Say hi — your first message will start the chat.</Text>
@@ -263,6 +263,15 @@ export default function Conversation({ route, navigation }: any) {
         data={visibleMsgs}
         keyExtractor={m => m.id}
         contentContainerStyle={{ padding: 12, gap: 4 }}
+        ListHeaderComponent={
+          <View style={s.listHeader}>
+            <View style={s.datePill}><Text style={s.datePillText}>Today</Text></View>
+            <View style={s.e2eBanner}>
+              <Ionicons name="lock-closed" size={12} color="#92400E" />
+              <Text style={s.e2eBannerText}>Messages and calls are end-to-end encrypted</Text>
+            </View>
+          </View>
+        }
         onContentSizeChange={() => listRef.current?.scrollToEnd?.({ animated: false })}
         renderItem={({ item, index }) => {
           const mine = item.senderUid === me || (item as any).senderId === me;
@@ -310,14 +319,22 @@ export default function Conversation({ route, navigation }: any) {
           <Text style={s.back}>{isRTL ? '›' : '‹'}</Text>
         </Pressable>
         <Pressable
-          style={{ flex: 1 }}
+          style={s.headerInfo}
           onPress={() => { if (isGroup) navigation.navigate('GroupInfo', { id }); }}
           accessible={true}
           accessibilityRole={isGroup ? 'button' : 'text'}
           accessibilityLabel={isGroup ? `${peerName}, ${t('group.info')}` : peerName}
         >
-          <Text style={s.title} numberOfLines={1}>{peerName}</Text>
-          {headerSubtitle ? <Text style={s.subtitle}>{headerSubtitle}</Text> : null}
+          <View style={s.headerAvatarWrap}>
+            <View style={[s.headerAvatar, { backgroundColor: avatarColor(peerUid ?? peerName) }]}>
+              <Text style={s.headerAvatarText}>{initials(peerName)}</Text>
+            </View>
+            {!isGroup ? <View style={s.onlineDot} /> : null}
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={s.title} numberOfLines={1}>{peerName}</Text>
+            {headerSubtitle ? <Text style={s.subtitle}>{headerSubtitle}</Text> : null}
+          </View>
         </Pressable>
       </View>
 
@@ -397,7 +414,7 @@ export default function Conversation({ route, navigation }: any) {
               accessibilityLabel={t('convo.composerPlaceholder')}
             />
             <Pressable
-              style={[s.sendBtn, (!draft.trim() || busy) && { opacity: 0.4 }]}
+              style={[s.sendBtn, busy && { opacity: 0.4 }]}
               onPress={send}
               disabled={!draft.trim() || busy}
               accessible={true}
@@ -405,7 +422,11 @@ export default function Conversation({ route, navigation }: any) {
               accessibilityLabel={editing ? t('common.save') : t('common.send')}
               accessibilityState={{ disabled: !draft.trim() || busy }}
             >
-              <Text style={{ color: colors.action.primaryFg, fontWeight: '700' }}>{editing ? '✓' : '↑'}</Text>
+              <Ionicons
+                name={editing ? 'checkmark' : draft.trim() ? 'arrow-up' : 'mic'}
+                size={20}
+                color={colors.action.primaryFg}
+              />
             </Pressable>
           </View>
         </View>
@@ -422,13 +443,23 @@ function buildStyles(colors: any, rtl: boolean) {
     emptyAvatarText:{ color: '#fff', fontSize: 34, fontWeight: '800' },
     emptyName:     { fontSize: 20, fontWeight: '800', color: colors.text.primary, textAlign: 'center' },
     emptyHandle:   { fontSize: 13, color: colors.text.muted, textAlign: 'center' },
-    e2eNotice:     { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.background.subtle, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, marginTop: 16 },
-    e2eText:       { fontSize: 12, color: colors.text.muted },
+    e2eNotice:     { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FBEFD0', paddingHorizontal: 14, paddingVertical: 9, borderRadius: 14, marginTop: 16 },
+    e2eText:       { fontSize: 12, color: '#92400E' },
     emptyNudge:    { fontSize: 13, color: colors.text.muted, textAlign: 'center', marginTop: 14, lineHeight: 19 },
-    header:   { paddingTop: 50, paddingBottom: 12, paddingHorizontal: 14, backgroundColor: colors.background.surface, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 12, borderBottomWidth: 1, borderColor: colors.border.subtle },
-    back:     { fontSize: 24, color: colors.action.primary, minWidth: 32, textAlign: 'center' },
-    title:    { fontSize: 15, fontWeight: '700', color: colors.text.primary, textAlign: rtl ? 'right' : 'left' },
-    subtitle: { fontSize: 11, color: colors.action.primary, marginTop: 2, textAlign: rtl ? 'right' : 'left' },
+    header:   { paddingTop: 50, paddingBottom: 12, paddingHorizontal: 14, backgroundColor: '#E6F1F7', flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 10, borderBottomWidth: 1, borderColor: colors.border.subtle },
+    back:     { fontSize: 24, color: colors.action.primary, minWidth: 28, textAlign: 'center' },
+    headerInfo: { flex: 1, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 10 },
+    headerAvatarWrap: { width: 40, height: 40 },
+    headerAvatar:  { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+    headerAvatarText: { color: '#fff', fontSize: 15, fontWeight: '800' },
+    onlineDot: { position: 'absolute', bottom: -1, right: rtl ? undefined : -1, left: rtl ? -1 : undefined, width: 13, height: 13, borderRadius: 7, backgroundColor: '#22C55E', borderWidth: 2, borderColor: '#E6F1F7' },
+    title:    { fontSize: 16, fontWeight: '800', color: colors.text.primary, textAlign: rtl ? 'right' : 'left' },
+    subtitle: { fontSize: 12, color: colors.action.primary, marginTop: 1, textAlign: rtl ? 'right' : 'left' },
+    listHeader: { alignItems: 'center', gap: 10, paddingTop: 6, paddingBottom: 8 },
+    datePill:   { backgroundColor: colors.background.surface, paddingHorizontal: 14, paddingVertical: 5, borderRadius: 999, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 3, shadowOffset: { width: 0, height: 1 }, elevation: 1 },
+    datePillText: { fontSize: 12, fontWeight: '700', color: colors.text.muted },
+    e2eBanner:  { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FBEFD0', paddingHorizontal: 14, paddingVertical: 9, borderRadius: 14, maxWidth: '88%' },
+    e2eBannerText: { fontSize: 12, color: '#92400E', textAlign: 'center', flexShrink: 1 },
     pinBanner: { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 10, paddingVertical: 8, paddingHorizontal: 14, backgroundColor: '#FEF3C7', borderBottomWidth: 1, borderColor: '#F59E0B' },
     pinIcon:   { fontSize: 16 },
     pinTitle:  { fontSize: 11, fontWeight: '700', color: '#A16207', textAlign: rtl ? 'right' : 'left' },
