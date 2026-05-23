@@ -18,6 +18,8 @@ import { isRTL } from '../i18n';
 import { radius } from '../theme';
 import { avatarColor, initials } from '../lib/avatar';
 import { LoadingState, EmptyState } from '../components/state';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
 
 type Filter = 'all' | 'unread' | 'favorites' | 'groups' | 'archived';
 
@@ -42,10 +44,10 @@ export default function ChatsList({ navigation }: any) {
   const { t } = useTranslation();
   const { colors } = useTheme();
   const me = auth.currentUser?.uid;
+  const insets = useSafeAreaInsets();
   const [rows, setRows] = useState<Conversation[] | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
   const [search, setSearch] = useState('');
-  const [searchOpen, setSearchOpen] = useState(false);
 
   // Per-conversation state + typing + peer profile, keyed by conversation id.
   const [states, setStates]   = useState<Record<string, UserState | undefined>>({});
@@ -137,30 +139,18 @@ export default function ChatsList({ navigation }: any) {
 
   return (
     <View style={s.root}>
-      <View style={s.header}>
-        <View style={s.titleRow}>
-          <Text style={s.h1}>{t('chats.title')}</Text>
-          <Pressable
-            onPress={() => { setSearchOpen(o => { if (o) setSearch(''); return !o; }); }}
-            hitSlop={12}
-            accessibilityRole="button"
-            accessibilityLabel={t('chats.search')}
-          >
-            <Ionicons name={searchOpen ? 'close' : 'search'} size={22} color={colors.text.primary} />
-          </Pressable>
-        </View>
-        {searchOpen ? (
-          <TextInput
-            style={s.search}
-            placeholder={t('chats.search')}
-            value={search}
-            onChangeText={setSearch}
-            autoCapitalize="none"
-            autoFocus
-            textAlign={isRTL ? 'right' : 'left'}
-            accessibilityLabel={t('chats.search')}
-          />
-        ) : null}
+      <StatusBar style="dark" translucent backgroundColor="transparent" />
+      <View style={[s.header, { paddingTop: insets.top + 4 }]}>
+        <Text style={s.h1}>OfflineSMS</Text>
+        <TextInput
+          style={s.search}
+          placeholder={t('chats.search')}
+          value={search}
+          onChangeText={setSearch}
+          autoCapitalize="none"
+          textAlign={isRTL ? 'right' : 'left'}
+          accessibilityLabel={t('chats.search')}
+        />
         <View style={s.chips}>
           {(['all','unread','favorites','groups','archived'] as Filter[]).map(f => (
             <Pressable
@@ -272,13 +262,12 @@ export default function ChatsList({ navigation }: any) {
 function buildStyles(colors: any, rtl: boolean) {
   return StyleSheet.create({
     root:        { flex: 1, backgroundColor: colors.background.app },
-    header:      { padding: 14, paddingTop: 50, backgroundColor: colors.background.app, gap: 12 },
-    titleRow:    { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', justifyContent: 'space-between' },
-    h1:          { fontSize: 26, fontWeight: '800', color: colors.text.primary, textAlign: rtl ? 'right' : 'left' },
+    header:      { paddingHorizontal: 14, paddingBottom: 14, backgroundColor: colors.background.app, gap: 12 },
+    h1:          { fontSize: 26, fontWeight: '800', color: colors.action.primary, textAlign: rtl ? 'right' : 'left' },
     search:      { padding: 12, backgroundColor: colors.background.subtle, borderRadius: radius.md, fontSize: 14, color: colors.text.primary },
     chips:       { flexDirection: rtl ? 'row-reverse' : 'row', gap: 8, flexWrap: 'wrap' },
-    chip:        { paddingHorizontal: 16, paddingVertical: 7, borderRadius: radius.pill, backgroundColor: colors.background.surface, minHeight: 32 },
-    chipActive:  { backgroundColor: colors.action.primary },
+    chip:        { paddingHorizontal: 16, paddingVertical: 7, borderRadius: radius.pill, backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.border.strong, minHeight: 32 },
+    chipActive:  { backgroundColor: colors.action.primary, borderColor: colors.action.primary },
     chipText:    { fontSize: 13, color: colors.text.secondary, fontWeight: '700' },
     chipTextActive: { color: colors.action.primaryFg },
     row:         { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 14, paddingVertical: 12, paddingHorizontal: 16 },
