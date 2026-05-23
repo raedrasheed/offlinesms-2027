@@ -103,8 +103,6 @@ export default function App() {
           <AuthFlow />
         ) : profileCompleted === null ? (
           null /* waiting for users/{uid} snapshot */
-        ) : profileCompleted === false ? (
-          <OnboardingFlow />
         ) : (
           <RootStack.Navigator screenOptions={{ headerShown: false }}>
             <RootStack.Screen name="Tabs" component={MainTabs} />
