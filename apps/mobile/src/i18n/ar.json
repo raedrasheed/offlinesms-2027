@@ -58,6 +58,22 @@
     "filterFavorites": "المفضلة",
     "filterGroups": "المجموعات"
   },
+  "status": {
+    "title": "الحالة",
+    "myStatus": "حالتي",
+    "tapToAdd": "اضغط لإضافة تحديث للحالة",
+    "recentUpdates": "التحديثات الأخيرة",
+    "noUpdatesTitle": "لا توجد تحديثات حديثة",
+    "noUpdatesDesc": "عندما ينشر جهات اتصالك حالة، ستظهر هنا.",
+    "comingSoon": "نشر الحالة قادم قريبًا."
+  },
+  "calls": {
+    "title": "المكالمات",
+    "filterAll": "الكل",
+    "filterMissed": "الفائتة",
+    "emptyTitle": "لا توجد مكالمات حديثة",
+    "emptyDesc": "سيظهر سجل مكالماتك هنا."
+  },
   "convo": {
     "online": "متصل",
     "typing": "يكتب…",
@@ -294,6 +310,7 @@
   "settings": {
     "title": "الإعدادات",
     "profile": "الملف الشخصي",
+    "editProfileHint": "اضغط لإعداد ملفك الشخصي",
     "findFriends": "البحث عن الأصدقاء",
     "securityPin": "رمز الأمان",
     "permissions": "الأذونات",

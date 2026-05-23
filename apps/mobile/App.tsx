@@ -20,6 +20,7 @@ import ProfileCompletion from './src/screens/ProfileCompletion';
 import CreatePin from './src/screens/CreatePin';
 import Permissions from './src/screens/Permissions';
 import FindFriends from './src/screens/FindFriends';
+import IncomingCall from './src/screens/IncomingCall';
 import ChatsList from './src/screens/ChatsList';
 import Conversation from './src/screens/Conversation';
 import NewChat from './src/screens/NewChat';
@@ -151,6 +152,7 @@ export default function App() {
             <RootStack.Screen name="CreatePin" component={CreatePin} />
             <RootStack.Screen name="Permissions" component={Permissions} />
             <RootStack.Screen name="FindFriends" component={FindFriends} />
+            <RootStack.Screen name="IncomingCall" component={IncomingCall} options={{ presentation: 'fullScreenModal' }} />
           </RootStack.Navigator>
         )}
       </NavigationContainer>

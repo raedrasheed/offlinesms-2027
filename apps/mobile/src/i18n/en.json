@@ -58,6 +58,22 @@
     "filterFavorites": "Favorites",
     "filterGroups": "Groups"
   },
+  "status": {
+    "title": "Status",
+    "myStatus": "My status",
+    "tapToAdd": "Tap to add status update",
+    "recentUpdates": "Recent updates",
+    "noUpdatesTitle": "No recent updates",
+    "noUpdatesDesc": "When your contacts post a status, it’ll show up here.",
+    "comingSoon": "Posting a status is coming soon."
+  },
+  "calls": {
+    "title": "Calls",
+    "filterAll": "All",
+    "filterMissed": "Missed",
+    "emptyTitle": "No recent calls",
+    "emptyDesc": "Your call history will appear here."
+  },
   "convo": {
     "online": "Online",
     "typing": "Typing…",
@@ -294,6 +310,7 @@
   "settings": {
     "title": "Settings",
     "profile": "Profile",
+    "editProfileHint": "Tap to set up your profile",
     "findFriends": "Find friends",
     "securityPin": "Security PIN",
     "permissions": "Permissions",

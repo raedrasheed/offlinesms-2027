@@ -5,9 +5,10 @@
 
 import { useEffect, useState } from 'react';
 import {
-  View, Text, Pressable, Switch, StyleSheet, Alert, ScrollView,
+  View, Text, Pressable, Switch, StyleSheet, Alert, ScrollView, Image,
   I18nManager,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { signOut } from '../lib/auth';
 import { auth } from '../lib/firebase';
@@ -44,6 +45,13 @@ const TIME_FORMATS: { value: TimeFormat; labelKey: string }[] = [
   { value: '24h',    labelKey: 'settings.timeFormat24' },
 ];
 
+function profileInitials(name?: string): string {
+  const parts = (name ?? '').trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '?';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
 export default function Settings({ navigation }: any) {
   const { t, i18n } = useTranslation();
   const { colors, preference: themePref, setPreference: setThemePref } = useTheme();
@@ -54,6 +62,7 @@ export default function Settings({ navigation }: any) {
   const [currentLang, setCurrentLang]   = useState<LanguageCode>((i18n.language as LanguageCode) || 'en');
   const [currentTime, setCurrentTime]   = useState<TimeFormat>('system');
   const [busy, setBusy]                 = useState(false);
+  const [profile, setProfile]           = useState<{ displayName?: string; username?: string; photoURL?: string | null }>({});
 
   useEffect(() => {
     if (!me) return;
@@ -67,6 +76,7 @@ export default function Settings({ navigation }: any) {
       if (m?.inAppNotifications != null) setInAppNotifs(m.inAppNotifications);
       if (m?.timeFormat) setCurrentTime(m.timeFormat);
       if (m?.preferredLanguage) setCurrentLang(m.preferredLanguage);
+      setProfile({ displayName: m?.displayName, username: m?.username, photoURL: m?.photoURL });
     });
   }, [me]);
 
@@ -104,15 +114,23 @@ export default function Settings({ navigation }: any) {
       accessibilityLabel={t('settings.title')}
     >
 
-      {/* Profile */}
+      {/* Profile header card */}
       <Pressable
-        style={s.row}
+        style={s.profileCard}
         onPress={() => navigation.navigate('EditProfile')}
         accessible={true}
         accessibilityRole="button"
         accessibilityLabel={t('settings.profile')}
       >
-        <Text style={s.title}>{t('settings.profile')}</Text>
+        <View style={s.profileAv}>
+          {profile.photoURL
+            ? <Image source={{ uri: profile.photoURL }} style={s.profileAvImg} />
+            : <Text style={s.profileAvText}>{profileInitials(profile.displayName)}</Text>}
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={s.profileName} numberOfLines={1}>{profile.displayName || t('settings.profile')}</Text>
+          <Text style={s.profileSub} numberOfLines={1}>{profile.username ? `@${profile.username}` : t('settings.editProfileHint')}</Text>
+        </View>
         <Text style={s.chev} accessibilityElementsHidden>{isRTL ? '‹' : '›'}</Text>
       </Pressable>
 
@@ -325,6 +343,12 @@ function buildStyles(colors: any, rtl: boolean) {
     content:      { padding: 14, paddingBottom: 96, gap: 8 },
     row:          { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', paddingVertical: 16, paddingHorizontal: 14, backgroundColor: colors.background.surface, borderRadius: radius.md, gap: 10 },
     toggleRow:    { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', paddingVertical: 16, paddingHorizontal: 14, backgroundColor: colors.background.surface, borderRadius: radius.md, gap: 12 },
+    profileCard:  { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 14, padding: 14, backgroundColor: colors.background.surface, borderRadius: radius.md },
+    profileAv:    { width: 52, height: 52, borderRadius: 26, backgroundColor: colors.action.primary, alignItems: 'center', justifyContent: 'center' },
+    profileAvImg: { width: 52, height: 52, borderRadius: 26 },
+    profileAvText:{ color: colors.action.primaryFg, fontWeight: '800', fontSize: 16 },
+    profileName:  { fontSize: 16, fontWeight: '800', color: colors.text.primary, textAlign: rtl ? 'right' : 'left' },
+    profileSub:   { fontSize: 12, color: colors.text.muted, marginTop: 2, textAlign: rtl ? 'right' : 'left' },
     title:        { fontSize: 14, fontWeight: '700', color: colors.text.primary, flex: 1, textAlign: rtl ? 'right' : 'left', lineHeight: 20 },
     sub:          { fontSize: 12, color: colors.text.muted, marginTop: 2, textAlign: rtl ? 'right' : 'left', lineHeight: 16 },
     chev:         { fontSize: 18, color: colors.text.disabled, fontWeight: '700' },
