@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  FlatList, View, Text, Pressable, StyleSheet, TextInput, Alert,
+  FlatList, View, Text, Pressable, StyleSheet, TextInput,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
@@ -240,15 +240,7 @@ export default function ChatsList({ navigation }: any) {
 
       <Pressable
         style={[s.fab, isRTL && { right: undefined, left: 18 }]}
-        onPress={() => Alert.alert(
-          'New conversation',
-          undefined,
-          [
-            { text: 'New chat',  onPress: () => navigation.navigate('NewChat') },
-            { text: 'New group', onPress: () => navigation.navigate('NewGroup') },
-            { text: 'Cancel', style: 'cancel' },
-          ],
-        )}
+        onPress={() => navigation.navigate('NewChatMenu')}
         accessible={true}
         accessibilityRole="button"
         accessibilityLabel="New conversation"

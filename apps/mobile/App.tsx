@@ -25,7 +25,9 @@ import { ErrorBoundary } from './src/components/ErrorBoundary';
 import ChatsList from './src/screens/ChatsList';
 import Conversation from './src/screens/Conversation';
 import NewChat from './src/screens/NewChat';
+import NewChatMenu from './src/screens/NewChatMenu';
 import NewGroup from './src/screens/NewGroup';
+import GroupCreateInfo from './src/screens/GroupCreateInfo';
 import GroupInfo from './src/screens/GroupInfo';
 import AddMembers from './src/screens/AddMembers';
 import ForwardPicker from './src/screens/ForwardPicker';
@@ -134,8 +136,10 @@ export default function App() {
         ) : (
           <RootStack.Navigator screenOptions={{ headerShown: false }}>
             <RootStack.Screen name="Tabs" component={MainTabs} />
+            <RootStack.Screen name="NewChatMenu" component={NewChatMenu} />
             <RootStack.Screen name="NewChat" component={NewChat} />
             <RootStack.Screen name="NewGroup" component={NewGroup} />
+            <RootStack.Screen name="GroupCreateInfo" component={GroupCreateInfo} />
             <RootStack.Screen name="Conversation" component={Conversation} />
             <RootStack.Screen name="GroupInfo" component={GroupInfo} />
             <RootStack.Screen name="AddMembers" component={AddMembers} />
