@@ -79,7 +79,7 @@ export default function EditProfile({ navigation }: any) {
     try {
       const res = await fetch(result.assets[0].uri);
       const blob = await res.blob();
-      const r = ref(storage, `avatars/${me}.jpg`);
+      const r = ref(storage, `avatars/${me}/avatar.jpg`);
       await uploadBytes(r, blob);
       const url = await getDownloadURL(r);
       await updateDoc(doc(db, 'users', me), { photoURL: url, updatedAt: serverTimestamp() });
