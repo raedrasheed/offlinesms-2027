@@ -1,41 +1,37 @@
-// NewGroup — pick members and a name, call createGroup.
+// Create-group flow · Step 2 — "Add members".
 //
-// Reuses the Phase 4 username prefix-search. Member chips are stored
-// locally; users currently in the chips list are filtered out of the
-// search results. Caller is owner; max 256 members is enforced
-// server-side.
+// Multi-select people via username search. Selected people appear as chips
+// with a running N/256 counter; tapping a row toggles selection. "Next"
+// carries the selection to the Group info screen (Step 3) which performs the
+// actual createGroup call.
 
 import { useEffect, useMemo, useState } from 'react';
 import {
   View, Text, TextInput, FlatList, Pressable, StyleSheet,
-  KeyboardAvoidingView, Platform, ScrollView,
+  KeyboardAvoidingView, Platform,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import {
   collection, getDocs, limit, orderBy, query, where,
 } from 'firebase/firestore';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { db, auth } from '../lib/firebase';
-import { createGroup, groupErrorCopy } from '../lib/conversations';
 import { normalizeUsername } from '../lib/username';
 import { colors, radius } from '../theme';
+import { avatarColor, initials } from '../lib/avatar';
 import { LoadingState, EmptyState, ErrorState } from '../components/state';
 
-type UserRow = {
-  uid: string;
-  displayName?: string;
-  username?: string;
-};
-
-const NAME_MAX = 80;
+type UserRow = { uid: string; displayName?: string; username?: string };
 const HARD_CAP = 256;
 
 export default function NewGroup({ navigation }: any) {
+  const insets = useSafeAreaInsets();
   const me = auth.currentUser?.uid;
-  const [name, setName]   = useState('');
-  const [term, setTerm]   = useState('');
-  const [rows, setRows]   = useState<UserRow[] | null>([]);
+  const [term, setTerm] = useState('');
+  const [rows, setRows] = useState<UserRow[]>([]);
   const [selected, setSelected] = useState<UserRow[]>([]);
-  const [busy, setBusy]   = useState(false);
-  const [err, setErr]     = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
   const selectedIds = useMemo(() => new Set(selected.map(s => s.uid)), [selected]);
 
@@ -56,138 +52,137 @@ export default function NewGroup({ navigation }: any) {
         const list: UserRow[] = [];
         for (const d of snap.docs) {
           if (d.id === me) continue;
-          if (selectedIds.has(d.id)) continue;
           const data = d.data() as UserRow;
           list.push({ uid: d.id, displayName: data.displayName, username: data.username });
         }
         setRows(list);
-      } catch (e: any) {
-        setErr(e?.message ?? 'search-failed');
-        setRows([]);
-      } finally { setBusy(false); }
+      } catch (e: any) { setErr(e?.message ?? 'search-failed'); setRows([]); }
+      finally { setBusy(false); }
     }, 200);
     return () => clearTimeout(handle);
-  }, [term, me, selectedIds]);
+  }, [term, me]);
 
-  function add(u: UserRow) {
-    if (selected.length + 1 >= HARD_CAP) return;
-    setSelected(s => [...s, u]);
-    setTerm('');
-  }
-  function remove(uid: string) {
-    setSelected(s => s.filter(u => u.uid !== uid));
+  function toggle(u: UserRow) {
+    setSelected(prev =>
+      prev.some(p => p.uid === u.uid)
+        ? prev.filter(p => p.uid !== u.uid)
+        : (prev.length >= HARD_CAP ? prev : [...prev, u]),
+    );
   }
 
-  const canSubmit = name.trim().length > 0 && selected.length >= 1 && !busy;
+  // Selected people always appear first; search results follow (de-duped).
+  const listData = useMemo(() => {
+    const map = new Map<string, UserRow>();
+    for (const u of selected) map.set(u.uid, u);
+    for (const u of rows) if (!map.has(u.uid)) map.set(u.uid, u);
+    return [...map.values()];
+  }, [selected, rows]);
 
-  async function submit() {
-    if (!canSubmit) return;
-    setBusy(true); setErr(null);
-    try {
-      const res = await createGroup({
-        name: name.trim(),
-        memberUids: selected.map(s => s.uid),
-      });
-      navigation.replace('Conversation', { id: res.conversationId });
-    } catch (e: any) {
-      setErr(groupErrorCopy(e?.code ?? 'internal'));
-    } finally { setBusy(false); }
-  }
+  const canNext = selected.length >= 1;
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.root}>
-      <View style={s.header}>
-        <Pressable onPress={() => navigation.goBack()}><Text style={s.back}>‹</Text></Pressable>
-        <Text style={s.title}>New group</Text>
+      <View style={[s.header, { paddingTop: insets.top + 6 }]}>
+        <Pressable onPress={() => navigation.goBack()} hitSlop={10}>
+          <Ionicons name="chevron-back" size={24} color={colors.primary} />
+        </Pressable>
+        <Text style={s.title}>Add members</Text>
         <Pressable
-          style={[s.createBtn, !canSubmit && { opacity: 0.4 }]}
-          onPress={submit}
-          disabled={!canSubmit}
+          onPress={() => canNext && navigation.navigate('GroupCreateInfo', { members: selected })}
+          disabled={!canNext}
+          hitSlop={10}
         >
-          <Text style={s.createText}>{busy ? '…' : 'Create'}</Text>
+          <Text style={[s.next, !canNext && { opacity: 0.4 }]}>Next</Text>
         </Pressable>
       </View>
 
-      <ScrollView keyboardShouldPersistTaps="handled" style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }}>
-        <Text style={s.label}>Group name</Text>
-        <TextInput
-          style={s.input}
-          value={name}
-          onChangeText={setName}
-          maxLength={NAME_MAX}
-          placeholder="e.g. Weekend trip planning"
-          autoCapitalize="sentences"
-        />
-
-        <Text style={s.label}>Members</Text>
-        {selected.length === 0 ? (
-          <Text style={s.hint}>Add at least one member.</Text>
-        ) : (
+      {selected.length > 0 ? (
+        <View style={s.selectedWrap}>
           <View style={s.chips}>
             {selected.map(u => (
-              <Pressable key={u.uid} style={s.chip} onPress={() => remove(u.uid)}>
-                <Text style={s.chipText}>{u.displayName ?? u.username ?? u.uid.slice(0, 6)}  ×</Text>
+              <Pressable key={u.uid} style={s.chip} onPress={() => toggle(u)}>
+                <View style={[s.chipAv, { backgroundColor: avatarColor(u.uid) }]}>
+                  <Text style={s.chipAvText}>{initials(u.displayName ?? u.username ?? '?')}</Text>
+                </View>
+                <Text style={s.chipText} numberOfLines={1}>{u.displayName ?? u.username ?? u.uid.slice(0, 6)}</Text>
+                <Ionicons name="close" size={14} color={colors.primaryDark} />
               </Pressable>
             ))}
+            <Text style={s.counter}>{selected.length} / {HARD_CAP}</Text>
           </View>
-        )}
+        </View>
+      ) : null}
 
-        <TextInput
-          style={s.input}
-          value={term}
-          onChangeText={setTerm}
-          placeholder="Search by username"
-          autoCapitalize="none"
-          autoCorrect={false}
+      <TextInput
+        style={s.search}
+        value={term}
+        onChangeText={setTerm}
+        placeholder="Search name or number"
+        placeholderTextColor={colors.ink400}
+        autoCapitalize="none"
+        autoCorrect={false}
+      />
+
+      {selected.length > 0 ? <Text style={s.sectionLabel}>SELECTED · {selected.length}</Text> : null}
+
+      {err ? (
+        <ErrorState compact title="Search failed" description={err} />
+      ) : busy && term ? (
+        <LoadingState compact title="Searching…" />
+      ) : listData.length === 0 ? (
+        <EmptyState
+          compact
+          title={term ? 'No matches' : 'Search to add people'}
+          description={term ? undefined : 'Type a name or @username to find people to add.'}
         />
-
-        {err ? (
-          <ErrorState compact title="Couldn’t complete" description={err} />
-        ) : busy && term ? (
-          <LoadingState compact title="Searching…" />
-        ) : term && (rows ?? []).length === 0 ? (
-          <EmptyState compact title="No matches" description={`No user with username starting with "${term}".`} />
-        ) : null}
-
-        {(rows ?? []).length > 0 ? (
-          <FlatList
-            scrollEnabled={false}
-            data={rows ?? []}
-            keyExtractor={u => u.uid}
-            renderItem={({ item }) => (
-              <Pressable style={s.row} onPress={() => add(item)}>
-                <View style={s.avatar}><Text style={s.avatarText}>{(item.displayName ?? item.username ?? '?').slice(0, 1).toUpperCase()}</Text></View>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.name}>{item.displayName ?? '—'}</Text>
-                  <Text style={s.handle}>@{item.username ?? item.uid.slice(0, 6)}</Text>
+      ) : (
+        <FlatList
+          data={listData}
+          keyExtractor={u => u.uid}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{ paddingBottom: 24 }}
+          renderItem={({ item }) => {
+            const on = selectedIds.has(item.uid);
+            return (
+              <Pressable style={s.row} onPress={() => toggle(item)}>
+                <View style={[s.av, { backgroundColor: avatarColor(item.uid) }]}>
+                  <Text style={s.avText}>{initials(item.displayName ?? item.username ?? '?')}</Text>
                 </View>
-                <Text style={s.add}>＋</Text>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={s.name} numberOfLines={1}>{item.displayName ?? item.username ?? '—'}</Text>
+                  <Text style={s.handle} numberOfLines={1}>@{item.username ?? item.uid.slice(0, 6)}</Text>
+                </View>
+                <Ionicons
+                  name={on ? 'checkmark-circle' : 'ellipse-outline'}
+                  size={24}
+                  color={on ? colors.primary : colors.ink300}
+                />
               </Pressable>
-            )}
-          />
-        ) : null}
-      </ScrollView>
+            );
+          }}
+        />
+      )}
     </KeyboardAvoidingView>
   );
 }
 
 const s = StyleSheet.create({
-  root:   { flex: 1, backgroundColor: colors.bgCanvas },
-  header: { paddingTop: 50, paddingBottom: 12, paddingHorizontal: 14, backgroundColor: colors.primaryLight, flexDirection: 'row', alignItems: 'center', gap: 12 },
-  back:   { fontSize: 24, color: colors.primary, width: 24 },
-  title:  { fontSize: 14, fontWeight: '700', color: colors.ink, flex: 1 },
-  createBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: radius.pill, backgroundColor: colors.primary },
-  createText: { color: '#fff', fontWeight: '700', fontSize: 13 },
-  label:  { fontSize: 12, fontWeight: '700', color: colors.ink700, marginTop: 14, marginBottom: 6, letterSpacing: 0.4, paddingHorizontal: 14 },
-  input:  { marginHorizontal: 14, padding: 12, backgroundColor: '#fff', borderRadius: radius.md, fontSize: 15, borderWidth: 1, borderColor: colors.ink200 },
-  hint:   { fontSize: 12, color: colors.ink500, paddingHorizontal: 14 },
-  chips:  { flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingHorizontal: 14, marginBottom: 10 },
-  chip:   { paddingHorizontal: 10, paddingVertical: 6, borderRadius: radius.pill, backgroundColor: colors.primaryLight },
-  chipText: { fontSize: 12, fontWeight: '600', color: colors.primaryDark },
-  row:    { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, marginHorizontal: 14, marginBottom: 6, backgroundColor: '#fff', borderRadius: radius.md, borderWidth: 1, borderColor: colors.ink100 },
-  avatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
-  avatarText: { color: '#fff', fontWeight: '700' },
-  name:   { fontSize: 14, fontWeight: '700', color: colors.ink },
-  handle: { fontSize: 12, color: colors.ink500, marginTop: 2 },
-  add:    { fontSize: 22, color: colors.primary, fontWeight: '700' },
+  root:    { flex: 1, backgroundColor: colors.surface },
+  header:  { paddingBottom: 12, paddingHorizontal: 14, backgroundColor: colors.surface, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  title:   { fontSize: 18, fontWeight: '800', color: colors.ink, flex: 1 },
+  next:    { fontSize: 16, fontWeight: '700', color: colors.primary },
+  selectedWrap: { paddingHorizontal: 14, paddingTop: 8 },
+  chips:   { flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' },
+  chip:    { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 4, paddingHorizontal: 8, borderRadius: radius.pill, backgroundColor: colors.primaryLight, maxWidth: 180 },
+  chipAv:  { width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+  chipAvText: { color: '#fff', fontSize: 9, fontWeight: '800' },
+  chipText:{ fontSize: 13, fontWeight: '600', color: colors.primaryDark, flexShrink: 1 },
+  counter: { fontSize: 12, color: colors.ink500, marginLeft: 4 },
+  search:  { marginHorizontal: 14, marginTop: 12, padding: 12, backgroundColor: colors.surface2, borderRadius: radius.md, fontSize: 15, color: colors.ink },
+  sectionLabel: { fontSize: 11, fontWeight: '700', color: colors.ink500, letterSpacing: 0.6, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 4 },
+  row:     { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 10, paddingHorizontal: 16 },
+  av:      { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center' },
+  avText:  { color: '#fff', fontWeight: '800', fontSize: 16 },
+  name:    { fontSize: 15, fontWeight: '700', color: colors.ink },
+  handle:  { fontSize: 13, color: colors.ink500, marginTop: 2 },
 });

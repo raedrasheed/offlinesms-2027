@@ -245,11 +245,11 @@ function ReceiptIndicator({ message, isGroup }: { message: Message; isGroup: boo
 
 const s = StyleSheet.create({
   senderLabel:    { fontSize: 11, fontWeight: '700', color: colors.ink500, marginLeft: 2, marginTop: 4, marginBottom: 2 },
-  bubble:         { maxWidth: '78%', padding: 10, borderRadius: 16 },
-  sent:           { alignSelf: 'flex-end', backgroundColor: colors.primary, borderBottomRightRadius: 6 },
-  recv:           { alignSelf: 'flex-start', backgroundColor: '#fff', borderBottomLeftRadius: 6, borderWidth: 1, borderColor: colors.ink100 },
+  bubble:         { maxWidth: '78%', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 22 },
+  sent:           { alignSelf: 'flex-end', backgroundColor: '#1E88E5', borderBottomRightRadius: 8 },
+  recv:           { alignSelf: 'flex-start', backgroundColor: '#fff', borderBottomLeftRadius: 8, borderWidth: 1, borderColor: colors.ink100 },
   bubbleRow:      { flexDirection: 'row', alignItems: 'flex-end', gap: 6 },
-  bubbleText:     { fontSize: 14, color: colors.ink, lineHeight: 20, flexShrink: 1 },
+  bubbleText:     { fontSize: 16, color: colors.ink, lineHeight: 22, flexShrink: 1 },
   deletedText:    { fontStyle: 'italic', color: colors.ink500 },
   meta:           { fontSize: 11, color: colors.ink500, marginBottom: 4, fontWeight: '600' },
   replyPreview:   { borderLeftWidth: 3, borderLeftColor: colors.primaryDark, paddingLeft: 8, marginBottom: 6, backgroundColor: 'rgba(0,0,0,.04)', borderRadius: 6, padding: 6 },

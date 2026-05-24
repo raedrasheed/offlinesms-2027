@@ -53,7 +53,7 @@ function validateAbout(about: unknown): string | null {
   return trimmed;
 }
 
-export const claimUsername = onCall(async (request) => {
+export const claimUsername = onCall({ region: 'us-central1' }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'sign-in-required');
 

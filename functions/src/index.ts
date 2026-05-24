@@ -1,4 +1,5 @@
 // OfflineSMS Cloud Functions — entry barrel
+import './options'; // must precede all function modules; sets global runtime caps
 import { initializeApp } from 'firebase-admin/app';
 initializeApp();
 
