@@ -1,9 +1,9 @@
 {
   "projects": {
-    "default": "offlinesms-prod"
+    "default": "offlinesms-prod-2027"
   },
   "targets": {
-    "offlinesms-prod": {
+    "offlinesms-prod-2027": {
       "hosting": {
         "dashboard": [
           "offlinesms-dashboard"
