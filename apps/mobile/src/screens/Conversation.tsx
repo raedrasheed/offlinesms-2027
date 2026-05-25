@@ -202,7 +202,15 @@ export default function Conversation({ route, navigation }: any) {
     });
   }
   function openInfo(m: Message) {
-    navigation.navigate('MessageInfo', { id, messageId: m.id });
+    navigation.navigate('MessageInfo', {
+      id,
+      messageId:   m.id,
+      messageText: m.deletedForEveryone ? 'This message was deleted.' : (m.text ?? ''),
+      createdAtMs: m.createdAt?.toMillis?.() ?? null,
+      isGroup,
+      groupName:   isGroup ? peerName : null,
+      memberCount: convo?.memberCount ?? null,
+    });
   }
   async function unpin() {
     const messageId = convo?.pinnedMessage?.messageId;
@@ -289,6 +297,7 @@ export default function Conversation({ route, navigation }: any) {
                 isStarred:      starred.has(item.id),
                 isPinned:       (item.pinnedAt != null) || convo?.pinnedMessage?.messageId === item.id,
                 myUid:          me,
+                memberCount:    convo?.memberCount,
               }}
               onReply={startReply}
               onEditStart={startEdit}

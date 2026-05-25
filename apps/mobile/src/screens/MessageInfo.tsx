@@ -1,14 +1,16 @@
-// MessageInfo — Phase 7 receipt details.
+// MessageInfo — Phase 7 receipt details, restyled to the design guide.
 //
-// Senders see aggregate counts + a tabbed per-recipient list (All /
-// Delivered / Read / Pending / Failed). Non-senders see aggregates only
-// plus a PermissionState notice explaining why detail is hidden.
+// Senders see a teal preview card, a 2×2 stats grid, filter tabs with counts,
+// a recipient search, and per-recipient rows with colored status pills.
+// Non-senders see aggregates only plus a PermissionState notice.
 
 import { useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, FlatList } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, TextInput } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import {
   collection, limit, onSnapshot, orderBy, query, where,
 } from 'firebase/firestore';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { auth, db } from '../lib/firebase';
 import {
   getMessageInfo,
@@ -17,64 +19,54 @@ import {
   ReceiptStatus,
 } from '../lib/conversations';
 import { colors, radius } from '../theme';
+import { avatarColor, initials } from '../lib/avatar';
 import { LoadingState, ErrorState, PermissionState } from '../components/state';
 
-type TabKey = 'all' | 'delivered' | 'read' | 'pending' | 'failed';
+type TabKey = 'all' | 'read' | 'delivered' | 'pending' | 'failed';
 
 function fmt(ts: any): string {
   const d: Date | null = ts?.toDate?.() ?? (
-    typeof ts === 'object' && ts?._seconds
-      ? new Date(ts._seconds * 1000) : null
+    typeof ts === 'object' && ts?._seconds ? new Date(ts._seconds * 1000) : null
   );
-  if (!d) return '—';
-  return d.toLocaleString();
+  if (!d) return '';
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
+
+const PILL: Record<string, { bg: string; fg: string; label: string }> = {
+  read:      { bg: '#DCFCE7', fg: '#166534', label: 'Read' },
+  viewed:    { bg: '#DCFCE7', fg: '#166534', label: 'Read' },
+  played:    { bg: '#EDE9FE', fg: '#6D28D9', label: 'Played' },
+  delivered: { bg: '#DBEAFE', fg: '#1D4ED8', label: 'Delivered' },
+  pending:   { bg: '#FEF3C7', fg: '#92400E', label: 'Pending' },
+  failed:    { bg: '#FEE2E2', fg: '#991B1B', label: 'Failed' },
+};
 
 function StatusPill({ status }: { status: ReceiptStatus }) {
-  const tone = (() => {
-    switch (status) {
-      case 'delivered': return { bg: '#E0F2FE', fg: '#075985' };
-      case 'read':      return { bg: '#DCFCE7', fg: '#166534' };
-      case 'viewed':    return { bg: '#DCFCE7', fg: '#166534' };
-      case 'played':    return { bg: '#DDD6FE', fg: '#5B21B6' };
-      case 'failed':    return { bg: '#FEE2E2', fg: '#991B1B' };
-      default:          return { bg: '#E5E7EB', fg: '#374151' };
-    }
-  })();
+  const tone = PILL[status] ?? { bg: colors.ink100, fg: colors.ink700, label: status };
   return (
     <View style={[s.pill, { backgroundColor: tone.bg }]}>
-      <Text style={[s.pillText, { color: tone.fg }]}>{status}</Text>
+      <Text style={[s.pillText, { color: tone.fg }]}>{tone.label}</Text>
     </View>
   );
-}
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={s.row}>
-      <Text style={s.label}>{label}</Text>
-      <Text style={s.value}>{value}</Text>
-    </View>
-  );
-}
-
-function recipientTime(r: ReceiptDetail): any {
-  return r.readAt ?? r.viewedAt ?? r.playedAt ?? r.deliveredAt ?? r.failedAt ?? null;
 }
 
 function statusMatches(filter: TabKey, status: ReceiptStatus): boolean {
   if (filter === 'all') return true;
   if (filter === 'read') return status === 'read' || status === 'viewed' || status === 'played';
-  if (filter === 'delivered') return status === 'delivered';
-  if (filter === 'pending') return status === 'pending';
-  if (filter === 'failed') return status === 'failed';
-  return true;
+  return status === filter;
 }
 
 export default function MessageInfo({ route, navigation }: any) {
-  const { id, messageId } = route.params as { id: string; messageId: string };
+  const insets = useSafeAreaInsets();
+  const { id, messageId, messageText, createdAtMs, groupName, memberCount } = route.params as {
+    id: string; messageId: string;
+    messageText?: string; createdAtMs?: number | null;
+    groupName?: string | null; memberCount?: number | null;
+  };
   const [info, setInfo] = useState<MessageInfoData | null>(null);
   const [err, setErr]   = useState<string | null>(null);
   const [tab, setTab]   = useState<TabKey>('all');
+  const [search, setSearch] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -85,57 +77,67 @@ export default function MessageInfo({ route, navigation }: any) {
     return () => { cancelled = true; };
   }, [id, messageId]);
 
+  const a = info?.aggregates ?? { deliveredCount: 0, readCount: 0, viewedCount: 0, playedCount: 0, failedCount: 0, pendingCount: 0 };
+  const readTotal = a.readCount + a.viewedCount + a.playedCount;
+
+  const counts = useMemo(() => {
+    const recs = info?.recipients ?? [];
+    return {
+      all:       recs.length,
+      read:      recs.filter(r => statusMatches('read', r.status)).length,
+      delivered: recs.filter(r => r.status === 'delivered').length,
+      pending:   recs.filter(r => r.status === 'pending').length,
+      failed:    recs.filter(r => r.status === 'failed').length,
+    };
+  }, [info?.recipients]);
+
   const filtered = useMemo<ReceiptDetail[]>(() => {
     if (!info?.recipients) return [];
-    return info.recipients.filter(r => statusMatches(tab, r.status));
-  }, [info?.recipients, tab]);
+    const q = search.trim().toLowerCase();
+    return info.recipients.filter(r =>
+      statusMatches(tab, r.status) &&
+      (!q || (r.displayName ?? r.uid).toLowerCase().includes(q)),
+    );
+  }, [info?.recipients, tab, search]);
 
-  if (err) return <ErrorState fullPage title="Couldn’t load" description={err} />;
+  if (err)  return <ErrorState fullPage title="Couldn’t load" description={err} />;
   if (!info) return <LoadingState fullPage title="Loading info…" />;
 
-  const a = info.aggregates ?? {
-    deliveredCount: 0, readCount: 0, viewedCount: 0,
-    playedCount: 0, failedCount: 0, pendingCount: 0,
-  };
+  const subtitle = [groupName, memberCount ? `${memberCount} members` : null].filter(Boolean).join(' · ');
 
   return (
     <View style={s.root}>
-      <View style={s.header}>
-        <Pressable onPress={() => navigation.goBack()}><Text style={s.back}>‹</Text></Pressable>
-        <Text style={s.title}>Message info</Text>
+      <View style={[s.header, { paddingTop: insets.top + 6 }]}>
+        <Pressable onPress={() => navigation.goBack()} hitSlop={10}>
+          <Ionicons name="chevron-back" size={24} color={colors.primary} />
+        </Pressable>
+        <View style={{ flex: 1 }}>
+          <Text style={s.title}>Message info</Text>
+          {subtitle ? <Text style={s.subtitle} numberOfLines={1}>{subtitle}</Text> : null}
+        </View>
+        <Ionicons name="ellipsis-horizontal" size={20} color={colors.ink500} />
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: 14, paddingBottom: 32 }}>
-        <View style={s.card}>
-          <Text style={s.cardLabel}>{info.senderDisplayName ?? info.senderUid ?? 'Message'}</Text>
-          <Text style={s.cardBody}>
-            {info.deletedForEveryone ? 'This message was deleted.' : '—'}
+      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 32 }} keyboardShouldPersistTaps="handled">
+        <View style={s.preview}>
+          <Text style={s.previewText}>
+            {messageText || (info.deletedForEveryone ? 'This message was deleted.' : '—')}
           </Text>
+          <Text style={s.previewTime}>{fmt(info.createdAt) || (createdAtMs ? new Date(createdAtMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '')}</Text>
         </View>
 
-        <Row label="Sent"      value={fmt(info.createdAt)} />
-        <Row label="Edited"    value={info.editedAt ? fmt(info.editedAt) : '—'} />
-        <Row label="Deleted"   value={info.deletedForEveryone ? fmt(info.deletedAt) : '—'} />
-        <Row label="Pinned"    value={info.pinnedAt ? fmt(info.pinnedAt) : '—'} />
-        <Row label="Forwarded" value={info.forwarded ? 'Yes' : '—'} />
-        <Row label="Reply to"  value={info.replyTo ? (info.replyTo.senderDisplayName + ': ' + info.replyTo.preview) : '—'} />
-
-        <Text style={s.sectionLabel}>Delivery</Text>
         <View style={s.statsGrid}>
-          <Stat label="Delivered" value={a.deliveredCount} />
-          <Stat label="Read"      value={a.readCount + a.viewedCount + a.playedCount} />
-          <Stat label="Pending"   value={a.pendingCount} />
-          <Stat label="Failed"    value={a.failedCount} />
+          <Stat icon="checkmark-done" tint="#1D4ED8" value={a.deliveredCount} label="Delivered" />
+          <Stat icon="eye-outline"    tint="#166534" value={readTotal}        label="Read" />
+          <Stat icon="time-outline"   tint="#92400E" value={a.pendingCount}   label="Pending" />
+          <Stat icon="alert-circle-outline" tint="#991B1B" value={a.failedCount} label="Failed" />
         </View>
 
         {info.isSender && !info.deletedForEveryone
-          && (a.pendingCount > 0 || a.failedCount > 0 || a.deliveredCount > a.readCount) ? (
+          && (a.pendingCount > 0 || a.failedCount > 0 || a.deliveredCount > readTotal) ? (
           <Pressable
             style={s.escalateBtn}
-            onPress={() => navigation.navigate('SmsEscalation', {
-              conversationId: id,
-              messageId:      messageId,
-            })}
+            onPress={() => navigation.navigate('SmsEscalation', { conversationId: id, messageId })}
           >
             <Text style={s.escalateText}>Send via OfflineSMS</Text>
             <Text style={s.escalateSub}>Reach recipients who haven’t read or received this message.</Text>
@@ -153,37 +155,54 @@ export default function MessageInfo({ route, navigation }: any) {
         {info.isSender && info.recipients ? (
           <>
             <View style={s.tabs}>
-              {(['all','delivered','read','pending','failed'] as TabKey[]).map(t => (
+              {(['all', 'read', 'delivered', 'pending', 'failed'] as TabKey[]).map(t => (
                 <Pressable key={t} style={[s.tab, tab === t && s.tabOn]} onPress={() => setTab(t)}>
                   <Text style={[s.tabText, tab === t && s.tabTextOn]}>
-                    {t === 'all' ? 'All' : t[0].toUpperCase() + t.slice(1)}
+                    {t === 'all' ? 'All' : `${t[0].toUpperCase()}${t.slice(1)} ${counts[t]}`}
                   </Text>
                 </Pressable>
               ))}
             </View>
 
+            <View style={s.searchWrap}>
+              <Ionicons name="search" size={16} color={colors.ink400} />
+              <TextInput
+                style={s.search}
+                placeholder="Search recipients"
+                placeholderTextColor={colors.ink400}
+                value={search}
+                onChangeText={setSearch}
+                autoCapitalize="none"
+              />
+            </View>
+
             {filtered.length === 0 ? (
               <Text style={s.empty}>No recipients in this state.</Text>
             ) : (
-              <FlatList
-                scrollEnabled={false}
-                data={filtered}
-                keyExtractor={r => r.uid}
-                renderItem={({ item }) => (
-                  <View style={s.recipientRow}>
-                    <View style={s.avatar}><Text style={s.avatarText}>{(item.displayName ?? item.uid).slice(0, 1).toUpperCase()}</Text></View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={s.recipientName}>
-                        {item.displayName ?? item.uid.slice(0, 6)}
-                        {item.role && item.role !== 'member' ? `  · ${item.role}` : ''}
-                      </Text>
-                      <Text style={s.recipientTime}>{fmt(recipientTime(item))}</Text>
-                      {item.failureReason ? <Text style={s.recipientFail}>{item.failureReason}</Text> : null}
-                    </View>
-                    <StatusPill status={item.status} />
+              filtered.map(item => (
+                <View key={item.uid} style={s.recipientRow}>
+                  <View style={[s.avatar, { backgroundColor: avatarColor(item.uid) }]}>
+                    <Text style={s.avatarText}>{initials(item.displayName ?? item.uid)}</Text>
                   </View>
-                )}
-              />
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <View style={s.nameRow}>
+                      <Text style={s.recipientName} numberOfLines={1}>{item.displayName ?? item.uid.slice(0, 6)}</Text>
+                      {item.role && item.role !== 'member' ? (
+                        <Text style={s.roleBadge}>{item.role.toUpperCase()}</Text>
+                      ) : null}
+                    </View>
+                    <Text style={s.recipientMeta} numberOfLines={1}>
+                      {[
+                        item.deliveredAt ? `Delivered ${fmt(item.deliveredAt)}` : null,
+                        item.readAt ? `Read ${fmt(item.readAt)}` : null,
+                        item.playedAt ? `Played ${fmt(item.playedAt)}` : null,
+                      ].filter(Boolean).join(' · ') || '—'}
+                    </Text>
+                    {item.failureReason ? <Text style={s.recipientFail}>{item.failureReason}</Text> : null}
+                  </View>
+                  <StatusPill status={item.status} />
+                </View>
+              ))
             )}
           </>
         ) : (
@@ -200,35 +219,31 @@ export default function MessageInfo({ route, navigation }: any) {
   );
 }
 
-function Stat({ label, value }: { label: string; value: number }) {
+function Stat({ icon, tint, value, label }: { icon: keyof typeof Ionicons.glyphMap; tint: string; value: number; label: string }) {
   return (
     <View style={s.statCard}>
-      <Text style={s.statValue}>{value}</Text>
+      <View style={s.statTop}>
+        <Ionicons name={icon} size={15} color={tint} />
+        <Text style={[s.statValue, { color: tint }]}>{value}</Text>
+      </View>
       <Text style={s.statLabel}>{label}</Text>
     </View>
   );
 }
 
-/**
- * Phase 11: when the message has any OfflineSMS escalation batch, surface
- * a deep link to the most recent batch's Delivery Report. Subscribes to
- * smsBatches where senderId == me and messageId == X order by createdAt desc.
- */
 function LatestBatchLink({
   conversationId, messageId, onOpen,
 }: {
-  conversationId: string;
-  messageId: string;
-  onOpen: (batchId: string) => void;
+  conversationId: string; messageId: string; onOpen: (batchId: string) => void;
 }) {
   const me = auth.currentUser?.uid;
-  const [batch, setBatch] = useState<{ id: string; status?: string; createdAt?: any } | null>(null);
+  const [batch, setBatch] = useState<{ id: string; status?: string } | null>(null);
 
   useEffect(() => {
     if (!me || !messageId) return;
     const q = query(
       collection(db, 'smsBatches'),
-      where('senderId',  '==', me),
+      where('senderId', '==', me),
       where('messageId', '==', messageId),
       orderBy('createdAt', 'desc'),
       limit(1),
@@ -236,7 +251,7 @@ function LatestBatchLink({
     return onSnapshot(q, snap => {
       if (snap.empty) { setBatch(null); return; }
       const d = snap.docs[0];
-      setBatch({ id: d.id, ...(d.data() as { status?: string; createdAt?: any }) });
+      setBatch({ id: d.id, ...(d.data() as { status?: string }) });
     });
   }, [me, messageId, conversationId]);
 
@@ -247,46 +262,46 @@ function LatestBatchLink({
         <Text style={s.batchLinkTitle}>OfflineSMS reminders</Text>
         <Text style={s.batchLinkSub}>Latest batch · status {batch.status ?? '—'}</Text>
       </View>
-      <Text style={s.batchLinkChevron}>›</Text>
+      <Ionicons name="chevron-forward" size={18} color={colors.ink400} />
     </Pressable>
   );
 }
 
 const s = StyleSheet.create({
   root:    { flex: 1, backgroundColor: colors.bgCanvas },
-  header:  { paddingTop: 50, paddingBottom: 12, paddingHorizontal: 14, backgroundColor: colors.primaryLight, flexDirection: 'row', alignItems: 'center', gap: 12 },
-  back:    { fontSize: 24, color: colors.primary },
-  title:   { fontSize: 14, fontWeight: '700', color: colors.ink },
-  card:    { backgroundColor: '#fff', padding: 12, borderRadius: radius.md, borderWidth: 1, borderColor: colors.ink100, marginBottom: 12 },
-  cardLabel: { fontSize: 11, fontWeight: '700', color: colors.ink500, marginBottom: 4 },
-  cardBody:  { fontSize: 14, color: colors.ink },
-  row:     { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderColor: colors.ink100 },
-  label:   { fontSize: 12, color: colors.ink500, fontWeight: '600' },
-  value:   { fontSize: 12, color: colors.ink, fontWeight: '600', maxWidth: '60%', textAlign: 'right' },
-  sectionLabel: { fontSize: 11, fontWeight: '700', color: colors.ink500, letterSpacing: 0.6, marginTop: 12, marginBottom: 6 },
+  header:  { paddingBottom: 12, paddingHorizontal: 14, backgroundColor: colors.primaryLight, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  title:   { fontSize: 17, fontWeight: '800', color: colors.ink },
+  subtitle:{ fontSize: 12, color: colors.ink500, marginTop: 1 },
+  preview: { backgroundColor: '#1D6E92', borderRadius: 16, padding: 14 },
+  previewText: { fontSize: 15, color: '#fff', lineHeight: 21 },
+  previewTime: { fontSize: 11, color: 'rgba(255,255,255,.75)', alignSelf: 'flex-end', marginTop: 6 },
+  statsGrid:{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 14 },
+  statCard: { width: '47%', flexGrow: 1, backgroundColor: '#fff', borderRadius: radius.md, padding: 12, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 4, shadowOffset: { width: 0, height: 1 }, elevation: 1 },
+  statTop:  { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  statValue:{ fontSize: 20, fontWeight: '800' },
+  statLabel:{ fontSize: 11, fontWeight: '700', color: colors.ink500, marginTop: 4, letterSpacing: 0.4 },
   escalateBtn:  { marginTop: 14, padding: 14, borderRadius: radius.md, backgroundColor: colors.primary },
   escalateText: { color: '#fff', fontWeight: '800', fontSize: 14 },
   escalateSub:  { color: 'rgba(255,255,255,.85)', fontSize: 11, marginTop: 4 },
   batchLinkCard: { flexDirection: 'row', alignItems: 'center', marginTop: 10, padding: 14, borderRadius: radius.md, backgroundColor: '#fff', borderWidth: 1, borderColor: colors.ink100 },
   batchLinkTitle: { fontSize: 13, fontWeight: '800', color: colors.ink },
   batchLinkSub:   { fontSize: 11, color: colors.ink500, marginTop: 2 },
-  batchLinkChevron: { fontSize: 18, color: colors.ink400, fontWeight: '700' },
-  statsGrid:{ flexDirection: 'row', gap: 8 },
-  statCard: { flex: 1, backgroundColor: '#fff', borderRadius: radius.md, borderWidth: 1, borderColor: colors.ink100, padding: 10, alignItems: 'center' },
-  statValue:{ fontSize: 22, fontWeight: '800', color: colors.ink },
-  statLabel:{ fontSize: 10, fontWeight: '700', color: colors.ink500, marginTop: 2, letterSpacing: 0.4 },
-  tabs:    { flexDirection: 'row', gap: 6, marginTop: 14, flexWrap: 'wrap' },
-  tab:     { paddingHorizontal: 10, paddingVertical: 6, borderRadius: radius.pill, backgroundColor: '#fff', borderWidth: 1, borderColor: colors.ink200 },
+  tabs:    { flexDirection: 'row', gap: 6, marginTop: 18, flexWrap: 'wrap' },
+  tab:     { paddingHorizontal: 12, paddingVertical: 7, borderRadius: radius.pill, backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.ink300 },
   tabOn:   { backgroundColor: colors.primary, borderColor: colors.primary },
-  tabText: { fontSize: 12, color: colors.ink700, fontWeight: '600' },
+  tabText: { fontSize: 12, color: colors.ink700, fontWeight: '700' },
   tabTextOn: { color: '#fff' },
-  empty:   { fontSize: 12, color: colors.ink500, textAlign: 'center', padding: 16 },
-  recipientRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 10, marginTop: 6, backgroundColor: '#fff', borderRadius: radius.md, borderWidth: 1, borderColor: colors.ink100 },
-  avatar:  { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.primaryLight, alignItems: 'center', justifyContent: 'center' },
-  avatarText: { color: colors.primaryDark, fontWeight: '700' },
-  recipientName: { fontSize: 13, color: colors.ink, fontWeight: '700' },
-  recipientTime: { fontSize: 11, color: colors.ink500, marginTop: 2 },
+  searchWrap: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12, paddingHorizontal: 12, backgroundColor: '#fff', borderRadius: radius.md, borderWidth: 1, borderColor: colors.ink100 },
+  search:  { flex: 1, paddingVertical: 10, fontSize: 14, color: colors.ink },
+  empty:   { fontSize: 12, color: colors.ink500, textAlign: 'center', padding: 20 },
+  recipientRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: 1, borderColor: colors.ink100 },
+  avatar:  { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
+  avatarText: { color: '#fff', fontWeight: '800', fontSize: 14 },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  recipientName: { fontSize: 14, color: colors.ink, fontWeight: '700', flexShrink: 1 },
+  roleBadge: { fontSize: 9, fontWeight: '800', color: colors.primaryDark, letterSpacing: 0.6 },
+  recipientMeta: { fontSize: 11, color: colors.ink500, marginTop: 3 },
   recipientFail: { fontSize: 11, color: colors.err, marginTop: 2 },
-  pill:    { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
-  pillText: { fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
+  pill:    { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
+  pillText: { fontSize: 11, fontWeight: '700' },
 });
