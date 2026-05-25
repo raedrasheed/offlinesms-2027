@@ -25,7 +25,7 @@ export function ChatActionSheet({
   onClose:     () => void;
   mine:        boolean;
   previewText: string;
-  reactions:   string[];
+  reactions:   readonly string[];
   onReact:     (emoji: string) => void;
   actions:     SheetAction[];
 }) {
