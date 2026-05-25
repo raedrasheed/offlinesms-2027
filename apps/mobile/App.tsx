@@ -8,6 +8,7 @@ import { onAuthStateChanged, User } from 'firebase/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { auth, db } from './src/lib/firebase';
 import { ThemeProvider } from './src/context/ThemeContext';
+import { OfflineProvider } from './src/context/OfflineContext';
 import type { ThemePreference } from './src/lib/user';
 import './src/i18n';
 
@@ -126,6 +127,7 @@ export default function App() {
 
   return (
     <ThemeProvider userPreference={userTheme}>
+    <OfflineProvider>
     <SafeAreaProvider>
       <ErrorBoundary>
       <NavigationContainer>
@@ -164,6 +166,7 @@ export default function App() {
       </NavigationContainer>
       </ErrorBoundary>
     </SafeAreaProvider>
+    </OfflineProvider>
     </ThemeProvider>
   );
 }

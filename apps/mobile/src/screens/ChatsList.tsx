@@ -20,6 +20,8 @@ import { avatarColor, initials } from '../lib/avatar';
 import { LoadingState, EmptyState } from '../components/state';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
+import { useOffline } from '../context/OfflineContext';
+import { OfflineBanner, SyncingBanner } from '../components/OfflineBanners';
 
 type Filter = 'all' | 'unread' | 'favorites' | 'groups' | 'archived';
 
@@ -45,6 +47,7 @@ export default function ChatsList({ navigation }: any) {
   const { colors } = useTheme();
   const me = auth.currentUser?.uid;
   const insets = useSafeAreaInsets();
+  const { isOffline, isSyncing, queuedCount } = useOffline();
   const [rows, setRows] = useState<Conversation[] | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
   const [search, setSearch] = useState('');
@@ -168,6 +171,8 @@ export default function ChatsList({ navigation }: any) {
           ))}
         </View>
       </View>
+
+      {isSyncing && queuedCount > 0 ? <SyncingBanner count={queuedCount} /> : isOffline ? <OfflineBanner /> : null}
 
       {filtered.length === 0 ? (
         <EmptyState

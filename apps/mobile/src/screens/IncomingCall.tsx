@@ -1,6 +1,6 @@
-import { View, Text, Pressable, StyleSheet, SafeAreaView } from 'react-native';
+import { View, Text, Pressable, StyleSheet, SafeAreaView, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { colors } from '../theme';
+import Svg, { Defs, LinearGradient as SvgGradient, Stop, Rect } from 'react-native-svg';
 
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -12,9 +12,21 @@ function initials(name: string): string {
 export default function IncomingCall({ navigation, route }: any) {
   const name: string = route?.params?.name ?? 'Renison Hathway';
   const close = () => navigation.goBack();
+  const { width, height } = useWindowDimensions();
 
   return (
-    <SafeAreaView style={s.root}>
+    <View style={s.root}>
+      <Svg style={StyleSheet.absoluteFill} width={width} height={height}>
+        <Defs>
+          <SvgGradient id="callBg" x1="0" y1="0" x2="0.35" y2="1">
+            <Stop offset="0" stopColor="#1D4ED8" />
+            <Stop offset="0.55" stopColor="#4338CA" />
+            <Stop offset="1" stopColor="#6D28D9" />
+          </SvgGradient>
+        </Defs>
+        <Rect x="0" y="0" width={width} height={height} fill="url(#callBg)" />
+      </Svg>
+      <SafeAreaView style={s.safe}>
       <View style={s.top}>
         <Text style={s.kicker}>OFFLINESMS VIDEO</Text>
         <Text style={s.status}>Incoming call…</Text>
@@ -55,12 +67,14 @@ export default function IncomingCall({ navigation, route }: any) {
           <Text style={s.actionLabel}>Accept</Text>
         </View>
       </View>
-    </SafeAreaView>
+      </SafeAreaView>
+    </View>
   );
 }
 
 const s = StyleSheet.create({
-  root:   { flex: 1, backgroundColor: colors.primaryDark, justifyContent: 'space-between', paddingVertical: 48 },
+  root:   { flex: 1, backgroundColor: '#3B2E8F' },
+  safe:   { flex: 1, justifyContent: 'space-between', paddingVertical: 48 },
   top:    { alignItems: 'center', gap: 6, marginTop: 24 },
   kicker: { color: '#FFFFFF99', fontSize: 12, fontWeight: '800', letterSpacing: 1.5 },
   status: { color: '#FFFFFFE6', fontSize: 15, fontWeight: '600' },
