@@ -52,6 +52,9 @@ export type MessageBubbleProps = {
   onJumpTo:   (messageId: string) => void;
   onInfo:     (msg: Message) => void;
   onSendViaSms?: (msg: Message) => void;
+  // Offline-first: locally queued outgoing message not yet on the server.
+  pending?:   'queued' | 'syncing' | 'failed';
+  onRetry?:   () => void;
 };
 
 function createdAtMillis(value: any): number {
@@ -67,11 +70,46 @@ function formatTime(value: any): string {
 }
 
 export function MessageBubble({
-  message: m, context, showSender, onReply, onEditStart, onForward, onJumpTo, onInfo, onSendViaSms,
+  message: m, context, showSender, onReply, onEditStart, onForward, onJumpTo, onInfo, onSendViaSms, pending, onRetry,
 }: MessageBubbleProps) {
   const mine    = context.isMyMessage;
   const deleted = m.deletedForEveryone === true;
   const [sheetOpen, setSheetOpen] = useState(false);
+
+  if (pending) {
+    return (
+      <Pressable
+        style={[{ marginBottom: 2 }]}
+        onPress={pending === 'failed' ? onRetry : undefined}
+        disabled={pending !== 'failed'}
+      >
+        <View style={[s.bubble, s.sent, pending !== 'failed' && { opacity: 0.92 }]}>
+          <View style={s.bubbleRow}>
+            <Text style={[s.bubbleText, { color: '#fff' }]}>{m.text ?? ''}</Text>
+          </View>
+          <View style={s.bubbleFooter}>
+            {pending === 'failed' ? (
+              <>
+                <Ionicons name="alert-circle" size={12} color="#FFD9D9" />
+                <Text style={[s.foot, { color: '#FFD9D9' }]}>Failed · tap to retry</Text>
+              </>
+            ) : pending === 'syncing' ? (
+              <>
+                <Ionicons name="sync-outline" size={12} color="rgba(255,255,255,.85)" />
+                <Text style={[s.foot, { color: 'rgba(255,255,255,.85)' }]}>Sending…</Text>
+              </>
+            ) : (
+              <>
+                <Ionicons name="time-outline" size={12} color="rgba(255,255,255,.85)" />
+                <Text style={[s.foot, { color: 'rgba(255,255,255,.85)' }]}>Queued · sends when online</Text>
+              </>
+            )}
+            <Text style={[s.foot, { color: 'rgba(255,255,255,.7)' }]}>{formatTime(m.createdAt)}</Text>
+          </View>
+        </View>
+      </Pressable>
+    );
+  }
 
   const canEdit = mine && !deleted && (() => {
     const ms = createdAtMillis(m.createdAt);

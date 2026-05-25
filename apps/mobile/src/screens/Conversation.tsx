@@ -28,6 +28,9 @@ import { useTheme } from '../context/ThemeContext';
 import { isRTL } from '../i18n';
 import { LoadingState, EmptyState, ErrorState } from '../components/state';
 import { avatarColor, initials } from '../lib/avatar';
+import { useOffline } from '../context/OfflineContext';
+import { OfflineNotice, SyncSuccessChip } from '../components/OfflineBanners';
+import { getDraft, setDraft as persistDraft, clearDraft } from '../lib/drafts';
 
 type ComposerGate =
   | { kind: 'allowed' }
@@ -58,6 +61,7 @@ export default function Conversation({ route, navigation }: any) {
   const { colors } = useTheme();
   const { id } = route.params as { id: string };
   const me = auth.currentUser?.uid ?? '';
+  const { isOffline, enqueue, queuedFor, deliveredFor, deliveredNonce } = useOffline();
 
   const [msgs, setMsgs] = useState<Message[] | null>(null);
   const [draft, setDraft] = useState('');
@@ -152,6 +156,32 @@ export default function Conversation({ route, navigation }: any) {
     return () => clearTimeout(handle);
   }, [draft, id, editing]);
 
+  // Restore a saved draft when opening the chat.
+  useEffect(() => {
+    let on = true;
+    getDraft(id).then(text => { if (on && text) setDraft(prev => prev || text); });
+    return () => { on = false; };
+  }, [id]);
+
+  // Persist the composer draft (debounced) so it survives navigation/restart.
+  useEffect(() => {
+    if (editing) return;
+    const h = setTimeout(() => { persistDraft(id, draft); }, 400);
+    return () => clearTimeout(h);
+  }, [draft, id, editing]);
+
+  // Post-reconnect "delivered after reconnect" chip.
+  const [deliveredChip, setDeliveredChip] = useState(0);
+  useEffect(() => {
+    const n = deliveredFor(id);
+    if (n > 0) {
+      setDeliveredChip(n);
+      const h = setTimeout(() => setDeliveredChip(0), 5000);
+      return () => clearTimeout(h);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deliveredNonce]);
+
   const gate = useMemo(
     () => gateFor(convo, myRole, memberStatus === 'active' || memberStatus === 'unknown'),
     [convo, myRole, memberStatus],
@@ -228,10 +258,18 @@ export default function Conversation({ route, navigation }: any) {
       if (editing) {
         await editMessage(id, editing.messageId, text);
         cancelEdit();
+      } else if (isOffline) {
+        // Offline-first: persist locally and deliver on reconnect.
+        await enqueue({ conversationId: id, conversationType: isGroup ? 'group' : 'direct', text, replyTo: replyTo ?? null });
+        setReplyTo(null);
+        setDraft('');
+        clearDraft(id);
+        setTyping(id, false).catch(() => {});
       } else {
         await sendTextMessage(id, text, replyTo);
         setReplyTo(null);
         setDraft('');
+        clearDraft(id);
         setTyping(id, false).catch(() => {});
       }
     } catch (e: any) {
@@ -249,9 +287,21 @@ export default function Conversation({ route, navigation }: any) {
     return convo?.memberCount ? `${convo.memberCount} members${convo?.status === 'locked' ? ' · locked' : ''}` : null;
   }, [peerTyping, isGroup, convo?.memberCount, convo?.status]);
 
+  const queued = queuedFor(id);
   const body = useMemo(() => {
     if (visibleMsgs === null) return <LoadingState fullPage title="Loading messages…" />;
-    if (visibleMsgs.length === 0) return (
+
+    const queuedItems = queued.map(q => ({
+      id:             q.localQueueId,
+      conversationId: id,
+      senderUid:      me,
+      type:           'text' as const,
+      text:           q.text,
+      createdAt:      { toMillis: () => q.createdAt },
+      __pending:      q.status as 'queued' | 'syncing' | 'failed',
+    }));
+
+    if (visibleMsgs.length === 0 && queuedItems.length === 0) return (
       <View style={s.emptyConvo}>
         <View style={[s.emptyAvatar, { backgroundColor: avatarColor(peerUid ?? peerName) }]}>
           <Text style={s.emptyAvatarText}>{initials(peerName)}</Text>
@@ -265,11 +315,13 @@ export default function Conversation({ route, navigation }: any) {
         <Text style={s.emptyNudge}>Say hi — your first message will start the chat.</Text>
       </View>
     );
+
+    const data: any[] = [...visibleMsgs, ...queuedItems];
     return (
       <FlatList
         ref={listRef}
-        data={visibleMsgs}
-        keyExtractor={m => m.id}
+        data={data}
+        keyExtractor={(m: any) => m.id}
         contentContainerStyle={{ padding: 12, gap: 4 }}
         ListHeaderComponent={
           <View style={s.listHeader}>
@@ -282,9 +334,24 @@ export default function Conversation({ route, navigation }: any) {
         }
         onContentSizeChange={() => listRef.current?.scrollToEnd?.({ animated: false })}
         renderItem={({ item, index }) => {
+          if (item.__pending) {
+            return (
+              <MessageBubble
+                message={item}
+                pending={item.__pending}
+                showSender={false}
+                context={{ conversationId: id, isGroup, isMyMessage: true, myRoleIsAdmin, isStarred: false, isPinned: false, myUid: me, memberCount: convo?.memberCount }}
+                onReply={() => {}}
+                onEditStart={() => {}}
+                onForward={() => {}}
+                onJumpTo={() => {}}
+                onInfo={() => {}}
+              />
+            );
+          }
           const mine = item.senderUid === me || (item as any).senderId === me;
-          const previous = index > 0 ? visibleMsgs[index - 1] : null;
-          const showSender = isGroup && !mine && (!previous || previous.senderUid !== item.senderUid);
+          const previous = index > 0 ? data[index - 1] : null;
+          const showSender = isGroup && !mine && (!previous || previous.__pending || previous.senderUid !== item.senderUid);
           return (
             <MessageBubble
               message={item}
@@ -314,7 +381,7 @@ export default function Conversation({ route, navigation }: any) {
         }}
       />
     );
-  }, [visibleMsgs, me, isGroup, id, myRoleIsAdmin, starred, convo?.pinnedMessage]);
+  }, [visibleMsgs, queued, me, isGroup, id, myRoleIsAdmin, starred, convo?.pinnedMessage, convo?.memberCount]);
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.root}>
@@ -374,6 +441,9 @@ export default function Conversation({ route, navigation }: any) {
 
       {body}
 
+      {deliveredChip > 0 ? <SyncSuccessChip count={deliveredChip} /> : null}
+      {isOffline ? <OfflineNotice /> : null}
+
       {err ? <ErrorState compact title="Couldn't send" description={err} /> : null}
 
       {gate.kind === 'blocked' && !editing ? (
@@ -415,7 +485,7 @@ export default function Conversation({ route, navigation }: any) {
             <TextInput
               value={draft}
               onChangeText={setDraft}
-              placeholder={editing ? t('messageActions.editingMessage') : t('convo.composerPlaceholder')}
+              placeholder={editing ? t('messageActions.editingMessage') : isOffline ? 'Type · saved as draft' : t('convo.composerPlaceholder')}
               style={s.input}
               multiline
               maxLength={4000}
