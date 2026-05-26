@@ -4,6 +4,60 @@ Running log of phased work. Newest first.
 
 ---
 
+## Phase 22 — Local-First Mobile Database & Firebase Sync (22A)
+
+**Branch:** `claude/wonderful-bohr-WE9L0`
+**Status:** 22A complete (additive foundation). 22B–22E (UI cutover) deferred to
+a device-verified follow-up.
+
+### What was done
+
+1. **Phase 22 plan** (`docs/OFFLINESMS_PHASE_22_PLAN.md`) — objective, current
+   data-flow audit, listener/callable inventory, tech decision (`expo-sqlite`),
+   schema, sync architecture, conflict/migration/security/perf/test/rollback
+   strategies, acceptance criteria, and 22A→22E staging.
+2. **Local DB foundation** (`apps/mobile/src/localdb/`) — row `types`, SQLite
+   DDL + indexes (`schema`), versioned `migrations`, per-user `connection`
+   management with logout `wipeUserData`, and local-id/idempotency-key `ids`.
+   Added `expo-sqlite ~14.0.6`.
+3. **Repositories** — `conversations` (indexed chat-list query + folded
+   per-user state), `messages` (optimistic insert, paginated reads, remote
+   reconcile by `local_id`), durable idempotent `outbox`, `syncState` cursors,
+   monotonic `receipts`, group `members`, `userState` wrapper.
+4. **Sync engine** — `conflictResolver` (pure), `retryPolicy` (pure),
+   `networkState` (NetInfo), `firebasePush` (outbox→callables, passes
+   `localId`/`idempotencyKey`), `firebasePull` (cursor/paged Firestore reads),
+   `syncEngine` (single-flight push+pull+reconcile), `syncScheduler`
+   (triggers + foreground timer). Public facade `index.ts`
+   (`initLocalDb`/`queueSendMessage`/`wipeAndClose`).
+5. **Server idempotency** — `sendTextMessage` accepts optional
+   `localId`/`idempotencyKey`, dedupes by `clientLocalId`, returns the existing
+   message on retry. Optional + backward compatible; no rule changes.
+6. **Docs** — `OFFLINESMS_LOCAL_DB_SCHEMA.md`, `OFFLINESMS_SYNC_PROTOCOL.md`.
+7. **Tests** — 25 pure-logic unit tests (conflict resolver, retry policy,
+   migrations, ids) under `apps/mobile/__tests__/localdb/`, all passing in node.
+
+### Verification
+
+- `apps/mobile/__tests__/localdb` — **25/25 passing** (vitest, node env).
+- `functions` package **compiles** (`tsc`) with the idempotency change.
+- All new mobile modules are **additive** (not imported by any screen), so the
+  running app's behaviour is unchanged.
+
+### Known limitations / not done
+
+- Could not run the Expo app, `expo-sqlite`, or mobile typecheck in this
+  environment (native module + missing Expo deps); driver-backed DB tests and
+  the UI cutover require a device/Expo build.
+- **22B–22E (UI cutover)** — chat list/conversation reading from the local DB,
+  and demoting Firestore listeners into the sync layer — deferred; repository
+  read APIs are in place so the cutover is a small, well-scoped next step.
+- SQLCipher deferred (no secrets stored in SQLite; OS sandbox relied upon).
+- The legacy `offlineQueue`/`OfflineContext` remain the live send path until the
+  cutover; a one-time import into the new outbox is part of 22C.
+
+---
+
 ## Phase 21 — Controlled Production Rollout
 
 **Branch:** `claude/repo-audit-architecture-MiZDX`
