@@ -4,6 +4,48 @@ Running log of phased work. Newest first.
 
 ---
 
+## Phase 22D — Message Actions + Receipts via Outbox (flag-gated)
+
+**Branch:** `claude/phase22d-message-actions-outbox` (stacked on 22C).
+**Status:** Code complete (22D-1 → 22D-3); **on-device verification PENDING**.
+Gated by `LOCAL_FIRST_CONVERSATION_ENABLED` (default OFF) → no behaviour change.
+
+### What was done
+
+1. **Plan** — `docs/OFFLINESMS_PHASE_22D_PLAN.md`.
+2. **Pure toggle logic** — `reactionLogic.toggleReaction` mirrors the server
+   one-emoji-per-user rule; unit-tested.
+3. **Outbox helpers** — `queueReactMessage` / `queueEditMessage` /
+   `queueDeleteMessage` (optimistic local mutation + idempotent outbox item) and
+   `queueStarMessage` / `queuePinMessage` / `queueMarkReceipt` (idempotent
+   enqueue; receipt keys collapse per message+status). Repo mutators
+   `updateReactions` / `updateText`.
+4. **UI wiring** — `MessageBubble` react/edit/delete/star/pin and the
+   Conversation incoming-receipt emission route through the outbox when the
+   conversation is local-first (`context.localFirst`); the existing direct
+   callables remain for flag-OFF.
+
+### Verification
+
+- Mobile typecheck **clean**; **156/156 tests pass** (58 localdb; +6 this phase).
+- **NOT run:** Expo app / device. Device checklist in the 22D plan is **pending**
+  (offline react/edit/delete apply instantly + sync on reconnect; no
+  re-toggle/dup after retry; server reaction set reconciles; delete-for-everyone
+  wins; flag-OFF parity).
+
+### Known limitations / decisions
+
+- star/pin/receipt **read-state** still comes from the live
+  userState/conversation Firestore subscriptions, so only their **writes** were
+  routed through the outbox — no redundant message-schema columns were added
+  (deliberate; a local userState mirror for offline reads is a possible 22E
+  item).
+- Actions require the message's **remote id**; on a still-pending local message
+  the helpers no-op with `{ ok:false, reason:'not-delivered' }`.
+- Builds on 22A/22B/22C, which remain device-unverified.
+
+---
+
 ## Phase 22C — Conversation Local-DB + Outbox Send (flag-gated)
 
 **Branch:** `claude/phase22c-conversation-local-first` (stacked on the Phase 22
