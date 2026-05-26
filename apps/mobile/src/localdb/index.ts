@@ -29,6 +29,12 @@ export { setActiveConversation, kick as kickSync } from './sync/syncScheduler';
 
 let started = false;
 
+/** Open the per-user DB only (no message-sync scheduler). Used by Phase 22B
+ *  where the chat-list feeder drives writes. */
+export async function openLocalDb(uid: string): Promise<void> {
+  await openForUser(uid);
+}
+
 export async function initLocalDb(uid: string): Promise<void> {
   await openForUser(uid);
   if (!started) { startScheduler(); started = true; }
