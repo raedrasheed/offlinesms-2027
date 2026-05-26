@@ -29,7 +29,7 @@ function fmt(ts: any): string {
     typeof ts === 'object' && ts?._seconds ? new Date(ts._seconds * 1000) : null
   );
   if (!d) return '';
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
 const PILL: Record<string, { bg: string; fg: string; label: string }> = {
@@ -123,7 +123,7 @@ export default function MessageInfo({ route, navigation }: any) {
           <Text style={s.previewText}>
             {messageText || (info.deletedForEveryone ? 'This message was deleted.' : '—')}
           </Text>
-          <Text style={s.previewTime}>{fmt(info.createdAt) || (createdAtMs ? new Date(createdAtMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '')}</Text>
+          <Text style={s.previewTime}>{fmt(info.createdAt) || (createdAtMs ? new Date(createdAtMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : '')}</Text>
         </View>
 
         <View style={s.statsGrid}>

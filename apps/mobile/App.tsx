@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
@@ -82,14 +82,23 @@ const TAB_ICONS: Record<string, { active: keyof typeof Ionicons.glyphMap; inacti
 
 function MainTabs() {
   const { unreadChats } = useUnread();
+  const insets = useSafeAreaInsets();
   return (
     <Tabs.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarActiveTintColor:   '#1F7BA8',
         tabBarInactiveTintColor: '#6B7488',
-        tabBarStyle: { backgroundColor: '#FFFFFF', borderTopWidth: 1, borderTopColor: '#E5E7EB' },
-        tabBarBadgeStyle: { backgroundColor: '#1F7BA8' },
+        tabBarStyle: {
+          backgroundColor: '#FFFFFF',
+          borderTopWidth: 1,
+          borderTopColor: '#E5E7EB',
+          height: 64 + insets.bottom,
+          paddingTop: 10,
+          paddingBottom: insets.bottom + 12,
+        },
+        tabBarLabelStyle: { fontSize: 12, marginTop: 2 },
+        tabBarBadgeStyle: { backgroundColor: '#C9E0EC', color: '#155E83' },
         tabBarIcon: ({ focused, color, size }) => {
           const set = TAB_ICONS[route.name];
           const name = focused ? set.active : set.inactive;
