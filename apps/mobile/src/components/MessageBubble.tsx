@@ -27,6 +27,12 @@ import {
   pinMessage,
   deleteMessage,
 } from '../lib/conversations';
+import {
+  queueReactMessage,
+  queueDeleteMessage,
+  queueStarMessage,
+  queuePinMessage,
+} from '../localdb';
 
 const EDIT_WINDOW_MS = 15 * 60 * 1000;
 const SMALL_GROUP_MAX = 20;
@@ -40,6 +46,9 @@ export type BubbleContext = {
   isPinned:       boolean;
   myUid:          string;
   memberCount?:   number;
+  // Phase 22D — when true, actions route through the local outbox instead of
+  // calling the callables directly.
+  localFirst?:    boolean;
 };
 
 export type MessageBubbleProps = {
@@ -129,27 +138,35 @@ export function MessageBubble({
     try { (Clipboard as any).setString?.(m.text ?? ''); } catch {}
   }
   async function react(emoji: string) {
-    try { await reactToMessage(context.conversationId, m.id, emoji); }
-    catch (e: any) { Alert.alert('Couldn’t react', e?.message ?? 'try-again'); }
+    try {
+      if (context.localFirst) await queueReactMessage({ conversationId: context.conversationId, messageId: m.id, emoji, uid: context.myUid });
+      else await reactToMessage(context.conversationId, m.id, emoji);
+    } catch (e: any) { Alert.alert('Couldn’t react', e?.message ?? 'try-again'); }
   }
   async function toggleStar() {
-    try { await starMessage(context.conversationId, m.id, !context.isStarred); }
-    catch (e: any) { Alert.alert('Couldn’t update', e?.message ?? 'try-again'); }
+    try {
+      if (context.localFirst) await queueStarMessage({ conversationId: context.conversationId, messageId: m.id, starred: !context.isStarred });
+      else await starMessage(context.conversationId, m.id, !context.isStarred);
+    } catch (e: any) { Alert.alert('Couldn’t update', e?.message ?? 'try-again'); }
   }
   async function togglePin() {
-    try { await pinMessage(context.conversationId, m.id, !context.isPinned); }
-    catch (e: any) { Alert.alert('Couldn’t update', e?.message ?? 'try-again'); }
+    try {
+      if (context.localFirst) await queuePinMessage({ conversationId: context.conversationId, messageId: m.id, pinned: !context.isPinned });
+      else await pinMessage(context.conversationId, m.id, !context.isPinned);
+    } catch (e: any) { Alert.alert('Couldn’t update', e?.message ?? 'try-again'); }
   }
+  const del = (mode: 'for_me' | 'for_everyone') =>
+    (context.localFirst
+      ? queueDeleteMessage({ conversationId: context.conversationId, messageId: m.id, mode })
+      : deleteMessage(context.conversationId, m.id, mode)
+    ).catch((e: any) => Alert.alert('Couldn’t delete', e?.message ?? 'try-again'));
+
   function confirmDelete() {
     const buttons: Array<{ text: string; onPress?: () => void; style?: 'destructive' | 'cancel' }> = [
-      { text: 'Delete for me', style: 'destructive', onPress: () => {
-        deleteMessage(context.conversationId, m.id, 'for_me').catch((e: any) => Alert.alert('Couldn’t delete', e?.message ?? 'try-again'));
-      }},
+      { text: 'Delete for me', style: 'destructive', onPress: () => { void del('for_me'); } },
     ];
     if (canDeleteForEveryone) {
-      buttons.push({ text: 'Delete for everyone', style: 'destructive', onPress: () => {
-        deleteMessage(context.conversationId, m.id, 'for_everyone').catch((e: any) => Alert.alert('Couldn’t delete', e?.message ?? 'try-again'));
-      }});
+      buttons.push({ text: 'Delete for everyone', style: 'destructive', onPress: () => { void del('for_everyone'); } });
     }
     buttons.push({ text: 'Cancel', style: 'cancel' });
     Alert.alert('Delete message', undefined, buttons);

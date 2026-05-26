@@ -32,7 +32,7 @@ import { useOffline } from '../context/OfflineContext';
 import { OfflineNotice, SyncSuccessChip } from '../components/OfflineBanners';
 import { getDraft, setDraft as persistDraft, clearDraft } from '../lib/drafts';
 import { useLocalConversation } from '../hooks/useLocalConversation';
-import { queueSendMessage } from '../localdb';
+import { queueSendMessage, queueEditMessage, queueMarkReceipt } from '../localdb';
 
 type ComposerGate =
   | { kind: 'allowed' }
@@ -125,8 +125,8 @@ export default function Conversation({ route, navigation }: any) {
     for (const m of local.messages) {
       if (m.senderUid === me) continue;
       if (m.deletedForEveryone) continue;
-      markReceipt(id, m.id, 'delivered');
-      markReceipt(id, m.id, 'read');
+      void queueMarkReceipt({ conversationId: id, messageId: m.id, status: 'delivered' });
+      void queueMarkReceipt({ conversationId: id, messageId: m.id, status: 'read' });
     }
     requestAnimationFrame(() => listRef.current?.scrollToEnd?.({ animated: false }));
   }, [useLocal, id, me, local.messages]);
@@ -284,7 +284,8 @@ export default function Conversation({ route, navigation }: any) {
     setBusy(true); setErr(null);
     try {
       if (editing) {
-        await editMessage(id, editing.messageId, text);
+        if (useLocal) await queueEditMessage({ conversationId: id, messageId: editing.messageId, text });
+        else await editMessage(id, editing.messageId, text);
         cancelEdit();
       } else if (useLocal) {
         // Local-first: write an optimistic local message + idempotent outbox
@@ -388,7 +389,7 @@ export default function Conversation({ route, navigation }: any) {
                 message={item}
                 pending={item.__pending}
                 showSender={false}
-                context={{ conversationId: id, isGroup, isMyMessage: true, myRoleIsAdmin, isStarred: false, isPinned: false, myUid: me, memberCount: convo?.memberCount }}
+                context={{ conversationId: id, isGroup, isMyMessage: true, myRoleIsAdmin, isStarred: false, isPinned: false, myUid: me, memberCount: convo?.memberCount, localFirst: useLocal }}
                 onReply={() => {}}
                 onEditStart={() => {}}
                 onForward={() => {}}
@@ -413,6 +414,7 @@ export default function Conversation({ route, navigation }: any) {
                 isPinned:       (item.pinnedAt != null) || convo?.pinnedMessage?.messageId === item.id,
                 myUid:          me,
                 memberCount:    convo?.memberCount,
+                localFirst:     useLocal,
               }}
               onReply={startReply}
               onEditStart={startEdit}

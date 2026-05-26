@@ -160,3 +160,46 @@ export async function queueDeleteMessage(args: { conversationId: string; message
   kick('outbox');
   return { ok: true };
 }
+
+/**
+ * Phase 22D — star/pin/receipt through the outbox. Read-state for these still
+ * comes from the live userState/conversation subscriptions, so there's no local
+ * mutation here — just the idempotent enqueue. Idempotency keys collapse repeat
+ * writes to the same target state (and naturally batch receipts).
+ */
+export async function queueStarMessage(args: { conversationId: string; messageId: string; starred: boolean }): Promise<ActionResult> {
+  if (!getCurrentUid()) return { ok: false, reason: 'not-initialised' };
+  await outboxRepo.enqueue({
+    type: 'star_message', entityType: 'message', entityId: args.messageId,
+    conversationId: args.conversationId,
+    idempotencyKey: idempotencyKey(['star', args.messageId, String(args.starred), localId('star')]),
+    payload: { conversationId: args.conversationId, messageId: args.messageId, starred: args.starred },
+  });
+  kick('outbox');
+  return { ok: true };
+}
+
+export async function queuePinMessage(args: { conversationId: string; messageId: string; pinned: boolean }): Promise<ActionResult> {
+  if (!getCurrentUid()) return { ok: false, reason: 'not-initialised' };
+  await outboxRepo.enqueue({
+    type: 'pin_message', entityType: 'message', entityId: args.messageId,
+    conversationId: args.conversationId,
+    idempotencyKey: idempotencyKey(['pin', args.messageId, String(args.pinned), localId('pin')]),
+    payload: { conversationId: args.conversationId, messageId: args.messageId, pinned: args.pinned },
+  });
+  kick('outbox');
+  return { ok: true };
+}
+
+export async function queueMarkReceipt(args: { conversationId: string; messageId: string; status: string }): Promise<ActionResult> {
+  if (!getCurrentUid()) return { ok: false, reason: 'not-initialised' };
+  await outboxRepo.enqueue({
+    type: 'mark_receipt', entityType: 'message', entityId: args.messageId,
+    conversationId: args.conversationId,
+    // Idempotent per (message, status) → repeated receipts collapse to one item.
+    idempotencyKey: idempotencyKey(['receipt', args.messageId, args.status]),
+    payload: { conversationId: args.conversationId, messageId: args.messageId, status: args.status },
+  });
+  kick('outbox');
+  return { ok: true };
+}
