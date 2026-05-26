@@ -59,7 +59,7 @@ export function MessagesChart() {
           <YAxis tick={{ fill: '#475569', fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
           <Tooltip
             contentStyle={{ background: 'var(--c-bg)', border: '1px solid var(--c-border)', borderRadius: 8, fontSize: 12, color: 'var(--c-text)' }}
-            formatter={(v: number) => [`${v.toLocaleString()} msgs`, '']}
+            formatter={(v) => [`${Number(v).toLocaleString()} msgs`, '']}
             labelStyle={{ color: 'var(--c-text-2)' }}
           />
           <Area type="monotone" dataKey="msgs" stroke="#1F7BA8" strokeWidth={2} fill="url(#msgGrad)" dot={false} />
@@ -116,7 +116,7 @@ export function PointsChart() {
           <YAxis tick={{ fill: '#475569', fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
           <Tooltip
             contentStyle={{ background: 'var(--c-bg)', border: '1px solid var(--c-border)', borderRadius: 8, fontSize: 12, color: 'var(--c-text)' }}
-            formatter={(v: number) => [`${v.toLocaleString()} pts`, '']}
+            formatter={(v) => [`${Number(v).toLocaleString()} pts`, '']}
             labelStyle={{ color: 'var(--c-text-2)' }}
           />
           <Bar dataKey="pts" fill="#1F7BA8" radius={[3, 3, 0, 0]} />
