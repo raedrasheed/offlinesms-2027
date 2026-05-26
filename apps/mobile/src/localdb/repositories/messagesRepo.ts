@@ -152,6 +152,21 @@ export async function upsertRemoteMessage(r: {
   }
 }
 
+/** Phase 22D — optimistic local mutators (applied before the outbox push). */
+export async function updateReactions(remoteId: string, reactions: Record<string, string[]> | null): Promise<void> {
+  await getDb().run(
+    `UPDATE messages SET reactions_json = ?, updated_at = ? WHERE remote_id = ?`,
+    [reactions != null ? JSON.stringify(reactions) : null, Date.now(), remoteId],
+  );
+}
+
+export async function updateText(remoteId: string, text: string): Promise<void> {
+  await getDb().run(
+    `UPDATE messages SET text = ?, preview = ?, edited_at = ?, updated_at = ? WHERE remote_id = ?`,
+    [text, text.slice(0, 200), Date.now(), Date.now(), remoteId],
+  );
+}
+
 export async function markDeletedForEveryone(remoteId: string): Promise<void> {
   await getDb().run(
     `UPDATE messages SET deleted_for_everyone = 1, text = NULL, preview = NULL, updated_at = ? WHERE remote_id = ?`,

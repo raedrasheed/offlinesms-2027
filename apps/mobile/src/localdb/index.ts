@@ -13,7 +13,8 @@ import { startScheduler, stopScheduler, kick } from './sync/syncScheduler';
 import * as messagesRepo from './repositories/messagesRepo';
 import * as outboxRepo from './repositories/outboxRepo';
 import { getDeviceId } from './repositories/syncStateRepo';
-import { idempotencyKey } from './sync/ids';
+import { idempotencyKey, localId } from './sync/ids';
+import { toggleReaction } from './sync/reactionLogic';
 import type { MessageRow } from './types';
 
 export * from './types';
@@ -97,4 +98,65 @@ export async function queueSendMessage(input: QueueSendInput): Promise<MessageRo
 
   kick('outbox');
   return row;
+}
+
+export interface ActionResult { ok: boolean; reason?: 'not-initialised' | 'not-delivered' }
+
+function parseReactions(json: string | null): Record<string, string[]> | null {
+  if (!json) return null;
+  try { const p = JSON.parse(json); return p && typeof p === 'object' ? p : null; } catch { return null; }
+}
+
+/**
+ * Phase 22D — react to a message: optimistic local toggle + idempotent outbox
+ * item. Requires the message's remote id (a still-pending message must be
+ * delivered first). Toggles are order-sensitive, so each tap is its own item.
+ */
+export async function queueReactMessage(args: { conversationId: string; messageId: string; emoji: string; uid: string }): Promise<ActionResult> {
+  if (!getCurrentUid()) return { ok: false, reason: 'not-initialised' };
+  const msg = await messagesRepo.getByRemoteId(args.messageId);
+  if (!msg) return { ok: false, reason: 'not-delivered' };
+  const next = toggleReaction(parseReactions(msg.reactions_json), args.emoji, args.uid);
+  await messagesRepo.updateReactions(args.messageId, next);
+  await outboxRepo.enqueue({
+    type: 'react_message', entityType: 'message', entityId: args.messageId,
+    conversationId: args.conversationId,
+    idempotencyKey: idempotencyKey(['react', args.messageId, args.uid, args.emoji, localId('tap')]),
+    payload: { conversationId: args.conversationId, messageId: args.messageId, emoji: args.emoji },
+  });
+  kick('outbox');
+  return { ok: true };
+}
+
+/** Phase 22D — edit a message: optimistic local text update + outbox item. */
+export async function queueEditMessage(args: { conversationId: string; messageId: string; text: string }): Promise<ActionResult> {
+  if (!getCurrentUid()) return { ok: false, reason: 'not-initialised' };
+  const msg = await messagesRepo.getByRemoteId(args.messageId);
+  if (!msg) return { ok: false, reason: 'not-delivered' };
+  await messagesRepo.updateText(args.messageId, args.text);
+  await outboxRepo.enqueue({
+    type: 'edit_message', entityType: 'message', entityId: args.messageId,
+    conversationId: args.conversationId,
+    idempotencyKey: idempotencyKey(['edit', args.messageId, localId('edit')]),
+    payload: { conversationId: args.conversationId, messageId: args.messageId, text: args.text },
+  });
+  kick('outbox');
+  return { ok: true };
+}
+
+/** Phase 22D — delete a message: optimistic local delete + idempotent outbox item. */
+export async function queueDeleteMessage(args: { conversationId: string; messageId: string; mode: 'for_me' | 'for_everyone' }): Promise<ActionResult> {
+  if (!getCurrentUid()) return { ok: false, reason: 'not-initialised' };
+  const msg = await messagesRepo.getByRemoteId(args.messageId);
+  if (!msg) return { ok: false, reason: 'not-delivered' };
+  if (args.mode === 'for_everyone') await messagesRepo.markDeletedForEveryone(args.messageId);
+  else await messagesRepo.markDeletedForMe(args.messageId);
+  await outboxRepo.enqueue({
+    type: 'delete_message', entityType: 'message', entityId: args.messageId,
+    conversationId: args.conversationId,
+    idempotencyKey: idempotencyKey(['delete', args.messageId, args.mode]),
+    payload: { conversationId: args.conversationId, messageId: args.messageId, mode: args.mode },
+  });
+  kick('outbox');
+  return { ok: true };
 }
