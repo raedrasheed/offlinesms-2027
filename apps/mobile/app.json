@@ -13,6 +13,10 @@
     },
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "androidNavigationBar": {
+      "barStyle": "dark-content",
+      "backgroundColor": "#FFFFFF"
+    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "app.offlinesms.mobile",
