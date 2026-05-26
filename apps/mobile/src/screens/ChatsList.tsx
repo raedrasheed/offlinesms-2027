@@ -37,7 +37,7 @@ function formatTime(ts?: any): string {
   if (!d) return '';
   const now = new Date();
   const sameDay = d.toDateString() === now.toDateString();
-  if (sameDay) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (sameDay) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
   const yesterday = new Date(now.getTime() - 86_400_000);
   if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
   return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
@@ -276,9 +276,9 @@ function buildStyles(colors: any, rtl: boolean) {
     chipActive:  { backgroundColor: colors.action.primary, borderColor: colors.action.primary },
     chipText:    { fontSize: 13, color: colors.text.secondary, fontWeight: '700' },
     chipTextActive: { color: colors.action.primaryFg },
-    chipBadge:   { minWidth: 18, height: 18, paddingHorizontal: 5, borderRadius: 9, backgroundColor: colors.action.primary, alignItems: 'center', justifyContent: 'center' },
+    chipBadge:   { minWidth: 18, height: 18, paddingHorizontal: 5, borderRadius: 9, backgroundColor: '#C9E0EC', alignItems: 'center', justifyContent: 'center' },
     chipBadgeActive: { backgroundColor: colors.action.primaryFg },
-    chipBadgeText: { color: colors.action.primaryFg, fontSize: 11, fontWeight: '800' },
+    chipBadgeText: { color: '#155E83', fontSize: 11, fontWeight: '800' },
     chipBadgeTextActive: { color: colors.action.primary },
     row:         { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 14, paddingVertical: 12, paddingHorizontal: 16 },
     avWrap:      { width: 52, height: 52 },
@@ -294,8 +294,8 @@ function buildStyles(colors: any, rtl: boolean) {
     preview:     { fontSize: 14, color: colors.text.muted, flex: 1, textAlign: rtl ? 'right' : 'left' },
     badges:      { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 4 },
     tag:         { fontSize: 12 },
-    unread:      { minWidth: 20, height: 20, paddingHorizontal: 6, borderRadius: 10, backgroundColor: colors.action.primary, alignItems: 'center', justifyContent: 'center' },
-    unreadText:  { color: colors.action.primaryFg, fontSize: 11, fontWeight: '800' },
+    unread:      { minWidth: 20, height: 20, paddingHorizontal: 6, borderRadius: 10, backgroundColor: '#C9E0EC', alignItems: 'center', justifyContent: 'center' },
+    unreadText:  { color: '#155E83', fontSize: 11, fontWeight: '800' },
     fab:         { position: 'absolute', right: 18, bottom: 22, width: 60, height: 60, borderRadius: 20, backgroundColor: colors.action.primary, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 6 },
     fabText:     { color: colors.action.primaryFg, fontSize: 28, fontWeight: '700', marginTop: -2 },
   });

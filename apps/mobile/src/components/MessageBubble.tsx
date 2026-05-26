@@ -66,7 +66,7 @@ function createdAtMillis(value: any): number {
 function formatTime(value: any): string {
   const ms = createdAtMillis(value);
   if (!ms) return '';
-  return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
 export function MessageBubble({
