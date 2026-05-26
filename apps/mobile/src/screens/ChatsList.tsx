@@ -15,6 +15,7 @@ import {
 } from '../lib/conversations';
 import { useTheme } from '../context/ThemeContext';
 import { useUnread } from '../context/UnreadContext';
+import { useLocalChatList } from '../hooks/useLocalChatList';
 import { isRTL } from '../i18n';
 import { radius } from '../theme';
 import { avatarColor, initials } from '../lib/avatar';
@@ -54,17 +55,26 @@ export default function ChatsList({ navigation }: any) {
   const [filter, setFilter] = useState<Filter>('all');
   const [search, setSearch] = useState('');
 
+  // Phase 22B — local-first chat list (flag-gated). `useLocal` is true only when
+  // the flag is on AND the local DB initialised; otherwise the Firestore path
+  // below runs unchanged (including as a fallback).
+  const local = useLocalChatList(me);
+  const useLocal = local.source === 'local';
+
   // Per-conversation state + typing + peer profile, keyed by conversation id.
   const [states, setStates]   = useState<Record<string, UserState | undefined>>({});
   const [typing, setTyping]   = useState<Record<string, boolean>>({});
   const [peers, setPeers]     = useState<Record<string, { name?: string }>>({});
 
-  // Conversations list.
-  useEffect(() => subscribeConversations(setRows), []);
+  // Conversations list (Firestore path — skipped when the local DB drives the UI).
+  useEffect(() => {
+    if (useLocal) return;
+    return subscribeConversations(setRows);
+  }, [useLocal]);
 
   // Per-conversation subscriptions: userState + typing + peer display name.
   useEffect(() => {
-    if (!me || !rows) return;
+    if (useLocal || !me || !rows) return;
     const unsubs: Array<() => void> = [];
     for (const c of rows) {
       // user state
@@ -98,9 +108,10 @@ export default function ChatsList({ navigation }: any) {
       }
     }
     return () => { for (const u of unsubs) try { u(); } catch {} };
-  }, [me, rows]);
+  }, [me, rows, useLocal]);
 
   const enriched: Row[] = useMemo(() => {
+    if (useLocal) return local.items as unknown as Row[];
     if (!rows) return [];
     return rows.map(c => {
       const isGroup = c.type === 'group';
@@ -114,7 +125,7 @@ export default function ChatsList({ navigation }: any) {
         someoneTyping: typing[c.id] ?? false,
       };
     });
-  }, [rows, states, peers, typing]);
+  }, [useLocal, local.items, rows, states, peers, typing]);
 
   const filtered = useMemo(() => {
     let out = enriched;
@@ -138,7 +149,11 @@ export default function ChatsList({ navigation }: any) {
   const s = buildStyles(colors, isRTL);
   const firstName = (auth.currentUser?.displayName ?? '').trim().split(/\s+/)[0] || '';
 
-  if (rows === null) return <LoadingState fullPage title="Loading chats…" />;
+  if (useLocal) {
+    if (local.loading && local.items.length === 0) return <LoadingState fullPage title="Loading chats…" />;
+  } else if (rows === null) {
+    return <LoadingState fullPage title="Loading chats…" />;
+  }
 
   return (
     <View style={s.root}>
@@ -177,6 +192,9 @@ export default function ChatsList({ navigation }: any) {
             </Pressable>
           ))}
         </View>
+        {useLocal ? (
+          <Text style={s.localHint}>{isOffline ? 'Local cache · offline' : 'Local cache'}</Text>
+        ) : null}
       </View>
 
       {isSyncing && queuedCount > 0 ? <SyncingBanner count={queuedCount} /> : isOffline ? <OfflineBanner /> : null}
@@ -280,6 +298,7 @@ function buildStyles(colors: any, rtl: boolean) {
     chipBadgeActive: { backgroundColor: colors.action.primaryFg },
     chipBadgeText: { color: '#155E83', fontSize: 11, fontWeight: '800' },
     chipBadgeTextActive: { color: colors.action.primary },
+    localHint:   { fontSize: 10, color: colors.text.muted, marginTop: 2, textAlign: rtl ? 'right' : 'left' },
     row:         { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 14, paddingVertical: 12, paddingHorizontal: 16 },
     avWrap:      { width: 52, height: 52 },
     av:          { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
