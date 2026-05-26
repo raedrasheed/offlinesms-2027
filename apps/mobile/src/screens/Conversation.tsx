@@ -31,6 +31,8 @@ import { avatarColor, initials } from '../lib/avatar';
 import { useOffline } from '../context/OfflineContext';
 import { OfflineNotice, SyncSuccessChip } from '../components/OfflineBanners';
 import { getDraft, setDraft as persistDraft, clearDraft } from '../lib/drafts';
+import { useLocalConversation } from '../hooks/useLocalConversation';
+import { queueSendMessage } from '../localdb';
 
 type ComposerGate =
   | { kind: 'allowed' }
@@ -63,6 +65,12 @@ export default function Conversation({ route, navigation }: any) {
   const me = auth.currentUser?.uid ?? '';
   const { isOffline, enqueue, queuedFor, deliveredFor, deliveredNonce } = useOffline();
 
+  // Phase 22C — local-first conversation (flag-gated). `useLocal` is true only
+  // when the flag is on AND the local DB initialised; otherwise the Firestore +
+  // OfflineContext path below runs unchanged (including as a fallback).
+  const local = useLocalConversation(id, me);
+  const useLocal = local.source === 'local';
+
   const [msgs, setMsgs] = useState<Message[] | null>(null);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
@@ -90,9 +98,9 @@ export default function Conversation({ route, navigation }: any) {
     });
   }, [id]);
 
-  // Messages.
+  // Messages (Firestore path — skipped when the local DB drives the screen).
   useEffect(() => {
-    if (!id) return;
+    if (useLocal || !id) return;
     return subscribeMessages(id, rows => {
       setMsgs(rows);
       markRead(id).catch(() => {});
@@ -107,7 +115,21 @@ export default function Conversation({ route, navigation }: any) {
       }
       requestAnimationFrame(() => listRef.current?.scrollToEnd?.({ animated: false }));
     });
-  }, [id, me]);
+  }, [id, me, useLocal]);
+
+  // Local-first mode: messages come from the feeder/local DB; still emit
+  // read/delivered receipts for incoming messages (callables dedupe server-side).
+  useEffect(() => {
+    if (!useLocal || !id) return;
+    markRead(id).catch(() => {});
+    for (const m of local.messages) {
+      if (m.senderUid === me) continue;
+      if (m.deletedForEveryone) continue;
+      markReceipt(id, m.id, 'delivered');
+      markReceipt(id, m.id, 'read');
+    }
+    requestAnimationFrame(() => listRef.current?.scrollToEnd?.({ animated: false }));
+  }, [useLocal, id, me, local.messages]);
 
   // userState (drives starred + deletedForMe filtering).
   useEffect(() => {
@@ -192,11 +214,17 @@ export default function Conversation({ route, navigation }: any) {
   const starred = useMemo(() => new Set(userState?.starredMessageIds ?? []), [userState]);
   const deletedForMe = useMemo(() => new Set(userState?.deletedForMeMessageIds ?? []), [userState]);
 
+  // Effective message source: local DB when local-first is active, else the
+  // Firestore-fed `msgs`. (null = still loading → renders the loader.)
+  const effectiveMsgs: Message[] | null = useLocal
+    ? (local.loading && local.messages.length === 0 ? null : local.messages)
+    : msgs;
+
   // Apply local hide.
   const visibleMsgs = useMemo(() => {
-    if (!msgs) return null;
-    return msgs.filter(m => !deletedForMe.has(m.id));
-  }, [msgs, deletedForMe]);
+    if (!effectiveMsgs) return null;
+    return effectiveMsgs.filter(m => !deletedForMe.has(m.id));
+  }, [effectiveMsgs, deletedForMe]);
 
   function jumpTo(messageId: string) {
     if (!visibleMsgs) return;
@@ -258,6 +286,26 @@ export default function Conversation({ route, navigation }: any) {
       if (editing) {
         await editMessage(id, editing.messageId, text);
         cancelEdit();
+      } else if (useLocal) {
+        // Local-first: write an optimistic local message + idempotent outbox
+        // item; the sync engine delivers it (online or on reconnect) and
+        // reconciles to the server id without duplicating on retry.
+        await queueSendMessage({
+          conversationId: id,
+          senderUid: me,
+          text,
+          replyTo: replyTo ? {
+            messageId: replyTo.messageId,
+            senderUid: replyTo.senderUid,
+            senderDisplayName: replyTo.senderDisplayName,
+            preview: replyTo.preview,
+          } : null,
+        });
+        local.refresh();
+        setReplyTo(null);
+        setDraft('');
+        clearDraft(id);
+        setTyping(id, false).catch(() => {});
       } else if (isOffline) {
         // Offline-first: persist locally and deliver on reconnect.
         await enqueue({ conversationId: id, conversationType: isGroup ? 'group' : 'direct', text, replyTo: replyTo ?? null });

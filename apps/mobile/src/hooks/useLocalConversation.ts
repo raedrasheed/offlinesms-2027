@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { LOCAL_FIRST_CONVERSATION_ENABLED } from '../config/features';
 import { initLocalDb, messagesRepo, setActiveConversation } from '../localdb';
 import { startConversationFeeder } from '../localdb/sync/conversationFeeder';
+import { importLegacyQueueOnce } from '../localdb/sync/legacyImport';
 import { mapAndOrderMessages } from './messageModel';
 import type { Message } from '../lib/conversations';
 
@@ -57,6 +58,7 @@ export function useLocalConversation(conversationId: string | undefined, uid: st
       try {
         await initLocalDb(uid);
         setActiveConversation(conversationId);
+        await importLegacyQueueOnce(uid);
         if (cancelled) return;
         await refresh();
         stopFeeder = startConversationFeeder(conversationId, () => { void refresh(); });

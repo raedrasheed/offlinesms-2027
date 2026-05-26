@@ -180,4 +180,5 @@ export type SyncStateKey =
   | 'last_support_pull_at'
   | 'local_schema_version'
   | 'current_user_uid'
-  | 'device_id';
+  | 'device_id'
+  | 'legacy_queue_migrated';
