@@ -1,0 +1,90 @@
+// Phase 22 — sync engine. Orchestrates outbox push + remote pull + reconcile.
+// Single-flight (no overlapping runs). Read by the scheduler; never blocks UI.
+
+import * as outboxRepo from '../repositories/outboxRepo';
+import * as messagesRepo from '../repositories/messagesRepo';
+import { pullConversations, pullMessages, pullMembers } from './firebasePull';
+import { pushOutboxItem } from './firebasePush';
+import { isOnline } from './networkState';
+import { isPermanent, errorCode, nextAttemptAt } from './retryPolicy';
+
+let running = false;
+
+export type SyncReason =
+  | 'boot' | 'auth-change' | 'online' | 'foreground'
+  | 'outbox' | 'manual' | 'timer';
+
+/** Push all due outbox items. Returns how many completed. */
+export async function pushOutbox(): Promise<number> {
+  if (!isOnline()) return 0;
+  let completed = 0;
+  const due = await outboxRepo.claimDue();
+  for (const item of due) {
+    if (!isOnline()) break;
+    await outboxRepo.markProcessing(item.id);
+    try {
+      const res = await pushOutboxItem(item);
+      // Reconcile an optimistic send with its canonical server message.
+      if (item.type === 'send_message' && res.remoteId) {
+        const payload = JSON.parse(item.payload_json || '{}');
+        if (payload.localId) {
+          await messagesRepo.reconcileToRemote(payload.localId, {
+            remoteId: res.remoteId, remoteCreatedAt: null,
+          });
+        }
+      }
+      await outboxRepo.markCompleted(item.id);
+      completed++;
+    } catch (err: any) {
+      const code = errorCode(err);
+      const message = err?.message ?? 'push-failed';
+      if (isPermanent(err)) {
+        // Permanent: dead-letter immediately and surface on the message.
+        await outboxRepo.markFailed(item.id, code, message, Date.now() + 1e12);
+        if (item.type === 'send_message') {
+          const payload = JSON.parse(item.payload_json || '{}');
+          if (payload.localId) await messagesRepo.setError(payload.localId, code, message);
+        }
+      } else {
+        const attempt = item.attempt_count + 1;
+        await outboxRepo.markFailed(item.id, code, message, nextAttemptAt(attempt));
+        if (item.type === 'send_message') {
+          const payload = JSON.parse(item.payload_json || '{}');
+          if (payload.localId) await messagesRepo.setStatus(payload.localId, 'pending', 'pending');
+        }
+      }
+    }
+  }
+  return completed;
+}
+
+/** Pull remote changes into the local DB. `activeConversationId` is prioritized. */
+export async function pullRemoteChanges(activeConversationId?: string): Promise<void> {
+  if (!isOnline()) return;
+  await pullConversations();
+  if (activeConversationId) {
+    await pullMessages(activeConversationId);
+    await pullMembers(activeConversationId);
+  }
+}
+
+export async function syncNow(reason: SyncReason, activeConversationId?: string): Promise<void> {
+  if (running) return;
+  running = true;
+  try {
+    await pushOutbox();
+    await pullRemoteChanges(activeConversationId);
+  } catch {
+    // Never throw out of a sync run; individual failures are recorded per-item.
+  } finally {
+    running = false;
+  }
+}
+
+export async function retryFailedOutboxItem(id: string): Promise<void> {
+  await outboxRepo.retryItem(id);
+}
+
+export function isSyncing(): boolean {
+  return running;
+}
