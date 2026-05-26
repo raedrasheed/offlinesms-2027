@@ -38,6 +38,7 @@
     "expo-localization": "~15.0.3",
     "expo-notifications": "^0.28.19",
     "expo-secure-store": "~13.0.2",
+    "expo-sqlite": "~14.0.6",
     "expo-status-bar": "~1.12.1",
     "firebase": "^10.13.2",
     "i18next": "^23.15.1",
