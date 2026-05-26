@@ -26,10 +26,19 @@ export const sendTextMessage = onCall(async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'sign-in-required');
 
-  const data = (request.data ?? {}) as { conversationId?: unknown; text?: unknown; replyTo?: unknown };
+  const data = (request.data ?? {}) as {
+    conversationId?: unknown; text?: unknown; replyTo?: unknown;
+    localId?: unknown; idempotencyKey?: unknown;
+  };
   if (typeof data.conversationId !== 'string' || !data.conversationId) {
     throw new HttpsError('invalid-argument', 'conversationId-required');
   }
+  // Phase 22 — optional client idempotency. When the offline-first client
+  // retries an ambiguous send it passes the same clientLocalId; we return the
+  // already-created message instead of inserting a duplicate.
+  const clientLocalId = typeof data.localId === 'string' && data.localId ? data.localId : null;
+  const clientIdempotencyKey = typeof data.idempotencyKey === 'string' && data.idempotencyKey
+    ? data.idempotencyKey : null;
   if (typeof data.text !== 'string') {
     throw new HttpsError('invalid-argument', 'text-required');
   }
@@ -124,6 +133,17 @@ export const sendTextMessage = onCall(async (request) => {
     }
   }
 
+  // Idempotency: if a message with this clientLocalId already exists in the
+  // conversation, return it rather than creating a duplicate. clientLocalId is
+  // globally unique per device, so a single-field index is sufficient.
+  if (clientLocalId) {
+    const dupSnap = await convoRef.collection('messages')
+      .where('clientLocalId', '==', clientLocalId).limit(1).get();
+    if (!dupSnap.empty) {
+      return { messageId: dupSnap.docs[0].id, idempotent: true };
+    }
+  }
+
   const msgRef = convoRef.collection('messages').doc();
   const now = FieldValue.serverTimestamp();
   await msgRef.set({
@@ -144,6 +164,8 @@ export const sendTextMessage = onCall(async (request) => {
     expiresAt:          null,
     createdAt:          now,
     updatedAt:          now,
+    clientLocalId,
+    idempotencyKey:     clientIdempotencyKey,
     ...(isGroup ? { senderDisplayName, senderPhotoURL } : {}),
   });
 
@@ -158,5 +180,5 @@ export const sendTextMessage = onCall(async (request) => {
     },
   });
 
-  return { messageId: msgRef.id };
+  return { messageId: msgRef.id, idempotent: false };
 });
