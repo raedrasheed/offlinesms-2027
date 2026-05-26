@@ -14,6 +14,7 @@ import {
   UserState,
 } from '../lib/conversations';
 import { useTheme } from '../context/ThemeContext';
+import { useUnread } from '../context/UnreadContext';
 import { isRTL } from '../i18n';
 import { radius } from '../theme';
 import { avatarColor, initials } from '../lib/avatar';
@@ -23,7 +24,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useOffline } from '../context/OfflineContext';
 import { OfflineBanner, SyncingBanner } from '../components/OfflineBanners';
 
-type Filter = 'all' | 'unread' | 'favorites' | 'groups' | 'archived';
+type Filter = 'all' | 'unread' | 'favorites' | 'groups';
 
 type Row = Conversation & {
   state?:        UserState;
@@ -45,6 +46,7 @@ function formatTime(ts?: any): string {
 export default function ChatsList({ navigation }: any) {
   const { t } = useTranslation();
   const { colors } = useTheme();
+  const { unreadChats } = useUnread();
   const me = auth.currentUser?.uid;
   const insets = useSafeAreaInsets();
   const { isOffline, isSyncing, queuedCount } = useOffline();
@@ -119,7 +121,6 @@ export default function ChatsList({ navigation }: any) {
     if (filter === 'unread')         out = out.filter(c => (c.state?.unreadCount ?? 0) > 0);
     else if (filter === 'favorites') out = out.filter(c => c.state?.favorite === true);
     else if (filter === 'groups')    out = out.filter(c => c.type === 'group');
-    else if (filter === 'archived')  out = out.filter(c => c.state?.archived === true);
     else                             out = out.filter(c => c.state?.archived !== true);
 
     const t = search.trim().toLowerCase();
@@ -132,7 +133,6 @@ export default function ChatsList({ navigation }: any) {
     unread:    t('chats.filterUnread'),
     favorites: t('chats.filterFavorites'),
     groups:    t('chats.filterGroups'),
-    archived:  'Archived',
   };
 
   const s = buildStyles(colors, isRTL);
@@ -155,7 +155,7 @@ export default function ChatsList({ navigation }: any) {
           accessibilityLabel={t('chats.search')}
         />
         <View style={s.chips}>
-          {(['all','unread','favorites','groups','archived'] as Filter[]).map(f => (
+          {(['all','unread','favorites','groups'] as Filter[]).map(f => (
             <Pressable
               key={f}
               style={[s.chip, filter === f && s.chipActive]}
@@ -167,6 +167,13 @@ export default function ChatsList({ navigation }: any) {
               <Text style={[s.chipText, filter === f && s.chipTextActive]}>
                 {FILTER_LABELS[f]}
               </Text>
+              {f === 'unread' && unreadChats > 0 ? (
+                <View style={[s.chipBadge, filter === f && s.chipBadgeActive]}>
+                  <Text style={[s.chipBadgeText, filter === f && s.chipBadgeTextActive]}>
+                    {unreadChats > 99 ? '99+' : unreadChats}
+                  </Text>
+                </View>
+              ) : null}
             </Pressable>
           ))}
         </View>
@@ -180,7 +187,6 @@ export default function ChatsList({ navigation }: any) {
           title={
             filter === 'unread'    ? 'Nothing unread' :
             filter === 'favorites' ? 'No favorite chats yet' :
-            filter === 'archived'  ? 'No archived chats' :
             firstName ? `You’re all set, ${firstName}` : 'You’re all set'
           }
           description={
@@ -215,7 +221,10 @@ export default function ChatsList({ navigation }: any) {
                     {item.type === 'group' && item.memberCount ? `  · ${item.memberCount}` : ''}
                   </Text>
                   {/* Timestamp is always LTR to prevent digit reversal in RTL */}
-                  <Text style={s.time} accessibilityElementsHidden>
+                  <Text
+                    style={[s.time, (item.state?.unreadCount ?? 0) > 0 && s.timeUnread]}
+                    accessibilityElementsHidden
+                  >
                     {formatTime(item.state?.lastMessageAt ?? item.lastMessageAt)}
                   </Text>
                 </View>
@@ -258,25 +267,30 @@ export default function ChatsList({ navigation }: any) {
 
 function buildStyles(colors: any, rtl: boolean) {
   return StyleSheet.create({
-    root:        { flex: 1, backgroundColor: colors.background.app },
-    header:      { paddingHorizontal: 14, paddingBottom: 14, backgroundColor: colors.background.app, gap: 12 },
+    root:        { flex: 1, backgroundColor: '#FFFFFF' },
+    header:      { paddingHorizontal: 14, paddingBottom: 14, backgroundColor: '#FFFFFF', gap: 12 },
     h1:          { fontSize: 26, fontWeight: '800', color: colors.action.primary, textAlign: rtl ? 'right' : 'left' },
     search:      { padding: 12, backgroundColor: colors.background.subtle, borderRadius: radius.md, fontSize: 14, color: colors.text.primary },
     chips:       { flexDirection: rtl ? 'row-reverse' : 'row', gap: 8, flexWrap: 'wrap' },
-    chip:        { paddingHorizontal: 16, paddingVertical: 7, borderRadius: radius.pill, backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.border.strong, minHeight: 32 },
+    chip:        { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 7, borderRadius: radius.pill, backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.border.strong, minHeight: 32 },
     chipActive:  { backgroundColor: colors.action.primary, borderColor: colors.action.primary },
     chipText:    { fontSize: 13, color: colors.text.secondary, fontWeight: '700' },
     chipTextActive: { color: colors.action.primaryFg },
+    chipBadge:   { minWidth: 18, height: 18, paddingHorizontal: 5, borderRadius: 9, backgroundColor: colors.action.primary, alignItems: 'center', justifyContent: 'center' },
+    chipBadgeActive: { backgroundColor: colors.action.primaryFg },
+    chipBadgeText: { color: colors.action.primaryFg, fontSize: 11, fontWeight: '800' },
+    chipBadgeTextActive: { color: colors.action.primary },
     row:         { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 14, paddingVertical: 12, paddingHorizontal: 16 },
     avWrap:      { width: 52, height: 52 },
     av:          { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
     avGroup:     { borderRadius: 18 },
     avText:      { color: '#fff', fontWeight: '800', fontSize: 17 },
-    onlineDot:   { position: 'absolute', bottom: 1, right: rtl ? undefined : 1, left: rtl ? 1 : undefined, width: 15, height: 15, borderRadius: 8, backgroundColor: '#22C55E', borderWidth: 2.5, borderColor: colors.background.app },
+    onlineDot:   { position: 'absolute', bottom: 1, right: rtl ? undefined : 1, left: rtl ? 1 : undefined, width: 15, height: 15, borderRadius: 8, backgroundColor: '#22C55E', borderWidth: 2.5, borderColor: '#FFFFFF' },
     rowTop:      { flexDirection: rtl ? 'row-reverse' : 'row', justifyContent: 'space-between', alignItems: 'center', gap: 6 },
     rowBot:      { flexDirection: rtl ? 'row-reverse' : 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 2, gap: 6 },
     name:        { fontSize: 16, fontWeight: '800', color: colors.text.primary, flex: 1, textAlign: rtl ? 'right' : 'left' },
     time:        { fontSize: 12, color: colors.text.muted, writingDirection: 'ltr' },
+    timeUnread:  { color: colors.action.primary, fontWeight: '700' },
     preview:     { fontSize: 14, color: colors.text.muted, flex: 1, textAlign: rtl ? 'right' : 'left' },
     badges:      { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 4 },
     tag:         { fontSize: 12 },

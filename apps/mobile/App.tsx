@@ -9,6 +9,7 @@ import { doc, onSnapshot } from 'firebase/firestore';
 import { auth, db } from './src/lib/firebase';
 import { ThemeProvider } from './src/context/ThemeContext';
 import { OfflineProvider } from './src/context/OfflineContext';
+import { UnreadProvider, useUnread } from './src/context/UnreadContext';
 import type { ThemePreference } from './src/lib/user';
 import './src/i18n';
 
@@ -80,12 +81,15 @@ const TAB_ICONS: Record<string, { active: keyof typeof Ionicons.glyphMap; inacti
 };
 
 function MainTabs() {
+  const { unreadChats } = useUnread();
   return (
     <Tabs.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarActiveTintColor:   '#1F7BA8',
         tabBarInactiveTintColor: '#6B7488',
+        tabBarStyle: { backgroundColor: '#FFFFFF', borderTopWidth: 1, borderTopColor: '#E5E7EB' },
+        tabBarBadgeStyle: { backgroundColor: '#1F7BA8' },
         tabBarIcon: ({ focused, color, size }) => {
           const set = TAB_ICONS[route.name];
           const name = focused ? set.active : set.inactive;
@@ -93,7 +97,11 @@ function MainTabs() {
         },
       })}
     >
-      <Tabs.Screen name="Chats" component={ChatsList} />
+      <Tabs.Screen
+        name="Chats"
+        component={ChatsList}
+        options={{ tabBarBadge: unreadChats > 0 ? (unreadChats > 99 ? '99+' : unreadChats) : undefined }}
+      />
       <Tabs.Screen name="Status" component={Status} />
       <Tabs.Screen name="Calls" component={Calls} />
       <Tabs.Screen name="Settings" component={Settings} />
@@ -136,6 +144,7 @@ export default function App() {
         ) : profileCompleted === null ? (
           null /* waiting for users/{uid} snapshot */
         ) : (
+          <UnreadProvider>
           <RootStack.Navigator screenOptions={{ headerShown: false }}>
             <RootStack.Screen name="Tabs" component={MainTabs} />
             <RootStack.Screen name="NewChatMenu" component={NewChatMenu} />
@@ -162,6 +171,7 @@ export default function App() {
             <RootStack.Screen name="FindFriends" component={FindFriends} />
             <RootStack.Screen name="IncomingCall" component={IncomingCall} options={{ presentation: 'fullScreenModal' }} />
           </RootStack.Navigator>
+          </UnreadProvider>
         )}
       </NavigationContainer>
       </ErrorBoundary>
