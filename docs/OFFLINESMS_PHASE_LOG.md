@@ -4,6 +4,51 @@ Running log of phased work. Newest first.
 
 ---
 
+## Phase 22B — ChatList Local-DB Cutover (flag-gated)
+
+**Branch:** `claude/wonderful-bohr-WE9L0`
+**Status:** Code complete; **on-device verification PENDING** (no Expo build
+available in the work environment). Flag defaults OFF → no behaviour change.
+
+### What was done
+
+1. **Phase 22B plan** (`docs/OFFLINESMS_PHASE_22B_PLAN.md`).
+2. **Feature flag** (`apps/mobile/src/config/features.ts`) —
+   `LOCAL_FIRST_CHAT_LIST_ENABLED`, default `false`, overridable via
+   `EXPO_PUBLIC_LOCAL_FIRST_CHAT_LIST=1`.
+3. **Pure view-model** (`src/hooks/chatListModel.ts`) — `ConversationRow` →
+   render item (Timestamp-like wrapper so existing `formatTime` works) +
+   `filterChatList` (All/Unread/Favorites/Groups + search).
+4. **Hook** (`src/hooks/useLocalChatList.ts`) — opens the per-user DB
+   (`openLocalDb`, no message-sync scheduler), reads `conversationsRepo`, starts
+   the feeder, re-reads on change; returns `{ items, loading, error, source,
+   refresh }` with `firestoreFallback` on init failure.
+5. **Feeder** (`src/localdb/sync/chatListFeeder.ts`) — owns the conversations +
+   per-user-state Firestore listeners; upserts into SQLite, resolves direct-chat
+   peer names once; logs only ids/codes.
+6. **ChatsList integration** — flag-gated: local path skips the Firestore
+   listeners; flag off / fallback keeps the old path verbatim. Same UI/filters/
+   search; subtle "Local cache" hint in local mode.
+7. **Tests** — mapper, filter, flag-default; **35/35 localdb tests passing**
+   (node).
+
+### Verification
+
+- `apps/mobile/__tests__/localdb` — **35/35 passing** (vitest, node).
+- Flag off by default → ChatsList behaviour unchanged.
+- **NOT run:** Expo app / device. Device checklist in the 22B plan is **pending**
+  (cold-start cached list, airplane mode, reconnect refresh, unread parity,
+  filters on local data, logout no-leak, flag-off parity).
+
+### Known limitations
+
+- Direct-chat peer name resolved by the feeder (1 user-doc read each, cached);
+  group/unread/preview come from the conversation + userState docs.
+- Conversation screen, `OfflineContext`/`offlineQueue`, SMS/points: untouched.
+- Mobile typecheck/lint/build not runnable here (Expo deps absent).
+
+---
+
 ## Phase 22 — Local-First Mobile Database & Firebase Sync (22A)
 
 **Branch:** `claude/wonderful-bohr-WE9L0`
