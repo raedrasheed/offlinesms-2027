@@ -97,6 +97,13 @@ export interface MessageRow {
   sync_status: MessageSyncStatus;
   client_sequence: number;
   server_version: number;
+  // Phase 22C — denormalized for local rendering (JSON reactions map + receipt
+  // aggregate counts, mirroring the Firestore message doc).
+  reactions_json: string | null;
+  delivered_count: number;
+  read_count: number;
+  viewed_count: number;
+  played_count: number;
 }
 
 export interface ReactionRow {

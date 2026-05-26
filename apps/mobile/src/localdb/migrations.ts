@@ -6,7 +6,7 @@
 // whose version is greater than the database's current version, in order, and
 // returns the resulting version.
 
-import { ALL_TABLE_STATEMENTS, CREATE_INDEXES, SCHEMA_VERSION } from './schema';
+import { ALL_TABLE_STATEMENTS, CREATE_INDEXES, MESSAGES_V2_COLUMNS, SCHEMA_VERSION } from './schema';
 
 export type SqlExec = (sql: string) => Promise<void>;
 
@@ -23,7 +23,13 @@ export const MIGRATIONS: Migration[] = [
       for (const idx of CREATE_INDEXES) await exec(idx);
     },
   },
-  // Future migrations: { version: 2, up: async (exec) => { ... } }
+  {
+    // Phase 22C — denormalized reactions + receipt counts on messages.
+    version: 2,
+    up: async (exec) => {
+      for (const stmt of MESSAGES_V2_COLUMNS) await exec(stmt);
+    },
+  },
 ];
 
 export const LATEST_VERSION = SCHEMA_VERSION;

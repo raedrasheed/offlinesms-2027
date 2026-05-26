@@ -3,7 +3,17 @@
 // Pure strings (no native import) so migrations.ts can apply them and tests can
 // assert on them. Booleans are stored as INTEGER 0/1; timestamps as INTEGER ms.
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
+
+// Phase 22C — columns added to `messages` in migration v2 (ALTER, applied on
+// top of the v1 CREATE so existing installs upgrade cleanly).
+export const MESSAGES_V2_COLUMNS = [
+  `ALTER TABLE messages ADD COLUMN reactions_json TEXT;`,
+  `ALTER TABLE messages ADD COLUMN delivered_count INTEGER DEFAULT 0;`,
+  `ALTER TABLE messages ADD COLUMN read_count INTEGER DEFAULT 0;`,
+  `ALTER TABLE messages ADD COLUMN viewed_count INTEGER DEFAULT 0;`,
+  `ALTER TABLE messages ADD COLUMN played_count INTEGER DEFAULT 0;`,
+];
 
 export const CREATE_CONVERSATIONS = `
 CREATE TABLE IF NOT EXISTS conversations (

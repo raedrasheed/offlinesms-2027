@@ -19,6 +19,16 @@ function mapStatus(s: MessageRow['status']): Message['status'] {
   return s === 'pending' ? 'sending' : s;
 }
 
+function parseReactions(json: string | null): Record<string, string[]> | null {
+  if (!json) return null;
+  try {
+    const parsed = JSON.parse(json);
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, string[]>) : null;
+  } catch {
+    return null;
+  }
+}
+
 export function mapMessageRow(row: MessageRow): Message {
   const at = tsLike(effectiveTimeMs(row));
   return {
@@ -43,9 +53,13 @@ export function mapMessageRow(row: MessageRow): Message {
         }
       : null,
     forwarded: row.forwarded === 1,
-    reactions: null, // not yet stored locally (deferred)
+    reactions: parseReactions(row.reactions_json),
     createdAt: at,
     senderDisplayName: row.sender_display_name,
+    deliveredCount: row.delivered_count ?? 0,
+    readCount: row.read_count ?? 0,
+    viewedCount: row.viewed_count ?? 0,
+    playedCount: row.played_count ?? 0,
   } as Message;
 }
 

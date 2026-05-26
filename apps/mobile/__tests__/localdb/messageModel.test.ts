@@ -11,6 +11,7 @@ function row(p: Partial<MessageRow>): MessageRow {
     reply_to_message_id: null, reply_to_preview: null, forwarded: 0,
     forwarded_from_message_id: null, status: 'sent', error_code: null,
     error_message: null, sync_status: 'synced', client_sequence: 0, server_version: 0,
+    reactions_json: null, delivered_count: 0, read_count: 0, viewed_count: 0, played_count: 0,
     ...p,
   };
 }
@@ -49,6 +50,24 @@ describe('mapMessageRow', () => {
     const m = mapMessageRow(row({ deleted_for_everyone: 1, forwarded: 1 }));
     expect(m.deletedForEveryone).toBe(true);
     expect(m.forwarded).toBe(true);
+  });
+
+  it('parses the reactions JSON map', () => {
+    const m = mapMessageRow(row({ reactions_json: JSON.stringify({ '👍': ['u1', 'u2'], '❤️': ['u3'] }) }));
+    expect(m.reactions).toEqual({ '👍': ['u1', 'u2'], '❤️': ['u3'] });
+  });
+
+  it('returns null reactions for empty/invalid JSON', () => {
+    expect(mapMessageRow(row({ reactions_json: null })).reactions).toBeNull();
+    expect(mapMessageRow(row({ reactions_json: 'not json' })).reactions).toBeNull();
+  });
+
+  it('maps receipt aggregate counts', () => {
+    const m = mapMessageRow(row({ delivered_count: 5, read_count: 3, viewed_count: 1, played_count: 0 }));
+    expect(m.deliveredCount).toBe(5);
+    expect(m.readCount).toBe(3);
+    expect(m.viewedCount).toBe(1);
+    expect(m.playedCount).toBe(0);
   });
 });
 

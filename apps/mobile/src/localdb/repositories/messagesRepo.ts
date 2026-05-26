@@ -99,26 +99,37 @@ export async function reconcileToRemote(localId: string, remote: {
 }
 
 /** Upsert a message pulled from the remote backend (keyed by remote_id). */
+export interface RemoteReceiptCounts {
+  delivered?: number; read?: number; viewed?: number; played?: number;
+}
+
 export async function upsertRemoteMessage(r: {
   remoteId: string; conversationId: string; senderUid: string; senderDisplayName?: string | null;
   text: string | null; remoteCreatedAt: number | null; editedAt?: number | null;
   deletedForEveryone?: boolean; replyToMessageId?: string | null; replyToPreview?: string | null;
   forwarded?: boolean; serverVersion?: number; status?: MessageStatus;
+  reactions?: Record<string, string[]> | null; counts?: RemoteReceiptCounts;
 }): Promise<void> {
   const existing = await getByRemoteId(r.remoteId);
   const now = Date.now();
+  const reactionsJson = r.reactions != null ? JSON.stringify(r.reactions) : null;
+  const c = r.counts ?? {};
   if (existing) {
     await getDb().run(
       `UPDATE messages SET text = ?, sender_display_name = COALESCE(?, sender_display_name),
          remote_created_at = COALESCE(?, remote_created_at), edited_at = ?,
          deleted_for_everyone = ?, reply_to_message_id = ?, reply_to_preview = ?,
          forwarded = ?, status = COALESCE(?, status), sync_status = 'synced',
-         server_version = COALESCE(?, server_version), updated_at = ?
+         server_version = COALESCE(?, server_version),
+         reactions_json = ?, delivered_count = ?, read_count = ?, viewed_count = ?, played_count = ?,
+         updated_at = ?
        WHERE remote_id = ?`,
       [
         r.text, r.senderDisplayName ?? null, r.remoteCreatedAt, r.editedAt ?? null,
         r.deletedForEveryone ? 1 : 0, r.replyToMessageId ?? null, r.replyToPreview ?? null,
-        r.forwarded ? 1 : 0, r.status ?? null, r.serverVersion ?? null, now, r.remoteId,
+        r.forwarded ? 1 : 0, r.status ?? null, r.serverVersion ?? null,
+        reactionsJson, c.delivered ?? 0, c.read ?? 0, c.viewed ?? 0, c.played ?? 0,
+        now, r.remoteId,
       ],
     );
   } else {
@@ -127,13 +138,15 @@ export async function upsertRemoteMessage(r: {
         (id, local_id, remote_id, conversation_id, sender_uid, sender_display_name, type, text, preview,
          created_at, remote_created_at, updated_at, edited_at, deleted_for_everyone, deleted_for_me, deleted_at,
          reply_to_message_id, reply_to_preview, forwarded, forwarded_from_message_id,
-         status, error_code, error_message, sync_status, client_sequence, server_version)
-       VALUES (?, NULL, ?, ?, ?, ?, 'text', ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, NULL, ?, NULL, NULL, 'synced', 0, ?)`,
+         status, error_code, error_message, sync_status, client_sequence, server_version,
+         reactions_json, delivered_count, read_count, viewed_count, played_count)
+       VALUES (?, NULL, ?, ?, ?, ?, 'text', ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, NULL, ?, NULL, NULL, 'synced', 0, ?, ?, ?, ?, ?, ?)`,
       [
         r.remoteId, r.remoteId, r.conversationId, r.senderUid, r.senderDisplayName ?? null,
         r.text, (r.text ?? '').slice(0, 200), r.remoteCreatedAt ?? now, r.remoteCreatedAt ?? now, now,
         r.editedAt ?? null, r.deletedForEveryone ? 1 : 0, r.replyToMessageId ?? null, r.replyToPreview ?? null,
         r.forwarded ? 1 : 0, r.status ?? 'sent', r.serverVersion ?? 0,
+        reactionsJson, c.delivered ?? 0, c.read ?? 0, c.viewed ?? 0, c.played ?? 0,
       ],
     );
   }

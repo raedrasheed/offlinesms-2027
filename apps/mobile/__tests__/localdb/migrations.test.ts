@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { applyMigrations, LATEST_VERSION, MIGRATIONS } from '../../src/localdb/migrations';
-import { ALL_TABLE_STATEMENTS, CREATE_INDEXES } from '../../src/localdb/schema';
+import { ALL_TABLE_STATEMENTS, CREATE_INDEXES, MESSAGES_V2_COLUMNS } from '../../src/localdb/schema';
 
 async function record() {
   const sqls: string[] = [];
@@ -14,14 +14,24 @@ describe('applyMigrations', () => {
     expect(version).toBe(LATEST_VERSION);
   });
 
-  it('creates every table and index', async () => {
+  it('creates every table and index, then applies v2 columns', async () => {
     const { sqls } = await record();
-    expect(sqls.length).toBe(ALL_TABLE_STATEMENTS.length + CREATE_INDEXES.length);
+    expect(sqls.length).toBe(ALL_TABLE_STATEMENTS.length + CREATE_INDEXES.length + MESSAGES_V2_COLUMNS.length);
     for (const table of ['conversations', 'messages', 'outbox', 'sync_state', 'tombstones', 'message_receipts', 'message_reactions', 'group_members']) {
       expect(sqls.some(s => s.includes(`CREATE TABLE IF NOT EXISTS ${table}`))).toBe(true);
     }
     expect(sqls.some(s => s.includes('idx_messages_conversation_created'))).toBe(true);
     expect(sqls.some(s => s.includes('idx_outbox_status_next_attempt'))).toBe(true);
+    // v2 reactions/receipts columns.
+    expect(sqls.some(s => s.includes('ADD COLUMN reactions_json'))).toBe(true);
+    expect(sqls.some(s => s.includes('ADD COLUMN delivered_count'))).toBe(true);
+  });
+
+  it('upgrades from v1 to latest by applying only v2', async () => {
+    const sqls: string[] = [];
+    const version = await applyMigrations(1, async (sql) => { sqls.push(sql); });
+    expect(version).toBe(LATEST_VERSION);
+    expect(sqls).toEqual(MESSAGES_V2_COLUMNS);
   });
 
   it('is a no-op when already at the latest version', async () => {
