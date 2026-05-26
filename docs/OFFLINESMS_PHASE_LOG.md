@@ -4,6 +4,54 @@ Running log of phased work. Newest first.
 
 ---
 
+## Phase 22C — Conversation Local-DB + Outbox Send (flag-gated)
+
+**Branch:** `claude/phase22c-conversation-local-first` (stacked on the Phase 22
+branch).
+**Status:** Code complete (22C-1 → 22C-3); **on-device verification PENDING**.
+Flag `LOCAL_FIRST_CONVERSATION_ENABLED` defaults OFF → no behaviour change.
+
+### What was done
+
+1. **Plan** — `docs/OFFLINESMS_PHASE_22C_PLAN.md`.
+2. **Schema v2** — `reactions_json` + `delivered/read/viewed/played_count`
+   columns on `messages` (migration v2 / ALTER), persisted by
+   `upsertRemoteMessage` and mapped by the message view-model so local mode
+   renders reactions + receipt indicators.
+3. **Message view-model** (`src/hooks/messageModel.ts`) — `MessageRow` →
+   `Message` (reactions parse, counts, replyTo, pending→sending) + chronological
+   ordering. Pure, unit-tested.
+4. **Feeder + hook** — `conversationFeeder` (reuses `subscribeMessages`, upserts
+   reactions/counts into SQLite) and `useLocalConversation` (opens DB + sync
+   scheduler, serves messages from the DB, paginates, Firestore fallback).
+5. **Screen cutover** — `Conversation.tsx` reads from the local DB and sends via
+   `queueSendMessage` + outbox/sync engine (idempotent; no dup on retry) when
+   the flag is on; Firestore listener skipped; incoming receipts still emitted;
+   falls back to the existing Firestore + OfflineContext path otherwise.
+6. **Legacy import** — one-time, guarded import of the AsyncStorage
+   `offlineQueue` into the SQLite outbox (safe: remaining legacy items are
+   undelivered).
+7. **Feature flag** — `LOCAL_FIRST_CONVERSATION_ENABLED` (default OFF, env
+   override). Tests for model + migration v2 + flag default.
+
+### Verification
+
+- Mobile typecheck **clean**; all-workspaces typecheck **clean**.
+- i18n parity **PASS**; **150/150 tests pass** (incl. 46 localdb).
+- **NOT run:** Expo app / device. Device checklist in the 22C plan is **pending**
+  (flag-OFF parity, cached instant load, optimistic send + no-dup on
+  reconnect/retry, incoming stream, legacy migration once, logout wipe).
+
+### Known limitations
+
+- Reactions/receipts now persist locally, but per-user receipt detail
+  (MessageInfo) and reaction *writes* still go through existing callables.
+- Builds on 22A/22B, which remain device-unverified (PR #6 Draft).
+- Conversation message *actions* (edit/delete/react/star/pin) still call their
+  callables directly; routing those through the outbox is a later sub-phase.
+
+---
+
 ## Phase 22B — ChatList Local-DB Cutover (flag-gated)
 
 **Branch:** `claude/wonderful-bohr-WE9L0`
