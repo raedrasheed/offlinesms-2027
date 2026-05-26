@@ -16,3 +16,12 @@ function envFlag(name: string, fallback: boolean): boolean {
  * initialise the UI falls back to the existing Firestore path.
  */
 export const LOCAL_FIRST_CHAT_LIST_ENABLED = envFlag('EXPO_PUBLIC_LOCAL_FIRST_CHAT_LIST', false);
+
+/**
+ * Phase 22C — when true, the Conversation screen reads messages from the local
+ * SQLite DB and sends through the outbox + sync engine instead of calling
+ * sendTextMessage directly. Defaults OFF; override via
+ * EXPO_PUBLIC_LOCAL_FIRST_CONVERSATION=1. Falls back to the existing Firestore +
+ * OfflineContext path if the local DB cannot initialise.
+ */
+export const LOCAL_FIRST_CONVERSATION_ENABLED = envFlag('EXPO_PUBLIC_LOCAL_FIRST_CONVERSATION', false);
