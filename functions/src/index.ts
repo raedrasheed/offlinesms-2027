@@ -6,6 +6,10 @@ initializeApp();
 export { onMessageCreate } from './chats/onMessageCreate';
 export { getOrCreateDirectConversation } from './chats/getOrCreateDirectConversation';
 export { sendTextMessage }                from './chats/sendTextMessage';
+
+// Phase 23 — media messages (images & voice notes).
+export { createMediaMessage }   from './chats/createMediaMessage';
+export { finalizeMediaMessage } from './chats/finalizeMediaMessage';
 export { markRead }                       from './chats/markRead';
 export { setTyping }                      from './chats/setTyping';
 
