@@ -21,17 +21,17 @@ function call<T = any>(name: string, data: any): Promise<T> {
   return httpsCallable<any, T>(getFunctions(app), name)(data).then(r => r.data);
 }
 
-/**
- * Upload a local file to Storage with progress, returning the download URL.
- * `fetch(localUri).blob()` reads file:// URIs in Expo/RN. Re-uploading to the
- * same path on retry is safe (it overwrites the same object).
- */
-async function uploadLocalFile(
-  localUri: string, storagePath: string, contentType: string,
+/** Read a local file (file:// uri) into a Blob. Works for Expo/RN file uris. */
+async function readLocalBlob(localUri: string): Promise<Blob> {
+  const res = await fetch(localUri);
+  return res.blob();
+}
+
+/** Upload a Blob to Storage with progress, returning the download URL. */
+async function uploadBlob(
+  blob: Blob, storagePath: string, contentType: string,
   onProgress: (fraction: number) => void,
 ): Promise<string> {
-  const res = await fetch(localUri);
-  const blob = await res.blob();
   const task = uploadBytesResumable(ref(storage, storagePath), blob, { contentType });
   await new Promise<void>((resolve, reject) => {
     task.on('state_changed',
@@ -61,22 +61,30 @@ export async function pushOutboxItem(item: OutboxRow): Promise<PushResult> {
     case 'send_image_message': {
       const localId: string | null = payload.localMessageId ?? null;
       try {
+        // Read the file first so we have an authoritative byte size (the picker
+        // does not always report fileSize, which would fail server validation).
+        const blob = await readLocalBlob(payload.localUri);
+        const sizeBytes = blob.size || payload.sizeBytes || 0;
         // 1. Reserve the message doc + Storage path (idempotent by localId).
         const created = await call<{ messageId: string; storagePath: string; idempotent?: boolean }>('createMediaMessage', {
           conversationId: payload.conversationId,
           type: 'image',
           caption: payload.caption ?? null,
           mimeType: payload.mimeType,
-          sizeBytes: payload.sizeBytes,
+          sizeBytes,
           width: payload.width ?? null,
           height: payload.height ?? null,
           replyTo: payload.replyTo ?? null,
           localId,
           idempotencyKey: item.idempotency_key,
         });
+        // Reconcile the local row to the server id immediately so the realtime
+        // feeder (which sees the new doc during the slow upload) updates this
+        // row instead of inserting a duplicate / colliding on remote_id.
+        if (localId) { try { await messagesRepo.reconcileToRemote(localId, { remoteId: created.messageId, remoteCreatedAt: null }); } catch { /* noop */ } }
         // 2. Upload the binary with progress.
-        const downloadURL = await uploadLocalFile(
-          payload.localUri, created.storagePath, payload.mimeType,
+        const downloadURL = await uploadBlob(
+          blob, created.storagePath, payload.mimeType,
           (f) => { if (localId) void messagesRepo.setMediaProgress(localId, f); },
         );
         // 3. Finalize (idempotent).
@@ -98,19 +106,22 @@ export async function pushOutboxItem(item: OutboxRow): Promise<PushResult> {
     case 'send_voice_message': {
       const localId: string | null = payload.localMessageId ?? null;
       try {
+        const blob = await readLocalBlob(payload.localUri);
+        const sizeBytes = blob.size || payload.sizeBytes || 0;
         const created = await call<{ messageId: string; storagePath: string; idempotent?: boolean }>('createMediaMessage', {
           conversationId: payload.conversationId,
           type: 'voice',
           mimeType: payload.mimeType,
-          sizeBytes: payload.sizeBytes,
+          sizeBytes,
           durationMs: payload.durationMs,
           waveform: payload.waveform ?? null,
           replyTo: payload.replyTo ?? null,
           localId,
           idempotencyKey: item.idempotency_key,
         });
-        const downloadURL = await uploadLocalFile(
-          payload.localUri, created.storagePath, payload.mimeType,
+        if (localId) { try { await messagesRepo.reconcileToRemote(localId, { remoteId: created.messageId, remoteCreatedAt: null }); } catch { /* noop */ } }
+        const downloadURL = await uploadBlob(
+          blob, created.storagePath, payload.mimeType,
           (f) => { if (localId) void messagesRepo.setMediaProgress(localId, f); },
         );
         await call('finalizeMediaMessage', {

@@ -29,7 +29,9 @@ export default function ImagePreviewScreen({ route, navigation }: any) {
 
   async function send() {
     if (busy) return;
-    const check = validateMediaMessage({ mediaType: 'image', mimeType, sizeBytes });
+    // The picker doesn't always report a size; treat unknown (0) as valid here
+    // and let the upload step compute the authoritative size from the file.
+    const check = validateMediaMessage({ mediaType: 'image', mimeType, sizeBytes: sizeBytes || 1 });
     if (!check.ok) {
       Alert.alert(t('media.uploadFailed'), check.reason === 'too-large' ? 'Image is too large (max 10 MB).' : 'This image type is not supported.');
       return;

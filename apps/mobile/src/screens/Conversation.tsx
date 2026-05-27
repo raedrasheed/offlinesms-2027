@@ -84,6 +84,12 @@ export default function Conversation({ route, navigation }: any) {
   // Mirror this conversation's messages into the local SQLite DB while it's open.
   useMessagePersistence(id, me || undefined);
 
+  // Re-read local messages when returning to this screen (e.g. after sending an
+  // image from the preview screen) so the optimistic bubble shows immediately.
+  const refreshRef = useRef(local.refresh);
+  useEffect(() => { refreshRef.current = local.refresh; });
+  useEffect(() => navigation.addListener('focus', () => refreshRef.current?.()), [navigation]);
+
   const [msgs, setMsgs] = useState<Message[] | null>(null);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
@@ -380,6 +386,7 @@ export default function Conversation({ route, navigation }: any) {
         replyTo: replyToRef.current ?? null,
       });
       setReplyTo(null);
+      local.refresh();
     } catch (e: any) {
       Alert.alert(t('media.uploadFailed'), e?.message ?? 'try-again');
     }
@@ -388,7 +395,12 @@ export default function Conversation({ route, navigation }: any) {
   const micPan = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => draftEmptyRef.current && !editingRef.current,
+      onStartShouldSetPanResponderCapture: () => draftEmptyRef.current && !editingRef.current,
       onMoveShouldSetPanResponder: () => modeRef.current !== 'idle',
+      onMoveShouldSetPanResponderCapture: () => modeRef.current !== 'idle',
+      // Don't let the message list steal the swipe-up-to-lock vertical drag.
+      onPanResponderTerminationRequest: () => false,
+      onShouldBlockNativeResponder: () => true,
       onPanResponderGrant: () => {
         void (async () => {
           const ok = await recorder.start();

@@ -18,6 +18,7 @@ export interface RecordingResult {
 
 let recording: Audio.Recording | null = null;
 let sampler: WaveformSampler | null = null;
+let startedAt = 0;
 
 async function setRecordingMode(on: boolean): Promise<void> {
   await Audio.setAudioModeAsync({
@@ -47,6 +48,7 @@ export async function startRecording(onSample?: (bars: number[]) => void): Promi
     }
   });
   await rec.startAsync();
+  startedAt = Date.now();
   recording = rec;
 }
 
@@ -55,11 +57,15 @@ export async function stopRecording(mimeType = 'audio/m4a'): Promise<RecordingRe
   if (!recording) return null;
   const rec = recording;
   recording = null;
+  const elapsed = startedAt > 0 ? Date.now() - startedAt : 0;
   let durationMs = 0;
   try {
     const status = await rec.stopAndUnloadAsync();
     durationMs = status.durationMillis ?? 0;
   } catch { /* best-effort */ }
+  // status.durationMillis is unreliable right after stop on some devices; fall
+  // back to the wall-clock elapsed time so short notes aren't rejected.
+  if (!durationMs || durationMs < elapsed - 200) durationMs = elapsed;
   await setRecordingMode(false).catch(() => {});
   const uri = rec.getURI();
   const waveform = sampler?.finalize() ?? [];
