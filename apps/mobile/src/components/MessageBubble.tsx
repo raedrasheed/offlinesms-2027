@@ -14,10 +14,11 @@
 
 import { useState } from 'react';
 import {
-  View, Text, Pressable, Alert, StyleSheet, Clipboard,
+  View, Text, Pressable, Alert, StyleSheet, Clipboard, Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme';
+import { avatarColor, initials } from '../lib/avatar';
 import { ChatActionSheet, SheetAction } from './ChatActionSheet';
 import {
   Message,
@@ -75,7 +76,7 @@ function createdAtMillis(value: any): number {
 function formatTime(value: any): string {
   const ms = createdAtMillis(value);
   if (!ms) return '';
-  return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
 export function MessageBubble({
@@ -133,6 +134,9 @@ export function MessageBubble({
       .filter(([, uids]) => (uids ?? []).length > 0)
       .map(([emoji, uids]) => ({ emoji, count: uids.length, mine: uids.includes(context.myUid) }));
   })();
+  const reactionTotal = reactionEntries.reduce((sum, r) => sum + r.count, 0);
+  const iReacted = reactionEntries.some(r => r.mine);
+  const showAvatar = context.isGroup && !mine;
 
   function copyText() {
     try { (Clipboard as any).setString?.(m.text ?? ''); } catch {}
@@ -191,7 +195,22 @@ export function MessageBubble({
       ];
 
   return (
-    <View style={{ marginBottom: 2 }}>
+    <View style={[s.row, mine ? s.rowMine : s.rowTheirs]}>
+      {showAvatar ? (
+        showSender ? (
+          m.senderPhotoURL ? (
+            <Image source={{ uri: m.senderPhotoURL }} style={s.avatar} />
+          ) : (
+            <View style={[s.avatar, { backgroundColor: avatarColor(m.senderUid) }]}>
+              <Text style={s.avatarText}>{initials(m.senderDisplayName ?? m.senderUid.slice(0, 2))}</Text>
+            </View>
+          )
+        ) : (
+          <View style={s.avatarSpacer} />
+        )
+      ) : null}
+
+      <View style={[s.col, mine ? s.colMine : s.colTheirs]}>
       {showSender ? (
         <Text style={s.senderLabel}>{m.senderDisplayName ?? m.senderUid.slice(0, 6)}</Text>
       ) : null}
@@ -231,15 +250,17 @@ export function MessageBubble({
       </Pressable>
 
       {reactionEntries.length > 0 ? (
-        <View style={[s.reactionsRow, mine && { justifyContent: 'flex-end' }]}>
+        <Pressable
+          style={[s.reactionPill, iReacted && s.reactionPillMine]}
+          onPress={() => setSheetOpen(true)}
+        >
           {reactionEntries.map(r => (
-            <Pressable key={r.emoji} style={[s.reactionChip, r.mine && s.reactionChipMine]} onPress={() => react(r.emoji)}>
-              <Text style={s.reactionEmoji}>{r.emoji}</Text>
-              <Text style={s.reactionCount}>{r.count}</Text>
-            </Pressable>
+            <Text key={r.emoji} style={s.reactionEmoji}>{r.emoji}</Text>
           ))}
-        </View>
+          {reactionTotal > 1 ? <Text style={s.reactionCount}>{reactionTotal}</Text> : null}
+        </Pressable>
       ) : null}
+      </View>
 
       <ChatActionSheet
         visible={sheetOpen}
@@ -289,10 +310,19 @@ function ReceiptIndicator({ message, isGroup, memberCount }: { message: Message;
 }
 
 const s = StyleSheet.create({
+  row:            { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 2 },
+  rowMine:        { justifyContent: 'flex-end' },
+  rowTheirs:      { justifyContent: 'flex-start' },
+  col:            { maxWidth: '80%' },
+  colMine:        { alignItems: 'flex-end' },
+  colTheirs:      { alignItems: 'flex-start' },
+  avatar:         { width: 30, height: 30, borderRadius: 15, marginRight: 6, marginTop: 18, alignItems: 'center', justifyContent: 'center' },
+  avatarText:     { color: '#fff', fontWeight: '800', fontSize: 12 },
+  avatarSpacer:   { width: 36 },
   senderLabel:    { fontSize: 11, fontWeight: '700', color: colors.ink500, marginLeft: 2, marginTop: 4, marginBottom: 2 },
-  bubble:         { maxWidth: '78%', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 22 },
-  sent:           { alignSelf: 'flex-end', backgroundColor: '#1E88E5', borderBottomRightRadius: 8 },
-  recv:           { alignSelf: 'flex-start', backgroundColor: '#fff', borderBottomLeftRadius: 8, borderWidth: 1, borderColor: colors.ink100 },
+  bubble:         { maxWidth: '100%', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 22, shadowColor: '#000', shadowOpacity: 0.10, shadowRadius: 3, shadowOffset: { width: 0, height: 1 }, elevation: 2 },
+  sent:           { backgroundColor: '#1E88E5', borderBottomRightRadius: 8 },
+  recv:           { backgroundColor: '#fff', borderBottomLeftRadius: 8 },
   bubbleRow:      { flexDirection: 'row', alignItems: 'flex-end', gap: 6 },
   bubbleText:     { fontSize: 16, color: colors.ink, lineHeight: 22, flexShrink: 1 },
   deletedText:    { fontStyle: 'italic', color: colors.ink500 },
@@ -306,9 +336,8 @@ const s = StyleSheet.create({
   receiptRow:     { flexDirection: 'row', alignItems: 'center', gap: 3 },
   star:           { fontSize: 10, color: '#F59E0B' },
   tick:           { fontSize: 11, fontWeight: '700', letterSpacing: -1 },
-  reactionsRow:   { flexDirection: 'row', gap: 4, marginTop: 4, marginHorizontal: 6 },
-  reactionChip:   { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, backgroundColor: '#fff', borderWidth: 1, borderColor: colors.ink200 },
-  reactionChipMine:{ borderColor: colors.primary, backgroundColor: colors.primaryLight },
-  reactionEmoji:  { fontSize: 12 },
-  reactionCount:  { fontSize: 11, fontWeight: '700', color: colors.ink700 },
+  reactionPill:   { flexDirection: 'row', alignItems: 'center', gap: 2, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, backgroundColor: '#fff', marginTop: -11, marginHorizontal: 12, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 2.5, shadowOffset: { width: 0, height: 1 }, elevation: 3 },
+  reactionPillMine:{ backgroundColor: colors.primaryLight },
+  reactionEmoji:  { fontSize: 13 },
+  reactionCount:  { fontSize: 12, fontWeight: '700', color: colors.ink700, marginLeft: 2 },
 });

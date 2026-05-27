@@ -369,6 +369,7 @@ export default function Conversation({ route, navigation }: any) {
     return (
       <FlatList
         ref={listRef}
+        style={s.msgList}
         data={data}
         keyExtractor={(m: any) => m.id}
         contentContainerStyle={{ padding: 12, gap: 4 }}
@@ -566,7 +567,8 @@ export default function Conversation({ route, navigation }: any) {
 
 function buildStyles(colors: any, rtl: boolean) {
   return StyleSheet.create({
-    root:     { flex: 1, backgroundColor: colors.background.subtle },
+    root:     { flex: 1, backgroundColor: '#FFFFFF' },
+    msgList:  { flex: 1, backgroundColor: '#EAF2FB' },
     emptyConvo:    { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40, gap: 6 },
     emptyAvatar:   { width: 96, height: 96, borderRadius: 48, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
     emptyAvatarText:{ color: '#fff', fontSize: 34, fontWeight: '800' },
