@@ -18,11 +18,14 @@ export function startConversationFeeder(conversationId: string, onChange: () => 
   return subscribeMessages(conversationId, async (msgs) => {
     for (const m of msgs) {
       try {
+        const media = (m as any).media;
         await upsertRemoteMessage({
           remoteId: m.id,
           conversationId,
           senderUid: m.senderUid ?? (m as any).senderId ?? '',
           senderDisplayName: m.senderDisplayName ?? null,
+          type: (m as any).type ?? 'text',
+          caption: (m as any).caption ?? null,
           text: m.text ?? null,
           remoteCreatedAt: ms(m.createdAt),
           editedAt: ms(m.editedAt),
@@ -37,6 +40,19 @@ export function startConversationFeeder(conversationId: string, onChange: () => 
             viewed: m.viewedCount ?? 0,
             played: m.playedCount ?? 0,
           },
+          media: media ? {
+            mimeType: media.mimeType ?? null,
+            sizeBytes: media.sizeBytes ?? null,
+            width: media.width ?? null,
+            height: media.height ?? null,
+            durationMs: media.durationMs ?? null,
+            waveform: media.waveform ?? null,
+            storagePath: media.storagePath ?? null,
+            downloadURL: media.downloadURL ?? null,
+            thumbnailPath: media.thumbnailPath ?? null,
+            thumbnailURL: media.thumbnailURL ?? null,
+            uploadStatus: media.uploadStatus ?? null,
+          } : null,
         });
       } catch { /* best-effort per message */ }
     }

@@ -6,7 +6,9 @@
 // the server can dedupe retries (see functions/src/chats/sendTextMessage.ts).
 
 import { getFunctions, httpsCallable } from 'firebase/functions';
-import { app } from '../../lib/firebase';
+import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
+import { app, storage } from '../../lib/firebase';
+import * as messagesRepo from '../repositories/messagesRepo';
 import type { OutboxRow } from '../types';
 
 export interface PushResult {
@@ -17,6 +19,28 @@ export interface PushResult {
 
 function call<T = any>(name: string, data: any): Promise<T> {
   return httpsCallable<any, T>(getFunctions(app), name)(data).then(r => r.data);
+}
+
+/**
+ * Upload a local file to Storage with progress, returning the download URL.
+ * `fetch(localUri).blob()` reads file:// URIs in Expo/RN. Re-uploading to the
+ * same path on retry is safe (it overwrites the same object).
+ */
+async function uploadLocalFile(
+  localUri: string, storagePath: string, contentType: string,
+  onProgress: (fraction: number) => void,
+): Promise<string> {
+  const res = await fetch(localUri);
+  const blob = await res.blob();
+  const task = uploadBytesResumable(ref(storage, storagePath), blob, { contentType });
+  await new Promise<void>((resolve, reject) => {
+    task.on('state_changed',
+      (snap) => { if (snap.totalBytes > 0) onProgress(snap.bytesTransferred / snap.totalBytes); },
+      reject,
+      () => resolve(),
+    );
+  });
+  return getDownloadURL(task.snapshot.ref);
 }
 
 export async function pushOutboxItem(item: OutboxRow): Promise<PushResult> {
@@ -33,6 +57,43 @@ export async function pushOutboxItem(item: OutboxRow): Promise<PushResult> {
         clientCreatedAt: payload.clientCreatedAt ?? null,
       });
       return { ok: true, remoteId: res?.messageId, idempotent: res?.idempotent };
+    }
+    case 'send_image_message': {
+      const localId: string | null = payload.localMessageId ?? null;
+      try {
+        // 1. Reserve the message doc + Storage path (idempotent by localId).
+        const created = await call<{ messageId: string; storagePath: string; idempotent?: boolean }>('createMediaMessage', {
+          conversationId: payload.conversationId,
+          type: 'image',
+          caption: payload.caption ?? null,
+          mimeType: payload.mimeType,
+          sizeBytes: payload.sizeBytes,
+          width: payload.width ?? null,
+          height: payload.height ?? null,
+          replyTo: payload.replyTo ?? null,
+          localId,
+          idempotencyKey: item.idempotency_key,
+        });
+        // 2. Upload the binary with progress.
+        const downloadURL = await uploadLocalFile(
+          payload.localUri, created.storagePath, payload.mimeType,
+          (f) => { if (localId) void messagesRepo.setMediaProgress(localId, f); },
+        );
+        // 3. Finalize (idempotent).
+        await call('finalizeMediaMessage', {
+          conversationId: payload.conversationId,
+          messageId: created.messageId,
+          downloadURL,
+          width: payload.width ?? null,
+          height: payload.height ?? null,
+          sizeBytes: payload.sizeBytes,
+        });
+        if (localId) await messagesRepo.setMediaUploaded(localId, { downloadURL });
+        return { ok: true, remoteId: created.messageId, idempotent: created.idempotent };
+      } catch (err) {
+        if (localId) await messagesRepo.setMediaFailed(localId).catch(() => {});
+        throw err;
+      }
     }
     case 'edit_message':
       await call('editMessage', { conversationId: payload.conversationId, messageId: payload.messageId, text: payload.text });

@@ -41,11 +41,13 @@ export async function pushOutbox(): Promise<number> {
     await outboxRepo.markProcessing(item.id);
     try {
       const res = await pushOutboxItem(item);
-      // Reconcile an optimistic send with its canonical server message.
-      if (item.type === 'send_message' && res.remoteId) {
+      // Reconcile an optimistic send (text or media) with its canonical server
+      // message id so the local row flips from pending → sent.
+      if ((item.type === 'send_message' || item.type === 'send_image_message' || item.type === 'send_voice_message') && res.remoteId) {
         const payload = JSON.parse(item.payload_json || '{}');
-        if (payload.localId) {
-          await messagesRepo.reconcileToRemote(payload.localId, {
+        const localId = payload.localId ?? payload.localMessageId;
+        if (localId) {
+          await messagesRepo.reconcileToRemote(localId, {
             remoteId: res.remoteId, remoteCreatedAt: null,
           });
         }

@@ -132,6 +132,76 @@ export async function insertLocalMessage(m: NewLocalMessage): Promise<MessageRow
   return (await getByLocalId(id))!;
 }
 
+export interface NewLocalMediaMessage {
+  conversationId: string;
+  senderUid: string;
+  senderDisplayName?: string | null;
+  mediaType: 'image' | 'voice';
+  caption?: string | null;
+  localUri: string;
+  mimeType: string;
+  sizeBytes: number;
+  width?: number | null;
+  height?: number | null;
+  durationMs?: number | null;
+  waveform?: number[] | null;
+  replyToMessageId?: string | null;
+  replyToPreview?: string | null;
+  deviceId: string;
+  clientSequence: number;
+}
+
+/** Phase 23 — insert an optimistic outgoing media message (image/voice). */
+export async function insertLocalMediaMessage(m: NewLocalMediaMessage): Promise<MessageRow> {
+  const now = Date.now();
+  const id = localMessageId(m.deviceId);
+  const preview = m.mediaType === 'image' ? 'Photo' : 'Voice message';
+  await getDb().run(
+    `INSERT INTO messages
+      (id, local_id, remote_id, conversation_id, sender_uid, sender_display_name, type, text, preview, caption,
+       created_at, remote_created_at, updated_at, edited_at, deleted_for_everyone, deleted_for_me, deleted_at,
+       reply_to_message_id, reply_to_preview, forwarded, forwarded_from_message_id,
+       status, error_code, error_message, sync_status, client_sequence, server_version,
+       media_local_uri, media_mime, media_size, media_width, media_height, media_duration_ms, media_waveform,
+       media_upload_status, media_upload_progress)
+     VALUES (?,?,NULL,?,?,?, ?, NULL, ?, ?, ?, NULL, ?, NULL, 0, 0, NULL, ?, ?, 0, NULL, 'pending', NULL, NULL, 'pending', ?, 0,
+       ?, ?, ?, ?, ?, ?, ?, 'pending', 0)`,
+    [
+      id, id, m.conversationId, m.senderUid, m.senderDisplayName ?? null, m.mediaType, preview, m.caption ?? null,
+      now, now, m.replyToMessageId ?? null, m.replyToPreview ?? null, m.clientSequence,
+      m.localUri, m.mimeType, m.sizeBytes, m.width ?? null, m.height ?? null, m.durationMs ?? null,
+      m.waveform ? JSON.stringify(m.waveform) : null,
+    ],
+  );
+  return (await getByLocalId(id))!;
+}
+
+/** Phase 23 — update the local upload progress (0..1) for a pending media message. */
+export async function setMediaProgress(localId: string, progress: number): Promise<void> {
+  await getDb().run(
+    `UPDATE messages SET media_upload_status = 'uploading', media_upload_progress = ?, updated_at = ? WHERE local_id = ?`,
+    [Math.max(0, Math.min(1, progress)), Date.now(), localId],
+  );
+}
+
+/** Phase 23 — mark a media message uploaded and store the resolved URLs. */
+export async function setMediaUploaded(localId: string, urls: { downloadURL?: string | null; thumbnailURL?: string | null }): Promise<void> {
+  await getDb().run(
+    `UPDATE messages SET media_upload_status = 'uploaded', media_upload_progress = 1,
+       media_download_url = COALESCE(?, media_download_url), media_thumb_url = COALESCE(?, media_thumb_url),
+       updated_at = ? WHERE local_id = ?`,
+    [urls.downloadURL ?? null, urls.thumbnailURL ?? null, Date.now(), localId],
+  );
+}
+
+/** Phase 23 — mark a media upload failed (keeps the row for retry). */
+export async function setMediaFailed(localId: string): Promise<void> {
+  await getDb().run(
+    `UPDATE messages SET media_upload_status = 'failed', updated_at = ? WHERE local_id = ?`,
+    [Date.now(), localId],
+  );
+}
+
 export async function setStatus(localId: string, status: MessageStatus, sync?: MessageSyncStatus): Promise<void> {
   if (sync) {
     await getDb().run(`UPDATE messages SET status = ?, sync_status = ?, updated_at = ? WHERE local_id = ?`,
@@ -166,30 +236,50 @@ export interface RemoteReceiptCounts {
   delivered?: number; read?: number; viewed?: number; played?: number;
 }
 
+export interface RemoteMediaInput {
+  mimeType?: string | null;
+  sizeBytes?: number | null;
+  width?: number | null;
+  height?: number | null;
+  durationMs?: number | null;
+  waveform?: number[] | null;
+  storagePath?: string | null;
+  downloadURL?: string | null;
+  thumbnailPath?: string | null;
+  thumbnailURL?: string | null;
+  uploadStatus?: 'pending' | 'uploading' | 'uploaded' | 'failed' | null;
+}
+
 export async function upsertRemoteMessage(r: {
   remoteId: string; conversationId: string; senderUid: string; senderDisplayName?: string | null;
+  type?: 'text' | 'image' | 'voice'; caption?: string | null;
   text: string | null; remoteCreatedAt: number | null; editedAt?: number | null;
   deletedForEveryone?: boolean; replyToMessageId?: string | null; replyToPreview?: string | null;
   forwarded?: boolean; serverVersion?: number; status?: MessageStatus;
   reactions?: Record<string, string[]> | null; counts?: RemoteReceiptCounts;
+  media?: RemoteMediaInput | null;
 }): Promise<void> {
   const existing = await getByRemoteId(r.remoteId);
   const now = Date.now();
   const reactionsJson = r.reactions != null ? JSON.stringify(r.reactions) : null;
   const c = r.counts ?? {};
+  const md = r.media ?? null;
+  const waveformJson = md?.waveform != null ? JSON.stringify(md.waveform) : null;
+  const type = r.type ?? 'text';
   if (existing) {
-    // Only touch reactions/receipt counts when the caller actually provides
-    // them. The catch-up pull (firebasePull) omits both; without this guard it
-    // would clobber reaction + receipt data the realtime feeder had set.
+    // Only touch reactions/receipt counts (and media) when the caller actually
+    // provides them. The catch-up pull omits reactions/counts; without this
+    // guard it would clobber data the realtime feeder had set.
     const sets = [
-      'text = ?', 'sender_display_name = COALESCE(?, sender_display_name)',
+      'type = COALESCE(?, type)', 'caption = ?', 'text = ?',
+      'sender_display_name = COALESCE(?, sender_display_name)',
       'remote_created_at = COALESCE(?, remote_created_at)', 'edited_at = ?',
       'deleted_for_everyone = ?', 'reply_to_message_id = ?', 'reply_to_preview = ?',
       'forwarded = ?', 'status = COALESCE(?, status)', "sync_status = 'synced'",
       'server_version = COALESCE(?, server_version)', 'updated_at = ?',
     ];
     const params: any[] = [
-      r.text, r.senderDisplayName ?? null, r.remoteCreatedAt, r.editedAt ?? null,
+      r.type ?? null, r.caption ?? null, r.text, r.senderDisplayName ?? null, r.remoteCreatedAt, r.editedAt ?? null,
       r.deletedForEveryone ? 1 : 0, r.replyToMessageId ?? null, r.replyToPreview ?? null,
       r.forwarded ? 1 : 0, r.status ?? null, r.serverVersion ?? null, now,
     ];
@@ -198,23 +288,44 @@ export async function upsertRemoteMessage(r: {
       sets.push('delivered_count = ?', 'read_count = ?', 'viewed_count = ?', 'played_count = ?');
       params.push(c.delivered ?? 0, c.read ?? 0, c.viewed ?? 0, c.played ?? 0);
     }
+    if (r.media !== undefined) {
+      sets.push(
+        'media_mime = ?', 'media_size = ?', 'media_width = ?', 'media_height = ?',
+        'media_duration_ms = ?', 'media_waveform = ?', 'media_storage_path = ?',
+        'media_download_url = COALESCE(?, media_download_url)', 'media_thumb_path = ?',
+        'media_thumb_url = COALESCE(?, media_thumb_url)', 'media_upload_status = ?',
+      );
+      params.push(
+        md?.mimeType ?? null, md?.sizeBytes ?? null, md?.width ?? null, md?.height ?? null,
+        md?.durationMs ?? null, waveformJson, md?.storagePath ?? null,
+        md?.downloadURL ?? null, md?.thumbnailPath ?? null, md?.thumbnailURL ?? null,
+        md?.uploadStatus ?? null,
+      );
+    }
     params.push(r.remoteId);
     await getDb().run(`UPDATE messages SET ${sets.join(', ')} WHERE remote_id = ?`, params);
   } else {
     await getDb().run(
       `INSERT INTO messages
-        (id, local_id, remote_id, conversation_id, sender_uid, sender_display_name, type, text, preview,
+        (id, local_id, remote_id, conversation_id, sender_uid, sender_display_name, type, text, preview, caption,
          created_at, remote_created_at, updated_at, edited_at, deleted_for_everyone, deleted_for_me, deleted_at,
          reply_to_message_id, reply_to_preview, forwarded, forwarded_from_message_id,
          status, error_code, error_message, sync_status, client_sequence, server_version,
-         reactions_json, delivered_count, read_count, viewed_count, played_count)
-       VALUES (?, NULL, ?, ?, ?, ?, 'text', ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, NULL, ?, NULL, NULL, 'synced', 0, ?, ?, ?, ?, ?, ?)`,
+         reactions_json, delivered_count, read_count, viewed_count, played_count,
+         media_mime, media_size, media_width, media_height, media_duration_ms, media_waveform,
+         media_storage_path, media_download_url, media_thumb_path, media_thumb_url, media_upload_status)
+       VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, NULL, ?, NULL, NULL, 'synced', 0, ?, ?, ?, ?, ?, ?,
+         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         r.remoteId, r.remoteId, r.conversationId, r.senderUid, r.senderDisplayName ?? null,
-        r.text, (r.text ?? '').slice(0, 200), r.remoteCreatedAt ?? now, r.remoteCreatedAt ?? now, now,
+        type, r.text, (r.text ?? '').slice(0, 200), r.caption ?? null,
+        r.remoteCreatedAt ?? now, r.remoteCreatedAt ?? now, now,
         r.editedAt ?? null, r.deletedForEveryone ? 1 : 0, r.replyToMessageId ?? null, r.replyToPreview ?? null,
         r.forwarded ? 1 : 0, r.status ?? 'sent', r.serverVersion ?? 0,
         reactionsJson, c.delivered ?? 0, c.read ?? 0, c.viewed ?? 0, c.played ?? 0,
+        md?.mimeType ?? null, md?.sizeBytes ?? null, md?.width ?? null, md?.height ?? null,
+        md?.durationMs ?? null, waveformJson, md?.storagePath ?? null, md?.downloadURL ?? null,
+        md?.thumbnailPath ?? null, md?.thumbnailURL ?? null, md?.uploadStatus ?? null,
       ],
     );
   }

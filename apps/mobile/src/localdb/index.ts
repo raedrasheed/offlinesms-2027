@@ -100,6 +100,71 @@ export async function queueSendMessage(input: QueueSendInput): Promise<MessageRo
   return row;
 }
 
+export interface QueueSendImageInput {
+  conversationId: string;
+  senderUid: string;
+  senderDisplayName?: string | null;
+  localUri: string;
+  mimeType: string;
+  sizeBytes: number;
+  width?: number | null;
+  height?: number | null;
+  caption?: string | null;
+  replyTo?: { messageId: string; senderUid?: string; senderDisplayName?: string; preview?: string } | null;
+}
+
+/**
+ * Phase 23 — write an optimistic local image message (status `pending`,
+ * uploadStatus `pending`) and enqueue a `send_image_message` outbox item. The
+ * sync engine runs create → upload → finalize when online and reconciles the
+ * local row to the server message id. The local file is the render source until
+ * the download URL arrives, so the bubble shows immediately (and offline).
+ */
+export async function queueSendImageMessage(input: QueueSendImageInput): Promise<MessageRow> {
+  if (!getCurrentUid()) throw new Error('localdb: not initialised');
+  const deviceId = await getDeviceId();
+  const clientSequence = await messagesRepo.nextClientSequence(input.conversationId);
+
+  const row = await messagesRepo.insertLocalMediaMessage({
+    conversationId: input.conversationId,
+    senderUid: input.senderUid,
+    senderDisplayName: input.senderDisplayName ?? null,
+    mediaType: 'image',
+    caption: input.caption ?? null,
+    localUri: input.localUri,
+    mimeType: input.mimeType,
+    sizeBytes: input.sizeBytes,
+    width: input.width ?? null,
+    height: input.height ?? null,
+    replyToMessageId: input.replyTo?.messageId ?? null,
+    replyToPreview: input.replyTo?.preview ?? null,
+    deviceId,
+    clientSequence,
+  });
+
+  await outboxRepo.enqueue({
+    type: 'send_image_message',
+    entityType: 'message',
+    entityId: row.local_id,
+    conversationId: input.conversationId,
+    idempotencyKey: idempotencyKey(['send-image', deviceId, row.local_id]),
+    payload: {
+      conversationId: input.conversationId,
+      localMessageId: row.local_id,
+      localUri: input.localUri,
+      mimeType: input.mimeType,
+      sizeBytes: input.sizeBytes,
+      width: input.width ?? null,
+      height: input.height ?? null,
+      caption: input.caption ?? null,
+      replyTo: input.replyTo ?? null,
+    },
+  });
+
+  kick('outbox');
+  return row;
+}
+
 export interface ActionResult { ok: boolean; reason?: 'not-initialised' | 'not-delivered' }
 
 function parseReactions(json: string | null): Record<string, string[]> | null {

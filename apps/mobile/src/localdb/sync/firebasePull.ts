@@ -110,6 +110,8 @@ export async function pullMessages(conversationId: string, max = MSG_PAGE): Prom
       conversationId,
       senderUid: m.senderUid ?? m.senderId ?? '',
       senderDisplayName: m.senderDisplayName ?? null,
+      type: m.type ?? 'text',
+      caption: m.caption ?? null,
       text: m.text ?? null,
       remoteCreatedAt: createdMs,
       editedAt: ms(m.editedAt),
@@ -124,6 +126,19 @@ export async function pullMessages(conversationId: string, max = MSG_PAGE): Prom
         viewed: m.viewedCount ?? 0,
         played: m.playedCount ?? 0,
       },
+      media: m.media ? {
+        mimeType: m.media.mimeType ?? null,
+        sizeBytes: m.media.sizeBytes ?? null,
+        width: m.media.width ?? null,
+        height: m.media.height ?? null,
+        durationMs: m.media.durationMs ?? null,
+        waveform: m.media.waveform ?? null,
+        storagePath: m.media.storagePath ?? null,
+        downloadURL: m.media.downloadURL ?? null,
+        thumbnailPath: m.media.thumbnailPath ?? null,
+        thumbnailURL: m.media.thumbnailURL ?? null,
+        uploadStatus: m.media.uploadStatus ?? null,
+      } : null,
       status: 'sent',
     });
   }

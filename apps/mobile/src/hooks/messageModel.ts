@@ -29,6 +29,34 @@ function parseReactions(json: string | null): Record<string, string[]> | null {
   }
 }
 
+function parseWaveform(json: string | null | undefined): number[] | null {
+  if (!json) return null;
+  try {
+    const p = JSON.parse(json);
+    return Array.isArray(p) ? p.filter((n) => typeof n === 'number') : null;
+  } catch {
+    return null;
+  }
+}
+
+function mapMedia(row: MessageRow): Message['media'] {
+  if (row.type !== 'image' && row.type !== 'voice') return null;
+  return {
+    storagePath: row.media_storage_path ?? '',
+    downloadURL: row.media_download_url ?? null,
+    mimeType: row.media_mime ?? '',
+    sizeBytes: row.media_size ?? 0,
+    width: row.media_width ?? null,
+    height: row.media_height ?? null,
+    durationMs: row.media_duration_ms ?? null,
+    waveform: parseWaveform(row.media_waveform),
+    thumbnailPath: row.media_thumb_path ?? null,
+    thumbnailURL: row.media_thumb_url ?? null,
+    uploadStatus: (row.media_upload_status ?? 'uploaded') as NonNullable<Message['media']>['uploadStatus'],
+    localUri: row.media_local_uri ?? null,
+  };
+}
+
 export function mapMessageRow(row: MessageRow): Message {
   const at = tsLike(effectiveTimeMs(row));
   return {
@@ -37,8 +65,10 @@ export function mapMessageRow(row: MessageRow): Message {
     id: row.remote_id ?? row.local_id ?? row.id,
     conversationId: row.conversation_id,
     senderUid: row.sender_uid,
-    type: 'text',
+    type: row.type,
     text: row.text ?? undefined,
+    caption: row.caption ?? undefined,
+    media: mapMedia(row),
     status: mapStatus(row.status),
     deletedForEveryone: row.deleted_for_everyone === 1,
     editedAt: row.edited_at != null ? tsLike(row.edited_at) : null,
