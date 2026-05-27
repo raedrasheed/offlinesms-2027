@@ -211,11 +211,12 @@ export function MessageBubble({
       ) : null}
 
       <View style={[s.col, mine ? s.colMine : s.colTheirs]}>
-      {showSender ? (
-        <Text style={s.senderLabel}>{m.senderDisplayName ?? m.senderUid.slice(0, 6)}</Text>
-      ) : null}
-
       <Pressable onLongPress={() => setSheetOpen(true)} delayLongPress={300} style={[s.bubble, mine ? s.sent : s.recv]}>
+        {showSender ? (
+          <Text style={[s.senderLabel, { color: avatarColor(m.senderUid) }]} numberOfLines={1}>
+            {m.senderDisplayName ?? m.senderUid.slice(0, 6)}
+          </Text>
+        ) : null}
         {m.forwarded ? <Text style={[s.meta, mine && { color: 'rgba(255,255,255,.85)' }]}>↪︎ Forwarded</Text> : null}
 
         {m.replyTo ? (
@@ -316,13 +317,13 @@ const s = StyleSheet.create({
   col:            { maxWidth: '80%' },
   colMine:        { alignItems: 'flex-end' },
   colTheirs:      { alignItems: 'flex-start' },
-  avatar:         { width: 30, height: 30, borderRadius: 15, marginRight: 6, marginTop: 18, alignItems: 'center', justifyContent: 'center' },
+  avatar:         { width: 30, height: 30, borderRadius: 15, marginRight: 6, marginTop: 2, alignItems: 'center', justifyContent: 'center' },
   avatarText:     { color: '#fff', fontWeight: '800', fontSize: 12 },
   avatarSpacer:   { width: 36 },
-  senderLabel:    { fontSize: 11, fontWeight: '700', color: colors.ink500, marginLeft: 2, marginTop: 4, marginBottom: 2 },
-  bubble:         { maxWidth: '100%', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 22, shadowColor: '#000', shadowOpacity: 0.10, shadowRadius: 3, shadowOffset: { width: 0, height: 1 }, elevation: 2 },
-  sent:           { backgroundColor: '#1E88E5', borderBottomRightRadius: 8 },
-  recv:           { backgroundColor: '#fff', borderBottomLeftRadius: 8 },
+  senderLabel:    { fontSize: 12, fontWeight: '800', marginBottom: 2 },
+  bubble:         { maxWidth: '100%', paddingHorizontal: 11, paddingVertical: 7, borderRadius: 18, shadowColor: '#000', shadowOpacity: 0.10, shadowRadius: 3, shadowOffset: { width: 0, height: 1 }, elevation: 2 },
+  sent:           { backgroundColor: '#1E88E5', borderTopRightRadius: 5 },
+  recv:           { backgroundColor: '#fff', borderTopLeftRadius: 5 },
   bubbleRow:      { flexDirection: 'row', alignItems: 'flex-end', gap: 6 },
   bubbleText:     { fontSize: 16, color: colors.ink, lineHeight: 22, flexShrink: 1 },
   deletedText:    { fontStyle: 'italic', color: colors.ink500 },
