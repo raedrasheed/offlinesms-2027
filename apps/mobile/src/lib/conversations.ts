@@ -110,6 +110,7 @@ export type MediaInfo = {
   thumbnailPath?: string | null;   // image
   thumbnailURL?:  string | null;
   uploadStatus:   MediaUploadStatus;
+  uploadProgress?: number;         // local-only, 0..1 during upload
   localUri?:      string | null;   // local-only; not persisted to Firestore
 };
 

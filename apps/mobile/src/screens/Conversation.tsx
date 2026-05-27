@@ -35,7 +35,11 @@ import { OfflineNotice, SyncSuccessChip } from '../components/OfflineBanners';
 import { getDraft, setDraft as persistDraft, clearDraft } from '../lib/drafts';
 import { useLocalConversation } from '../hooks/useLocalConversation';
 import { useMessagePersistence } from '../hooks/useLocalPersistence';
-import { queueSendMessage, queueEditMessage, queueMarkReceipt } from '../localdb';
+import { queueSendMessage, queueEditMessage, queueMarkReceipt, retryMediaMessage } from '../localdb';
+import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system';
+import { AttachmentSheet } from '../components/chat/AttachmentSheet';
+import type { AttachmentKey } from '../media/mediaValidation';
 
 type ComposerGate =
   | { kind: 'allowed' }
@@ -296,6 +300,45 @@ export default function Conversation({ route, navigation }: any) {
     catch (e: any) { Alert.alert("Couldn't unpin", e?.message ?? 'try-again'); }
   }
 
+  // Phase 23 — attachment sheet + image picking.
+  const [attachOpen, setAttachOpen] = useState(false);
+
+  async function handleAsset(res: ImagePicker.ImagePickerResult) {
+    if (res.canceled || !res.assets?.[0]) return;
+    const a = res.assets[0];
+    let size = a.fileSize ?? 0;
+    if (!size) {
+      try { const info = await FileSystem.getInfoAsync(a.uri); size = (info as any).size ?? 0; } catch { /* best-effort */ }
+    }
+    navigation.navigate('ImagePreview', {
+      conversationId: id,
+      uri: a.uri,
+      width: a.width,
+      height: a.height,
+      mimeType: a.mimeType ?? 'image/jpeg',
+      sizeBytes: size,
+      replyTo: replyTo ?? null,
+    });
+    setReplyTo(null);
+  }
+
+  async function onAttachSelect(key: AttachmentKey) {
+    if (key === 'photos') {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) { Alert.alert(t('media.photosPermissionTitle'), t('media.photosPermissionMessage')); return; }
+      const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.8 });
+      await handleAsset(res);
+    } else if (key === 'camera') {
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (!perm.granted) { Alert.alert(t('media.cameraPermissionTitle'), t('media.cameraPermissionMessage')); return; }
+      const res = await ImagePicker.launchCameraAsync({ quality: 0.8 });
+      await handleAsset(res);
+    }
+  }
+
+  const openImage = (uri: string) => navigation.navigate('ImageViewer', { uri });
+  const retryMedia = (msg: Message) => { void retryMediaMessage(msg.id); };
+
   async function send() {
     const text = draft.trim();
     if (!text || busy) return;
@@ -442,6 +485,8 @@ export default function Conversation({ route, navigation }: any) {
               onForward={startForward}
               onJumpTo={jumpTo}
               onInfo={openInfo}
+              onOpenImage={openImage}
+              onRetryMedia={retryMedia}
               onSendViaSms={msg => navigation.navigate('SmsEscalation', {
                 conversationId: id,
                 messageId:      msg.id,
@@ -553,6 +598,16 @@ export default function Conversation({ route, navigation }: any) {
             </View>
           ) : null}
           <View style={s.composer}>
+            {!editing ? (
+              <Pressable
+                style={s.attachBtn}
+                onPress={() => setAttachOpen(true)}
+                accessibilityRole="button"
+                accessibilityLabel={t('media.attach')}
+              >
+                <Ionicons name="add" size={24} color={colors.text.muted} />
+              </Pressable>
+            ) : null}
             <TextInput
               value={draft}
               onChangeText={setDraft}
@@ -581,6 +636,12 @@ export default function Conversation({ route, navigation }: any) {
           </View>
         </View>
       )}
+
+      <AttachmentSheet
+        visible={attachOpen}
+        onClose={() => setAttachOpen(false)}
+        onSelect={onAttachSelect}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -623,6 +684,7 @@ function buildStyles(colors: any, rtl: boolean) {
     composer: { padding: 12, paddingBottom: 24, flexDirection: rtl ? 'row-reverse' : 'row', gap: 8, alignItems: 'flex-end', backgroundColor: '#EAF2FB' },
     input:    { flex: 1, minHeight: 40, maxHeight: 120, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: colors.background.surface, borderRadius: 22, borderWidth: 1, borderColor: colors.border.subtle, fontSize: 14, color: colors.text.primary },
     sendBtn:  { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.action.primary, alignItems: 'center', justifyContent: 'center' },
+    attachBtn:{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
     gate:     { padding: 16, paddingBottom: 28, backgroundColor: '#EAF2FB', borderTopWidth: 1, borderColor: colors.border.subtle },
     gateText: { fontSize: 12, color: colors.text.muted, textAlign: 'center' },
   });

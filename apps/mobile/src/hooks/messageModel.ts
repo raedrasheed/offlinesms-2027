@@ -53,6 +53,7 @@ function mapMedia(row: MessageRow): Message['media'] {
     thumbnailPath: row.media_thumb_path ?? null,
     thumbnailURL: row.media_thumb_url ?? null,
     uploadStatus: (row.media_upload_status ?? 'uploaded') as NonNullable<Message['media']>['uploadStatus'],
+    uploadProgress: row.media_upload_progress ?? 0,
     localUri: row.media_local_uri ?? null,
   };
 }

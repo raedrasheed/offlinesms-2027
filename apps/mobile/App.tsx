@@ -47,6 +47,8 @@ import Devices from './src/screens/Devices';
 import SmsEscalation from './src/screens/SmsEscalation';
 import SupportTicket from './src/screens/SupportTicket';
 import EditProfile from './src/screens/EditProfile';
+import ImagePreviewScreen from './src/screens/ImagePreviewScreen';
+import ImageViewerScreen from './src/screens/ImageViewerScreen';
 
 const AuthStack = createNativeStackNavigator();
 const OnboardingStack = createNativeStackNavigator();
@@ -147,6 +149,8 @@ export default function App() {
             <RootStack.Screen name="NewGroup" component={NewGroup} />
             <RootStack.Screen name="GroupCreateInfo" component={GroupCreateInfo} />
             <RootStack.Screen name="Conversation" component={Conversation} />
+            <RootStack.Screen name="ImagePreview" component={ImagePreviewScreen} />
+            <RootStack.Screen name="ImageViewer" component={ImageViewerScreen} options={{ presentation: 'fullScreenModal' }} />
             <RootStack.Screen name="GroupInfo" component={GroupInfo} />
             <RootStack.Screen name="AddMembers" component={AddMembers} />
             <RootStack.Screen name="ForwardPicker" component={ForwardPicker} />

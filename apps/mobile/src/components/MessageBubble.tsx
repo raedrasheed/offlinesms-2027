@@ -21,6 +21,7 @@ import { colors } from '../theme';
 import { avatarColor, initials } from '../lib/avatar';
 import { ChatActionSheet, SheetAction } from './ChatActionSheet';
 import { ReactionsSheet, ReactorInfo } from './ReactionsSheet';
+import { ImageMessageBubble } from './chat/ImageMessageBubble';
 import {
   Message,
   REACTION_EMOJIS,
@@ -65,6 +66,8 @@ export type MessageBubbleProps = {
   onJumpTo:   (messageId: string) => void;
   onInfo:     (msg: Message) => void;
   onSendViaSms?: (msg: Message) => void;
+  onOpenImage?:  (uri: string) => void;
+  onRetryMedia?: (msg: Message) => void;
   // Offline-first: locally queued outgoing message not yet on the server.
   pending?:   'queued' | 'syncing' | 'failed';
   onRetry?:   () => void;
@@ -83,7 +86,8 @@ function formatTime(value: any): string {
 }
 
 export function MessageBubble({
-  message: m, context, showSender, onReply, onEditStart, onForward, onJumpTo, onInfo, onSendViaSms, pending, onRetry,
+  message: m, context, showSender, onReply, onEditStart, onForward, onJumpTo, onInfo, onSendViaSms,
+  onOpenImage, onRetryMedia, pending, onRetry,
 }: MessageBubbleProps) {
   const mine    = context.isMyMessage;
   const deleted = m.deletedForEveryone === true;
@@ -237,11 +241,20 @@ export function MessageBubble({
           </Pressable>
         ) : null}
 
-        <View style={s.bubbleRow}>
-          <Text style={[s.bubbleText, mine && { color: '#fff' }, deleted && (mine ? s.deletedTextMine : s.deletedText)]}>
-            {deleted ? 'This message was deleted.' : (m.text ?? '')}
-          </Text>
-        </View>
+        {!deleted && m.type === 'image' ? (
+          <ImageMessageBubble
+            message={m}
+            mine={mine}
+            onOpen={(uri) => onOpenImage?.(uri)}
+            onRetry={() => onRetryMedia?.(m)}
+          />
+        ) : (
+          <View style={s.bubbleRow}>
+            <Text style={[s.bubbleText, mine && { color: '#fff' }, deleted && (mine ? s.deletedTextMine : s.deletedText)]}>
+              {deleted ? 'This message was deleted.' : (m.text ?? '')}
+            </Text>
+          </View>
+        )}
 
         <View style={s.bubbleFooter}>
           {m.editedAt ? <Text style={[s.foot, mine && { color: 'rgba(255,255,255,.7)' }]}>edited</Text> : null}

@@ -165,6 +165,14 @@ export async function queueSendImageMessage(input: QueueSendImageInput): Promise
   return row;
 }
 
+/** Phase 23 — retry a failed media upload: reset its outbox item + local state. */
+export async function retryMediaMessage(localMessageId: string): Promise<void> {
+  if (!getCurrentUid()) return;
+  await messagesRepo.setMediaProgress(localMessageId, 0);
+  await outboxRepo.retryByEntityId(localMessageId);
+  kick('outbox');
+}
+
 export interface ActionResult { ok: boolean; reason?: 'not-initialised' | 'not-delivered' }
 
 function parseReactions(json: string | null): Record<string, string[]> | null {
