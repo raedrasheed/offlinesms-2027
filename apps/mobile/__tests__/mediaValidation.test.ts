@@ -16,6 +16,7 @@ import {
   initialUploadState,
   uploadPercent,
 } from '../src/media/uploadState';
+import { dbToAmplitude } from '../src/media/audio/waveform';
 
 describe('MIME allow-list', () => {
   it('accepts allowed image types and rejects others', () => {
@@ -136,5 +137,19 @@ describe('uploadReducer', () => {
     expect(s.error).toBe('net');
     s = uploadReducer(s, { type: 'retry' });
     expect(s.phase).toBe('creating');
+  });
+});
+
+describe('dbToAmplitude', () => {
+  it('maps the metering floor and ceiling into [0,1]', () => {
+    expect(dbToAmplitude(0)).toBeCloseTo(1);
+    expect(dbToAmplitude(-60)).toBe(0);
+    expect(dbToAmplitude(-120)).toBe(0);
+    expect(dbToAmplitude(-30)).toBeCloseTo(0.5);
+  });
+  it('handles missing/invalid input', () => {
+    expect(dbToAmplitude(undefined)).toBe(0);
+    expect(dbToAmplitude(null)).toBe(0);
+    expect(dbToAmplitude(NaN)).toBe(0);
   });
 });

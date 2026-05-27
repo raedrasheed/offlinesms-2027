@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList, View, Text, TextInput, Pressable, StyleSheet, Alert,
-  KeyboardAvoidingView, Platform,
+  KeyboardAvoidingView, Platform, PanResponder,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { doc, onSnapshot } from 'firebase/firestore';
@@ -35,11 +35,14 @@ import { OfflineNotice, SyncSuccessChip } from '../components/OfflineBanners';
 import { getDraft, setDraft as persistDraft, clearDraft } from '../lib/drafts';
 import { useLocalConversation } from '../hooks/useLocalConversation';
 import { useMessagePersistence } from '../hooks/useLocalPersistence';
-import { queueSendMessage, queueEditMessage, queueMarkReceipt, retryMediaMessage } from '../localdb';
+import { queueSendMessage, queueEditMessage, queueMarkReceipt, retryMediaMessage, queueSendVoiceMessage, openLocalDb } from '../localdb';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import { AttachmentSheet } from '../components/chat/AttachmentSheet';
-import type { AttachmentKey } from '../media/mediaValidation';
+import { VoiceRecorderBar } from '../components/chat/VoiceRecorderBar';
+import { LockedVoiceRecorderBar } from '../components/chat/LockedVoiceRecorderBar';
+import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
+import { validateMediaMessage, type AttachmentKey } from '../media/mediaValidation';
 
 type ComposerGate =
   | { kind: 'allowed' }
@@ -338,6 +341,77 @@ export default function Conversation({ route, navigation }: any) {
 
   const openImage = (uri: string) => navigation.navigate('ImageViewer', { uri });
   const retryMedia = (msg: Message) => { void retryMediaMessage(msg.id); };
+  const onPlayedVoice = (msg: Message) => {
+    if (msg.senderUid !== me) void queueMarkReceipt({ conversationId: id, messageId: msg.id, status: 'played' });
+  };
+
+  // Phase 23 — voice recording (hold mic → record, slide left → cancel, swipe up → lock).
+  const recorder = useVoiceRecorder();
+  const modeRef = useRef(recorder.mode);
+  useEffect(() => { modeRef.current = recorder.mode; }, [recorder.mode]);
+  const cancelArmedRef = useRef(false);
+  const [cancelArmed, setCancelArmed] = useState(false);
+  // Refs so the PanResponder (created once) reads current values.
+  const draftEmptyRef = useRef(true);
+  const editingRef = useRef(false);
+  const replyToRef = useRef<ReplyTo | null>(null);
+  useEffect(() => { draftEmptyRef.current = draft.trim() === ''; }, [draft]);
+  useEffect(() => { editingRef.current = !!editing; }, [editing]);
+  useEffect(() => { replyToRef.current = replyTo; }, [replyTo]);
+
+  async function sendVoice(res: Awaited<ReturnType<typeof recorder.stop>>) {
+    if (!res) return;
+    const check = validateMediaMessage({ mediaType: 'voice', mimeType: res.mimeType, sizeBytes: res.sizeBytes, durationMs: res.durationMs });
+    if (!check.ok) {
+      if (check.reason === 'too-short') Alert.alert(t('media.recordingTooShort'));
+      else Alert.alert(t('media.uploadFailed'));
+      return;
+    }
+    try {
+      await openLocalDb(me);
+      await queueSendVoiceMessage({
+        conversationId: id,
+        senderUid: me,
+        localUri: res.uri,
+        mimeType: res.mimeType,
+        sizeBytes: res.sizeBytes,
+        durationMs: res.durationMs,
+        waveform: res.waveform,
+        replyTo: replyToRef.current ?? null,
+      });
+      setReplyTo(null);
+    } catch (e: any) {
+      Alert.alert(t('media.uploadFailed'), e?.message ?? 'try-again');
+    }
+  }
+
+  const micPan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => draftEmptyRef.current && !editingRef.current,
+      onMoveShouldSetPanResponder: () => modeRef.current !== 'idle',
+      onPanResponderGrant: () => {
+        void (async () => {
+          const ok = await recorder.start();
+          if (!ok) Alert.alert(t('media.microphonePermissionTitle'), t('media.microphonePermissionMessage'));
+        })();
+      },
+      onPanResponderMove: (_evt, g) => {
+        if (modeRef.current !== 'recording') return;
+        if (g.dy < -70) recorder.lock();
+        const armed = g.dx < -80;
+        if (armed !== cancelArmedRef.current) { cancelArmedRef.current = armed; setCancelArmed(armed); }
+      },
+      onPanResponderRelease: () => {
+        void (async () => {
+          if (modeRef.current === 'locked') return; // locked → use bar buttons
+          if (cancelArmedRef.current) { cancelArmedRef.current = false; setCancelArmed(false); await recorder.cancel(); return; }
+          const res = await recorder.stop();
+          await sendVoice(res);
+        })();
+      },
+      onPanResponderTerminate: () => { void recorder.cancel(); },
+    }),
+  ).current;
 
   async function send() {
     const text = draft.trim();
@@ -487,6 +561,7 @@ export default function Conversation({ route, navigation }: any) {
               onInfo={openInfo}
               onOpenImage={openImage}
               onRetryMedia={retryMedia}
+              onPlayedVoice={onPlayedVoice}
               onSendViaSms={msg => navigation.navigate('SmsEscalation', {
                 conversationId: id,
                 messageId:      msg.id,
@@ -598,41 +673,65 @@ export default function Conversation({ route, navigation }: any) {
             </View>
           ) : null}
           <View style={s.composer}>
-            {!editing ? (
-              <Pressable
-                style={s.attachBtn}
-                onPress={() => setAttachOpen(true)}
-                accessibilityRole="button"
-                accessibilityLabel={t('media.attach')}
-              >
-                <Ionicons name="add" size={24} color={colors.text.muted} />
-              </Pressable>
-            ) : null}
-            <TextInput
-              value={draft}
-              onChangeText={setDraft}
-              placeholder={editing ? t('messageActions.editingMessage') : isOffline ? 'Type · saved as draft' : t('convo.composerPlaceholder')}
-              style={s.input}
-              multiline
-              maxLength={4000}
-              textAlign={isRTL ? 'right' : 'left'}
-              accessibilityLabel={t('convo.composerPlaceholder')}
-            />
-            <Pressable
-              style={[s.sendBtn, busy && { opacity: 0.4 }]}
-              onPress={send}
-              disabled={!draft.trim() || busy}
-              accessible={true}
-              accessibilityRole="button"
-              accessibilityLabel={editing ? t('common.save') : t('common.send')}
-              accessibilityState={{ disabled: !draft.trim() || busy }}
-            >
-              <Ionicons
-                name={editing ? 'checkmark' : draft.trim() ? 'arrow-up' : 'mic'}
-                size={20}
-                color={colors.action.primaryFg}
+            {recorder.mode === 'locked' ? (
+              <LockedVoiceRecorderBar
+                elapsedMs={recorder.elapsedMs}
+                bars={recorder.bars}
+                onTrash={() => { void recorder.cancel(); }}
+                onSend={() => { void (async () => { const res = await recorder.stop(); await sendVoice(res); })(); }}
               />
-            </Pressable>
+            ) : recorder.mode === 'recording' ? (
+              <>
+                <VoiceRecorderBar elapsedMs={recorder.elapsedMs} bars={recorder.bars} cancelArmed={cancelArmed} />
+                <View style={s.sendBtn} {...micPan.panHandlers}>
+                  <Ionicons name="mic" size={20} color={colors.action.primaryFg} />
+                </View>
+              </>
+            ) : (
+              <>
+                {!editing ? (
+                  <Pressable
+                    style={s.attachBtn}
+                    onPress={() => setAttachOpen(true)}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('media.attach')}
+                  >
+                    <Ionicons name="add" size={24} color={colors.text.muted} />
+                  </Pressable>
+                ) : null}
+                <TextInput
+                  value={draft}
+                  onChangeText={setDraft}
+                  placeholder={editing ? t('messageActions.editingMessage') : isOffline ? 'Type · saved as draft' : t('convo.composerPlaceholder')}
+                  style={s.input}
+                  multiline
+                  maxLength={4000}
+                  textAlign={isRTL ? 'right' : 'left'}
+                  accessibilityLabel={t('convo.composerPlaceholder')}
+                />
+                {(draft.trim() !== '' || editing) ? (
+                  <Pressable
+                    style={[s.sendBtn, busy && { opacity: 0.4 }]}
+                    onPress={send}
+                    disabled={busy}
+                    accessibilityRole="button"
+                    accessibilityLabel={editing ? t('common.save') : t('common.send')}
+                    accessibilityState={{ disabled: busy }}
+                  >
+                    <Ionicons name={editing ? 'checkmark' : 'arrow-up'} size={20} color={colors.action.primaryFg} />
+                  </Pressable>
+                ) : (
+                  <View
+                    style={s.sendBtn}
+                    {...micPan.panHandlers}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('media.holdToRecord')}
+                  >
+                    <Ionicons name="mic" size={20} color={colors.action.primaryFg} />
+                  </View>
+                )}
+              </>
+            )}
           </View>
         </View>
       )}

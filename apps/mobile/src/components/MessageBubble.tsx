@@ -22,6 +22,7 @@ import { avatarColor, initials } from '../lib/avatar';
 import { ChatActionSheet, SheetAction } from './ChatActionSheet';
 import { ReactionsSheet, ReactorInfo } from './ReactionsSheet';
 import { ImageMessageBubble } from './chat/ImageMessageBubble';
+import { VoiceMessageBubble } from './chat/VoiceMessageBubble';
 import {
   Message,
   REACTION_EMOJIS,
@@ -66,8 +67,9 @@ export type MessageBubbleProps = {
   onJumpTo:   (messageId: string) => void;
   onInfo:     (msg: Message) => void;
   onSendViaSms?: (msg: Message) => void;
-  onOpenImage?:  (uri: string) => void;
-  onRetryMedia?: (msg: Message) => void;
+  onOpenImage?:   (uri: string) => void;
+  onRetryMedia?:  (msg: Message) => void;
+  onPlayedVoice?: (msg: Message) => void;
   // Offline-first: locally queued outgoing message not yet on the server.
   pending?:   'queued' | 'syncing' | 'failed';
   onRetry?:   () => void;
@@ -87,7 +89,7 @@ function formatTime(value: any): string {
 
 export function MessageBubble({
   message: m, context, showSender, onReply, onEditStart, onForward, onJumpTo, onInfo, onSendViaSms,
-  onOpenImage, onRetryMedia, pending, onRetry,
+  onOpenImage, onRetryMedia, onPlayedVoice, pending, onRetry,
 }: MessageBubbleProps) {
   const mine    = context.isMyMessage;
   const deleted = m.deletedForEveryone === true;
@@ -246,6 +248,13 @@ export function MessageBubble({
             message={m}
             mine={mine}
             onOpen={(uri) => onOpenImage?.(uri)}
+            onRetry={() => onRetryMedia?.(m)}
+          />
+        ) : !deleted && m.type === 'voice' ? (
+          <VoiceMessageBubble
+            message={m}
+            mine={mine}
+            onPlayed={() => onPlayedVoice?.(m)}
             onRetry={() => onRetryMedia?.(m)}
           />
         ) : (

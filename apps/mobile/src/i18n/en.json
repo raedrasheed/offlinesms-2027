@@ -305,7 +305,8 @@
     "continue": "Continue",
     "send": "Send",
     "back": "Back",
-    "retry": "Retry"
+    "retry": "Retry",
+    "delete": "Delete"
   },
   "settings": {
     "title": "Settings",
