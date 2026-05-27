@@ -15,7 +15,11 @@ let appStateSub: { remove: () => void } | null = null;
 let activeConversationId: string | undefined;
 
 export function setActiveConversation(id?: string): void {
+  if (id === activeConversationId) return;
   activeConversationId = id;
+  // Catch up the newly opened conversation (messages + members, which have no
+  // realtime feeder) without waiting for the next foreground/timer tick.
+  if (id) void syncNow('active-change', id);
 }
 
 function startTimer(): void {

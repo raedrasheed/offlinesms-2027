@@ -182,5 +182,6 @@ export type SyncStateKey =
   | 'current_user_uid'
   | 'device_id'
   | 'legacy_queue_migrated'
+  | 'last_prune_at'
   // Per-conversation message high-water mark (max remote createdAt pulled).
   | `msg_cursor:${string}`;

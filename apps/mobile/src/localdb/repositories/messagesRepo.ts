@@ -50,6 +50,42 @@ export async function getByLocalId(localId: string): Promise<MessageRow | null> 
   return getDb().first<MessageRow>(`SELECT * FROM messages WHERE local_id = ?`, [localId]);
 }
 
+/**
+ * Retention: keep the most recent `keepPerConversation` messages per
+ * conversation and evict older ones, bounding DB growth. Only fully-synced rows
+ * (sync_status 'synced' with a remote_id) are eligible — pending/unsent and
+ * failed messages are never dropped, so nothing waiting on the outbox is lost.
+ * Evicted history is re-fetchable from Firestore on demand. Returns the number
+ * of rows deleted.
+ */
+export async function pruneOldMessages(keepPerConversation = 500): Promise<number> {
+  const db = getDb();
+  const victims = await db.all<{ id: string }>(
+    `SELECT id FROM (
+       SELECT id, ROW_NUMBER() OVER (
+         PARTITION BY conversation_id
+         ORDER BY COALESCE(remote_created_at, created_at) DESC
+       ) AS rn
+       FROM messages
+       WHERE sync_status = 'synced' AND remote_id IS NOT NULL
+     ) WHERE rn > ?`,
+    [keepPerConversation],
+  );
+  if (victims.length === 0) return 0;
+  const ids = victims.map((v) => v.id);
+  // Chunk to stay under SQLite's bound-variable limit on large backlogs.
+  for (let i = 0; i < ids.length; i += 400) {
+    const chunk = ids.slice(i, i + 400);
+    const placeholders = chunk.map(() => '?').join(',');
+    await db.run(`DELETE FROM messages WHERE id IN (${placeholders})`, chunk);
+  }
+  // Drop reactions/receipts orphaned by the prune (keyed by either id form).
+  const orphanFilter = `message_id NOT IN (SELECT id FROM messages UNION SELECT remote_id FROM messages WHERE remote_id IS NOT NULL)`;
+  await db.run(`DELETE FROM message_reactions WHERE ${orphanFilter}`);
+  await db.run(`DELETE FROM message_receipts WHERE ${orphanFilter}`);
+  return ids.length;
+}
+
 export async function getByRemoteId(remoteId: string): Promise<MessageRow | null> {
   return getDb().first<MessageRow>(`SELECT * FROM messages WHERE remote_id = ?`, [remoteId]);
 }
