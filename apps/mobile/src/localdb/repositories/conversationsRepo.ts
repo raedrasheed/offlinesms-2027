@@ -36,6 +36,14 @@ export async function getConversation(id: string): Promise<ConversationRow | nul
   return getDb().first<ConversationRow>(`SELECT * FROM conversations WHERE id = ? OR remote_id = ?`, [id, id]);
 }
 
+export async function countConversations(includeArchived = true): Promise<number> {
+  const clause = includeArchived ? '' : 'WHERE archived = 0';
+  const row = await getDb().first<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM conversations ${clause}`,
+  );
+  return row?.n ?? 0;
+}
+
 export async function countUnreadConversations(): Promise<number> {
   const row = await getDb().first<{ n: number }>(
     `SELECT COUNT(*) AS n FROM conversations WHERE unread_count > 0 AND archived = 0`,

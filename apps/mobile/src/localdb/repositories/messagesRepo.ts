@@ -30,6 +30,22 @@ export async function listMessages(conversationId: string, limit = PAGE, beforeC
   return rows;
 }
 
+/** Count stored messages, optionally scoped to a single conversation. Excludes
+ *  rows deleted for me, matching what the conversation screen renders. */
+export async function countMessages(conversationId?: string): Promise<number> {
+  if (conversationId != null) {
+    const row = await getDb().first<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ? AND deleted_for_me = 0`,
+      [conversationId],
+    );
+    return row?.n ?? 0;
+  }
+  const row = await getDb().first<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM messages WHERE deleted_for_me = 0`,
+  );
+  return row?.n ?? 0;
+}
+
 export async function getByLocalId(localId: string): Promise<MessageRow | null> {
   return getDb().first<MessageRow>(`SELECT * FROM messages WHERE local_id = ?`, [localId]);
 }

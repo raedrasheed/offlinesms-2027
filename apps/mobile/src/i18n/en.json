@@ -338,6 +338,11 @@
     "timeFormatSystem": "System default",
     "timeFormat12": "12-hour (1:30 PM)",
     "timeFormat24": "24-hour (13:30)",
+    "localStorage": "On-device storage",
+    "localStorageSubtitle": "Chats and messages saved locally on this device",
+    "localChats": "Chats",
+    "localMessages": "Messages",
+    "localStorageEmpty": "No chats stored on this device yet.",
     "updateFailed": "Couldn't update setting. Please try again."
   }
 }

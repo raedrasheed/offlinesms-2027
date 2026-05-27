@@ -24,6 +24,7 @@ import {
   type LanguageCode,
 } from '../lib/user';
 import { subscribeWallet, Wallet } from '../lib/points';
+import { conversationsRepo, messagesRepo, getCurrentUid } from '../localdb';
 import { useTheme } from '../context/ThemeContext';
 import { changeLanguage, isRTL } from '../i18n';
 import { radius } from '../theme';
@@ -63,10 +64,28 @@ export default function Settings({ navigation }: any) {
   const [currentTime, setCurrentTime]   = useState<TimeFormat>('system');
   const [busy, setBusy]                 = useState(false);
   const [profile, setProfile]           = useState<{ displayName?: string; username?: string; photoURL?: string | null }>({});
+  const [localStats, setLocalStats]     = useState<{ chats: number; messages: number } | null>(null);
 
   useEffect(() => {
     if (!me) return;
     return subscribeWallet(me, setWallet);
+  }, [me]);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      if (!getCurrentUid()) return;
+      try {
+        const [chats, messages] = await Promise.all([
+          conversationsRepo.countConversations(),
+          messagesRepo.countMessages(),
+        ]);
+        if (active) setLocalStats({ chats, messages });
+      } catch {
+        if (active) setLocalStats({ chats: 0, messages: 0 });
+      }
+    })();
+    return () => { active = false; };
   }, [me]);
 
   useEffect(() => {
@@ -311,6 +330,34 @@ export default function Settings({ navigation }: any) {
         <Text style={s.chev} accessibilityElementsHidden>{isRTL ? '‹' : '›'}</Text>
       </Pressable>
 
+      {/* On-device storage */}
+      <View
+        style={s.section}
+        accessible={true}
+        accessibilityLabel={`${t('settings.localStorage')}. ${
+          localStats
+            ? `${t('settings.localChats')}: ${localStats.chats}, ${t('settings.localMessages')}: ${localStats.messages}`
+            : t('settings.localStorageSubtitle')
+        }`}
+      >
+        <Text style={s.sectionLabel}>{t('settings.localStorage')}</Text>
+        <Text style={s.sub}>{t('settings.localStorageSubtitle')}</Text>
+        {localStats && localStats.chats === 0 && localStats.messages === 0 ? (
+          <Text style={[s.sub, { marginTop: 10 }]}>{t('settings.localStorageEmpty')}</Text>
+        ) : (
+          <View style={s.statRow}>
+            <View style={s.statBox}>
+              <Text style={s.statValue}>{(localStats?.chats ?? 0).toLocaleString()}</Text>
+              <Text style={s.statLabel}>{t('settings.localChats')}</Text>
+            </View>
+            <View style={s.statBox}>
+              <Text style={s.statValue}>{(localStats?.messages ?? 0).toLocaleString()}</Text>
+              <Text style={s.statLabel}>{t('settings.localMessages')}</Text>
+            </View>
+          </View>
+        )}
+      </View>
+
       {/* Help & Support */}
       <Pressable
         style={s.row}
@@ -359,5 +406,9 @@ function buildStyles(colors: any, rtl: boolean) {
     chipActive:   { backgroundColor: colors.action.primary, borderColor: colors.action.primary },
     chipText:     { fontSize: 13, fontWeight: '600', color: colors.text.secondary },
     chipTextActive: { color: colors.action.primaryFg },
+    statRow:      { flexDirection: rtl ? 'row-reverse' : 'row', gap: 10, marginTop: 12 },
+    statBox:      { flex: 1, backgroundColor: colors.background.subtle, borderRadius: radius.md, paddingVertical: 14, paddingHorizontal: 12, alignItems: 'center' },
+    statValue:    { fontSize: 22, fontWeight: '800', color: colors.text.primary },
+    statLabel:    { fontSize: 12, color: colors.text.muted, marginTop: 4, textTransform: 'uppercase', letterSpacing: 0.5 },
   });
 }

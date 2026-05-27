@@ -338,6 +338,11 @@
     "timeFormatSystem": "الإعداد الافتراضي للنظام",
     "timeFormat12": "12 ساعة (1:30 م)",
     "timeFormat24": "24 ساعة (13:30)",
+    "localStorage": "التخزين على الجهاز",
+    "localStorageSubtitle": "المحادثات والرسائل المحفوظة محليًا على هذا الجهاز",
+    "localChats": "المحادثات",
+    "localMessages": "الرسائل",
+    "localStorageEmpty": "لا توجد محادثات مخزّنة على هذا الجهاز بعد.",
     "updateFailed": "تعذّر تحديث الإعداد. يرجى المحاولة مرة أخرى."
   }
 }
