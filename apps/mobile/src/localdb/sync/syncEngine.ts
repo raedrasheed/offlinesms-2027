@@ -92,7 +92,9 @@ export async function syncNow(reason: SyncReason, activeConversationId?: string)
     await pushOutbox();
     if (PULL_REASONS.has(reason)) {
       await pullRemoteChanges(activeConversationId);
-      await maybePrune();
+      // Keep the retention sweep off the conversation-open path; run it only on
+      // app start / foreground so it never stalls opening a chat.
+      if (reason === 'boot' || reason === 'foreground') await maybePrune();
     }
   } catch {
     // Never throw out of a sync run; individual failures are recorded per-item.

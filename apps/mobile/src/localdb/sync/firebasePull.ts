@@ -32,15 +32,19 @@ export async function pullConversations(): Promise<void> {
   const uid = auth.currentUser?.uid;
   if (!uid) return;
   const since = await getCursor('last_conversations_pull_at');
+  // `>=` (not `>`) so docs sharing the boundary millisecond aren't skipped when
+  // a page truncates at the limit; re-processing the boundary doc is idempotent.
   const snap = await getDocs(query(
     collection(db, 'conversations'),
     where('participantUids', 'array-contains', uid),
-    where('updatedAt', '>', Timestamp.fromMillis(since)),
+    where('updatedAt', '>=', Timestamp.fromMillis(since)),
     orderBy('updatedAt', 'asc'),
     qlimit(CONV_PAGE),
   ));
   let maxTs = since;
-  for (const d of snap.docs) {
+  // Per-conversation userState lives in a sibling doc; fetch them in parallel
+  // rather than serially (a cold-start page can be up to CONV_PAGE round-trips).
+  await Promise.all(snap.docs.map(async (d) => {
     const c = d.data() as any;
     const updatedMs = ms(c.updatedAt);
     if (updatedMs != null && updatedMs > maxTs) maxTs = updatedMs;
@@ -57,7 +61,6 @@ export async function pullConversations(): Promise<void> {
       last_message_at: updatedMs,
       remote_updated_at: updatedMs,
     });
-    // Per-user state lives in conversations/{id}/userState/{uid}.
     try {
       const us = await getDoc(doc(db, 'conversations', d.id, 'userState', uid));
       if (us.exists()) {
@@ -71,22 +74,25 @@ export async function pullConversations(): Promise<void> {
         });
       }
     } catch { /* best-effort */ }
-  }
+  }));
   if (maxTs > since) await setCursor('last_conversations_pull_at', maxTs);
 }
 
 /**
  * Pull messages for one conversation created since the last pull. Incremental:
- * queries `createdAt > cursor` ascending and advances a per-conversation
- * high-water mark (`msg_cursor:<id>`). Live edits/deletes are handled by the
- * realtime conversation feeder while the chat is open.
+ * queries `createdAt >= cursor` ascending and advances a per-conversation
+ * high-water mark (`msg_cursor:<id>`). Maps reactions + receipt counts (same as
+ * the realtime feeder) so the catch-up path keeps them consistent. Edits/deletes
+ * of older messages are reconciled by the feeder when the chat is opened.
  */
 export async function pullMessages(conversationId: string, max = MSG_PAGE): Promise<void> {
   const cursorKey: `msg_cursor:${string}` = `msg_cursor:${conversationId}`;
   const since = await getCursor(cursorKey);
+  // `>=` so messages sharing the boundary millisecond aren't dropped when a page
+  // truncates at the limit; the upsert is idempotent so re-processing is safe.
   const snap = await getDocs(query(
     collection(db, 'conversations', conversationId, 'messages'),
-    where('createdAt', '>', Timestamp.fromMillis(since)),
+    where('createdAt', '>=', Timestamp.fromMillis(since)),
     orderBy('createdAt', 'asc'),
     qlimit(max),
   ));
@@ -111,10 +117,58 @@ export async function pullMessages(conversationId: string, max = MSG_PAGE): Prom
       replyToMessageId: m.replyTo?.messageId ?? null,
       replyToPreview: m.replyTo?.preview ?? null,
       forwarded: !!m.forwarded,
+      reactions: m.reactions ?? null,
+      counts: {
+        delivered: m.deliveredCount ?? 0,
+        read: m.readCount ?? 0,
+        viewed: m.viewedCount ?? 0,
+        played: m.playedCount ?? 0,
+      },
       status: 'sent',
     });
   }
   if (maxTs > since) await setCursor(cursorKey, maxTs);
+}
+
+/**
+ * Backfill older messages from Firestore (those created strictly before
+ * `beforeMs`), for paging back through history that retention has evicted or
+ * that the forward pull never reached. Does not move the forward cursor.
+ * Returns how many docs were fetched (0 means no older history remains).
+ */
+export async function pullMessagesBefore(conversationId: string, beforeMs: number, max = MSG_PAGE): Promise<number> {
+  const snap = await getDocs(query(
+    collection(db, 'conversations', conversationId, 'messages'),
+    where('createdAt', '<', Timestamp.fromMillis(beforeMs)),
+    orderBy('createdAt', 'desc'),
+    qlimit(max),
+  ));
+  for (const d of snap.docs) {
+    const m = d.data() as any;
+    if (m.deletedForEveryone) { await markDeletedForEveryone(d.id); continue; }
+    await upsertRemoteMessage({
+      remoteId: d.id,
+      conversationId,
+      senderUid: m.senderUid ?? m.senderId ?? '',
+      senderDisplayName: m.senderDisplayName ?? null,
+      text: m.text ?? null,
+      remoteCreatedAt: ms(m.createdAt),
+      editedAt: ms(m.editedAt),
+      deletedForEveryone: !!m.deletedForEveryone,
+      replyToMessageId: m.replyTo?.messageId ?? null,
+      replyToPreview: m.replyTo?.preview ?? null,
+      forwarded: !!m.forwarded,
+      reactions: m.reactions ?? null,
+      counts: {
+        delivered: m.deliveredCount ?? 0,
+        read: m.readCount ?? 0,
+        viewed: m.viewedCount ?? 0,
+        played: m.playedCount ?? 0,
+      },
+      status: 'sent',
+    });
+  }
+  return snap.size;
 }
 
 /** Pull group members for a conversation. */

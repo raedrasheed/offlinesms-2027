@@ -60,6 +60,17 @@ export async function getByLocalId(localId: string): Promise<MessageRow | null> 
  */
 export async function pruneOldMessages(keepPerConversation = 500): Promise<number> {
   const db = getDb();
+  // Cheap guard: skip the full-table window sort + orphan sweep unless at least
+  // one conversation actually exceeds the cap (the common case is a no-op).
+  const over = await db.first<{ one: number }>(
+    `SELECT 1 AS one FROM (
+       SELECT conversation_id FROM messages
+        WHERE sync_status = 'synced' AND remote_id IS NOT NULL
+        GROUP BY conversation_id HAVING COUNT(*) > ?
+     ) LIMIT 1`,
+    [keepPerConversation],
+  );
+  if (!over) return 0;
   const victims = await db.all<{ id: string }>(
     `SELECT id FROM (
        SELECT id, ROW_NUMBER() OVER (
@@ -112,7 +123,7 @@ export async function insertLocalMessage(m: NewLocalMessage): Promise<MessageRow
        created_at, remote_created_at, updated_at, edited_at, deleted_for_everyone, deleted_for_me, deleted_at,
        reply_to_message_id, reply_to_preview, forwarded, forwarded_from_message_id,
        status, error_code, error_message, sync_status, client_sequence, server_version)
-     VALUES (?,?,?,?,?,?, 'text', ?, ?, ?, NULL, ?, NULL, 0, 0, NULL, ?, ?, 0, NULL, 'pending', NULL, NULL, 'pending', ?, 0)`,
+     VALUES (?,?,NULL,?,?,?, 'text', ?, ?, ?, NULL, ?, NULL, 0, 0, NULL, ?, ?, 0, NULL, 'pending', NULL, NULL, 'pending', ?, 0)`,
     [
       id, id, m.conversationId, m.senderUid, m.senderDisplayName ?? null, m.text, preview,
       now, now, m.replyToMessageId ?? null, m.replyToPreview ?? null, m.clientSequence,
@@ -167,23 +178,28 @@ export async function upsertRemoteMessage(r: {
   const reactionsJson = r.reactions != null ? JSON.stringify(r.reactions) : null;
   const c = r.counts ?? {};
   if (existing) {
-    await getDb().run(
-      `UPDATE messages SET text = ?, sender_display_name = COALESCE(?, sender_display_name),
-         remote_created_at = COALESCE(?, remote_created_at), edited_at = ?,
-         deleted_for_everyone = ?, reply_to_message_id = ?, reply_to_preview = ?,
-         forwarded = ?, status = COALESCE(?, status), sync_status = 'synced',
-         server_version = COALESCE(?, server_version),
-         reactions_json = ?, delivered_count = ?, read_count = ?, viewed_count = ?, played_count = ?,
-         updated_at = ?
-       WHERE remote_id = ?`,
-      [
-        r.text, r.senderDisplayName ?? null, r.remoteCreatedAt, r.editedAt ?? null,
-        r.deletedForEveryone ? 1 : 0, r.replyToMessageId ?? null, r.replyToPreview ?? null,
-        r.forwarded ? 1 : 0, r.status ?? null, r.serverVersion ?? null,
-        reactionsJson, c.delivered ?? 0, c.read ?? 0, c.viewed ?? 0, c.played ?? 0,
-        now, r.remoteId,
-      ],
-    );
+    // Only touch reactions/receipt counts when the caller actually provides
+    // them. The catch-up pull (firebasePull) omits both; without this guard it
+    // would clobber reaction + receipt data the realtime feeder had set.
+    const sets = [
+      'text = ?', 'sender_display_name = COALESCE(?, sender_display_name)',
+      'remote_created_at = COALESCE(?, remote_created_at)', 'edited_at = ?',
+      'deleted_for_everyone = ?', 'reply_to_message_id = ?', 'reply_to_preview = ?',
+      'forwarded = ?', 'status = COALESCE(?, status)', "sync_status = 'synced'",
+      'server_version = COALESCE(?, server_version)', 'updated_at = ?',
+    ];
+    const params: any[] = [
+      r.text, r.senderDisplayName ?? null, r.remoteCreatedAt, r.editedAt ?? null,
+      r.deletedForEveryone ? 1 : 0, r.replyToMessageId ?? null, r.replyToPreview ?? null,
+      r.forwarded ? 1 : 0, r.status ?? null, r.serverVersion ?? null, now,
+    ];
+    if (r.reactions !== undefined) { sets.push('reactions_json = ?'); params.push(reactionsJson); }
+    if (r.counts !== undefined) {
+      sets.push('delivered_count = ?', 'read_count = ?', 'viewed_count = ?', 'played_count = ?');
+      params.push(c.delivered ?? 0, c.read ?? 0, c.viewed ?? 0, c.played ?? 0);
+    }
+    params.push(r.remoteId);
+    await getDb().run(`UPDATE messages SET ${sets.join(', ')} WHERE remote_id = ?`, params);
   } else {
     await getDb().run(
       `INSERT INTO messages
