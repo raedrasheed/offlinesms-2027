@@ -7,11 +7,11 @@ Running log of phased work. Newest first.
 ## Phase 23 — Media Messages: Images & Voice Notes
 
 **Branch:** `claude/gracious-heisenberg-so2eH`.
-**Status:** Foundation + **image journey** landed (plan, data model, validation,
-callables, Storage rules, i18n, unit tests; schema v3 media columns, image
-outbox, attachment sheet, picker, preview/viewer, image bubble + progress).
-**Voice journey is NOT yet implemented.** All UI is code-complete but
-**pending on-device verification** (no native run in CI).
+**Status:** **Image + voice journeys** code-complete (plan, data model,
+validation, callables, Storage rules, i18n, unit tests; schema v3 media columns;
+image + voice outbox; attachment sheet, picker, preview/viewer, image bubble;
+hold-to-record/lock recorder, voice bubble + playback). **Pending on-device
+verification** (no native run in CI) — gestures and expo-av especially.
 
 ### Image journey (done)
 
@@ -48,14 +48,21 @@ outbox, attachment sheet, picker, preview/viewer, image bubble + progress).
 - Single image first; multi-select and crop/edit deferred.
 - No local-first flag changes in this phase.
 
-### Pending (next chunk — voice journey, device-verified)
+### Voice journey (done)
 
-- `VoiceRecorderBar` / `LockedVoiceRecorderBar`, `VoiceMessageBubble`,
-  `media/audio/{audioRecorder,audioPlayer,waveform,permissions}` (expo-av).
-- `send_voice_message` outbox handler (mirrors the image one) +
-  `queueSendVoiceMessage`; hold-to-record / slide-to-cancel / swipe-to-lock
-  gestures; played-receipt on playback.
-- Optional `expo-image-manipulator` for crop/thumbnail; multi-select.
+- `media/audio/{audioRecorder,audioPlayer,waveform,permissions}` (expo-av);
+  `useVoiceRecorder` state machine; `VoiceRecorderBar` / `LockedVoiceRecorderBar`
+  / `VoiceMessageBubble` / shared `Waveform`.
+- `queueSendVoiceMessage` + `send_voice_message` push handler; composer mic
+  hold-to-record + slide-to-cancel + swipe-to-lock (PanResponder); played
+  receipt on playback start.
+
+### Deferred / next
+
+- Device verification of both journeys (gesture thresholds, expo-av recording,
+  resumable upload, storage-rule membership lookup, v3 migration on upgrade).
+- Optional `expo-image-manipulator` crop/thumbnail; multi-select images.
+- Functions emulator tests for create/finalize; storage-rules test for chatMedia.
 
 ---
 
