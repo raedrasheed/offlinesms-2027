@@ -7,10 +7,23 @@ Running log of phased work. Newest first.
 ## Phase 23 — Media Messages: Images & Voice Notes
 
 **Branch:** `claude/gracious-heisenberg-so2eH`.
-**Status:** Foundation landed (plan, data model, validation, callables, Storage
-rules, i18n, unit tests). **Native UI journeys (attachment sheet, picker, image
-preview/bubble/progress, voice recorder/lock/bubble/playback) and the media
-outbox wiring are NOT yet implemented** and require device verification.
+**Status:** Foundation + **image journey** landed (plan, data model, validation,
+callables, Storage rules, i18n, unit tests; schema v3 media columns, image
+outbox, attachment sheet, picker, preview/viewer, image bubble + progress).
+**Voice journey is NOT yet implemented.** All UI is code-complete but
+**pending on-device verification** (no native run in CI).
+
+### Image journey (done)
+
+- Schema v3 media columns + migration; `insertLocalMediaMessage`,
+  media upload-state setters, `queueSendImageMessage`, `retryMediaMessage`.
+- `send_image_message` outbox handler: create → resumable upload (progress) →
+  finalize, with reconcile; media carried through feeder + catch-up pull +
+  view-model.
+- UI: `AttachmentSheet`, `ImageMessageBubble`, `MediaUploadProgress`,
+  `ImagePreviewScreen`, `ImageViewerScreen`; composer attach button + picker
+  (expo-image-picker) + permissions; navigation registered; `expo-file-system`
+  added for file size.
 
 ### What was done
 
@@ -35,16 +48,14 @@ outbox wiring are NOT yet implemented** and require device verification.
 - Single image first; multi-select and crop/edit deferred.
 - No local-first flag changes in this phase.
 
-### Pending (next chunk, device-verified)
+### Pending (next chunk — voice journey, device-verified)
 
-- `expo-file-system` (+ optional `expo-image-manipulator`) install & app.json
-  permission strings.
-- Attachment sheet, image picker, `ImagePreviewScreen`, `ImageMessageBubble`,
-  `MediaUploadProgress`, image viewer.
 - `VoiceRecorderBar` / `LockedVoiceRecorderBar`, `VoiceMessageBubble`,
-  `audioRecorder`/`audioPlayer`/`waveform`/`permissions` modules.
-- Outbox types `send_image_message`/`send_voice_message` + `firebasePush`
-  create→upload→finalize sequence; `MessageBubble`/`Conversation` integration.
+  `media/audio/{audioRecorder,audioPlayer,waveform,permissions}` (expo-av).
+- `send_voice_message` outbox handler (mirrors the image one) +
+  `queueSendVoiceMessage`; hold-to-record / slide-to-cancel / swipe-to-lock
+  gestures; played-receipt on playback.
+- Optional `expo-image-manipulator` for crop/thumbnail; multi-select.
 
 ---
 
