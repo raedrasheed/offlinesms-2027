@@ -24,7 +24,7 @@ import {
   type LanguageCode,
 } from '../lib/user';
 import { subscribeWallet, Wallet } from '../lib/points';
-import { conversationsRepo, messagesRepo, getCurrentUid } from '../localdb';
+import { conversationsRepo, messagesRepo, getCurrentUid, openLocalDb } from '../localdb';
 import { useTheme } from '../context/ThemeContext';
 import { changeLanguage, isRTL } from '../i18n';
 import { radius } from '../theme';
@@ -72,10 +72,11 @@ export default function Settings({ navigation }: any) {
   }, [me]);
 
   useEffect(() => {
+    if (!me) return;
     let active = true;
-    (async () => {
-      if (!getCurrentUid()) return;
+    async function refreshLocalStats() {
       try {
+        if (!getCurrentUid()) await openLocalDb(me!);
         const [chats, messages] = await Promise.all([
           conversationsRepo.countConversations(),
           messagesRepo.countMessages(),
@@ -84,9 +85,11 @@ export default function Settings({ navigation }: any) {
       } catch {
         if (active) setLocalStats({ chats: 0, messages: 0 });
       }
-    })();
-    return () => { active = false; };
-  }, [me]);
+    }
+    refreshLocalStats();
+    const unsub = navigation.addListener('focus', refreshLocalStats);
+    return () => { active = false; unsub(); };
+  }, [me, navigation]);
 
   useEffect(() => {
     if (!me) return;
