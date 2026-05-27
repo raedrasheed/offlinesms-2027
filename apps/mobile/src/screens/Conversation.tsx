@@ -88,7 +88,11 @@ export default function Conversation({ route, navigation }: any) {
   // image from the preview screen) so the optimistic bubble shows immediately.
   const refreshRef = useRef(local.refresh);
   useEffect(() => { refreshRef.current = local.refresh; });
-  useEffect(() => navigation.addListener('focus', () => refreshRef.current?.()), [navigation]);
+  useEffect(() => navigation.addListener('focus', () => {
+    refreshRef.current?.();
+    // Land on the latest message whenever the chat is opened/re-focused.
+    requestAnimationFrame(() => listRef.current?.scrollToEnd?.({ animated: false }));
+  }), [navigation]);
 
   const [msgs, setMsgs] = useState<Message[] | null>(null);
   const [draft, setDraft] = useState('');
