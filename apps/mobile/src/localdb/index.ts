@@ -165,6 +165,62 @@ export async function queueSendImageMessage(input: QueueSendImageInput): Promise
   return row;
 }
 
+export interface QueueSendVoiceInput {
+  conversationId: string;
+  senderUid: string;
+  senderDisplayName?: string | null;
+  localUri: string;
+  mimeType: string;
+  sizeBytes: number;
+  durationMs: number;
+  waveform?: number[] | null;
+  replyTo?: { messageId: string; senderUid?: string; senderDisplayName?: string; preview?: string } | null;
+}
+
+/** Phase 23 — optimistic local voice message + `send_voice_message` outbox item. */
+export async function queueSendVoiceMessage(input: QueueSendVoiceInput): Promise<MessageRow> {
+  if (!getCurrentUid()) throw new Error('localdb: not initialised');
+  const deviceId = await getDeviceId();
+  const clientSequence = await messagesRepo.nextClientSequence(input.conversationId);
+
+  const row = await messagesRepo.insertLocalMediaMessage({
+    conversationId: input.conversationId,
+    senderUid: input.senderUid,
+    senderDisplayName: input.senderDisplayName ?? null,
+    mediaType: 'voice',
+    localUri: input.localUri,
+    mimeType: input.mimeType,
+    sizeBytes: input.sizeBytes,
+    durationMs: input.durationMs,
+    waveform: input.waveform ?? null,
+    replyToMessageId: input.replyTo?.messageId ?? null,
+    replyToPreview: input.replyTo?.preview ?? null,
+    deviceId,
+    clientSequence,
+  });
+
+  await outboxRepo.enqueue({
+    type: 'send_voice_message',
+    entityType: 'message',
+    entityId: row.local_id,
+    conversationId: input.conversationId,
+    idempotencyKey: idempotencyKey(['send-voice', deviceId, row.local_id]),
+    payload: {
+      conversationId: input.conversationId,
+      localMessageId: row.local_id,
+      localUri: input.localUri,
+      mimeType: input.mimeType,
+      sizeBytes: input.sizeBytes,
+      durationMs: input.durationMs,
+      waveform: input.waveform ?? null,
+      replyTo: input.replyTo ?? null,
+    },
+  });
+
+  kick('outbox');
+  return row;
+}
+
 /** Phase 23 — retry a failed media upload: reset its outbox item + local state. */
 export async function retryMediaMessage(localMessageId: string): Promise<void> {
   if (!getCurrentUid()) return;

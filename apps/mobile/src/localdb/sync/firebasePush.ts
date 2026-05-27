@@ -95,6 +95,37 @@ export async function pushOutboxItem(item: OutboxRow): Promise<PushResult> {
         throw err;
       }
     }
+    case 'send_voice_message': {
+      const localId: string | null = payload.localMessageId ?? null;
+      try {
+        const created = await call<{ messageId: string; storagePath: string; idempotent?: boolean }>('createMediaMessage', {
+          conversationId: payload.conversationId,
+          type: 'voice',
+          mimeType: payload.mimeType,
+          sizeBytes: payload.sizeBytes,
+          durationMs: payload.durationMs,
+          waveform: payload.waveform ?? null,
+          replyTo: payload.replyTo ?? null,
+          localId,
+          idempotencyKey: item.idempotency_key,
+        });
+        const downloadURL = await uploadLocalFile(
+          payload.localUri, created.storagePath, payload.mimeType,
+          (f) => { if (localId) void messagesRepo.setMediaProgress(localId, f); },
+        );
+        await call('finalizeMediaMessage', {
+          conversationId: payload.conversationId,
+          messageId: created.messageId,
+          downloadURL,
+          sizeBytes: payload.sizeBytes,
+        });
+        if (localId) await messagesRepo.setMediaUploaded(localId, { downloadURL });
+        return { ok: true, remoteId: created.messageId, idempotent: created.idempotent };
+      } catch (err) {
+        if (localId) await messagesRepo.setMediaFailed(localId).catch(() => {});
+        throw err;
+      }
+    }
     case 'edit_message':
       await call('editMessage', { conversationId: payload.conversationId, messageId: payload.messageId, text: payload.text });
       return { ok: true };
