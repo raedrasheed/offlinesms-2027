@@ -21,7 +21,9 @@ import {
   GroupRole,
   ReplyTo,
   UserState,
+  subscribeMembers,
 } from '../lib/conversations';
+import type { ReactorInfo } from '../components/ReactionsSheet';
 import { Ionicons } from '@expo/vector-icons';
 import { MessageBubble } from '../components/MessageBubble';
 import { useTheme } from '../context/ThemeContext';
@@ -166,6 +168,19 @@ export default function Conversation({ route, navigation }: any) {
       setMemberStatus(data.status ?? 'active');
     });
   }, [id, me, convo?.type]);
+
+  // Group member names — resolves uids to names for the reactions breakdown.
+  const [reactorNames, setReactorNames] = useState<Record<string, ReactorInfo>>({});
+  useEffect(() => {
+    if (!id || convo?.type !== 'group') { setReactorNames({}); return; }
+    return subscribeMembers(id, rows => {
+      const map: Record<string, ReactorInfo> = {};
+      for (const m of rows) {
+        map[m.uid] = { name: m.displayNameSnapshot ?? m.uid.slice(0, 6), photoURL: m.photoURLSnapshot ?? null };
+      }
+      setReactorNames(map);
+    });
+  }, [id, convo?.type]);
 
   // Typing indicator.
   useEffect(() => {
@@ -419,6 +434,7 @@ export default function Conversation({ route, navigation }: any) {
                 isPinned:       (item.pinnedAt != null) || convo?.pinnedMessage?.messageId === item.id,
                 myUid:          me,
                 memberCount:    convo?.memberCount,
+                reactorNames,
                 localFirst:     useLocal,
               }}
               onReply={startReply}
@@ -436,7 +452,7 @@ export default function Conversation({ route, navigation }: any) {
         }}
       />
     );
-  }, [visibleMsgs, queued, me, isGroup, id, myRoleIsAdmin, starred, convo?.pinnedMessage, convo?.memberCount]);
+  }, [visibleMsgs, queued, me, isGroup, id, myRoleIsAdmin, starred, convo?.pinnedMessage, convo?.memberCount, reactorNames]);
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.root}>

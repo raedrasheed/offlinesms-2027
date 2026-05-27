@@ -20,6 +20,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme';
 import { avatarColor, initials } from '../lib/avatar';
 import { ChatActionSheet, SheetAction } from './ChatActionSheet';
+import { ReactionsSheet, ReactorInfo } from './ReactionsSheet';
 import {
   Message,
   REACTION_EMOJIS,
@@ -47,6 +48,8 @@ export type BubbleContext = {
   isPinned:       boolean;
   myUid:          string;
   memberCount?:   number;
+  // uid → display name/photo for resolving who reacted (group members).
+  reactorNames?:  Record<string, ReactorInfo>;
   // Phase 22D — when true, actions route through the local outbox instead of
   // calling the callables directly.
   localFirst?:    boolean;
@@ -85,6 +88,7 @@ export function MessageBubble({
   const mine    = context.isMyMessage;
   const deleted = m.deletedForEveryone === true;
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [reactionsOpen, setReactionsOpen] = useState(false);
 
   if (pending) {
     return (
@@ -253,7 +257,7 @@ export function MessageBubble({
       {reactionEntries.length > 0 ? (
         <Pressable
           style={[s.reactionPill, iReacted && s.reactionPillMine]}
-          onPress={() => setSheetOpen(true)}
+          onPress={() => (context.isGroup ? setReactionsOpen(true) : setSheetOpen(true))}
         >
           {reactionEntries.map(r => (
             <Text key={r.emoji} style={s.reactionEmoji}>{r.emoji}</Text>
@@ -271,6 +275,18 @@ export function MessageBubble({
         reactions={deleted ? [] : REACTION_EMOJIS}
         onReact={(e) => { close(); react(e); }}
         actions={sheetActions}
+      />
+
+      <ReactionsSheet
+        visible={reactionsOpen}
+        onClose={() => setReactionsOpen(false)}
+        reactions={m.reactions}
+        myUid={context.myUid}
+        resolveName={(uid) =>
+          context.reactorNames?.[uid] ??
+          (uid === context.myUid ? { name: 'You' } : { name: uid.slice(0, 6) })
+        }
+        onRemoveMine={(emoji) => { void react(emoji); }}
       />
     </View>
   );
