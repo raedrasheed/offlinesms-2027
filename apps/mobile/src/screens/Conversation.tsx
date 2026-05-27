@@ -421,7 +421,7 @@ export default function Conversation({ route, navigation }: any) {
           await sendVoice(res);
         })();
       },
-      onPanResponderTerminate: () => { void recorder.cancel(); },
+      onPanResponderTerminate: () => { if (modeRef.current !== 'locked') void recorder.cancel(); },
     }),
   ).current;
 
@@ -689,14 +689,22 @@ export default function Conversation({ route, navigation }: any) {
               <LockedVoiceRecorderBar
                 elapsedMs={recorder.elapsedMs}
                 bars={recorder.bars}
+                paused={recorder.paused}
                 onTrash={() => { void recorder.cancel(); }}
+                onTogglePause={() => { void recorder.togglePause(); }}
                 onSend={() => { void (async () => { const res = await recorder.stop(); await sendVoice(res); })(); }}
               />
             ) : recorder.mode === 'recording' ? (
               <>
                 <VoiceRecorderBar elapsedMs={recorder.elapsedMs} bars={recorder.bars} cancelArmed={cancelArmed} />
-                <View style={s.sendBtn} {...micPan.panHandlers}>
-                  <Ionicons name="mic" size={20} color={colors.action.primaryFg} />
+                <View style={s.micWrap}>
+                  <View style={s.lockPill}>
+                    <Ionicons name="lock-closed" size={16} color={colors.text.muted} />
+                    <Ionicons name="chevron-up" size={14} color={colors.text.muted} />
+                  </View>
+                  <View style={[s.sendBtn, s.micRecording]} {...micPan.panHandlers}>
+                    <Ionicons name="mic" size={26} color={colors.action.primaryFg} />
+                  </View>
                 </View>
               </>
             ) : (
@@ -796,6 +804,9 @@ function buildStyles(colors: any, rtl: boolean) {
     input:    { flex: 1, minHeight: 40, maxHeight: 120, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: colors.background.surface, borderRadius: 22, borderWidth: 1, borderColor: colors.border.subtle, fontSize: 14, color: colors.text.primary },
     sendBtn:  { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.action.primary, alignItems: 'center', justifyContent: 'center' },
     attachBtn:{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+    micWrap:  { width: 40, alignItems: 'center', justifyContent: 'center' },
+    micRecording: { transform: [{ scale: 1.5 }] },
+    lockPill: { position: 'absolute', bottom: 52, width: 34, paddingVertical: 8, borderRadius: 18, backgroundColor: colors.background.surface, alignItems: 'center', gap: 4, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 4, shadowOffset: { width: 0, height: 1 }, elevation: 3 },
     gate:     { padding: 16, paddingBottom: 28, backgroundColor: '#EAF2FB', borderTopWidth: 1, borderColor: colors.border.subtle },
     gateText: { fontSize: 12, color: colors.text.muted, textAlign: 'center' },
   });

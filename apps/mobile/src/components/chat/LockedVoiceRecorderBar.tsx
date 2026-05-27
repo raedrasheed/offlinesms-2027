@@ -1,4 +1,4 @@
-// Phase 23 — locked recording bar (hands-free). Trash to discard, send to upload.
+// Phase 23 — locked recording bar (hands-free). Trash · pause/resume · send.
 
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -8,11 +8,13 @@ import { formatDuration } from '../../media/mediaValidation';
 import { Waveform } from './Waveform';
 
 export function LockedVoiceRecorderBar({
-  elapsedMs, bars, onTrash, onSend,
+  elapsedMs, bars, paused, onTrash, onTogglePause, onSend,
 }: {
   elapsedMs: number;
   bars: number[];
+  paused: boolean;
   onTrash: () => void;
+  onTogglePause: () => void;
   onSend: () => void;
 }) {
   const { t } = useTranslation();
@@ -22,11 +24,14 @@ export function LockedVoiceRecorderBar({
         <Pressable onPress={onTrash} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('common.delete')}>
           <Ionicons name="trash-outline" size={22} color={colors.err} />
         </Pressable>
-        <View style={s.dot} />
+        {!paused ? <View style={s.dot} /> : <Ionicons name="pause" size={12} color={colors.ink500} />}
         <Text style={s.timer}>{formatDuration(elapsedMs)}</Text>
         <View style={s.wave}>
           <Waveform bars={bars} color={colors.primary} height={22} />
         </View>
+        <Pressable onPress={onTogglePause} hitSlop={10} accessibilityRole="button" accessibilityLabel={paused ? t('common.continue') : t('common.cancel')}>
+          <Ionicons name={paused ? 'play' : 'pause'} size={24} color={colors.err} />
+        </Pressable>
         <Pressable onPress={onSend} style={s.send} accessibilityRole="button" accessibilityLabel={t('common.send')}>
           <Ionicons name="send" size={18} color="#fff" />
         </Pressable>

@@ -93,6 +93,9 @@ export function MessageBubble({
 }: MessageBubbleProps) {
   const mine    = context.isMyMessage;
   const deleted = m.deletedForEveryone === true;
+  // For images without a caption, overlay time + ticks on the photo (WhatsApp
+  // style) instead of below the bubble.
+  const imageOverlayFooter = !deleted && m.type === 'image' && !(m.caption && m.caption.trim());
   const [sheetOpen, setSheetOpen] = useState(false);
   const [reactionsOpen, setReactionsOpen] = useState(false);
 
@@ -249,6 +252,12 @@ export function MessageBubble({
             mine={mine}
             onOpen={(uri) => onOpenImage?.(uri)}
             onRetry={() => onRetryMedia?.(m)}
+            footer={imageOverlayFooter ? (
+              <>
+                <Text style={s.imgFootTime}>{formatTime(m.createdAt)}</Text>
+                {mine ? <ReceiptIndicator message={m} isGroup={context.isGroup} memberCount={context.memberCount} /> : null}
+              </>
+            ) : null}
           />
         ) : !deleted && m.type === 'voice' ? (
           <VoiceMessageBubble
@@ -265,15 +274,17 @@ export function MessageBubble({
           </View>
         )}
 
-        <View style={s.bubbleFooter}>
-          {m.editedAt ? <Text style={[s.foot, mine && { color: 'rgba(255,255,255,.7)' }]}>edited</Text> : null}
-          {context.isStarred ? <Text style={s.star}>★</Text> : null}
-          {context.isPinned ? <Text style={s.foot}>📌</Text> : null}
-          {mine && !deleted ? (
-            <ReceiptIndicator message={m} isGroup={context.isGroup} memberCount={context.memberCount} />
-          ) : null}
-          <Text style={[s.foot, mine && { color: 'rgba(255,255,255,.7)' }]}>{formatTime(m.createdAt)}</Text>
-        </View>
+        {imageOverlayFooter ? null : (
+          <View style={s.bubbleFooter}>
+            {m.editedAt ? <Text style={[s.foot, mine && { color: 'rgba(255,255,255,.7)' }]}>edited</Text> : null}
+            {context.isStarred ? <Text style={s.star}>★</Text> : null}
+            {context.isPinned ? <Text style={s.foot}>📌</Text> : null}
+            {mine && !deleted ? (
+              <ReceiptIndicator message={m} isGroup={context.isGroup} memberCount={context.memberCount} />
+            ) : null}
+            <Text style={[s.foot, mine && { color: 'rgba(255,255,255,.7)' }]}>{formatTime(m.createdAt)}</Text>
+          </View>
+        )}
       </Pressable>
 
       {reactionEntries.length > 0 ? (
@@ -373,6 +384,7 @@ const s = StyleSheet.create({
   replyText:      { fontSize: 12, color: colors.ink, marginTop: 2 },
   bubbleFooter:   { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 6, marginTop: 4 },
   foot:           { fontSize: 10, color: colors.ink500 },
+  imgFootTime:    { fontSize: 11, color: '#fff', fontWeight: '600' },
   receiptRow:     { flexDirection: 'row', alignItems: 'center', gap: 3 },
   star:           { fontSize: 10, color: '#F59E0B' },
   tick:           { fontSize: 11, fontWeight: '700', letterSpacing: -1 },

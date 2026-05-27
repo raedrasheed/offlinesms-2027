@@ -88,4 +88,12 @@ export async function cancelRecording(): Promise<void> {
   if (uri) { try { await FileSystem.deleteAsync(uri, { idempotent: true }); } catch { /* noop */ } }
 }
 
+export async function pauseRecording(): Promise<void> {
+  if (recording) { try { await recording.pauseAsync(); } catch { /* noop */ } }
+}
+
+export async function resumeRecording(): Promise<void> {
+  if (recording) { try { await recording.startAsync(); } catch { /* noop */ } }
+}
+
 export function isRecording(): boolean { return recording != null; }

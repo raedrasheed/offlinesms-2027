@@ -6,6 +6,7 @@
 // owned by the surrounding MessageBubble.
 
 import { View, Text, Image, Pressable, StyleSheet } from 'react-native';
+import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { colors } from '../../theme';
 import type { Message } from '../../lib/conversations';
@@ -15,12 +16,13 @@ const MAX_W = 230;
 const MAX_H = 280;
 
 export function ImageMessageBubble({
-  message, mine, onOpen, onRetry,
+  message, mine, onOpen, onRetry, footer,
 }: {
   message: Message;
   mine: boolean;
   onOpen: (uri: string) => void;
   onRetry?: () => void;
+  footer?: ReactNode;
 }) {
   const { t } = useTranslation();
   const media = message.media;
@@ -57,6 +59,7 @@ export function ImageMessageBubble({
         {failed ? (
           <MediaUploadProgress progress={0} failed onRetry={onRetry} />
         ) : null}
+        {footer ? <View style={s.footerOverlay}>{footer}</View> : null}
       </Pressable>
       {caption ? (
         <Text style={[s.caption, mine && { color: '#fff' }]}>{caption}</Text>
@@ -68,6 +71,7 @@ export function ImageMessageBubble({
 const s = StyleSheet.create({
   frame:       { borderRadius: 14, overflow: 'hidden', backgroundColor: colors.ink100 },
   image:       { width: '100%', height: '100%' },
+  footerOverlay: { position: 'absolute', right: 8, bottom: 8, flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, backgroundColor: 'rgba(0,0,0,0.4)' },
   placeholder: { backgroundColor: colors.primaryTint },
   caption:     { fontSize: 15, color: colors.ink, marginTop: 6, lineHeight: 21 },
 });
