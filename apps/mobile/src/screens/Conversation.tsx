@@ -31,6 +31,8 @@ import { avatarColor, initials } from '../lib/avatar';
 import { useOffline } from '../context/OfflineContext';
 import { OfflineNotice, SyncSuccessChip } from '../components/OfflineBanners';
 import { getDraft, setDraft as persistDraft, clearDraft } from '../lib/drafts';
+import { useLocalConversation } from '../hooks/useLocalConversation';
+import { queueSendMessage, queueEditMessage, queueMarkReceipt } from '../localdb';
 
 type ComposerGate =
   | { kind: 'allowed' }
@@ -63,6 +65,12 @@ export default function Conversation({ route, navigation }: any) {
   const me = auth.currentUser?.uid ?? '';
   const { isOffline, enqueue, queuedFor, deliveredFor, deliveredNonce } = useOffline();
 
+  // Phase 22C — local-first conversation (flag-gated). `useLocal` is true only
+  // when the flag is on AND the local DB initialised; otherwise the Firestore +
+  // OfflineContext path below runs unchanged (including as a fallback).
+  const local = useLocalConversation(id, me);
+  const useLocal = local.source === 'local';
+
   const [msgs, setMsgs] = useState<Message[] | null>(null);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
@@ -90,9 +98,9 @@ export default function Conversation({ route, navigation }: any) {
     });
   }, [id]);
 
-  // Messages.
+  // Messages (Firestore path — skipped when the local DB drives the screen).
   useEffect(() => {
-    if (!id) return;
+    if (useLocal || !id) return;
     return subscribeMessages(id, rows => {
       setMsgs(rows);
       markRead(id).catch(() => {});
@@ -107,7 +115,21 @@ export default function Conversation({ route, navigation }: any) {
       }
       requestAnimationFrame(() => listRef.current?.scrollToEnd?.({ animated: false }));
     });
-  }, [id, me]);
+  }, [id, me, useLocal]);
+
+  // Local-first mode: messages come from the feeder/local DB; still emit
+  // read/delivered receipts for incoming messages (callables dedupe server-side).
+  useEffect(() => {
+    if (!useLocal || !id) return;
+    markRead(id).catch(() => {});
+    for (const m of local.messages) {
+      if (m.senderUid === me) continue;
+      if (m.deletedForEveryone) continue;
+      void queueMarkReceipt({ conversationId: id, messageId: m.id, status: 'delivered' });
+      void queueMarkReceipt({ conversationId: id, messageId: m.id, status: 'read' });
+    }
+    requestAnimationFrame(() => listRef.current?.scrollToEnd?.({ animated: false }));
+  }, [useLocal, id, me, local.messages]);
 
   // userState (drives starred + deletedForMe filtering).
   useEffect(() => {
@@ -192,11 +214,17 @@ export default function Conversation({ route, navigation }: any) {
   const starred = useMemo(() => new Set(userState?.starredMessageIds ?? []), [userState]);
   const deletedForMe = useMemo(() => new Set(userState?.deletedForMeMessageIds ?? []), [userState]);
 
+  // Effective message source: local DB when local-first is active, else the
+  // Firestore-fed `msgs`. (null = still loading → renders the loader.)
+  const effectiveMsgs: Message[] | null = useLocal
+    ? (local.loading && local.messages.length === 0 ? null : local.messages)
+    : msgs;
+
   // Apply local hide.
   const visibleMsgs = useMemo(() => {
-    if (!msgs) return null;
-    return msgs.filter(m => !deletedForMe.has(m.id));
-  }, [msgs, deletedForMe]);
+    if (!effectiveMsgs) return null;
+    return effectiveMsgs.filter(m => !deletedForMe.has(m.id));
+  }, [effectiveMsgs, deletedForMe]);
 
   function jumpTo(messageId: string) {
     if (!visibleMsgs) return;
@@ -256,8 +284,29 @@ export default function Conversation({ route, navigation }: any) {
     setBusy(true); setErr(null);
     try {
       if (editing) {
-        await editMessage(id, editing.messageId, text);
+        if (useLocal) await queueEditMessage({ conversationId: id, messageId: editing.messageId, text });
+        else await editMessage(id, editing.messageId, text);
         cancelEdit();
+      } else if (useLocal) {
+        // Local-first: write an optimistic local message + idempotent outbox
+        // item; the sync engine delivers it (online or on reconnect) and
+        // reconciles to the server id without duplicating on retry.
+        await queueSendMessage({
+          conversationId: id,
+          senderUid: me,
+          text,
+          replyTo: replyTo ? {
+            messageId: replyTo.messageId,
+            senderUid: replyTo.senderUid,
+            senderDisplayName: replyTo.senderDisplayName,
+            preview: replyTo.preview,
+          } : null,
+        });
+        local.refresh();
+        setReplyTo(null);
+        setDraft('');
+        clearDraft(id);
+        setTyping(id, false).catch(() => {});
       } else if (isOffline) {
         // Offline-first: persist locally and deliver on reconnect.
         await enqueue({ conversationId: id, conversationType: isGroup ? 'group' : 'direct', text, replyTo: replyTo ?? null });
@@ -320,6 +369,7 @@ export default function Conversation({ route, navigation }: any) {
     return (
       <FlatList
         ref={listRef}
+        style={s.msgList}
         data={data}
         keyExtractor={(m: any) => m.id}
         contentContainerStyle={{ padding: 12, gap: 4 }}
@@ -340,7 +390,7 @@ export default function Conversation({ route, navigation }: any) {
                 message={item}
                 pending={item.__pending}
                 showSender={false}
-                context={{ conversationId: id, isGroup, isMyMessage: true, myRoleIsAdmin, isStarred: false, isPinned: false, myUid: me, memberCount: convo?.memberCount }}
+                context={{ conversationId: id, isGroup, isMyMessage: true, myRoleIsAdmin, isStarred: false, isPinned: false, myUid: me, memberCount: convo?.memberCount, localFirst: useLocal }}
                 onReply={() => {}}
                 onEditStart={() => {}}
                 onForward={() => {}}
@@ -365,6 +415,7 @@ export default function Conversation({ route, navigation }: any) {
                 isPinned:       (item.pinnedAt != null) || convo?.pinnedMessage?.messageId === item.id,
                 myUid:          me,
                 memberCount:    convo?.memberCount,
+                localFirst:     useLocal,
               }}
               onReply={startReply}
               onEditStart={startEdit}
@@ -516,7 +567,8 @@ export default function Conversation({ route, navigation }: any) {
 
 function buildStyles(colors: any, rtl: boolean) {
   return StyleSheet.create({
-    root:     { flex: 1, backgroundColor: colors.background.subtle },
+    root:     { flex: 1, backgroundColor: '#FFFFFF' },
+    msgList:  { flex: 1, backgroundColor: '#EAF2FB' },
     emptyConvo:    { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40, gap: 6 },
     emptyAvatar:   { width: 96, height: 96, borderRadius: 48, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
     emptyAvatarText:{ color: '#fff', fontSize: 34, fontWeight: '800' },
@@ -525,7 +577,7 @@ function buildStyles(colors: any, rtl: boolean) {
     e2eNotice:     { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FBEFD0', paddingHorizontal: 14, paddingVertical: 9, borderRadius: 14, marginTop: 16 },
     e2eText:       { fontSize: 12, color: '#92400E' },
     emptyNudge:    { fontSize: 13, color: colors.text.muted, textAlign: 'center', marginTop: 14, lineHeight: 19 },
-    header:   { paddingTop: 50, paddingBottom: 12, paddingHorizontal: 14, backgroundColor: '#E6F1F7', flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 10, borderBottomWidth: 1, borderColor: colors.border.subtle },
+    header:   { paddingTop: 50, paddingBottom: 12, paddingHorizontal: 14, backgroundColor: '#E6F1F7', flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 10, zIndex: 2, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 4 },
     back:     { fontSize: 24, color: colors.action.primary, minWidth: 28, textAlign: 'center' },
     headerInfo: { flex: 1, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 10 },
     headerAvatarWrap: { width: 40, height: 40 },
@@ -548,10 +600,10 @@ function buildStyles(colors: any, rtl: boolean) {
     composerPreviewTitle: { fontSize: 11, fontWeight: '700', color: colors.action.primary, textAlign: rtl ? 'right' : 'left' },
     composerPreviewBody:  { fontSize: 12, color: colors.text.primary, marginTop: 2, textAlign: rtl ? 'right' : 'left' },
     composerPreviewClose: { fontSize: 18, color: colors.text.muted, fontWeight: '700', paddingHorizontal: 6, minWidth: 36, minHeight: 36, textAlignVertical: 'center', textAlign: 'center' },
-    composer: { padding: 12, paddingBottom: 24, flexDirection: rtl ? 'row-reverse' : 'row', gap: 8, alignItems: 'flex-end', backgroundColor: colors.background.subtle },
+    composer: { padding: 12, paddingBottom: 24, flexDirection: rtl ? 'row-reverse' : 'row', gap: 8, alignItems: 'flex-end', backgroundColor: '#EAF2FB' },
     input:    { flex: 1, minHeight: 40, maxHeight: 120, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: colors.background.surface, borderRadius: 22, borderWidth: 1, borderColor: colors.border.subtle, fontSize: 14, color: colors.text.primary },
     sendBtn:  { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.action.primary, alignItems: 'center', justifyContent: 'center' },
-    gate:     { padding: 16, paddingBottom: 28, backgroundColor: colors.background.subtle, borderTopWidth: 1, borderColor: colors.border.subtle },
+    gate:     { padding: 16, paddingBottom: 28, backgroundColor: '#EAF2FB', borderTopWidth: 1, borderColor: colors.border.subtle },
     gateText: { fontSize: 12, color: colors.text.muted, textAlign: 'center' },
   });
 }

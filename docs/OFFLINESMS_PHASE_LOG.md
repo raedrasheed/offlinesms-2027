@@ -4,6 +4,195 @@ Running log of phased work. Newest first.
 
 ---
 
+## Phase 22D — Message Actions + Receipts via Outbox (flag-gated)
+
+**Branch:** `claude/phase22d-message-actions-outbox` (stacked on 22C).
+**Status:** Code complete (22D-1 → 22D-3); **on-device verification PENDING**.
+Gated by `LOCAL_FIRST_CONVERSATION_ENABLED` (default OFF) → no behaviour change.
+
+### What was done
+
+1. **Plan** — `docs/OFFLINESMS_PHASE_22D_PLAN.md`.
+2. **Pure toggle logic** — `reactionLogic.toggleReaction` mirrors the server
+   one-emoji-per-user rule; unit-tested.
+3. **Outbox helpers** — `queueReactMessage` / `queueEditMessage` /
+   `queueDeleteMessage` (optimistic local mutation + idempotent outbox item) and
+   `queueStarMessage` / `queuePinMessage` / `queueMarkReceipt` (idempotent
+   enqueue; receipt keys collapse per message+status). Repo mutators
+   `updateReactions` / `updateText`.
+4. **UI wiring** — `MessageBubble` react/edit/delete/star/pin and the
+   Conversation incoming-receipt emission route through the outbox when the
+   conversation is local-first (`context.localFirst`); the existing direct
+   callables remain for flag-OFF.
+
+### Verification
+
+- Mobile typecheck **clean**; **156/156 tests pass** (58 localdb; +6 this phase).
+- **NOT run:** Expo app / device. Device checklist in the 22D plan is **pending**
+  (offline react/edit/delete apply instantly + sync on reconnect; no
+  re-toggle/dup after retry; server reaction set reconciles; delete-for-everyone
+  wins; flag-OFF parity).
+
+### Known limitations / decisions
+
+- star/pin/receipt **read-state** still comes from the live
+  userState/conversation Firestore subscriptions, so only their **writes** were
+  routed through the outbox — no redundant message-schema columns were added
+  (deliberate; a local userState mirror for offline reads is a possible 22E
+  item).
+- Actions require the message's **remote id**; on a still-pending local message
+  the helpers no-op with `{ ok:false, reason:'not-delivered' }`.
+- Builds on 22A/22B/22C, which remain device-unverified.
+
+---
+
+## Phase 22C — Conversation Local-DB + Outbox Send (flag-gated)
+
+**Branch:** `claude/phase22c-conversation-local-first` (stacked on the Phase 22
+branch).
+**Status:** Code complete (22C-1 → 22C-3); **on-device verification PENDING**.
+Flag `LOCAL_FIRST_CONVERSATION_ENABLED` defaults OFF → no behaviour change.
+
+### What was done
+
+1. **Plan** — `docs/OFFLINESMS_PHASE_22C_PLAN.md`.
+2. **Schema v2** — `reactions_json` + `delivered/read/viewed/played_count`
+   columns on `messages` (migration v2 / ALTER), persisted by
+   `upsertRemoteMessage` and mapped by the message view-model so local mode
+   renders reactions + receipt indicators.
+3. **Message view-model** (`src/hooks/messageModel.ts`) — `MessageRow` →
+   `Message` (reactions parse, counts, replyTo, pending→sending) + chronological
+   ordering. Pure, unit-tested.
+4. **Feeder + hook** — `conversationFeeder` (reuses `subscribeMessages`, upserts
+   reactions/counts into SQLite) and `useLocalConversation` (opens DB + sync
+   scheduler, serves messages from the DB, paginates, Firestore fallback).
+5. **Screen cutover** — `Conversation.tsx` reads from the local DB and sends via
+   `queueSendMessage` + outbox/sync engine (idempotent; no dup on retry) when
+   the flag is on; Firestore listener skipped; incoming receipts still emitted;
+   falls back to the existing Firestore + OfflineContext path otherwise.
+6. **Legacy import** — one-time, guarded import of the AsyncStorage
+   `offlineQueue` into the SQLite outbox (safe: remaining legacy items are
+   undelivered).
+7. **Feature flag** — `LOCAL_FIRST_CONVERSATION_ENABLED` (default OFF, env
+   override). Tests for model + migration v2 + flag default.
+
+### Verification
+
+- Mobile typecheck **clean**; all-workspaces typecheck **clean**.
+- i18n parity **PASS**; **150/150 tests pass** (incl. 46 localdb).
+- **NOT run:** Expo app / device. Device checklist in the 22C plan is **pending**
+  (flag-OFF parity, cached instant load, optimistic send + no-dup on
+  reconnect/retry, incoming stream, legacy migration once, logout wipe).
+
+### Known limitations
+
+- Reactions/receipts now persist locally, but per-user receipt detail
+  (MessageInfo) and reaction *writes* still go through existing callables.
+- Builds on 22A/22B, which remain device-unverified (PR #6 Draft).
+- Conversation message *actions* (edit/delete/react/star/pin) still call their
+  callables directly; routing those through the outbox is a later sub-phase.
+
+---
+
+## Phase 22B — ChatList Local-DB Cutover (flag-gated)
+
+**Branch:** `claude/wonderful-bohr-WE9L0`
+**Status:** Code complete; **on-device verification PENDING** (no Expo build
+available in the work environment). Flag defaults OFF → no behaviour change.
+
+### What was done
+
+1. **Phase 22B plan** (`docs/OFFLINESMS_PHASE_22B_PLAN.md`).
+2. **Feature flag** (`apps/mobile/src/config/features.ts`) —
+   `LOCAL_FIRST_CHAT_LIST_ENABLED`, default `false`, overridable via
+   `EXPO_PUBLIC_LOCAL_FIRST_CHAT_LIST=1`.
+3. **Pure view-model** (`src/hooks/chatListModel.ts`) — `ConversationRow` →
+   render item (Timestamp-like wrapper so existing `formatTime` works) +
+   `filterChatList` (All/Unread/Favorites/Groups + search).
+4. **Hook** (`src/hooks/useLocalChatList.ts`) — opens the per-user DB
+   (`openLocalDb`, no message-sync scheduler), reads `conversationsRepo`, starts
+   the feeder, re-reads on change; returns `{ items, loading, error, source,
+   refresh }` with `firestoreFallback` on init failure.
+5. **Feeder** (`src/localdb/sync/chatListFeeder.ts`) — owns the conversations +
+   per-user-state Firestore listeners; upserts into SQLite, resolves direct-chat
+   peer names once; logs only ids/codes.
+6. **ChatsList integration** — flag-gated: local path skips the Firestore
+   listeners; flag off / fallback keeps the old path verbatim. Same UI/filters/
+   search; subtle "Local cache" hint in local mode.
+7. **Tests** — mapper, filter, flag-default; **35/35 localdb tests passing**
+   (node).
+
+### Verification
+
+- `apps/mobile/__tests__/localdb` — **35/35 passing** (vitest, node).
+- Flag off by default → ChatsList behaviour unchanged.
+- **NOT run:** Expo app / device. Device checklist in the 22B plan is **pending**
+  (cold-start cached list, airplane mode, reconnect refresh, unread parity,
+  filters on local data, logout no-leak, flag-off parity).
+
+### Known limitations
+
+- Direct-chat peer name resolved by the feeder (1 user-doc read each, cached);
+  group/unread/preview come from the conversation + userState docs.
+- Conversation screen, `OfflineContext`/`offlineQueue`, SMS/points: untouched.
+- Mobile typecheck/lint/build not runnable here (Expo deps absent).
+
+---
+
+## Phase 22 — Local-First Mobile Database & Firebase Sync (22A)
+
+**Branch:** `claude/wonderful-bohr-WE9L0`
+**Status:** 22A complete (additive foundation). 22B–22E (UI cutover) deferred to
+a device-verified follow-up.
+
+### What was done
+
+1. **Phase 22 plan** (`docs/OFFLINESMS_PHASE_22_PLAN.md`) — objective, current
+   data-flow audit, listener/callable inventory, tech decision (`expo-sqlite`),
+   schema, sync architecture, conflict/migration/security/perf/test/rollback
+   strategies, acceptance criteria, and 22A→22E staging.
+2. **Local DB foundation** (`apps/mobile/src/localdb/`) — row `types`, SQLite
+   DDL + indexes (`schema`), versioned `migrations`, per-user `connection`
+   management with logout `wipeUserData`, and local-id/idempotency-key `ids`.
+   Added `expo-sqlite ~14.0.6`.
+3. **Repositories** — `conversations` (indexed chat-list query + folded
+   per-user state), `messages` (optimistic insert, paginated reads, remote
+   reconcile by `local_id`), durable idempotent `outbox`, `syncState` cursors,
+   monotonic `receipts`, group `members`, `userState` wrapper.
+4. **Sync engine** — `conflictResolver` (pure), `retryPolicy` (pure),
+   `networkState` (NetInfo), `firebasePush` (outbox→callables, passes
+   `localId`/`idempotencyKey`), `firebasePull` (cursor/paged Firestore reads),
+   `syncEngine` (single-flight push+pull+reconcile), `syncScheduler`
+   (triggers + foreground timer). Public facade `index.ts`
+   (`initLocalDb`/`queueSendMessage`/`wipeAndClose`).
+5. **Server idempotency** — `sendTextMessage` accepts optional
+   `localId`/`idempotencyKey`, dedupes by `clientLocalId`, returns the existing
+   message on retry. Optional + backward compatible; no rule changes.
+6. **Docs** — `OFFLINESMS_LOCAL_DB_SCHEMA.md`, `OFFLINESMS_SYNC_PROTOCOL.md`.
+7. **Tests** — 25 pure-logic unit tests (conflict resolver, retry policy,
+   migrations, ids) under `apps/mobile/__tests__/localdb/`, all passing in node.
+
+### Verification
+
+- `apps/mobile/__tests__/localdb` — **25/25 passing** (vitest, node env).
+- `functions` package **compiles** (`tsc`) with the idempotency change.
+- All new mobile modules are **additive** (not imported by any screen), so the
+  running app's behaviour is unchanged.
+
+### Known limitations / not done
+
+- Could not run the Expo app, `expo-sqlite`, or mobile typecheck in this
+  environment (native module + missing Expo deps); driver-backed DB tests and
+  the UI cutover require a device/Expo build.
+- **22B–22E (UI cutover)** — chat list/conversation reading from the local DB,
+  and demoting Firestore listeners into the sync layer — deferred; repository
+  read APIs are in place so the cutover is a small, well-scoped next step.
+- SQLCipher deferred (no secrets stored in SQLite; OS sandbox relied upon).
+- The legacy `offlineQueue`/`OfflineContext` remain the live send path until the
+  cutover; a one-time import into the new outbox is part of 22C.
+
+---
+
 ## Phase 21 — Controlled Production Rollout
 
 **Branch:** `claude/repo-audit-architecture-MiZDX`

@@ -5,7 +5,8 @@
     "moduleResolution": "node",
     "outDir": "lib",
     "noEmit": false,
-    "declaration": true
+    "declaration": false,
+    "types": ["node"]
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "lib"]

@@ -10,7 +10,7 @@ import { colors } from './colors';
 export const lightSemantic = {
   color: {
     background: {
-      app:     colors.bgCanvas,
+      app:     colors.surface,
       surface: colors.surface,
       subtle:  colors.surface2,
       sunken:  colors.surfaceSunken,

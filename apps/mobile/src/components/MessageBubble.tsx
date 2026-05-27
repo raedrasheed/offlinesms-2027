@@ -14,10 +14,11 @@
 
 import { useState } from 'react';
 import {
-  View, Text, Pressable, Alert, StyleSheet, Clipboard,
+  View, Text, Pressable, Alert, StyleSheet, Clipboard, Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme';
+import { avatarColor, initials } from '../lib/avatar';
 import { ChatActionSheet, SheetAction } from './ChatActionSheet';
 import {
   Message,
@@ -27,6 +28,12 @@ import {
   pinMessage,
   deleteMessage,
 } from '../lib/conversations';
+import {
+  queueReactMessage,
+  queueDeleteMessage,
+  queueStarMessage,
+  queuePinMessage,
+} from '../localdb';
 
 const EDIT_WINDOW_MS = 15 * 60 * 1000;
 const SMALL_GROUP_MAX = 20;
@@ -40,6 +47,9 @@ export type BubbleContext = {
   isPinned:       boolean;
   myUid:          string;
   memberCount?:   number;
+  // Phase 22D — when true, actions route through the local outbox instead of
+  // calling the callables directly.
+  localFirst?:    boolean;
 };
 
 export type MessageBubbleProps = {
@@ -66,7 +76,7 @@ function createdAtMillis(value: any): number {
 function formatTime(value: any): string {
   const ms = createdAtMillis(value);
   if (!ms) return '';
-  return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
 export function MessageBubble({
@@ -124,32 +134,43 @@ export function MessageBubble({
       .filter(([, uids]) => (uids ?? []).length > 0)
       .map(([emoji, uids]) => ({ emoji, count: uids.length, mine: uids.includes(context.myUid) }));
   })();
+  const reactionTotal = reactionEntries.reduce((sum, r) => sum + r.count, 0);
+  const iReacted = reactionEntries.some(r => r.mine);
+  const showAvatar = context.isGroup && !mine;
 
   function copyText() {
     try { (Clipboard as any).setString?.(m.text ?? ''); } catch {}
   }
   async function react(emoji: string) {
-    try { await reactToMessage(context.conversationId, m.id, emoji); }
-    catch (e: any) { Alert.alert('Couldn’t react', e?.message ?? 'try-again'); }
+    try {
+      if (context.localFirst) await queueReactMessage({ conversationId: context.conversationId, messageId: m.id, emoji, uid: context.myUid });
+      else await reactToMessage(context.conversationId, m.id, emoji);
+    } catch (e: any) { Alert.alert('Couldn’t react', e?.message ?? 'try-again'); }
   }
   async function toggleStar() {
-    try { await starMessage(context.conversationId, m.id, !context.isStarred); }
-    catch (e: any) { Alert.alert('Couldn’t update', e?.message ?? 'try-again'); }
+    try {
+      if (context.localFirst) await queueStarMessage({ conversationId: context.conversationId, messageId: m.id, starred: !context.isStarred });
+      else await starMessage(context.conversationId, m.id, !context.isStarred);
+    } catch (e: any) { Alert.alert('Couldn’t update', e?.message ?? 'try-again'); }
   }
   async function togglePin() {
-    try { await pinMessage(context.conversationId, m.id, !context.isPinned); }
-    catch (e: any) { Alert.alert('Couldn’t update', e?.message ?? 'try-again'); }
+    try {
+      if (context.localFirst) await queuePinMessage({ conversationId: context.conversationId, messageId: m.id, pinned: !context.isPinned });
+      else await pinMessage(context.conversationId, m.id, !context.isPinned);
+    } catch (e: any) { Alert.alert('Couldn’t update', e?.message ?? 'try-again'); }
   }
+  const del = (mode: 'for_me' | 'for_everyone') =>
+    (context.localFirst
+      ? queueDeleteMessage({ conversationId: context.conversationId, messageId: m.id, mode })
+      : deleteMessage(context.conversationId, m.id, mode)
+    ).catch((e: any) => Alert.alert('Couldn’t delete', e?.message ?? 'try-again'));
+
   function confirmDelete() {
     const buttons: Array<{ text: string; onPress?: () => void; style?: 'destructive' | 'cancel' }> = [
-      { text: 'Delete for me', style: 'destructive', onPress: () => {
-        deleteMessage(context.conversationId, m.id, 'for_me').catch((e: any) => Alert.alert('Couldn’t delete', e?.message ?? 'try-again'));
-      }},
+      { text: 'Delete for me', style: 'destructive', onPress: () => { void del('for_me'); } },
     ];
     if (canDeleteForEveryone) {
-      buttons.push({ text: 'Delete for everyone', style: 'destructive', onPress: () => {
-        deleteMessage(context.conversationId, m.id, 'for_everyone').catch((e: any) => Alert.alert('Couldn’t delete', e?.message ?? 'try-again'));
-      }});
+      buttons.push({ text: 'Delete for everyone', style: 'destructive', onPress: () => { void del('for_everyone'); } });
     }
     buttons.push({ text: 'Cancel', style: 'cancel' });
     Alert.alert('Delete message', undefined, buttons);
@@ -174,12 +195,28 @@ export function MessageBubble({
       ];
 
   return (
-    <View style={{ marginBottom: 2 }}>
-      {showSender ? (
-        <Text style={s.senderLabel}>{m.senderDisplayName ?? m.senderUid.slice(0, 6)}</Text>
+    <View style={[s.row, mine ? s.rowMine : s.rowTheirs]}>
+      {showAvatar ? (
+        showSender ? (
+          m.senderPhotoURL ? (
+            <Image source={{ uri: m.senderPhotoURL }} style={s.avatar} />
+          ) : (
+            <View style={[s.avatar, { backgroundColor: avatarColor(m.senderUid) }]}>
+              <Text style={s.avatarText}>{initials(m.senderDisplayName ?? m.senderUid.slice(0, 2))}</Text>
+            </View>
+          )
+        ) : (
+          <View style={s.avatarSpacer} />
+        )
       ) : null}
 
+      <View style={[s.col, mine ? s.colMine : s.colTheirs]}>
       <Pressable onLongPress={() => setSheetOpen(true)} delayLongPress={300} style={[s.bubble, mine ? s.sent : s.recv]}>
+        {showSender ? (
+          <Text style={[s.senderLabel, { color: avatarColor(m.senderUid) }]} numberOfLines={1}>
+            {m.senderDisplayName ?? m.senderUid.slice(0, 6)}
+          </Text>
+        ) : null}
         {m.forwarded ? <Text style={[s.meta, mine && { color: 'rgba(255,255,255,.85)' }]}>↪︎ Forwarded</Text> : null}
 
         {m.replyTo ? (
@@ -197,7 +234,7 @@ export function MessageBubble({
         ) : null}
 
         <View style={s.bubbleRow}>
-          <Text style={[s.bubbleText, mine && { color: '#fff' }, deleted && s.deletedText]}>
+          <Text style={[s.bubbleText, mine && { color: '#fff' }, deleted && (mine ? s.deletedTextMine : s.deletedText)]}>
             {deleted ? 'This message was deleted.' : (m.text ?? '')}
           </Text>
         </View>
@@ -214,15 +251,17 @@ export function MessageBubble({
       </Pressable>
 
       {reactionEntries.length > 0 ? (
-        <View style={[s.reactionsRow, mine && { justifyContent: 'flex-end' }]}>
+        <Pressable
+          style={[s.reactionPill, iReacted && s.reactionPillMine]}
+          onPress={() => setSheetOpen(true)}
+        >
           {reactionEntries.map(r => (
-            <Pressable key={r.emoji} style={[s.reactionChip, r.mine && s.reactionChipMine]} onPress={() => react(r.emoji)}>
-              <Text style={s.reactionEmoji}>{r.emoji}</Text>
-              <Text style={s.reactionCount}>{r.count}</Text>
-            </Pressable>
+            <Text key={r.emoji} style={s.reactionEmoji}>{r.emoji}</Text>
           ))}
-        </View>
+          {reactionTotal > 1 ? <Text style={s.reactionCount}>{reactionTotal}</Text> : null}
+        </Pressable>
       ) : null}
+      </View>
 
       <ChatActionSheet
         visible={sheetOpen}
@@ -272,13 +311,23 @@ function ReceiptIndicator({ message, isGroup, memberCount }: { message: Message;
 }
 
 const s = StyleSheet.create({
-  senderLabel:    { fontSize: 11, fontWeight: '700', color: colors.ink500, marginLeft: 2, marginTop: 4, marginBottom: 2 },
-  bubble:         { maxWidth: '78%', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 22 },
-  sent:           { alignSelf: 'flex-end', backgroundColor: '#1E88E5', borderBottomRightRadius: 8 },
-  recv:           { alignSelf: 'flex-start', backgroundColor: '#fff', borderBottomLeftRadius: 8, borderWidth: 1, borderColor: colors.ink100 },
+  row:            { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 2 },
+  rowMine:        { justifyContent: 'flex-end' },
+  rowTheirs:      { justifyContent: 'flex-start' },
+  col:            { maxWidth: '80%' },
+  colMine:        { alignItems: 'flex-end' },
+  colTheirs:      { alignItems: 'flex-start' },
+  avatar:         { width: 30, height: 30, borderRadius: 15, marginRight: 6, marginTop: 2, alignItems: 'center', justifyContent: 'center' },
+  avatarText:     { color: '#fff', fontWeight: '800', fontSize: 12 },
+  avatarSpacer:   { width: 36 },
+  senderLabel:    { fontSize: 12, fontWeight: '800', marginBottom: 2 },
+  bubble:         { maxWidth: '100%', paddingHorizontal: 11, paddingVertical: 7, borderRadius: 18, shadowColor: '#000', shadowOpacity: 0.10, shadowRadius: 3, shadowOffset: { width: 0, height: 1 }, elevation: 2 },
+  sent:           { backgroundColor: '#1E88E5', borderTopRightRadius: 5 },
+  recv:           { backgroundColor: '#fff', borderTopLeftRadius: 5 },
   bubbleRow:      { flexDirection: 'row', alignItems: 'flex-end', gap: 6 },
   bubbleText:     { fontSize: 16, color: colors.ink, lineHeight: 22, flexShrink: 1 },
   deletedText:    { fontStyle: 'italic', color: colors.ink500 },
+  deletedTextMine:{ fontStyle: 'italic', color: 'rgba(255,255,255,.8)' },
   meta:           { fontSize: 11, color: colors.ink500, marginBottom: 4, fontWeight: '600' },
   replyPreview:   { borderLeftWidth: 3, borderLeftColor: colors.primaryDark, paddingLeft: 8, marginBottom: 6, backgroundColor: 'rgba(0,0,0,.04)', borderRadius: 6, padding: 6 },
   replyPreviewMine:{ backgroundColor: 'rgba(255,255,255,.16)', borderLeftColor: '#fff' },
@@ -289,9 +338,8 @@ const s = StyleSheet.create({
   receiptRow:     { flexDirection: 'row', alignItems: 'center', gap: 3 },
   star:           { fontSize: 10, color: '#F59E0B' },
   tick:           { fontSize: 11, fontWeight: '700', letterSpacing: -1 },
-  reactionsRow:   { flexDirection: 'row', gap: 4, marginTop: 4, marginHorizontal: 6 },
-  reactionChip:   { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, backgroundColor: '#fff', borderWidth: 1, borderColor: colors.ink200 },
-  reactionChipMine:{ borderColor: colors.primary, backgroundColor: colors.primaryLight },
-  reactionEmoji:  { fontSize: 12 },
-  reactionCount:  { fontSize: 11, fontWeight: '700', color: colors.ink700 },
+  reactionPill:   { flexDirection: 'row', alignItems: 'center', gap: 2, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, backgroundColor: '#fff', marginTop: -11, marginHorizontal: 12, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 2.5, shadowOffset: { width: 0, height: 1 }, elevation: 3 },
+  reactionPillMine:{ backgroundColor: colors.primaryLight },
+  reactionEmoji:  { fontSize: 13 },
+  reactionCount:  { fontSize: 12, fontWeight: '700', color: colors.ink700, marginLeft: 2 },
 });
