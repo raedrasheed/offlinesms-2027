@@ -32,6 +32,7 @@ import { useOffline } from '../context/OfflineContext';
 import { OfflineNotice, SyncSuccessChip } from '../components/OfflineBanners';
 import { getDraft, setDraft as persistDraft, clearDraft } from '../lib/drafts';
 import { useLocalConversation } from '../hooks/useLocalConversation';
+import { useMessagePersistence } from '../hooks/useLocalPersistence';
 import { queueSendMessage, queueEditMessage, queueMarkReceipt } from '../localdb';
 
 type ComposerGate =
@@ -70,6 +71,9 @@ export default function Conversation({ route, navigation }: any) {
   // OfflineContext path below runs unchanged (including as a fallback).
   const local = useLocalConversation(id, me);
   const useLocal = local.source === 'local';
+
+  // Mirror this conversation's messages into the local SQLite DB while it's open.
+  useMessagePersistence(id, me || undefined);
 
   const [msgs, setMsgs] = useState<Message[] | null>(null);
   const [draft, setDraft] = useState('');

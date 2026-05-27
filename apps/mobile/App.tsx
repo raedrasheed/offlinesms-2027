@@ -23,6 +23,7 @@ import Permissions from './src/screens/Permissions';
 import FindFriends from './src/screens/FindFriends';
 import IncomingCall from './src/screens/IncomingCall';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
+import { useChatListPersistence } from './src/hooks/useLocalPersistence';
 import ChatsList from './src/screens/ChatsList';
 import Conversation from './src/screens/Conversation';
 import NewChat from './src/screens/NewChat';
@@ -122,6 +123,9 @@ export default function App() {
       if (pref) setUserTheme(pref);
     });
   }, [user]);
+
+  // Mirror the user's chats into the local SQLite DB for the whole session.
+  useChatListPersistence(user?.uid);
 
   if (!ready) return null;
 
