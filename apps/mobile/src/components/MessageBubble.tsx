@@ -233,7 +233,7 @@ export function MessageBubble({
         ) : null}
 
         <View style={s.bubbleRow}>
-          <Text style={[s.bubbleText, mine && { color: '#fff' }, deleted && s.deletedText]}>
+          <Text style={[s.bubbleText, mine && { color: '#fff' }, deleted && (mine ? s.deletedTextMine : s.deletedText)]}>
             {deleted ? 'This message was deleted.' : (m.text ?? '')}
           </Text>
         </View>
@@ -326,6 +326,7 @@ const s = StyleSheet.create({
   bubbleRow:      { flexDirection: 'row', alignItems: 'flex-end', gap: 6 },
   bubbleText:     { fontSize: 16, color: colors.ink, lineHeight: 22, flexShrink: 1 },
   deletedText:    { fontStyle: 'italic', color: colors.ink500 },
+  deletedTextMine:{ fontStyle: 'italic', color: 'rgba(255,255,255,.8)' },
   meta:           { fontSize: 11, color: colors.ink500, marginBottom: 4, fontWeight: '600' },
   replyPreview:   { borderLeftWidth: 3, borderLeftColor: colors.primaryDark, paddingLeft: 8, marginBottom: 6, backgroundColor: 'rgba(0,0,0,.04)', borderRadius: 6, padding: 6 },
   replyPreviewMine:{ backgroundColor: 'rgba(255,255,255,.16)', borderLeftColor: '#fff' },
