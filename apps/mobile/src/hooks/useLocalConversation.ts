@@ -12,7 +12,7 @@ import { initLocalDb, messagesRepo, setActiveConversation, clearChat, getChatCle
 import { startConversationFeeder } from '../localdb/sync/conversationFeeder';
 import { pullMessagesBefore } from '../localdb/sync/firebasePull';
 import { importLegacyQueueOnce } from '../localdb/sync/legacyImport';
-import { mapAndOrderMessages, effectiveTimeMs } from './messageModel';
+import { mapAndOrderMessages } from './messageModel';
 import type { Message } from '../lib/conversations';
 
 export type ConversationSource = 'disabled' | 'local' | 'firestoreFallback';
@@ -44,9 +44,11 @@ export function useLocalConversation(conversationId: string | undefined, uid: st
     refreshing.current = true;
     try {
       const all = await messagesRepo.listMessages(conversationId, limitRef.current);
-      // Hide anything at/older than the "cleared chat" watermark.
+      // Hide messages whose SERVER time is at/older than the "cleared" watermark.
+      // Rows without a server time yet (your own still-pending sends) are always
+      // kept — comparing server-vs-server avoids clock-skew hiding new messages.
       const rows = clearedAtRef.current > 0
-        ? all.filter(r => effectiveTimeMs(r) > clearedAtRef.current)
+        ? all.filter(r => r.remote_created_at == null || r.remote_created_at > clearedAtRef.current)
         : all;
       localCountRef.current = rows.length;
       // Rows are newest-first; the last one is the oldest message held locally.

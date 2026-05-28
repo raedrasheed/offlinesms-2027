@@ -50,10 +50,12 @@ export async function getByLocalId(localId: string): Promise<MessageRow | null> 
   return getDb().first<MessageRow>(`SELECT * FROM messages WHERE local_id = ?`, [localId]);
 }
 
-/** Phase 23 — newest message time (server time preferred) in a conversation. */
+/** Phase 23 — newest SERVER message time in a conversation (0 if none synced).
+ *  Server-time only so the "clear" watermark never mixes in a device's local
+ *  clock (which would hide a peer's server-timestamped new messages). */
 export async function getMaxMessageTime(conversationId: string): Promise<number> {
   const row = await getDb().first<{ t: number | null }>(
-    `SELECT MAX(COALESCE(remote_created_at, created_at)) AS t FROM messages WHERE conversation_id = ?`,
+    `SELECT MAX(remote_created_at) AS t FROM messages WHERE conversation_id = ?`,
     [conversationId],
   );
   return row?.t ?? 0;
