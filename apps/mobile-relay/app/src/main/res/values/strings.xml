@@ -1,6 +1,24 @@
 <resources>
     <string name="app_name">OfflineSMS Business</string>
+
     <string name="enroll_title">Link this relay device</string>
     <string name="enroll_hint">Enter the pairing code from your OfflineSMS dashboard.</string>
+    <string name="enroll_code_hint">Pairing code</string>
+    <string name="enroll_label_hint">Device label (e.g. Front desk SIM)</string>
+    <string name="enroll_button">Link device</string>
+    <string name="enroll_invalid">Enter the full pairing code.</string>
+    <string name="enroll_working">Linking…</string>
+    <string name="enroll_failed">Couldn\'t link: %1$s</string>
     <string name="private_notice">This relay app is private and works only with an approved OfflineSMS Business account.</string>
+
+    <string name="relay_active">Relay active</string>
+    <string name="relay_paused">Relay paused</string>
+
+    <string name="dash_business">Business: %1$s</string>
+    <string name="dash_device">Device: %1$s</string>
+    <string name="dash_queue">Queue depth: %1$d</string>
+    <string name="dash_pause">Pause</string>
+    <string name="dash_resume">Resume</string>
+    <string name="dash_revoke">Unlink this device</string>
+    <string name="dash_logs">Recent activity</string>
 </resources>

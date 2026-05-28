@@ -15,10 +15,9 @@
         android:name=".RelayApplication"
         android:label="@string/app_name"
         android:allowBackup="false"
-        android:supportsRtl="true">
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Relay">
 
-        <!-- Phase 2: EnrollmentActivity (pairing code) is the launcher until the
-             device is enrolled; afterwards the relay dashboard screen. -->
         <activity
             android:name=".ui.EnrollmentActivity"
             android:exported="true">
@@ -28,8 +27,35 @@
             </intent-filter>
         </activity>
 
-        <!-- Phase 2: foreground relay service (FOREGROUND_SERVICE_DATA_SYNC) +
-             boot receiver are declared here. -->
+        <activity
+            android:name=".ui.DashboardActivity"
+            android:exported="false" />
+
+        <service
+            android:name=".service.RelayService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <service
+            android:name=".fcm.RelayFcmService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
+        <!-- SmsManager sent/delivered PendingIntent results (explicit, app-internal). -->
+        <receiver
+            android:name=".sms.SmsResultReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".service.BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
 
     </application>
 </manifest>
