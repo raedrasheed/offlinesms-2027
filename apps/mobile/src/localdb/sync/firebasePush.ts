@@ -9,6 +9,7 @@ import { getFunctions, httpsCallable } from 'firebase/functions';
 import * as FileSystem from 'expo-file-system';
 import { app, auth } from '../../lib/firebase';
 import * as messagesRepo from '../repositories/messagesRepo';
+import { setTransferProgress, clearTransfer } from '../../media/transferProgress';
 import type { OutboxRow } from '../types';
 
 export interface PushResult {
@@ -117,10 +118,11 @@ export async function pushOutboxItem(item: OutboxRow): Promise<PushResult> {
         // feeder (which sees the new doc during the slow upload) updates this
         // row instead of inserting a duplicate / colliding on remote_id.
         if (localId) { try { await messagesRepo.reconcileToRemote(localId, { remoteId: created.messageId, remoteCreatedAt: null }); } catch { /* noop */ } }
-        // 2. Upload the binary with progress.
+        // 2. Upload the binary with live progress (keyed by the message id the
+        //    bubble renders, so the % counter increments).
         const downloadURL = await uploadLocalFile(
           payload.localUri, created.storagePath, payload.mimeType,
-          (f) => { if (localId) void messagesRepo.setMediaProgress(localId, f); },
+          (f) => { setTransferProgress(created.messageId, 'upload', f); if (localId) void messagesRepo.setMediaProgress(localId, f); },
         );
         // 3. Finalize (idempotent).
         await call('finalizeMediaMessage', {
@@ -132,6 +134,7 @@ export async function pushOutboxItem(item: OutboxRow): Promise<PushResult> {
           sizeBytes: payload.sizeBytes,
         });
         if (localId) await messagesRepo.setMediaUploaded(localId, { downloadURL });
+        clearTransfer(created.messageId);
         return { ok: true, remoteId: created.messageId, idempotent: created.idempotent };
       } catch (err) {
         if (localId) await messagesRepo.setMediaFailed(localId, mediaError(err)).catch(() => {});
@@ -156,7 +159,7 @@ export async function pushOutboxItem(item: OutboxRow): Promise<PushResult> {
         if (localId) { try { await messagesRepo.reconcileToRemote(localId, { remoteId: created.messageId, remoteCreatedAt: null }); } catch { /* noop */ } }
         const downloadURL = await uploadLocalFile(
           payload.localUri, created.storagePath, payload.mimeType,
-          (f) => { if (localId) void messagesRepo.setMediaProgress(localId, f); },
+          (f) => { setTransferProgress(created.messageId, 'upload', f); if (localId) void messagesRepo.setMediaProgress(localId, f); },
         );
         await call('finalizeMediaMessage', {
           conversationId: payload.conversationId,
@@ -165,6 +168,7 @@ export async function pushOutboxItem(item: OutboxRow): Promise<PushResult> {
           sizeBytes: payload.sizeBytes,
         });
         if (localId) await messagesRepo.setMediaUploaded(localId, { downloadURL });
+        clearTransfer(created.messageId);
         return { ok: true, remoteId: created.messageId, idempotent: created.idempotent };
       } catch (err) {
         if (localId) await messagesRepo.setMediaFailed(localId, mediaError(err)).catch(() => {});

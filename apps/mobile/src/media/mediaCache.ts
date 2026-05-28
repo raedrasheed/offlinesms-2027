@@ -14,6 +14,7 @@
 
 import * as FileSystem from 'expo-file-system';
 import type { Message } from '../lib/conversations';
+import { setTransferProgress, setTransferFailed, clearTransfer } from './transferProgress';
 
 const ROOT = `${FileSystem.documentDirectory}OfflineSMS/`;
 const IMAGES_DIR = `${ROOT}Images/`;
@@ -72,21 +73,44 @@ export async function ensureCached(message: Message): Promise<string | null> {
   const info = await FileSystem.getInfoAsync(path);
   if (info.exists && !info.isDirectory && info.size > 0) { known.add(path); return path; }
 
-  const url = message.media?.downloadURL || null;
-  if (!url) return null;
-
   const existing = inflight.get(path);
   if (existing) return existing;
+
+  const id = message.id;
+  const localUri = message.media?.localUri || null;
+  const url = message.media?.downloadURL || null;
 
   const task = (async () => {
     try {
       await ensureDirs();
-      const res = await FileSystem.downloadAsync(url, path);
-      if (res.status >= 200 && res.status < 300) { known.add(path); return path; }
+      // Own sends: copy the original local file — no network round-trip.
+      if (localUri) {
+        const li = await FileSystem.getInfoAsync(localUri);
+        if (li.exists && !li.isDirectory) {
+          await FileSystem.copyAsync({ from: localUri, to: path });
+          known.add(path);
+          return path;
+        }
+      }
+      if (!url) return null;
+      // Received media: download with live progress so the % counter increments.
+      const dl = FileSystem.createDownloadResumable(url, path, {}, (p) => {
+        if (id && p.totalBytesExpectedToWrite > 0) {
+          setTransferProgress(id, 'download', p.totalBytesWritten / p.totalBytesExpectedToWrite);
+        }
+      });
+      const res = await dl.downloadAsync();
+      if (res && res.status >= 200 && res.status < 300) {
+        known.add(path);
+        if (id) clearTransfer(id);
+        return path;
+      }
       await FileSystem.deleteAsync(path, { idempotent: true }).catch(() => {});
+      if (id) setTransferFailed(id, 'download');
       return null;
     } catch {
       await FileSystem.deleteAsync(path, { idempotent: true }).catch(() => {});
+      if (id) setTransferFailed(id, 'download');
       return null;
     } finally {
       inflight.delete(path);
@@ -94,6 +118,12 @@ export async function ensureCached(message: Message): Promise<string | null> {
   })();
   inflight.set(path, task);
   return task;
+}
+
+/** Re-attempt a failed download (clears the failed state, then re-fetches). */
+export async function retryDownload(message: Message): Promise<string | null> {
+  if (message.id) clearTransfer(message.id);
+  return ensureCached(message);
 }
 
 /** Fire-and-forget cache of every media message in a list (background prefetch). */

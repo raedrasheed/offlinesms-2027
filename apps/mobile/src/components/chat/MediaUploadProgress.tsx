@@ -14,21 +14,23 @@ const R = (SIZE - STROKE) / 2;
 const CIRC = 2 * Math.PI * R;
 
 export function MediaUploadProgress({
-  progress, failed, onRetry,
+  progress, failed, onRetry, mode = 'upload',
 }: {
   progress: number;       // 0..1
   failed?: boolean;
   onRetry?: () => void;
+  mode?: 'upload' | 'download';
 }) {
   const { t } = useTranslation();
   const pct = Math.round(Math.max(0, Math.min(1, progress)) * 100);
 
   if (failed) {
+    const label = mode === 'download' ? t('media.retryDownload') : t('media.retryUpload');
     return (
       <View style={s.overlay}>
-        <Pressable style={s.failBtn} onPress={onRetry} accessibilityRole="button" accessibilityLabel={t('media.retryUpload')}>
-          <Ionicons name="refresh" size={22} color="#fff" />
-          <Text style={s.failText}>{t('media.retryUpload')}</Text>
+        <Pressable style={s.failBtn} onPress={onRetry} accessibilityRole="button" accessibilityLabel={label}>
+          <Ionicons name={mode === 'download' ? 'arrow-down-circle' : 'arrow-up-circle'} size={22} color="#fff" />
+          <Text style={s.failText}>{label}</Text>
         </Pressable>
       </View>
     );
