@@ -103,8 +103,7 @@ export function useLocalConversation(conversationId: string | undefined, uid: st
 
   const clear = useCallback(async () => {
     if (!conversationId) return;
-    await clearChat(conversationId);
-    clearedAtRef.current = Date.now();
+    clearedAtRef.current = await clearChat(conversationId);
     setMessages([]);
   }, [conversationId]);
 

@@ -50,6 +50,15 @@ export async function getByLocalId(localId: string): Promise<MessageRow | null> 
   return getDb().first<MessageRow>(`SELECT * FROM messages WHERE local_id = ?`, [localId]);
 }
 
+/** Phase 23 — newest message time (server time preferred) in a conversation. */
+export async function getMaxMessageTime(conversationId: string): Promise<number> {
+  const row = await getDb().first<{ t: number | null }>(
+    `SELECT MAX(COALESCE(remote_created_at, created_at)) AS t FROM messages WHERE conversation_id = ?`,
+    [conversationId],
+  );
+  return row?.t ?? 0;
+}
+
 /** Phase 23 — delete all local messages for a conversation ("clear chat"). */
 export async function deleteConversationMessages(conversationId: string): Promise<number> {
   const before = await getDb().first<{ n: number }>(
