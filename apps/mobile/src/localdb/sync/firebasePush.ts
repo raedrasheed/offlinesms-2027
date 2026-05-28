@@ -6,9 +6,8 @@
 // the server can dedupe retries (see functions/src/chats/sendTextMessage.ts).
 
 import { getFunctions, httpsCallable } from 'firebase/functions';
-import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import * as FileSystem from 'expo-file-system';
-import { app, storage } from '../../lib/firebase';
+import { app, auth } from '../../lib/firebase';
 import * as messagesRepo from '../repositories/messagesRepo';
 import type { OutboxRow } from '../types';
 
@@ -20,41 +19,6 @@ export interface PushResult {
 
 function call<T = any>(name: string, data: any): Promise<T> {
   return httpsCallable<any, T>(getFunctions(app), name)(data).then(r => r.data);
-}
-
-const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-
-/** Decode a base64 string to a Uint8Array (no atob/Buffer dependency). */
-function base64ToBytes(b64: string): Uint8Array {
-  const lookup = new Uint8Array(256);
-  for (let i = 0; i < B64.length; i++) lookup[B64.charCodeAt(i)] = i;
-  const len = b64.length;
-  let bufferLength = Math.floor((len * 3) / 4);
-  if (len > 0 && b64[len - 1] === '=') bufferLength--;
-  if (len > 1 && b64[len - 2] === '=') bufferLength--;
-  const bytes = new Uint8Array(bufferLength);
-  let p = 0;
-  for (let i = 0; i < len; i += 4) {
-    const e1 = lookup[b64.charCodeAt(i)];
-    const e2 = lookup[b64.charCodeAt(i + 1)];
-    const e3 = lookup[b64.charCodeAt(i + 2)];
-    const e4 = lookup[b64.charCodeAt(i + 3)];
-    if (p < bufferLength) bytes[p++] = (e1 << 2) | (e2 >> 4);
-    if (p < bufferLength) bytes[p++] = ((e2 & 15) << 4) | (e3 >> 2);
-    if (p < bufferLength) bytes[p++] = ((e3 & 3) << 6) | e4;
-  }
-  return bytes;
-}
-
-/**
- * Read a local file (file:// uri) into a Uint8Array. We deliberately avoid
- * `fetch(uri).blob()` + uploadBytesResumable: that Blob is file-backed and the
- * Firebase JS SDK stalls on it in RN release builds (upload stuck at 0%).
- * Reading the bytes into memory uploads reliably and still reports progress.
- */
-async function readLocalBytes(localUri: string): Promise<Uint8Array> {
-  const base64 = await FileSystem.readAsStringAsync(localUri, { encoding: FileSystem.EncodingType.Base64 });
-  return base64ToBytes(base64);
 }
 
 /** Normalize an upload/finalize failure into a recordable {code, message} and
@@ -69,20 +33,50 @@ function mediaError(err: unknown): { code: string | null; message: string | null
   return { code, message };
 }
 
-/** Upload bytes to Storage with progress, returning the download URL. */
-async function uploadBytes(
-  bytes: Uint8Array, storagePath: string, contentType: string,
+/** Byte size of a local file, or 0 if it can't be read. */
+async function localFileSize(localUri: string): Promise<number> {
+  try {
+    const info = await FileSystem.getInfoAsync(localUri);
+    return info.exists && !info.isDirectory ? info.size : 0;
+  } catch { return 0; }
+}
+
+/**
+ * Upload a local file to Storage via the native HTTP stack (expo-file-system),
+ * not the Firebase JS SDK. uploadBytes/uploadBytesResumable stall at 0% under
+ * Hermes in RN release builds; a native binary POST to Storage's REST upload
+ * endpoint transfers reliably and still reports progress. Returns the tokenized
+ * download URL (same shape getDownloadURL would produce).
+ */
+async function uploadLocalFile(
+  localUri: string, storagePath: string, contentType: string,
   onProgress: (fraction: number) => void,
 ): Promise<string> {
-  const task = uploadBytesResumable(ref(storage, storagePath), bytes, { contentType });
-  await new Promise<void>((resolve, reject) => {
-    task.on('state_changed',
-      (snap) => { if (snap.totalBytes > 0) onProgress(snap.bytesTransferred / snap.totalBytes); },
-      reject,
-      () => resolve(),
-    );
-  });
-  return getDownloadURL(task.snapshot.ref);
+  const token = await auth.currentUser?.getIdToken();
+  if (!token) throw Object.assign(new Error('not-authenticated'), { code: 'storage/unauthenticated' });
+  const bucket = app.options.storageBucket;
+  if (!bucket) throw Object.assign(new Error('no-storage-bucket'), { code: 'storage/no-bucket' });
+
+  const name = encodeURIComponent(storagePath);
+  const url = `https://firebasestorage.googleapis.com/v0/b/${bucket}/o?uploadType=media&name=${name}`;
+  const uploadTask = FileSystem.createUploadTask(
+    url, localUri,
+    {
+      httpMethod: 'POST',
+      uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+      headers: { Authorization: `Firebase ${token}`, 'Content-Type': contentType },
+    },
+    (p) => { if (p.totalBytesExpectedToSend > 0) onProgress(p.totalBytesSent / p.totalBytesExpectedToSend); },
+  );
+  const res = await uploadTask.uploadAsync();
+  if (!res || res.status < 200 || res.status >= 300) {
+    throw Object.assign(new Error(`upload-http-${res?.status ?? 'no-response'}`), {
+      code: `storage/http-${res?.status ?? 0}`, message: (res?.body ?? '').slice(0, 300),
+    });
+  }
+  let downloadToken = '';
+  try { downloadToken = String(JSON.parse(res.body).downloadTokens ?? '').split(',')[0]; } catch { /* metadata parse best-effort */ }
+  return `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${name}?alt=media${downloadToken ? `&token=${downloadToken}` : ''}`;
 }
 
 export async function pushOutboxItem(item: OutboxRow): Promise<PushResult> {
@@ -103,10 +97,9 @@ export async function pushOutboxItem(item: OutboxRow): Promise<PushResult> {
     case 'send_image_message': {
       const localId: string | null = payload.localMessageId ?? null;
       try {
-        // Read the file first so we have an authoritative byte size (the picker
-        // does not always report fileSize, which would fail server validation).
-        const bytes = await readLocalBytes(payload.localUri);
-        const sizeBytes = bytes.length || payload.sizeBytes || 0;
+        // Authoritative byte size from the file (the picker does not always
+        // report fileSize, which would fail server validation).
+        const sizeBytes = await localFileSize(payload.localUri) || payload.sizeBytes || 0;
         // 1. Reserve the message doc + Storage path (idempotent by localId).
         const created = await call<{ messageId: string; storagePath: string; idempotent?: boolean }>('createMediaMessage', {
           conversationId: payload.conversationId,
@@ -125,8 +118,8 @@ export async function pushOutboxItem(item: OutboxRow): Promise<PushResult> {
         // row instead of inserting a duplicate / colliding on remote_id.
         if (localId) { try { await messagesRepo.reconcileToRemote(localId, { remoteId: created.messageId, remoteCreatedAt: null }); } catch { /* noop */ } }
         // 2. Upload the binary with progress.
-        const downloadURL = await uploadBytes(
-          bytes, created.storagePath, payload.mimeType,
+        const downloadURL = await uploadLocalFile(
+          payload.localUri, created.storagePath, payload.mimeType,
           (f) => { if (localId) void messagesRepo.setMediaProgress(localId, f); },
         );
         // 3. Finalize (idempotent).
@@ -148,8 +141,7 @@ export async function pushOutboxItem(item: OutboxRow): Promise<PushResult> {
     case 'send_voice_message': {
       const localId: string | null = payload.localMessageId ?? null;
       try {
-        const bytes = await readLocalBytes(payload.localUri);
-        const sizeBytes = bytes.length || payload.sizeBytes || 0;
+        const sizeBytes = await localFileSize(payload.localUri) || payload.sizeBytes || 0;
         const created = await call<{ messageId: string; storagePath: string; idempotent?: boolean }>('createMediaMessage', {
           conversationId: payload.conversationId,
           type: 'voice',
@@ -162,8 +154,8 @@ export async function pushOutboxItem(item: OutboxRow): Promise<PushResult> {
           idempotencyKey: item.idempotency_key,
         });
         if (localId) { try { await messagesRepo.reconcileToRemote(localId, { remoteId: created.messageId, remoteCreatedAt: null }); } catch { /* noop */ } }
-        const downloadURL = await uploadBytes(
-          bytes, created.storagePath, payload.mimeType,
+        const downloadURL = await uploadLocalFile(
+          payload.localUri, created.storagePath, payload.mimeType,
           (f) => { if (localId) void messagesRepo.setMediaProgress(localId, f); },
         );
         await call('finalizeMediaMessage', {
