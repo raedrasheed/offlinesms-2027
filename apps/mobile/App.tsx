@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
@@ -24,6 +24,7 @@ import FindFriends from './src/screens/FindFriends';
 import IncomingCall from './src/screens/IncomingCall';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { useChatListPersistence } from './src/hooks/useLocalPersistence';
+import { useUnreadTotal } from './src/lib/unreadStore';
 import ChatsList from './src/screens/ChatsList';
 import Conversation from './src/screens/Conversation';
 import NewChat from './src/screens/NewChat';
@@ -83,12 +84,20 @@ const TAB_ICONS: Record<string, { active: keyof typeof Ionicons.glyphMap; inacti
 };
 
 function MainTabs() {
+  const insets = useSafeAreaInsets();
+  const unread = useUnreadTotal();
   return (
     <Tabs.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarActiveTintColor:   '#1F7BA8',
         tabBarInactiveTintColor: '#6B7488',
+        tabBarStyle: {
+          height: 62 + insets.bottom,
+          paddingTop: 10,
+          paddingBottom: (insets.bottom || 8) + 4,
+        },
+        tabBarLabelStyle: { fontSize: 11, marginTop: 6 },
         tabBarIcon: ({ focused, color, size }) => {
           const set = TAB_ICONS[route.name];
           const name = focused ? set.active : set.inactive;
@@ -96,7 +105,11 @@ function MainTabs() {
         },
       })}
     >
-      <Tabs.Screen name="Chats" component={ChatsList} />
+      <Tabs.Screen
+        name="Chats"
+        component={ChatsList}
+        options={{ tabBarBadge: unread > 0 ? (unread > 99 ? '99+' : unread) : undefined }}
+      />
       <Tabs.Screen name="Status" component={Status} />
       <Tabs.Screen name="Calls" component={Calls} />
       <Tabs.Screen name="Settings" component={Settings} />
