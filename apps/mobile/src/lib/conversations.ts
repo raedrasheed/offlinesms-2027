@@ -317,26 +317,38 @@ export async function setRecording(conversationId: string, isRecording: boolean)
 // "online" is derived from lastSeen freshness (no extra field/rules needed).
 // ─────────────────────────────────────────────────────────────────
 
-/** Window within which a fresh lastSeen counts as "online". */
+/** Freshness window: an `online:true` user whose lastSeen is older than this is
+ *  treated as offline anyway (covers a crash that never wrote online:false). */
 export const ONLINE_WINDOW_MS = 45000;
 
-/** Stamp the caller's lastSeen (heartbeat + final write on background). */
-export async function updateLastSeen(): Promise<void> {
+export interface PresenceSnapshot {
+  online: boolean;       // explicit flag (instant offline on background)
+  lastSeenAt: number | null;
+}
+
+/** Write the caller's presence: explicit online flag + lastSeen heartbeat. */
+export async function writePresence(online: boolean): Promise<void> {
   const uid = auth.currentUser?.uid;
   if (!uid) return;
   await setDoc(
     doc(db, 'users', uid),
-    { lastSeen: serverTimestamp(), updatedAt: serverTimestamp() },
+    { online, lastSeen: serverTimestamp(), updatedAt: serverTimestamp() },
     { merge: true },
   );
 }
 
-/** Subscribe to another user's lastSeen (ms epoch, or null if unknown). */
-export function subscribePresence(uid: string, cb: (lastSeenAt: number | null) => void) {
+/** Heartbeat: keep online=true and lastSeen fresh while foregrounded. */
+export const updateLastSeen = () => writePresence(true);
+
+/** Subscribe to another user's presence (explicit flag + lastSeen). */
+export function subscribePresence(uid: string, cb: (p: PresenceSnapshot) => void) {
   return onSnapshot(
     doc(db, 'users', uid),
-    snap => cb(snap.exists() ? (snap.data()?.lastSeen?.toMillis?.() ?? null) : null),
-    () => cb(null),
+    snap => {
+      const d = snap.exists() ? snap.data() : null;
+      cb({ online: d?.online === true, lastSeenAt: d?.lastSeen?.toMillis?.() ?? null });
+    },
+    () => cb({ online: false, lastSeenAt: null }),
   );
 }
 

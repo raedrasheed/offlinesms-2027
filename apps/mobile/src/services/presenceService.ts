@@ -15,6 +15,7 @@
 import {
   setTyping as writeTyping,
   setRecording as writeRecording,
+  writePresence,
   updateLastSeen as writeLastSeen,
   subscribeActivity,
   subscribePresence,
@@ -27,16 +28,16 @@ const RECORDING_REFRESH_MS = 5000; // keep the recording TTL alive mid-recording
 // ── current-user online/offline ─────────────────────────────────────────────
 let heartbeat: ReturnType<typeof setInterval> | null = null;
 
-/** Mark the current user online and keep a lastSeen heartbeat running. */
+/** Mark the current user online (explicit flag) and keep a heartbeat running. */
 export async function setOnline(): Promise<void> {
-  await writeLastSeen().catch(() => {});
+  await writePresence(true).catch(() => {});
   if (!heartbeat) heartbeat = setInterval(() => { void writeLastSeen().catch(() => {}); }, HEARTBEAT_MS);
 }
 
-/** Stop the heartbeat and freeze lastSeen at "now" (peers see it go stale). */
+/** Clear the online flag immediately (instant offline) and stop the heartbeat. */
 export async function setOffline(): Promise<void> {
   if (heartbeat) { clearInterval(heartbeat); heartbeat = null; }
-  await writeLastSeen().catch(() => {});
+  await writePresence(false).catch(() => {});
 }
 
 export const updateLastSeen = writeLastSeen;
@@ -102,12 +103,11 @@ export function subscribeToPresence(
 
   let unsubPresence: (() => void) | null = null;
   if (opts.peerUid) {
-    unsubPresence = subscribePresence(opts.peerUid, lastSeenAt => {
-      state = {
-        ...state,
-        lastSeenAt,
-        online: lastSeenAt != null && Date.now() - lastSeenAt < ONLINE_WINDOW_MS,
-      };
+    unsubPresence = subscribePresence(opts.peerUid, ({ online, lastSeenAt }) => {
+      // Online only when the flag is set AND the heartbeat is still fresh — so a
+      // crash that never cleared the flag still resolves to offline after the window.
+      const fresh = lastSeenAt != null && Date.now() - lastSeenAt < ONLINE_WINDOW_MS;
+      state = { ...state, lastSeenAt, online: online && fresh };
       emit();
     });
   }

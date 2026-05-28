@@ -135,7 +135,7 @@ service cloud.firestore {
       // timeFormat are user-controlled preference fields.
       return [
         'displayName', 'photoURL', 'about', 'profileCompleted',
-        'fcmTokens', 'lastSeen', 'updatedAt',
+        'fcmTokens', 'lastSeen', 'online', 'updatedAt',
         'smsOptOut',
         'preferredLanguage', 'preferredTheme', 'inAppNotifications', 'timeFormat'
       ];
