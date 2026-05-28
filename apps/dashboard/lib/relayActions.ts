@@ -53,6 +53,29 @@ function targetBusinessId(session: AuthorizedSession, requested?: string): strin
   return requested && requested.trim() ? requested.trim() : null;
 }
 
+const UI_TO_BACKEND_MODE: Record<string, string> = {
+  http: 'http', relay: 'relay', hybrid: 'relay_with_http_fallback',
+};
+
+export async function setRelayModeAction(mode: 'http' | 'relay' | 'hybrid', targetBusiness?: string): Promise<RelayActionState> {
+  const session = await authorize();
+  if ('error' in session) return session;
+  const backend = UI_TO_BACKEND_MODE[mode];
+  if (!backend) return { error: 'Invalid mode.' };
+  const businessId = targetBusinessId(session, targetBusiness);
+  if (!businessId) return { error: 'Select an organization first.' };
+  try {
+    await adminDb.collection('smsConfig').doc('providers').set(
+      { byBusiness: { [businessId]: backend } }, { merge: true },
+    );
+  } catch {
+    return { error: 'Could not update relay mode.' };
+  }
+  await audit('relay.mode.set', session, businessId, { businessId, mode: backend });
+  revalidatePath('/admin/relay');
+  return { success: true };
+}
+
 export async function createRelayPairingCodeAction(targetBusiness?: string): Promise<RelayActionState> {
   const session = await authorize();
   if ('error' in session) return session;

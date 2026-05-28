@@ -175,3 +175,46 @@ export function isClaimable(nextAttemptAtMs: number | null | undefined, nowMs: n
 export function utcDayKey(d: Date = new Date()): string {
   return `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}`;
 }
+
+// ── Multi-device routing (Phase 5) ──────────────────────────────────────────
+export type SmsProviderMode = 'http' | 'relay' | 'relay_with_http_fallback';
+
+export function relayModeEngaged(mode: SmsProviderMode): boolean {
+  return mode === 'relay' || mode === 'relay_with_http_fallback';
+}
+export function isHybrid(mode: SmsProviderMode): boolean {
+  return mode === 'relay_with_http_fallback';
+}
+
+/** Remaining daily send budget for a device (today). */
+export function deviceRemaining(caps: { maxPerDay: number }, counters: { sentToday?: number }): number {
+  return Math.max(0, caps.maxPerDay - (counters.sentToday ?? 0));
+}
+
+/** A device may receive jobs only if active, fresh, and under its daily cap. */
+export function isDeviceRoutable(
+  d: { status: string; lastHeartbeatMs: number | null; remaining: number },
+  nowMs: number,
+): boolean {
+  return d.status === 'active' && !isHeartbeatStale(d.lastHeartbeatMs, nowMs) && d.remaining > 0;
+}
+
+export interface RouteDevice { deviceId: string; remaining: number }
+export interface RouteResult { assignments: Array<{ uid: string; deviceId: string }>; unrouted: string[] }
+
+/** Least-loaded routing: each recipient goes to the routable device with the
+ *  most remaining capacity; capacity is decremented as we assign. Recipients
+ *  with no remaining capacity anywhere are returned as `unrouted`. */
+export function routeLeastLoaded(recipientUids: string[], devices: RouteDevice[]): RouteResult {
+  const pool = devices.map(d => ({ ...d }));
+  const assignments: Array<{ uid: string; deviceId: string }> = [];
+  const unrouted: string[] = [];
+  for (const uid of recipientUids) {
+    let best: { deviceId: string; remaining: number } | null = null;
+    for (const d of pool) if (d.remaining > 0 && (!best || d.remaining > best.remaining)) best = d;
+    if (!best) { unrouted.push(uid); continue; }
+    assignments.push({ uid, deviceId: best.deviceId });
+    best.remaining -= 1;
+  }
+  return { assignments, unrouted };
+}

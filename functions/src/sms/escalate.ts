@@ -15,6 +15,9 @@ import {
   COOLDOWN_MS, COST_PER_SMS, MAX_BATCHES_PER_DAY, MAX_RECIPIENTS_PER_BATCH,
   todayKey,
 } from './recipients';
+import { resolveProvider } from './provider';
+import { relayModeEngaged, isHybrid } from './relayLogic';
+import { dispatchBatchToRelay } from './relayDispatcher';
 import { writeAuditLog } from '../lib/auditLog';
 
 const SMS_BODY_MAX = 320;
@@ -207,6 +210,70 @@ export const escalateSms = onCall({ region: 'us-central1' }, async (request) => 
       });
     }
     await skipBatch.commit();
+  }
+
+  // ── Phase 5: relay path (feature-flagged + organization-scoped) ──
+  // Default is HTTP. Relay engages only when the SENDER's organization is
+  // configured for 'relay' / hybrid. Billing is identical to HTTP: eligible
+  // recipients are 'queued' and the batch is set 'accepted', so the existing
+  // onSmsBatchAccepted settles unchanged (Points/refund logic untouched).
+  const orgId = (request.auth?.token?.organizationId as string | undefined) ?? null;
+  const providerMode = await resolveProvider(orgId);
+
+  if (relayModeEngaged(providerMode) && orgId) {
+    const hybrid = isHybrid(providerMode);
+
+    // Mark eligible recipients queued (relay pending).
+    const recipBatch = db.batch();
+    for (const e of eligible) {
+      recipBatch.set(batchRef.collection('recipients').doc(e.uid), {
+        userId: e.uid, maskedPhone: e.maskedPhone, appReceiptStatus: e.appReceiptStatus,
+        smsStatus: 'queued', skipReason: null, reason: null, updatedAt: FieldValue.serverTimestamp(),
+      });
+    }
+    await recipBatch.commit();
+
+    // Route to devices. Relay-only queues unrouted recipients; hybrid returns
+    // them for HTTP fallback (no relay job exists for them → no double-send).
+    const dispatch = await dispatchBatchToRelay(batchRef.id, orgId, { allowUnassignedQueue: !hybrid });
+
+    let fallbackCount = 0;
+    if (hybrid && dispatch.unrouted.length > 0) {
+      const fb = eligible.filter(e => dispatch.unrouted.includes(e.uid));
+      fallbackCount = fb.length;
+      const fbWrites = db.batch();
+      try {
+        const r = await sendBatch(batchRef.id, smsBody, fb.map(e => ({ uid: e.uid, phone: e.phone, maskedPhone: e.maskedPhone })));
+        for (const e of fb) {
+          const ok = r.acceptedRecipientIds.includes(e.uid);
+          fbWrites.set(batchRef.collection('recipients').doc(e.uid),
+            { smsStatus: ok ? 'queued' : 'failed', reason: ok ? null : 'gateway-error', updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+        }
+      } catch {
+        for (const e of fb) fbWrites.set(batchRef.collection('recipients').doc(e.uid),
+          { smsStatus: 'failed', reason: 'gateway-error', updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      }
+      await fbWrites.commit();
+      await writeAuditLog({ action: 'relay.http_fallback', actor: { uid }, target: { type: 'message', id: data.messageId }, result: 'success', metadata: { batchId: batchRef.id, businessId: orgId, count: fallbackCount } });
+    }
+
+    await batchRef.update({ status: 'accepted', provider: providerMode, updatedAt: FieldValue.serverTimestamp() });
+    await quotaRef.set({
+      uid, date: day, batchCount: FieldValue.increment(1),
+      recipientCount: FieldValue.increment(eligible.length), pointsSpent: FieldValue.increment(cost),
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    await writeAuditLog({
+      action: 'sms.escalation.accepted', actor: { uid }, target: { type: 'message', id: data.messageId }, result: 'success',
+      metadata: { batchId: batchRef.id, conversationId: data.conversationId, audience, provider: providerMode, routed: dispatch.routed, fallback: fallbackCount, pointsCost: cost },
+    });
+
+    return {
+      batchId: batchRef.id, offlineSmsBatchId: null,
+      sent: eligible.length, failed: 0, skipped: excluded.length,
+      pointsCost: cost, status: 'accepted', provider: providerMode,
+    };
   }
 
   // Dispatch via OfflineSMS Gateway.

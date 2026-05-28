@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { ADMIN_LABELS as L } from '@/lib/i18n';
 import {
   createRelayPairingCodeAction, setRelayDeviceStatusAction, revokeRelayDeviceAction,
+  setRelayModeAction,
 } from '@/lib/relayActions';
 
 export type RelayDeviceView = {
@@ -45,13 +46,15 @@ function liveStatus(d: RelayDeviceView): { text: string; color: string } {
 }
 
 export default function RelayAdmin({
-  devices, orgStatus, businessId, canManage, fetchError,
+  devices, orgStatus, businessId, canManage, fetchError, queueHealth, healthyDevices,
 }: {
   devices: RelayDeviceView[];
   orgStatus: RelayOrgStatus;
   businessId: string | null;
   canManage: boolean;
   fetchError: string | null;
+  queueHealth: Record<string, number>;
+  healthyDevices: number;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -88,8 +91,22 @@ export default function RelayAdmin({
     if (!code) return;
     navigator.clipboard?.writeText(code).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); });
   }
+  function setMode(mode: 'http' | 'relay' | 'hybrid') {
+    setErr(null);
+    startTransition(async () => {
+      const res = await setRelayModeAction(mode, businessId ?? undefined);
+      if (res.error) setErr(res.error); else router.refresh();
+    });
+  }
 
   const box = { background: CARD, border: `1px solid ${BORDER}`, borderRadius: 12, padding: 16 };
+  const currentMode: 'http' | 'relay' | 'hybrid' = orgStatus.mode;
+  const showNoDevicesWarning = orgStatus.relayEnabled && healthyDevices === 0;
+  const qh = [
+    ['qQueued', queueHealth.queued], ['qClaimed', queueHealth.claimed], ['qSending', queueHealth.sending],
+    ['qSent', queueHealth.sent], ['qDelivered', queueHealth.delivered], ['qFailed', queueHealth.failed],
+    ['qExpired', queueHealth.expired],
+  ] as const;
 
   return (
     <div className="space-y-4">
@@ -114,6 +131,39 @@ export default function RelayAdmin({
 
       {!businessId && canManage && (
         <p className="text-xs" style={{ color: 'var(--c-text-muted)' }}>{L.relay.selectOrgHint}</p>
+      )}
+
+      {canManage && businessId && (
+        <div style={box} className="flex flex-wrap items-center gap-2">
+          <span className="text-sm" style={{ color: 'var(--c-text-muted)' }}>{L.relay.setMode}:</span>
+          {([['http', L.relay.modeHttpOpt], ['relay', L.relay.modeRelayOpt], ['hybrid', L.relay.modeHybridOpt]] as const).map(([m, lbl]) => (
+            <button key={m} onClick={() => setMode(m as 'http' | 'relay' | 'hybrid')} disabled={pending}
+              className="px-3 py-1.5 rounded-md text-sm"
+              style={{ border: `1px solid ${BORDER}`, background: currentMode === m ? 'var(--c-accent, #1D6E92)' : 'transparent', color: currentMode === m ? '#fff' : 'inherit' }}>
+              {lbl}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {showNoDevicesWarning && (
+        <div style={{ ...box, borderColor: '#FCD34D', background: '#FEF3C7', color: '#92400E' }}>{L.relay.noHealthyDevices}</div>
+      )}
+
+      {businessId && (
+        <div style={box}>
+          <div className="text-sm mb-2" style={{ color: 'var(--c-text-muted)' }}>
+            {L.relay.queueHealth} · {L.relay.healthyDevices}: {healthyDevices}
+          </div>
+          <div className="grid grid-cols-3 md:grid-cols-7 gap-2 text-center">
+            {qh.map(([k, v]) => (
+              <div key={k} style={{ border: `1px solid ${BORDER}`, borderRadius: 8, padding: 8 }}>
+                <div className="text-lg font-semibold">{v ?? 0}</div>
+                <div className="text-xs" style={{ color: 'var(--c-text-muted)' }}>{(L.relay as Record<string, string>)[k]}</div>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
       {code && (

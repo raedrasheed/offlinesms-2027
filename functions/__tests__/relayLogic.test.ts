@@ -4,6 +4,7 @@ import {
   isHeartbeatStale, capacityRemaining, canManageBusiness, resolveBusinessId,
   normalizeReportStatus, recipientStatusFor, isTerminalJobStatus, shouldApplyReport,
   classifyFailure, backoffMs, failureOutcome, reapDecision, isClaimable, utcDayKey,
+  relayModeEngaged, isHybrid, deviceRemaining, isDeviceRoutable, routeLeastLoaded,
   BACKOFF_BASE_MS, BACKOFF_MAX_MS,
   PAIRING_CODE_TTL_MS, LEASE_TTL_MS,
 } from '../src/sms/relayLogic';
@@ -139,5 +140,44 @@ describe('reaper decision + claimability', () => {
   });
   it('utcDayKey is a UTC yyyymmdd string', () => {
     expect(utcDayKey(new Date('2026-05-28T23:30:00Z'))).toBe('20260528');
+  });
+});
+
+describe('provider mode (Phase 5)', () => {
+  it('relay engages only for relay / hybrid', () => {
+    expect(relayModeEngaged('http')).toBe(false);
+    expect(relayModeEngaged('relay')).toBe(true);
+    expect(relayModeEngaged('relay_with_http_fallback')).toBe(true);
+    expect(isHybrid('relay_with_http_fallback')).toBe(true);
+    expect(isHybrid('relay')).toBe(false);
+  });
+});
+
+describe('multi-device routing (Phase 5)', () => {
+  const now = 1_000_000;
+  it('only active, fresh, under-cap devices are routable', () => {
+    expect(deviceRemaining({ maxPerDay: 100 }, { sentToday: 30 })).toBe(70);
+    expect(isDeviceRoutable({ status: 'active', lastHeartbeatMs: now, remaining: 5 }, now)).toBe(true);
+    expect(isDeviceRoutable({ status: 'paused', lastHeartbeatMs: now, remaining: 5 }, now)).toBe(false);
+    expect(isDeviceRoutable({ status: 'active', lastHeartbeatMs: now - 200_000, remaining: 5 }, now)).toBe(false); // stale
+    expect(isDeviceRoutable({ status: 'active', lastHeartbeatMs: now, remaining: 0 }, now)).toBe(false); // cap-exhausted
+  });
+
+  it('least-loaded spreads jobs and respects capacity', () => {
+    const r = routeLeastLoaded(['a', 'b', 'c', 'd'], [
+      { deviceId: 'd1', remaining: 2 },
+      { deviceId: 'd2', remaining: 1 },
+    ]);
+    expect(r.assignments).toHaveLength(3);   // total capacity = 3
+    expect(r.unrouted).toEqual(['d']);
+    const perDevice = r.assignments.reduce<Record<string, number>>((m, x) => { m[x.deviceId] = (m[x.deviceId] ?? 0) + 1; return m; }, {});
+    expect(perDevice.d1).toBe(2);
+    expect(perDevice.d2).toBe(1);
+  });
+
+  it('no devices → everything unrouted', () => {
+    const r = routeLeastLoaded(['a', 'b'], []);
+    expect(r.assignments).toHaveLength(0);
+    expect(r.unrouted).toEqual(['a', 'b']);
   });
 });

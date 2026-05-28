@@ -76,6 +76,24 @@ export default async function RelayAdminPage({ searchParams }: { searchParams?: 
 
   const orgStatus = await resolveMode(businessId);
 
+  const now = Date.now();
+  const healthyDevices = devices.filter(
+    d => d.status === 'active' && d.lastHeartbeatAt != null && now - d.lastHeartbeatAt < 90_000,
+  ).length;
+
+  // Relay queue health for this organization (counts by status).
+  const STATUSES = ['queued', 'claimed', 'sending', 'sent', 'delivered', 'failed', 'expired'] as const;
+  const queueHealth: Record<string, number> = {};
+  if (businessId) {
+    await Promise.all(STATUSES.map(async s => {
+      try {
+        const c = await adminDb.collection('relayJobs')
+          .where('businessId', '==', businessId).where('status', '==', s).count().get();
+        queueHealth[s] = c.data().count;
+      } catch { queueHealth[s] = 0; }
+    }));
+  }
+
   return (
     <div className="p-6 space-y-5" style={{ color: 'var(--c-text)' }}>
       <div>
@@ -88,6 +106,8 @@ export default async function RelayAdminPage({ searchParams }: { searchParams?: 
         businessId={businessId}
         canManage={canManage}
         fetchError={fetchError}
+        queueHealth={queueHealth}
+        healthyDevices={healthyDevices}
       />
     </div>
   );
