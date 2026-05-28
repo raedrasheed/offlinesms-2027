@@ -27,8 +27,9 @@ export function VoiceMessageBubble({
   const uri = media?.downloadURL || media?.localUri || null;
   const durationMs = media?.durationMs ?? 0;
   const status = media?.uploadStatus ?? 'uploaded';
-  const uploading = status === 'pending' || status === 'uploading';
-  const failed = status === 'failed';
+  // Upload progress/retry only applies to your own outgoing message.
+  const uploading = mine && (status === 'pending' || status === 'uploading');
+  const failed = mine && status === 'failed';
 
   const [playing, setPlaying] = useState(false);
   const [positionMs, setPositionMs] = useState(0);

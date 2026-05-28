@@ -36,8 +36,10 @@ export function ImageMessageBubble({
   }
 
   const status = media?.uploadStatus ?? 'uploaded';
-  const uploading = status === 'pending' || status === 'uploading';
-  const failed = status === 'failed';
+  // Upload progress/retry only applies to your own outgoing message. A received
+  // image is never "uploading" on this device — show it (or a placeholder).
+  const uploading = mine && (status === 'pending' || status === 'uploading');
+  const failed = mine && status === 'failed';
   const caption = message.caption?.trim();
 
   return (
