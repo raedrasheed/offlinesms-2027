@@ -38,7 +38,10 @@ export type AdminCapability =
   | 'view:reports'
   // Phase 18
   | 'view:notifications'
-  | 'manage:notifications';
+  | 'manage:notifications'
+  // Phase 24 — SMS relay (OfflineSMS-Business devices)
+  | 'view:relay'
+  | 'manage:relay';
 
 type RoleKey = AdminRole | 'legacy_admin' | 'bootstrap_admin';
 
@@ -55,6 +58,7 @@ const ROLE_CAPABILITIES: Record<RoleKey, readonly AdminCapability[]> = {
     'export:audit', 'view:moderation',
     'search:global', 'export:users', 'export:groups', 'export:sms', 'export:points', 'export:support', 'view:reports',
     'view:notifications', 'manage:notifications',
+    'view:relay', 'manage:relay',
   ],
   organization_admin: [
     'view:overview', 'view:users',
@@ -64,6 +68,7 @@ const ROLE_CAPABILITIES: Record<RoleKey, readonly AdminCapability[]> = {
     'view:settings', 'view:communities',
     'retry:sms',
     'search:global', 'export:groups', 'export:sms', 'view:reports',
+    'view:relay', 'manage:relay',
   ],
   support_agent: [
     'view:overview', 'view:users', 'view:support',
@@ -95,6 +100,7 @@ const ROLE_CAPABILITIES: Record<RoleKey, readonly AdminCapability[]> = {
     'export:audit', 'view:moderation',
     'search:global', 'export:users', 'export:groups', 'export:sms', 'export:points', 'export:support', 'view:reports',
     'view:notifications', 'manage:notifications',
+    'view:relay', 'manage:relay',
   ],
   bootstrap_admin: [
     'view:overview', 'view:users', 'manage:users',
@@ -108,6 +114,7 @@ const ROLE_CAPABILITIES: Record<RoleKey, readonly AdminCapability[]> = {
     'export:audit', 'view:moderation',
     'search:global', 'export:users', 'export:groups', 'export:sms', 'export:points', 'export:support', 'view:reports',
     'view:notifications', 'manage:notifications',
+    'view:relay', 'manage:relay',
   ],
 };
 
