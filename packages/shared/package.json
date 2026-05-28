@@ -1,0 +1,7 @@
+{
+  "name": "@offlinesms/shared",
+  "version": "0.1.0",
+  "private": true,
+  "main": "relayTypes.ts",
+  "types": "relayTypes.ts"
+}

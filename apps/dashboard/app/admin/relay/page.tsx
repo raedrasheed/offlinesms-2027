@@ -1,0 +1,114 @@
+// Admin SMS Relay devices — server component. Lists OfflineSMS-Business relay
+// devices for the caller's organization (super_admin sees all / filters by ?org).
+// No message bodies or full phone numbers are ever shown.
+
+import { cookies } from 'next/headers';
+import { redirect } from 'next/navigation';
+import { verifySession } from '@/lib/session';
+import { canDo } from '@/lib/adminPermissions';
+import { getAdminScope } from '@/lib/adminScope';
+import { adminDb } from '@/lib/firebase-admin';
+import { ADMIN_LABELS } from '@/lib/i18n';
+import { PermissionState } from '@/components/state';
+import RelayAdmin, { type RelayDeviceView, type RelayOrgStatus } from './RelayAdmin';
+
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
+function ms(ts: any): number | null { return ts?.toMillis?.() ?? null; }
+
+async function resolveMode(businessId: string | null): Promise<RelayOrgStatus> {
+  try {
+    const snap = await adminDb.collection('smsConfig').doc('providers').get();
+    const data = (snap.exists ? snap.data() : {}) as { default?: string; byBusiness?: Record<string, string> };
+    const raw = (businessId && data.byBusiness?.[businessId]) || data.default || 'http';
+    const mode = raw === 'relay' ? 'relay' : raw === 'relay_with_http_fallback' ? 'hybrid' : 'http';
+    return { mode, relayEnabled: mode !== 'http' };
+  } catch {
+    return { mode: 'http', relayEnabled: false };
+  }
+}
+
+export default async function RelayAdminPage({ searchParams }: { searchParams?: { org?: string } }) {
+  const cookie = cookies().get('__session')?.value;
+  const session = await verifySession(cookie);
+  if (session.state !== 'authorized') redirect('/login?next=/admin/relay');
+  if (!canDo(session.role, 'view:relay')) {
+    return <div className="p-8"><PermissionState title="Relay access required" /></div>;
+  }
+
+  const scope = getAdminScope(session);
+  const businessId = scope.organizationId ?? (searchParams?.org?.trim() || null);
+  const canManage = canDo(session.role, 'manage:relay');
+
+  let q = adminDb.collection('relayDevices').limit(100) as FirebaseFirestore.Query;
+  if (businessId) q = adminDb.collection('relayDevices').where('businessId', '==', businessId).limit(100);
+
+  let devices: RelayDeviceView[] = [];
+  let fetchError: string | null = null;
+  try {
+    const snap = await q.get();
+    devices = snap.docs
+      .map(d => {
+        const x = d.data();
+        return {
+          deviceId: d.id,
+          businessId: (x.businessId as string) ?? '',
+          label: (x.label as string) ?? 'Relay device',
+          status: (x.status as string) ?? 'offline',
+          lastHeartbeatAt: ms(x.lastHeartbeatAt),
+          appVersion: (x.appVersion as string) ?? null,
+          manufacturer: (x.manufacturer as string) ?? null,
+          model: (x.model as string) ?? null,
+          simInfo: Array.isArray(x.simInfo) ? (x.simInfo as any[]).map(s => ({
+            carrierName: s?.carrierName ?? null, slotIndex: s?.slotIndex ?? null,
+          })) : [],
+          sentToday: (x.counters?.sentToday as number) ?? 0,
+          failedToday: (x.counters?.failedToday as number) ?? 0,
+          deliveredToday: (x.counters?.deliveredToday as number) ?? 0,
+          lastError: (x.lastError as string) ?? null,
+        };
+      })
+      .sort((a, b) => (b.lastHeartbeatAt ?? 0) - (a.lastHeartbeatAt ?? 0));
+  } catch (e: any) {
+    fetchError = e?.message ?? 'Failed to load relay devices.';
+  }
+
+  const orgStatus = await resolveMode(businessId);
+
+  const now = Date.now();
+  const healthyDevices = devices.filter(
+    d => d.status === 'active' && d.lastHeartbeatAt != null && now - d.lastHeartbeatAt < 90_000,
+  ).length;
+
+  // Relay queue health for this organization (counts by status).
+  const STATUSES = ['queued', 'claimed', 'sending', 'sent', 'delivered', 'failed', 'expired'] as const;
+  const queueHealth: Record<string, number> = {};
+  if (businessId) {
+    await Promise.all(STATUSES.map(async s => {
+      try {
+        const c = await adminDb.collection('relayJobs')
+          .where('businessId', '==', businessId).where('status', '==', s).count().get();
+        queueHealth[s] = c.data().count;
+      } catch { queueHealth[s] = 0; }
+    }));
+  }
+
+  return (
+    <div className="p-6 space-y-5" style={{ color: 'var(--c-text)' }}>
+      <div>
+        <h1 className="text-xl font-semibold">{ADMIN_LABELS.relay.title}</h1>
+        <p className="text-sm" style={{ color: 'var(--c-text-muted)' }}>{ADMIN_LABELS.relay.subtitle}</p>
+      </div>
+      <RelayAdmin
+        devices={devices}
+        orgStatus={orgStatus}
+        businessId={businessId}
+        canManage={canManage}
+        fetchError={fetchError}
+        queueHealth={queueHealth}
+        healthyDevices={healthyDevices}
+      />
+    </div>
+  );
+}
