@@ -56,7 +56,10 @@
     "filterAll": "All",
     "filterUnread": "Unread",
     "filterFavorites": "Favorites",
-    "filterGroups": "Groups"
+    "filterGroups": "Groups",
+    "clearChat": "Clear chat",
+    "clearChatTitle": "Clear chat?",
+    "clearChatMessage": "This removes the messages from this device. Messages others have are not affected."
   },
   "status": {
     "title": "Status",
@@ -305,7 +308,8 @@
     "continue": "Continue",
     "send": "Send",
     "back": "Back",
-    "retry": "Retry"
+    "retry": "Retry",
+    "delete": "Delete"
   },
   "settings": {
     "title": "Settings",
@@ -338,6 +342,45 @@
     "timeFormatSystem": "System default",
     "timeFormat12": "12-hour (1:30 PM)",
     "timeFormat24": "24-hour (13:30)",
+    "localStorage": "On-device storage",
+    "localStorageSubtitle": "Chats and messages saved locally on this device",
+    "localChats": "Chats",
+    "localMessages": "Messages",
+    "localStorageEmpty": "No chats stored on this device yet.",
     "updateFailed": "Couldn't update setting. Please try again."
+  },
+  "media": {
+    "photo": "Photos",
+    "camera": "Camera",
+    "file": "File",
+    "location": "Location",
+    "contact": "Contact",
+    "poll": "Poll",
+    "audio": "Audio",
+    "gif": "GIF",
+    "comingSoon": "Coming soon",
+    "attach": "Attach",
+    "preview": "Preview",
+    "addCaption": "Add a caption…",
+    "sendPhoto": "Send photo",
+    "uploading": "Uploading {{percent}}%",
+    "uploadFailed": "Upload failed",
+    "retryUpload": "Retry",
+    "openImage": "Open image",
+    "imageMessage": "Photo",
+    "voiceMessage": "Voice message",
+    "holdToRecord": "Hold to record",
+    "slideToCancel": "Slide to cancel",
+    "releaseToSend": "Release to send",
+    "swipeUpToLock": "Swipe up to lock",
+    "recordingLocked": "Recording locked",
+    "tapToPlay": "Tap to play",
+    "recordingTooShort": "Hold longer to record",
+    "microphonePermissionTitle": "Microphone access needed",
+    "microphonePermissionMessage": "OfflineSMS needs microphone access so you can record voice messages.",
+    "photosPermissionTitle": "Photos access needed",
+    "photosPermissionMessage": "OfflineSMS needs photo library access so you can send images in chats.",
+    "cameraPermissionTitle": "Camera access needed",
+    "cameraPermissionMessage": "OfflineSMS needs camera access so you can take and send photos."
   }
 }

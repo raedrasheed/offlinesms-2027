@@ -6,7 +6,7 @@
 // whose version is greater than the database's current version, in order, and
 // returns the resulting version.
 
-import { ALL_TABLE_STATEMENTS, CREATE_INDEXES, MESSAGES_V2_COLUMNS, SCHEMA_VERSION } from './schema';
+import { ALL_TABLE_STATEMENTS, CREATE_INDEXES, MESSAGES_V2_COLUMNS, MESSAGES_V3_COLUMNS, SCHEMA_VERSION } from './schema';
 
 export type SqlExec = (sql: string) => Promise<void>;
 
@@ -28,6 +28,13 @@ export const MIGRATIONS: Migration[] = [
     version: 2,
     up: async (exec) => {
       for (const stmt of MESSAGES_V2_COLUMNS) await exec(stmt);
+    },
+  },
+  {
+    // Phase 23 — media (image/voice) metadata + local upload state.
+    version: 3,
+    up: async (exec) => {
+      for (const stmt of MESSAGES_V3_COLUMNS) await exec(stmt);
     },
   },
 ];

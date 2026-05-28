@@ -92,12 +92,36 @@ export type PinnedMessage = {
   pinnedBy:           string;
 } | null;
 
+export type MessageType = 'text' | 'image' | 'voice';
+
+export type MediaUploadStatus = 'pending' | 'uploading' | 'uploaded' | 'failed';
+
+/** Phase 23 — media metadata stored on image/voice messages. Binary lives in
+ *  Firebase Storage; this object carries metadata only (never base64). */
+export type MediaInfo = {
+  storagePath:    string;
+  downloadURL?:   string | null;
+  mimeType:       string;
+  sizeBytes:      number;
+  width?:         number | null;
+  height?:        number | null;
+  durationMs?:    number | null;   // voice
+  waveform?:      number[] | null; // voice, normalized 0..1
+  thumbnailPath?: string | null;   // image
+  thumbnailURL?:  string | null;
+  uploadStatus:   MediaUploadStatus;
+  uploadProgress?: number;         // local-only, 0..1 during upload
+  localUri?:      string | null;   // local-only; not persisted to Firestore
+};
+
 export type Message = {
   id:                  string;
   conversationId:      string;
   senderUid:           string;
-  type:                'text';
+  type:                MessageType;
   text?:               string;
+  caption?:            string;       // Phase 23 — image caption
+  media?:              MediaInfo | null; // Phase 23 — image/voice metadata
   status?:             'sending' | 'sent' | 'delivered' | 'read' | 'failed';
   deletedForEveryone?: boolean;
   deletedAt?:          any;

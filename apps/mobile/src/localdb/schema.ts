@@ -3,7 +3,7 @@
 // Pure strings (no native import) so migrations.ts can apply them and tests can
 // assert on them. Booleans are stored as INTEGER 0/1; timestamps as INTEGER ms.
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 // Phase 22C — columns added to `messages` in migration v2 (ALTER, applied on
 // top of the v1 CREATE so existing installs upgrade cleanly).
@@ -13,6 +13,25 @@ export const MESSAGES_V2_COLUMNS = [
   `ALTER TABLE messages ADD COLUMN read_count INTEGER DEFAULT 0;`,
   `ALTER TABLE messages ADD COLUMN viewed_count INTEGER DEFAULT 0;`,
   `ALTER TABLE messages ADD COLUMN played_count INTEGER DEFAULT 0;`,
+];
+
+// Phase 23 — media (image/voice) columns on `messages`. Binary lives in
+// Firebase Storage; these hold metadata + local upload state only.
+export const MESSAGES_V3_COLUMNS = [
+  `ALTER TABLE messages ADD COLUMN caption TEXT;`,
+  `ALTER TABLE messages ADD COLUMN media_local_uri TEXT;`,
+  `ALTER TABLE messages ADD COLUMN media_mime TEXT;`,
+  `ALTER TABLE messages ADD COLUMN media_size INTEGER;`,
+  `ALTER TABLE messages ADD COLUMN media_width INTEGER;`,
+  `ALTER TABLE messages ADD COLUMN media_height INTEGER;`,
+  `ALTER TABLE messages ADD COLUMN media_duration_ms INTEGER;`,
+  `ALTER TABLE messages ADD COLUMN media_waveform TEXT;`,
+  `ALTER TABLE messages ADD COLUMN media_storage_path TEXT;`,
+  `ALTER TABLE messages ADD COLUMN media_download_url TEXT;`,
+  `ALTER TABLE messages ADD COLUMN media_thumb_path TEXT;`,
+  `ALTER TABLE messages ADD COLUMN media_thumb_url TEXT;`,
+  `ALTER TABLE messages ADD COLUMN media_upload_status TEXT;`,
+  `ALTER TABLE messages ADD COLUMN media_upload_progress REAL DEFAULT 0;`,
 ];
 
 export const CREATE_CONVERSATIONS = `

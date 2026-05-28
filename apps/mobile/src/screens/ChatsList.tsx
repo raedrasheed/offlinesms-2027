@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  FlatList, View, Text, Pressable, StyleSheet, TextInput,
+  FlatList, View, Text, Pressable, StyleSheet, TextInput, Image, Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
@@ -18,17 +18,20 @@ import { useLocalChatList } from '../hooks/useLocalChatList';
 import { isRTL } from '../i18n';
 import { radius } from '../theme';
 import { avatarColor, initials } from '../lib/avatar';
+import { setUnreadTotal } from '../lib/unreadStore';
+import { clearChat } from '../localdb';
 import { LoadingState, EmptyState } from '../components/state';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { useOffline } from '../context/OfflineContext';
 import { OfflineBanner, SyncingBanner } from '../components/OfflineBanners';
 
-type Filter = 'all' | 'unread' | 'favorites' | 'groups' | 'archived';
+type Filter = 'all' | 'unread' | 'favorites' | 'groups';
 
 type Row = Conversation & {
   state?:        UserState;
   peerName?:     string;
+  photoURL?:     string | null;
   someoneTyping: boolean;
 };
 
@@ -62,7 +65,7 @@ export default function ChatsList({ navigation }: any) {
   // Per-conversation state + typing + peer profile, keyed by conversation id.
   const [states, setStates]   = useState<Record<string, UserState | undefined>>({});
   const [typing, setTyping]   = useState<Record<string, boolean>>({});
-  const [peers, setPeers]     = useState<Record<string, { name?: string }>>({});
+  const [peers, setPeers]     = useState<Record<string, { name?: string; photoURL?: string | null }>>({});
 
   // Conversations list (Firestore path — skipped when the local DB drives the UI).
   useEffect(() => {
@@ -98,9 +101,9 @@ export default function ChatsList({ navigation }: any) {
         const peerUid = c.participantUids.find(u => u !== me);
         if (peerUid && !peers[peerUid]) {
           unsubs.push(onSnapshot(doc(db, 'users', peerUid), snap => {
-            const data = snap.data() as { displayName?: string; username?: string } | undefined;
+            const data = snap.data() as { displayName?: string; username?: string; photoURL?: string | null } | undefined;
             const name = data?.displayName || (data?.username ? `@${data.username}` : peerUid.slice(0, 6));
-            setPeers(prev => ({ ...prev, [c.id]: { name } }));
+            setPeers(prev => ({ ...prev, [c.id]: { name, photoURL: data?.photoURL ?? null } }));
           }));
         }
       }
@@ -120,30 +123,56 @@ export default function ChatsList({ navigation }: any) {
         ...c,
         state:         states[c.id],
         peerName:      displayName,
+        photoURL:      isGroup ? null : (peers[c.id]?.photoURL ?? null),
         someoneTyping: typing[c.id] ?? false,
       };
     });
   }, [useLocal, local.items, rows, states, peers, typing]);
 
+  // Archived chats are always hidden from every filter now (no archive tab).
+  const visible = useMemo(() => enriched.filter(c => c.state?.archived !== true), [enriched]);
+
   const filtered = useMemo(() => {
-    let out = enriched;
+    let out = visible;
     if (filter === 'unread')         out = out.filter(c => (c.state?.unreadCount ?? 0) > 0);
     else if (filter === 'favorites') out = out.filter(c => c.state?.favorite === true);
     else if (filter === 'groups')    out = out.filter(c => c.type === 'group');
-    else if (filter === 'archived')  out = out.filter(c => c.state?.archived === true);
-    else                             out = out.filter(c => c.state?.archived !== true);
 
     const t = search.trim().toLowerCase();
     if (t) out = out.filter(c => (c.peerName ?? '').toLowerCase().includes(t));
     return out;
-  }, [enriched, filter, search]);
+  }, [visible, filter, search]);
+
+  // Unread-message totals per filter (shown as a badge on each chip), plus the
+  // grand total that drives the bottom Chats-tab badge.
+  const unreadCounts = useMemo(() => {
+    const sum = (arr: Row[]) => arr.reduce((n, c) => n + (c.state?.unreadCount ?? 0), 0);
+    return {
+      all:       sum(visible),
+      unread:    sum(visible.filter(c => (c.state?.unreadCount ?? 0) > 0)),
+      favorites: sum(visible.filter(c => c.state?.favorite === true)),
+      groups:    sum(visible.filter(c => c.type === 'group')),
+    } as Record<Filter, number>;
+  }, [visible]);
+
+  useEffect(() => { setUnreadTotal(unreadCounts.all); }, [unreadCounts.all]);
+
+  const confirmClearChat = (cid: string, name: string) => {
+    Alert.alert(
+      t('chats.clearChatTitle'),
+      name ? `${t('chats.clearChatMessage')}\n\n${name}` : t('chats.clearChatMessage'),
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        { text: t('chats.clearChat'), style: 'destructive', onPress: () => { void clearChat(cid).then(() => local.refresh?.()); } },
+      ],
+    );
+  };
 
   const FILTER_LABELS: Record<Filter, string> = {
     all:       t('chats.filterAll'),
     unread:    t('chats.filterUnread'),
     favorites: t('chats.filterFavorites'),
     groups:    t('chats.filterGroups'),
-    archived:  'Archived',
   };
 
   const s = buildStyles(colors, isRTL);
@@ -170,24 +199,31 @@ export default function ChatsList({ navigation }: any) {
           accessibilityLabel={t('chats.search')}
         />
         <View style={s.chips}>
-          {(['all','unread','favorites','groups','archived'] as Filter[]).map(f => (
-            <Pressable
-              key={f}
-              style={[s.chip, filter === f && s.chipActive]}
-              onPress={() => setFilter(f)}
-              accessibilityRole="radio"
-              accessibilityLabel={FILTER_LABELS[f]}
-              accessibilityState={{ selected: filter === f }}
-            >
-              <Text style={[s.chipText, filter === f && s.chipTextActive]}>
-                {FILTER_LABELS[f]}
-              </Text>
-            </Pressable>
-          ))}
+          {(['all','unread','favorites','groups'] as Filter[]).map(f => {
+            const count = unreadCounts[f];
+            return (
+              <Pressable
+                key={f}
+                style={[s.chip, filter === f && s.chipActive]}
+                onPress={() => setFilter(f)}
+                accessibilityRole="radio"
+                accessibilityLabel={count > 0 ? `${FILTER_LABELS[f]}, ${count} unread` : FILTER_LABELS[f]}
+                accessibilityState={{ selected: filter === f }}
+              >
+                <Text style={[s.chipText, filter === f && s.chipTextActive]}>
+                  {FILTER_LABELS[f]}
+                </Text>
+                {count > 0 ? (
+                  <View style={[s.chipBadge, filter === f && s.chipBadgeActive]}>
+                    <Text style={[s.chipBadgeText, filter === f && s.chipBadgeTextActive]}>
+                      {count > 99 ? '99+' : count}
+                    </Text>
+                  </View>
+                ) : null}
+              </Pressable>
+            );
+          })}
         </View>
-        {useLocal ? (
-          <Text style={s.localHint}>{isOffline ? 'Local cache · offline' : 'Local cache'}</Text>
-        ) : null}
       </View>
 
       {isSyncing && queuedCount > 0 ? <SyncingBanner count={queuedCount} /> : isOffline ? <OfflineBanner /> : null}
@@ -198,7 +234,7 @@ export default function ChatsList({ navigation }: any) {
           title={
             filter === 'unread'    ? 'Nothing unread' :
             filter === 'favorites' ? 'No favorite chats yet' :
-            filter === 'archived'  ? 'No archived chats' :
+            filter === 'groups'    ? 'No group chats yet' :
             firstName ? `You’re all set, ${firstName}` : 'You’re all set'
           }
           description={
@@ -216,14 +252,20 @@ export default function ChatsList({ navigation }: any) {
             <Pressable
               style={s.row}
               onPress={() => navigation.navigate('Conversation', { id: item.id })}
+              onLongPress={() => confirmClearChat(item.id, item.peerName ?? '')}
+              delayLongPress={300}
               accessible={true}
               accessibilityRole="button"
               accessibilityLabel={`${item.peerName}${(item.state?.unreadCount ?? 0) > 0 ? `, ${item.state?.unreadCount} unread` : ''}`}
             >
               <View style={s.avWrap} accessibilityElementsHidden>
-                <View style={[s.av, item.type === 'group' && s.avGroup, { backgroundColor: avatarColor(item.id) }]}>
-                  <Text style={s.avText}>{initials(item.peerName ?? '?')}</Text>
-                </View>
+                {item.photoURL ? (
+                  <Image source={{ uri: item.photoURL }} style={[s.av, item.type === 'group' && s.avGroup]} />
+                ) : (
+                  <View style={[s.av, item.type === 'group' && s.avGroup, { backgroundColor: avatarColor(item.id) }]}>
+                    <Text style={s.avText}>{initials(item.peerName ?? '?')}</Text>
+                  </View>
+                )}
                 {item.type !== 'group' ? <View style={s.onlineDot} /> : null}
               </View>
               <View style={{ flex: 1, minWidth: 0 }}>
@@ -281,11 +323,14 @@ function buildStyles(colors: any, rtl: boolean) {
     h1:          { fontSize: 26, fontWeight: '800', color: colors.action.primary, textAlign: rtl ? 'right' : 'left' },
     search:      { padding: 12, backgroundColor: colors.background.subtle, borderRadius: radius.md, fontSize: 14, color: colors.text.primary },
     chips:       { flexDirection: rtl ? 'row-reverse' : 'row', gap: 8, flexWrap: 'wrap' },
-    chip:        { paddingHorizontal: 16, paddingVertical: 7, borderRadius: radius.pill, backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.border.strong, minHeight: 32 },
+    chip:        { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 7, borderRadius: radius.pill, backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.border.strong, minHeight: 32 },
     chipActive:  { backgroundColor: colors.action.primary, borderColor: colors.action.primary },
     chipText:    { fontSize: 13, color: colors.text.secondary, fontWeight: '700' },
     chipTextActive: { color: colors.action.primaryFg },
-    localHint:   { fontSize: 10, color: colors.text.muted, marginTop: 2, textAlign: rtl ? 'right' : 'left' },
+    chipBadge:   { minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 5, backgroundColor: colors.action.primary, alignItems: 'center', justifyContent: 'center' },
+    chipBadgeActive: { backgroundColor: colors.action.primaryFg },
+    chipBadgeText: { fontSize: 10, fontWeight: '800', color: colors.action.primaryFg },
+    chipBadgeTextActive: { color: colors.action.primary },
     row:         { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 14, paddingVertical: 12, paddingHorizontal: 16 },
     avWrap:      { width: 52, height: 52 },
     av:          { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },

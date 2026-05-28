@@ -20,6 +20,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme';
 import { avatarColor, initials } from '../lib/avatar';
 import { ChatActionSheet, SheetAction } from './ChatActionSheet';
+import { ReactionsSheet, ReactorInfo } from './ReactionsSheet';
+import { ImageMessageBubble } from './chat/ImageMessageBubble';
+import { VoiceMessageBubble } from './chat/VoiceMessageBubble';
 import {
   Message,
   REACTION_EMOJIS,
@@ -47,6 +50,8 @@ export type BubbleContext = {
   isPinned:       boolean;
   myUid:          string;
   memberCount?:   number;
+  // uid → display name/photo for resolving who reacted (group members).
+  reactorNames?:  Record<string, ReactorInfo>;
   // Phase 22D — when true, actions route through the local outbox instead of
   // calling the callables directly.
   localFirst?:    boolean;
@@ -62,6 +67,9 @@ export type MessageBubbleProps = {
   onJumpTo:   (messageId: string) => void;
   onInfo:     (msg: Message) => void;
   onSendViaSms?: (msg: Message) => void;
+  onOpenImage?:   (uri: string) => void;
+  onRetryMedia?:  (msg: Message) => void;
+  onPlayedVoice?: (msg: Message) => void;
   // Offline-first: locally queued outgoing message not yet on the server.
   pending?:   'queued' | 'syncing' | 'failed';
   onRetry?:   () => void;
@@ -80,11 +88,20 @@ function formatTime(value: any): string {
 }
 
 export function MessageBubble({
-  message: m, context, showSender, onReply, onEditStart, onForward, onJumpTo, onInfo, onSendViaSms, pending, onRetry,
+  message: m, context, showSender, onReply, onEditStart, onForward, onJumpTo, onInfo, onSendViaSms,
+  onOpenImage, onRetryMedia, onPlayedVoice, pending, onRetry,
 }: MessageBubbleProps) {
   const mine    = context.isMyMessage;
   const deleted = m.deletedForEveryone === true;
+  // For images without a caption, overlay time + ticks on the photo (WhatsApp
+  // style) instead of below the bubble.
+  const imageOverlayFooter = !deleted && m.type === 'image' && !(m.caption && m.caption.trim());
+  // Sender avatar/name: message snapshot first, then the resolved member profile.
+  const senderProfile = context.reactorNames?.[m.senderUid];
+  const senderPhoto = m.senderPhotoURL ?? senderProfile?.photoURL ?? null;
+  const senderName = m.senderDisplayName ?? senderProfile?.name ?? m.senderUid.slice(0, 2);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [reactionsOpen, setReactionsOpen] = useState(false);
 
   if (pending) {
     return (
@@ -198,11 +215,11 @@ export function MessageBubble({
     <View style={[s.row, mine ? s.rowMine : s.rowTheirs]}>
       {showAvatar ? (
         showSender ? (
-          m.senderPhotoURL ? (
-            <Image source={{ uri: m.senderPhotoURL }} style={s.avatar} />
+          senderPhoto ? (
+            <Image source={{ uri: senderPhoto }} style={s.avatar} />
           ) : (
             <View style={[s.avatar, { backgroundColor: avatarColor(m.senderUid) }]}>
-              <Text style={s.avatarText}>{initials(m.senderDisplayName ?? m.senderUid.slice(0, 2))}</Text>
+              <Text style={s.avatarText}>{initials(senderName)}</Text>
             </View>
           )
         ) : (
@@ -214,7 +231,7 @@ export function MessageBubble({
       <Pressable onLongPress={() => setSheetOpen(true)} delayLongPress={300} style={[s.bubble, mine ? s.sent : s.recv]}>
         {showSender ? (
           <Text style={[s.senderLabel, { color: avatarColor(m.senderUid) }]} numberOfLines={1}>
-            {m.senderDisplayName ?? m.senderUid.slice(0, 6)}
+            {senderName}
           </Text>
         ) : null}
         {m.forwarded ? <Text style={[s.meta, mine && { color: 'rgba(255,255,255,.85)' }]}>↪︎ Forwarded</Text> : null}
@@ -233,27 +250,51 @@ export function MessageBubble({
           </Pressable>
         ) : null}
 
-        <View style={s.bubbleRow}>
-          <Text style={[s.bubbleText, mine && { color: '#fff' }, deleted && (mine ? s.deletedTextMine : s.deletedText)]}>
-            {deleted ? 'This message was deleted.' : (m.text ?? '')}
-          </Text>
-        </View>
+        {!deleted && m.type === 'image' ? (
+          <ImageMessageBubble
+            message={m}
+            mine={mine}
+            onOpen={(uri) => onOpenImage?.(uri)}
+            onRetry={() => onRetryMedia?.(m)}
+            footer={imageOverlayFooter ? (
+              <>
+                <Text style={s.imgFootTime}>{formatTime(m.createdAt)}</Text>
+                {mine ? <ReceiptIndicator message={m} isGroup={context.isGroup} memberCount={context.memberCount} /> : null}
+              </>
+            ) : null}
+          />
+        ) : !deleted && m.type === 'voice' ? (
+          <VoiceMessageBubble
+            message={m}
+            mine={mine}
+            onPlayed={() => onPlayedVoice?.(m)}
+            onRetry={() => onRetryMedia?.(m)}
+          />
+        ) : (
+          <View style={s.bubbleRow}>
+            <Text style={[s.bubbleText, mine && { color: '#fff' }, deleted && (mine ? s.deletedTextMine : s.deletedText)]}>
+              {deleted ? 'This message was deleted.' : (m.text ?? '')}
+            </Text>
+          </View>
+        )}
 
-        <View style={s.bubbleFooter}>
-          {m.editedAt ? <Text style={[s.foot, mine && { color: 'rgba(255,255,255,.7)' }]}>edited</Text> : null}
-          {context.isStarred ? <Text style={s.star}>★</Text> : null}
-          {context.isPinned ? <Text style={s.foot}>📌</Text> : null}
-          {mine && !deleted ? (
-            <ReceiptIndicator message={m} isGroup={context.isGroup} memberCount={context.memberCount} />
-          ) : null}
-          <Text style={[s.foot, mine && { color: 'rgba(255,255,255,.7)' }]}>{formatTime(m.createdAt)}</Text>
-        </View>
+        {imageOverlayFooter ? null : (
+          <View style={s.bubbleFooter}>
+            {m.editedAt ? <Text style={[s.foot, mine && { color: 'rgba(255,255,255,.7)' }]}>edited</Text> : null}
+            {context.isStarred ? <Text style={s.star}>★</Text> : null}
+            {context.isPinned ? <Text style={s.foot}>📌</Text> : null}
+            {mine && !deleted ? (
+              <ReceiptIndicator message={m} isGroup={context.isGroup} memberCount={context.memberCount} />
+            ) : null}
+            <Text style={[s.foot, mine && { color: 'rgba(255,255,255,.7)' }]}>{formatTime(m.createdAt)}</Text>
+          </View>
+        )}
       </Pressable>
 
       {reactionEntries.length > 0 ? (
         <Pressable
           style={[s.reactionPill, iReacted && s.reactionPillMine]}
-          onPress={() => setSheetOpen(true)}
+          onPress={() => (context.isGroup ? setReactionsOpen(true) : setSheetOpen(true))}
         >
           {reactionEntries.map(r => (
             <Text key={r.emoji} style={s.reactionEmoji}>{r.emoji}</Text>
@@ -271,6 +312,18 @@ export function MessageBubble({
         reactions={deleted ? [] : REACTION_EMOJIS}
         onReact={(e) => { close(); react(e); }}
         actions={sheetActions}
+      />
+
+      <ReactionsSheet
+        visible={reactionsOpen}
+        onClose={() => setReactionsOpen(false)}
+        reactions={m.reactions}
+        myUid={context.myUid}
+        resolveName={(uid) =>
+          context.reactorNames?.[uid] ??
+          (uid === context.myUid ? { name: 'You' } : { name: uid.slice(0, 6) })
+        }
+        onRemoveMine={(emoji) => { void react(emoji); }}
       />
     </View>
   );
@@ -335,6 +388,7 @@ const s = StyleSheet.create({
   replyText:      { fontSize: 12, color: colors.ink, marginTop: 2 },
   bubbleFooter:   { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 6, marginTop: 4 },
   foot:           { fontSize: 10, color: colors.ink500 },
+  imgFootTime:    { fontSize: 11, color: '#fff', fontWeight: '600' },
   receiptRow:     { flexDirection: 'row', alignItems: 'center', gap: 3 },
   star:           { fontSize: 10, color: '#F59E0B' },
   tick:           { fontSize: 11, fontWeight: '700', letterSpacing: -1 },

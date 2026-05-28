@@ -3,6 +3,7 @@
 
 import * as outboxRepo from '../repositories/outboxRepo';
 import * as messagesRepo from '../repositories/messagesRepo';
+import { getCursor, setCursor } from '../repositories/syncStateRepo';
 import { pullConversations, pullMessages, pullMembers } from './firebasePull';
 import { pushOutboxItem } from './firebasePush';
 import { isOnline } from './networkState';
@@ -10,9 +11,25 @@ import { isPermanent, errorCode, nextAttemptAt } from './retryPolicy';
 
 let running = false;
 
+// Realtime feeders own steady-state reads, so the engine only pulls on these
+// lifecycle transitions (cold start, reconnect, return to foreground) to close
+// any gap when feeders weren't attached. The frequent timer/outbox kicks just
+// drain the outbox.
+const PULL_REASONS: ReadonlySet<SyncReason> = new Set(['boot', 'auth-change', 'online', 'foreground', 'active-change']);
+
+// Retention sweep cadence — at most once per this interval, on a pull run.
+const PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+async function maybePrune(): Promise<void> {
+  const last = await getCursor('last_prune_at');
+  if (Date.now() - last < PRUNE_INTERVAL_MS) return;
+  try { await messagesRepo.pruneOldMessages(); } catch { /* best-effort */ }
+  await setCursor('last_prune_at', Date.now());
+}
+
 export type SyncReason =
   | 'boot' | 'auth-change' | 'online' | 'foreground'
-  | 'outbox' | 'manual' | 'timer';
+  | 'active-change' | 'outbox' | 'manual' | 'timer';
 
 /** Push all due outbox items. Returns how many completed. */
 export async function pushOutbox(): Promise<number> {
@@ -24,11 +41,13 @@ export async function pushOutbox(): Promise<number> {
     await outboxRepo.markProcessing(item.id);
     try {
       const res = await pushOutboxItem(item);
-      // Reconcile an optimistic send with its canonical server message.
-      if (item.type === 'send_message' && res.remoteId) {
+      // Reconcile an optimistic send (text or media) with its canonical server
+      // message id so the local row flips from pending → sent.
+      if ((item.type === 'send_message' || item.type === 'send_image_message' || item.type === 'send_voice_message') && res.remoteId) {
         const payload = JSON.parse(item.payload_json || '{}');
-        if (payload.localId) {
-          await messagesRepo.reconcileToRemote(payload.localId, {
+        const localId = payload.localId ?? payload.localMessageId;
+        if (localId) {
+          await messagesRepo.reconcileToRemote(localId, {
             remoteId: res.remoteId, remoteCreatedAt: null,
           });
         }
@@ -73,7 +92,12 @@ export async function syncNow(reason: SyncReason, activeConversationId?: string)
   running = true;
   try {
     await pushOutbox();
-    await pullRemoteChanges(activeConversationId);
+    if (PULL_REASONS.has(reason)) {
+      await pullRemoteChanges(activeConversationId);
+      // Keep the retention sweep off the conversation-open path; run it only on
+      // app start / foreground so it never stalls opening a chat.
+      if (reason === 'boot' || reason === 'foreground') await maybePrune();
+    }
   } catch {
     // Never throw out of a sync run; individual failures are recorded per-item.
   } finally {

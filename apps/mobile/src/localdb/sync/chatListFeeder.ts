@@ -58,9 +58,9 @@ export function startChatListFeeder(uid: string, onChange: () => void): () => vo
         if (peerUid) {
           resolvedTitles.add(d.id);
           void getDoc(doc(db, 'users', peerUid)).then((u) => {
-            const data = u.data() as { displayName?: string; username?: string } | undefined;
+            const data = u.data() as { displayName?: string; username?: string; photoURL?: string | null } | undefined;
             const name = data?.displayName || (data?.username ? `@${data.username}` : peerUid.slice(0, 6));
-            void upsertRemoteConversation({ id: d.id, title: name }).then(onChange);
+            void upsertRemoteConversation({ id: d.id, title: name, avatar_url: data?.photoURL ?? null }).then(onChange);
           }).catch(() => { resolvedTitles.delete(d.id); });
         }
       }

@@ -12,7 +12,7 @@ import { openForUser, closeDb, wipeUserData, getCurrentUid } from './connection'
 import { startScheduler, stopScheduler, kick } from './sync/syncScheduler';
 import * as messagesRepo from './repositories/messagesRepo';
 import * as outboxRepo from './repositories/outboxRepo';
-import { getDeviceId } from './repositories/syncStateRepo';
+import { getDeviceId, getCursor, setCursor } from './repositories/syncStateRepo';
 import { idempotencyKey, localId } from './sync/ids';
 import { toggleReaction } from './sync/reactionLogic';
 import type { MessageRow } from './types';
@@ -98,6 +98,156 @@ export async function queueSendMessage(input: QueueSendInput): Promise<MessageRo
 
   kick('outbox');
   return row;
+}
+
+export interface QueueSendImageInput {
+  conversationId: string;
+  senderUid: string;
+  senderDisplayName?: string | null;
+  localUri: string;
+  mimeType: string;
+  sizeBytes: number;
+  width?: number | null;
+  height?: number | null;
+  caption?: string | null;
+  replyTo?: { messageId: string; senderUid?: string; senderDisplayName?: string; preview?: string } | null;
+}
+
+/**
+ * Phase 23 — write an optimistic local image message (status `pending`,
+ * uploadStatus `pending`) and enqueue a `send_image_message` outbox item. The
+ * sync engine runs create → upload → finalize when online and reconciles the
+ * local row to the server message id. The local file is the render source until
+ * the download URL arrives, so the bubble shows immediately (and offline).
+ */
+export async function queueSendImageMessage(input: QueueSendImageInput): Promise<MessageRow> {
+  if (!getCurrentUid()) throw new Error('localdb: not initialised');
+  const deviceId = await getDeviceId();
+  const clientSequence = await messagesRepo.nextClientSequence(input.conversationId);
+
+  const row = await messagesRepo.insertLocalMediaMessage({
+    conversationId: input.conversationId,
+    senderUid: input.senderUid,
+    senderDisplayName: input.senderDisplayName ?? null,
+    mediaType: 'image',
+    caption: input.caption ?? null,
+    localUri: input.localUri,
+    mimeType: input.mimeType,
+    sizeBytes: input.sizeBytes,
+    width: input.width ?? null,
+    height: input.height ?? null,
+    replyToMessageId: input.replyTo?.messageId ?? null,
+    replyToPreview: input.replyTo?.preview ?? null,
+    deviceId,
+    clientSequence,
+  });
+
+  await outboxRepo.enqueue({
+    type: 'send_image_message',
+    entityType: 'message',
+    entityId: row.local_id,
+    conversationId: input.conversationId,
+    idempotencyKey: idempotencyKey(['send-image', deviceId, row.local_id]),
+    payload: {
+      conversationId: input.conversationId,
+      localMessageId: row.local_id,
+      localUri: input.localUri,
+      mimeType: input.mimeType,
+      sizeBytes: input.sizeBytes,
+      width: input.width ?? null,
+      height: input.height ?? null,
+      caption: input.caption ?? null,
+      replyTo: input.replyTo ?? null,
+    },
+  });
+
+  kick('outbox');
+  return row;
+}
+
+export interface QueueSendVoiceInput {
+  conversationId: string;
+  senderUid: string;
+  senderDisplayName?: string | null;
+  localUri: string;
+  mimeType: string;
+  sizeBytes: number;
+  durationMs: number;
+  waveform?: number[] | null;
+  replyTo?: { messageId: string; senderUid?: string; senderDisplayName?: string; preview?: string } | null;
+}
+
+/** Phase 23 — optimistic local voice message + `send_voice_message` outbox item. */
+export async function queueSendVoiceMessage(input: QueueSendVoiceInput): Promise<MessageRow> {
+  if (!getCurrentUid()) throw new Error('localdb: not initialised');
+  const deviceId = await getDeviceId();
+  const clientSequence = await messagesRepo.nextClientSequence(input.conversationId);
+
+  const row = await messagesRepo.insertLocalMediaMessage({
+    conversationId: input.conversationId,
+    senderUid: input.senderUid,
+    senderDisplayName: input.senderDisplayName ?? null,
+    mediaType: 'voice',
+    localUri: input.localUri,
+    mimeType: input.mimeType,
+    sizeBytes: input.sizeBytes,
+    durationMs: input.durationMs,
+    waveform: input.waveform ?? null,
+    replyToMessageId: input.replyTo?.messageId ?? null,
+    replyToPreview: input.replyTo?.preview ?? null,
+    deviceId,
+    clientSequence,
+  });
+
+  await outboxRepo.enqueue({
+    type: 'send_voice_message',
+    entityType: 'message',
+    entityId: row.local_id,
+    conversationId: input.conversationId,
+    idempotencyKey: idempotencyKey(['send-voice', deviceId, row.local_id]),
+    payload: {
+      conversationId: input.conversationId,
+      localMessageId: row.local_id,
+      localUri: input.localUri,
+      mimeType: input.mimeType,
+      sizeBytes: input.sizeBytes,
+      durationMs: input.durationMs,
+      waveform: input.waveform ?? null,
+      replyTo: input.replyTo ?? null,
+    },
+  });
+
+  kick('outbox');
+  return row;
+}
+
+/** Phase 23 — retry a failed media upload: reset its outbox item + local state. */
+export async function retryMediaMessage(localMessageId: string): Promise<void> {
+  if (!getCurrentUid()) return;
+  await messagesRepo.setMediaProgress(localMessageId, 0);
+  await outboxRepo.retryByEntityId(localMessageId);
+  kick('outbox');
+}
+
+/**
+ * Phase 23 — clear a chat's history on this device. Deletes the local messages
+ * and records a "cleared" watermark so the realtime feeder / catch-up pull don't
+ * resurrect older messages; messages sent after this point still appear.
+ */
+export async function clearChat(conversationId: string): Promise<number> {
+  if (!getCurrentUid()) return 0;
+  // Watermark on the SAME clock as the messages (server time), not Date.now() —
+  // otherwise device/server clock skew can hide genuinely new incoming messages.
+  const watermark = await messagesRepo.getMaxMessageTime(conversationId);
+  await setCursor(`chat_cleared:${conversationId}`, watermark);
+  // Keep the pull cursor at the watermark so it resumes correctly.
+  await setCursor(`msg_cursor:${conversationId}`, watermark);
+  await messagesRepo.deleteConversationMessages(conversationId);
+  return watermark;
+}
+
+export async function getChatClearedAt(conversationId: string): Promise<number> {
+  return getCursor(`chat_cleared:${conversationId}`);
 }
 
 export interface ActionResult { ok: boolean; reason?: 'not-initialised' | 'not-delivered' }

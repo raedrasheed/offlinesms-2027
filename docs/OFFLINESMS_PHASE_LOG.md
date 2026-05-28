@@ -4,6 +4,68 @@ Running log of phased work. Newest first.
 
 ---
 
+## Phase 23 — Media Messages: Images & Voice Notes
+
+**Branch:** `claude/gracious-heisenberg-so2eH`.
+**Status:** **Image + voice journeys** code-complete (plan, data model,
+validation, callables, Storage rules, i18n, unit tests; schema v3 media columns;
+image + voice outbox; attachment sheet, picker, preview/viewer, image bubble;
+hold-to-record/lock recorder, voice bubble + playback). **Pending on-device
+verification** (no native run in CI) — gestures and expo-av especially.
+
+### Image journey (done)
+
+- Schema v3 media columns + migration; `insertLocalMediaMessage`,
+  media upload-state setters, `queueSendImageMessage`, `retryMediaMessage`.
+- `send_image_message` outbox handler: create → resumable upload (progress) →
+  finalize, with reconcile; media carried through feeder + catch-up pull +
+  view-model.
+- UI: `AttachmentSheet`, `ImageMessageBubble`, `MediaUploadProgress`,
+  `ImagePreviewScreen`, `ImageViewerScreen`; composer attach button + picker
+  (expo-image-picker) + permissions; navigation registered; `expo-file-system`
+  added for file size.
+
+### What was done
+
+1. **Plan** — `docs/OFFLINESMS_PHASE_23_PLAN.md` (inventory, data/storage model,
+   image + voice UX, offline/outbox, security, rules, tests, rollback, criteria).
+2. **Data model** — `Message.type` widened to `text|image|voice`; added a
+   metadata-only `MediaInfo` (binary stays in Storage), `caption`.
+3. **Pure helpers** (`apps/mobile/src/media/`): MIME allow-list + size/duration
+   validation, waveform normalization, duration formatting, attachment-option
+   mapping, and an upload-lifecycle reducer — all unit-tested.
+4. **Callables** — `createMediaMessage` (reserve metadata doc + return Storage
+   path, same membership/lock/admin/idempotency checks as `sendTextMessage`),
+   `finalizeMediaMessage` (sender-only, idempotent). `onMessageCreate` previews
+   media as "Photo"/"Voice message". Audit logs carry safe metadata only.
+5. **Storage rules** — `chatMedia/{conversationId}/{messageId}/{file}`: member
+   read, sender-only write, 10MB cap, strict image/audio MIME allow-list.
+6. **i18n** — EN/AR `media.*` keys (32 each, parity verified).
+
+### Decisions / deviations
+
+- **`expo-av`** (already installed, SDK 51) instead of `expo-audio` (SDK 52+).
+- Single image first; multi-select and crop/edit deferred.
+- No local-first flag changes in this phase.
+
+### Voice journey (done)
+
+- `media/audio/{audioRecorder,audioPlayer,waveform,permissions}` (expo-av);
+  `useVoiceRecorder` state machine; `VoiceRecorderBar` / `LockedVoiceRecorderBar`
+  / `VoiceMessageBubble` / shared `Waveform`.
+- `queueSendVoiceMessage` + `send_voice_message` push handler; composer mic
+  hold-to-record + slide-to-cancel + swipe-to-lock (PanResponder); played
+  receipt on playback start.
+
+### Deferred / next
+
+- Device verification of both journeys (gesture thresholds, expo-av recording,
+  resumable upload, storage-rule membership lookup, v3 migration on upgrade).
+- Optional `expo-image-manipulator` crop/thumbnail; multi-select images.
+- Functions emulator tests for create/finalize; storage-rules test for chatMedia.
+
+---
+
 ## Phase 22D — Message Actions + Receipts via Outbox (flag-gated)
 
 **Branch:** `claude/phase22d-message-actions-outbox` (stacked on 22C).

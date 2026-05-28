@@ -64,7 +64,10 @@ react {
 
     /* Bundling */
     //   A list containing the node command and its flags. Default is just 'node'.
-    // nodeExecutableAndArgs = ["node"]
+    //   Give Metro a larger Node heap so the release bundle doesn't OOM
+    //   ("Fatal process out of memory: Zone"). Lower the value if the build
+    //   machine has less RAM.
+    nodeExecutableAndArgs = ["node", "--max-old-space-size=8192"]
 
     //
     //   The path to the CLI configuration file. Default is empty.

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
@@ -23,6 +23,8 @@ import Permissions from './src/screens/Permissions';
 import FindFriends from './src/screens/FindFriends';
 import IncomingCall from './src/screens/IncomingCall';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
+import { useChatListPersistence } from './src/hooks/useLocalPersistence';
+import { useUnreadTotal } from './src/lib/unreadStore';
 import ChatsList from './src/screens/ChatsList';
 import Conversation from './src/screens/Conversation';
 import NewChat from './src/screens/NewChat';
@@ -46,6 +48,8 @@ import Devices from './src/screens/Devices';
 import SmsEscalation from './src/screens/SmsEscalation';
 import SupportTicket from './src/screens/SupportTicket';
 import EditProfile from './src/screens/EditProfile';
+import ImagePreviewScreen from './src/screens/ImagePreviewScreen';
+import ImageViewerScreen from './src/screens/ImageViewerScreen';
 
 const AuthStack = createNativeStackNavigator();
 const OnboardingStack = createNativeStackNavigator();
@@ -80,12 +84,20 @@ const TAB_ICONS: Record<string, { active: keyof typeof Ionicons.glyphMap; inacti
 };
 
 function MainTabs() {
+  const insets = useSafeAreaInsets();
+  const unread = useUnreadTotal();
   return (
     <Tabs.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarActiveTintColor:   '#1F7BA8',
         tabBarInactiveTintColor: '#6B7488',
+        tabBarStyle: {
+          height: 70 + insets.bottom,
+          paddingBottom: insets.bottom + 6,
+        },
+        tabBarItemStyle: { paddingTop: 12, paddingBottom: 4 },
+        tabBarLabelStyle: { fontSize: 11, marginTop: 4 },
         tabBarIcon: ({ focused, color, size }) => {
           const set = TAB_ICONS[route.name];
           const name = focused ? set.active : set.inactive;
@@ -93,7 +105,11 @@ function MainTabs() {
         },
       })}
     >
-      <Tabs.Screen name="Chats" component={ChatsList} />
+      <Tabs.Screen
+        name="Chats"
+        component={ChatsList}
+        options={{ tabBarBadge: unread > 0 ? (unread > 99 ? '99+' : unread) : undefined }}
+      />
       <Tabs.Screen name="Status" component={Status} />
       <Tabs.Screen name="Calls" component={Calls} />
       <Tabs.Screen name="Settings" component={Settings} />
@@ -123,6 +139,9 @@ export default function App() {
     });
   }, [user]);
 
+  // Mirror the user's chats into the local SQLite DB for the whole session.
+  useChatListPersistence(user?.uid);
+
   if (!ready) return null;
 
   return (
@@ -143,6 +162,8 @@ export default function App() {
             <RootStack.Screen name="NewGroup" component={NewGroup} />
             <RootStack.Screen name="GroupCreateInfo" component={GroupCreateInfo} />
             <RootStack.Screen name="Conversation" component={Conversation} />
+            <RootStack.Screen name="ImagePreview" component={ImagePreviewScreen} />
+            <RootStack.Screen name="ImageViewer" component={ImageViewerScreen} options={{ presentation: 'fullScreenModal' }} />
             <RootStack.Screen name="GroupInfo" component={GroupInfo} />
             <RootStack.Screen name="AddMembers" component={AddMembers} />
             <RootStack.Screen name="ForwardPicker" component={ForwardPicker} />

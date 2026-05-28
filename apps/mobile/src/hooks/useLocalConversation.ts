@@ -8,8 +8,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { LOCAL_FIRST_CONVERSATION_ENABLED } from '../config/features';
-import { initLocalDb, messagesRepo, setActiveConversation } from '../localdb';
+import { initLocalDb, messagesRepo, setActiveConversation, clearChat, getChatClearedAt } from '../localdb';
 import { startConversationFeeder } from '../localdb/sync/conversationFeeder';
+import { pullMessagesBefore } from '../localdb/sync/firebasePull';
 import { importLegacyQueueOnce } from '../localdb/sync/legacyImport';
 import { mapAndOrderMessages } from './messageModel';
 import type { Message } from '../lib/conversations';
@@ -24,6 +25,7 @@ export interface LocalConversation {
   source: ConversationSource;
   refresh: () => void;
   loadOlder: () => void;
+  clear: () => Promise<void>;
 }
 
 export function useLocalConversation(conversationId: string | undefined, uid: string | undefined): LocalConversation {
@@ -33,12 +35,25 @@ export function useLocalConversation(conversationId: string | undefined, uid: st
   const [source, setSource] = useState<ConversationSource>(enabled ? 'local' : 'disabled');
   const limitRef = useRef(PAGE);
   const refreshing = useRef(false);
+  const localCountRef = useRef(0);
+  const oldestMsRef = useRef<number | null>(null);
+  const clearedAtRef = useRef(0);
 
   const refresh = useCallback(async () => {
     if (!enabled || !conversationId || refreshing.current) return;
     refreshing.current = true;
     try {
-      const rows = await messagesRepo.listMessages(conversationId, limitRef.current);
+      const all = await messagesRepo.listMessages(conversationId, limitRef.current);
+      // Hide messages whose SERVER time is at/older than the "cleared" watermark.
+      // Rows without a server time yet (your own still-pending sends) are always
+      // kept — comparing server-vs-server avoids clock-skew hiding new messages.
+      const rows = clearedAtRef.current > 0
+        ? all.filter(r => r.remote_created_at == null || r.remote_created_at > clearedAtRef.current)
+        : all;
+      localCountRef.current = rows.length;
+      // Rows are newest-first; the last one is the oldest message held locally.
+      const oldest = rows[rows.length - 1];
+      oldestMsRef.current = oldest ? (oldest.remote_created_at ?? oldest.created_at ?? null) : null;
       setMessages(mapAndOrderMessages(rows));
       setSource('local');
     } catch {
@@ -59,6 +74,7 @@ export function useLocalConversation(conversationId: string | undefined, uid: st
         await initLocalDb(uid);
         setActiveConversation(conversationId);
         await importLegacyQueueOnce(uid);
+        clearedAtRef.current = await getChatClearedAt(conversationId);
         if (cancelled) return;
         await refresh();
         stopFeeder = startConversationFeeder(conversationId, () => { void refresh(); });
@@ -72,7 +88,26 @@ export function useLocalConversation(conversationId: string | undefined, uid: st
     return () => { cancelled = true; stopFeeder?.(); setActiveConversation(undefined); };
   }, [enabled, uid, conversationId, refresh]);
 
-  const loadOlder = useCallback(() => { limitRef.current += PAGE; void refresh(); }, [refresh]);
+  const loadOlder = useCallback(async () => {
+    if (!enabled || !conversationId) return;
+    limitRef.current += PAGE;
+    await refresh();
+    // Local history exhausted (fewer rows than asked for): backfill older
+    // messages from Firestore — covers history evicted by retention or never
+    // reached by the forward pull — then re-read.
+    if (localCountRef.current < limitRef.current && oldestMsRef.current != null) {
+      try {
+        const fetched = await pullMessagesBefore(conversationId, oldestMsRef.current);
+        if (fetched > 0) await refresh();
+      } catch { /* best-effort: keep showing what we have */ }
+    }
+  }, [enabled, conversationId, refresh]);
 
-  return { messages, loading, source, refresh: () => { void refresh(); }, loadOlder };
+  const clear = useCallback(async () => {
+    if (!conversationId) return;
+    clearedAtRef.current = await clearChat(conversationId);
+    setMessages([]);
+  }, [conversationId]);
+
+  return { messages, loading, source, refresh: () => { void refresh(); }, loadOlder, clear };
 }

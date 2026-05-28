@@ -33,6 +33,8 @@ export type MemberStatus = 'active' | 'left' | 'removed';
 
 export type OutboxType =
   | 'send_message'
+  | 'send_image_message'
+  | 'send_voice_message'
   | 'edit_message'
   | 'delete_message'
   | 'react_message'
@@ -77,7 +79,7 @@ export interface MessageRow {
   conversation_id: string;
   sender_uid: string;
   sender_display_name: string | null;
-  type: 'text';
+  type: 'text' | 'image' | 'voice';
   text: string | null;
   preview: string | null;
   created_at: number;
@@ -104,6 +106,22 @@ export interface MessageRow {
   read_count: number;
   viewed_count: number;
   played_count: number;
+  // Phase 23 — media (image/voice). Binary in Storage; these are metadata +
+  // local upload state. Present from schema v3; optional for older rows/tests.
+  caption?: string | null;
+  media_local_uri?: string | null;
+  media_mime?: string | null;
+  media_size?: number | null;
+  media_width?: number | null;
+  media_height?: number | null;
+  media_duration_ms?: number | null;
+  media_waveform?: string | null;
+  media_storage_path?: string | null;
+  media_download_url?: string | null;
+  media_thumb_path?: string | null;
+  media_thumb_url?: string | null;
+  media_upload_status?: 'pending' | 'uploading' | 'uploaded' | 'failed' | null;
+  media_upload_progress?: number | null;
 }
 
 export interface ReactionRow {
@@ -181,4 +199,9 @@ export type SyncStateKey =
   | 'local_schema_version'
   | 'current_user_uid'
   | 'device_id'
-  | 'legacy_queue_migrated';
+  | 'legacy_queue_migrated'
+  | 'last_prune_at'
+  // Per-conversation message high-water mark (max remote createdAt pulled).
+  | `msg_cursor:${string}`
+  // Per-conversation "cleared chat" watermark (hide messages at/older than ms).
+  | `chat_cleared:${string}`;

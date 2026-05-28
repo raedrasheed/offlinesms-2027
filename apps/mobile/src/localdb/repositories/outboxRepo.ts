@@ -93,6 +93,14 @@ export async function retryItem(id: string): Promise<void> {
   );
 }
 
+/** Phase 23 — reset a failed item by its entity id (e.g. a media message's local id). */
+export async function retryByEntityId(entityId: string): Promise<void> {
+  await getDb().run(
+    `UPDATE outbox SET status = 'pending', attempt_count = 0, next_attempt_at = ?, updated_at = ? WHERE entity_id = ? AND status = 'failed'`,
+    [Date.now(), Date.now(), entityId],
+  );
+}
+
 export async function deleteCompleted(olderThanMs = 0): Promise<void> {
   await getDb().run(`DELETE FROM outbox WHERE status = 'completed' AND updated_at <= ?`, [Date.now() - olderThanMs]);
 }
