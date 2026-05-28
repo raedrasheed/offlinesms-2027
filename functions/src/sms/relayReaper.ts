@@ -11,6 +11,7 @@ import { writeAuditLog } from '../lib/auditLog';
 import {
   reapDecision, backoffMs, isHeartbeatStale, recipientStatusFor, type RelayJobStatus,
 } from './relayLogic';
+import { maybeFinalizeRelayBatch } from './relaySettlement';
 
 const SCAN_LIMIT = 200;
 
@@ -20,6 +21,7 @@ export const relayReaper = onSchedule(
     const db = getFirestore();
     const now = Date.now();
     let expiredLeases = 0, requeued = 0, failedPermanent = 0, devicesOffline = 0;
+    const touchedBatches = new Set<string>();
 
     // 1) Expire lapsed leases.
     const inFlight = await db.collection('relayJobs')
@@ -74,6 +76,13 @@ export const relayReaper = onSchedule(
         }
         await writeAuditLog({ action: 'relay.job.failed', actor: { uid: 'system' }, target: { type: 'relayJob', id: doc.id }, result: 'failure', metadata: { businessId, reason: 'lease-expired-max-attempts' } });
       }
+      if (batchId) touchedBatches.add(batchId);
+    }
+
+    // 1b) Finalize any batch whose relay jobs are now all terminal (safety net
+    //     for batches whose last report didn't finalize, e.g. device went away).
+    for (const batchId of touchedBatches) {
+      try { await maybeFinalizeRelayBatch(batchId); } catch { /* next run retries */ }
     }
 
     // 2) Mark stale ACTIVE devices offline (never touch paused/revoked).

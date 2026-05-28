@@ -5,6 +5,7 @@ import {
   normalizeReportStatus, recipientStatusFor, isTerminalJobStatus, shouldApplyReport,
   classifyFailure, backoffMs, failureOutcome, reapDecision, isClaimable, utcDayKey,
   relayModeEngaged, isHybrid, deviceRemaining, isDeviceRoutable, routeLeastLoaded,
+  relayBatchFinalizable,
   BACKOFF_BASE_MS, BACKOFF_MAX_MS,
   PAIRING_CODE_TTL_MS, LEASE_TTL_MS,
 } from '../src/sms/relayLogic';
@@ -179,5 +180,15 @@ describe('multi-device routing (Phase 5)', () => {
     const r = routeLeastLoaded(['a', 'b'], []);
     expect(r.assignments).toHaveLength(0);
     expect(r.unrouted).toEqual(['a', 'b']);
+  });
+});
+
+describe('relay batch finalization guard (Phase 6)', () => {
+  it('finalizes once: only when sending, not finalized, and no in-flight jobs', () => {
+    expect(relayBatchFinalizable(0, false, 'sending')).toBe(true);
+    expect(relayBatchFinalizable(2, false, 'sending')).toBe(false); // jobs in flight
+    expect(relayBatchFinalizable(0, true, 'sending')).toBe(false);  // already finalized
+    expect(relayBatchFinalizable(0, false, 'completed')).toBe(false); // not sending (settled)
+    expect(relayBatchFinalizable(0, false, 'accepted')).toBe(false);  // HTTP path / not relay-sending
   });
 });

@@ -18,6 +18,7 @@ import {
 import { resolveProvider } from './provider';
 import { relayModeEngaged, isHybrid } from './relayLogic';
 import { dispatchBatchToRelay } from './relayDispatcher';
+import { maybeFinalizeRelayBatch } from './relaySettlement';
 import { writeAuditLog } from '../lib/auditLog';
 
 const SMS_BODY_MAX = 320;
@@ -257,12 +258,25 @@ export const escalateSms = onCall({ region: 'us-central1' }, async (request) => 
       await writeAuditLog({ action: 'relay.http_fallback', actor: { uid }, target: { type: 'message', id: data.messageId }, result: 'success', metadata: { batchId: batchRef.id, businessId: orgId, count: fallbackCount } });
     }
 
-    await batchRef.update({ status: 'accepted', provider: providerMode, updatedAt: FieldValue.serverTimestamp() });
+    // Relay batches stay 'sending'; settlement is deferred to completion
+    // reconciliation (maybeFinalizeRelayBatch → sending→completed → existing
+    // onSmsBatchAccepted), so later relay failures are refunded by the existing
+    // pipeline. The reservation is held until then.
+    await batchRef.update({ provider: providerMode, updatedAt: FieldValue.serverTimestamp() });
     await quotaRef.set({
       uid, date: day, batchCount: FieldValue.increment(1),
       recipientCount: FieldValue.increment(eligible.length), pointsSpent: FieldValue.increment(cost),
       updatedAt: FieldValue.serverTimestamp(),
     }, { merge: true });
+
+    // If nothing was routed to a relay device (e.g. hybrid where every recipient
+    // fell back to HTTP), there are no relay jobs to await → finalize now so the
+    // existing settlement runs immediately, just like the HTTP path.
+    let finalStatus = 'sending';
+    if (dispatch.routed === 0) {
+      const ok = await maybeFinalizeRelayBatch(batchRef.id);
+      if (ok) finalStatus = 'completed';
+    }
 
     await writeAuditLog({
       action: 'sms.escalation.accepted', actor: { uid }, target: { type: 'message', id: data.messageId }, result: 'success',
@@ -272,7 +286,7 @@ export const escalateSms = onCall({ region: 'us-central1' }, async (request) => 
     return {
       batchId: batchRef.id, offlineSmsBatchId: null,
       sent: eligible.length, failed: 0, skipped: excluded.length,
-      pointsCost: cost, status: 'accepted', provider: providerMode,
+      pointsCost: cost, status: finalStatus, provider: providerMode,
     };
   }
 

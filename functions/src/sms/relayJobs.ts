@@ -17,6 +17,7 @@ import {
   classifyFailure, failureOutcome, backoffMs, utcDayKey,
   type RelayJobStatus,
 } from './relayLogic';
+import { maybeFinalizeRelayBatch } from './relaySettlement';
 
 const REGION = 'us-central1';
 const MAX_CLAIM = 50;
@@ -203,6 +204,8 @@ export const reportRelayDelivery = onCall({ region: REGION }, async (request) =>
       target: { type: 'relayJob', id: data.jobId }, result: report === 'failed' ? 'failure' : 'success',
       metadata: { businessId: ctx.businessId, status: report },
     });
+    // Finalize the batch once all relay jobs are terminal → existing settlement.
+    if (applied.batchId) { try { await maybeFinalizeRelayBatch(applied.batchId); } catch { /* reaper retries */ } }
   }
   return { ok: true, applied: applied.changed, requeued: applied.requeued };
 });

@@ -202,6 +202,20 @@ export function isDeviceRoutable(
 export interface RouteDevice { deviceId: string; remaining: number }
 export interface RouteResult { assignments: Array<{ uid: string; deviceId: string }>; unrouted: string[] }
 
+/**
+ * A relay batch is finalizable exactly once: only when it's still 'sending'
+ * (relay batches are NOT set 'accepted' at dispatch, so the existing settlement
+ * trigger fires once on sending→completed), it hasn't been finalized before,
+ * and no relay job is still in flight.
+ */
+export function relayBatchFinalizable(
+  nonTerminalJobCount: number,
+  alreadyFinalized: boolean,
+  batchStatus: string,
+): boolean {
+  return nonTerminalJobCount === 0 && !alreadyFinalized && batchStatus === 'sending';
+}
+
 /** Least-loaded routing: each recipient goes to the routable device with the
  *  most remaining capacity; capacity is decremented as we assign. Recipients
  *  with no remaining capacity anywhere are returned as `unrouted`. */
