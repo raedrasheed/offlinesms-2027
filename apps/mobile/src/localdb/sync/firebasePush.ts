@@ -57,6 +57,18 @@ async function readLocalBytes(localUri: string): Promise<Uint8Array> {
   return base64ToBytes(base64);
 }
 
+/** Normalize an upload/finalize failure into a recordable {code, message} and
+ *  log it. Firebase StorageError carries a `.code` like 'storage/unauthorized'
+ *  or 'storage/unknown' (a wrong storageBucket surfaces here), which is the
+ *  fastest way to tell a config error apart from a transient network drop. */
+function mediaError(err: unknown): { code: string | null; message: string | null } {
+  const e = err as { code?: string; message?: string } | null;
+  const code = typeof e?.code === 'string' ? e.code : null;
+  const message = typeof e?.message === 'string' ? e.message : String(err);
+  console.warn(`[media upload failed] code=${code ?? 'unknown'} message=${message}`);
+  return { code, message };
+}
+
 /** Upload bytes to Storage with progress, returning the download URL. */
 async function uploadBytes(
   bytes: Uint8Array, storagePath: string, contentType: string,
@@ -129,7 +141,7 @@ export async function pushOutboxItem(item: OutboxRow): Promise<PushResult> {
         if (localId) await messagesRepo.setMediaUploaded(localId, { downloadURL });
         return { ok: true, remoteId: created.messageId, idempotent: created.idempotent };
       } catch (err) {
-        if (localId) await messagesRepo.setMediaFailed(localId).catch(() => {});
+        if (localId) await messagesRepo.setMediaFailed(localId, mediaError(err)).catch(() => {});
         throw err;
       }
     }
@@ -163,7 +175,7 @@ export async function pushOutboxItem(item: OutboxRow): Promise<PushResult> {
         if (localId) await messagesRepo.setMediaUploaded(localId, { downloadURL });
         return { ok: true, remoteId: created.messageId, idempotent: created.idempotent };
       } catch (err) {
-        if (localId) await messagesRepo.setMediaFailed(localId).catch(() => {});
+        if (localId) await messagesRepo.setMediaFailed(localId, mediaError(err)).catch(() => {});
         throw err;
       }
     }

@@ -213,11 +213,16 @@ export async function setMediaUploaded(localId: string, urls: { downloadURL?: st
   );
 }
 
-/** Phase 23 — mark a media upload failed (keeps the row for retry). */
-export async function setMediaFailed(localId: string): Promise<void> {
+/** Phase 23 — mark a media upload failed (keeps the row for retry). Records the
+ *  failure code/message so the cause (e.g. storage/unauthorized, wrong bucket)
+ *  is recoverable instead of a silent retry arrow. */
+export async function setMediaFailed(
+  localId: string,
+  error?: { code?: string | null; message?: string | null },
+): Promise<void> {
   await getDb().run(
-    `UPDATE messages SET media_upload_status = 'failed', updated_at = ? WHERE local_id = ?`,
-    [Date.now(), localId],
+    `UPDATE messages SET media_upload_status = 'failed', error_code = ?, error_message = ?, updated_at = ? WHERE local_id = ?`,
+    [error?.code ?? null, error?.message ?? null, Date.now(), localId],
   );
 }
 
