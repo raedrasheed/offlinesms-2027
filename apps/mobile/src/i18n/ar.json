@@ -56,7 +56,10 @@
     "filterAll": "الكل",
     "filterUnread": "غير مقروء",
     "filterFavorites": "المفضلة",
-    "filterGroups": "المجموعات"
+    "filterGroups": "المجموعات",
+    "clearChat": "مسح المحادثة",
+    "clearChatTitle": "مسح المحادثة؟",
+    "clearChatMessage": "سيؤدي ذلك إلى إزالة الرسائل من هذا الجهاز. لن تتأثر الرسائل لدى الآخرين."
   },
   "status": {
     "title": "الحالة",

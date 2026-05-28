@@ -366,6 +366,17 @@ export default function Conversation({ route, navigation }: any) {
 
   const openImage = (uri: string) => navigation.navigate('ImageViewer', { uri });
   const retryMedia = (msg: Message) => { void retryMediaMessage(msg.id); };
+
+  function confirmClearChat() {
+    Alert.alert(
+      t('chats.clearChatTitle'),
+      t('chats.clearChatMessage'),
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        { text: t('chats.clearChat'), style: 'destructive', onPress: () => { void local.clear(); setMsgs([]); } },
+      ],
+    );
+  }
   const onPlayedVoice = (msg: Message) => {
     if (msg.senderUid !== me) void queueMarkReceipt({ conversationId: id, messageId: msg.id, status: 'played' });
   };
@@ -642,6 +653,15 @@ export default function Conversation({ route, navigation }: any) {
             {headerSubtitle ? <Text style={s.subtitle}>{headerSubtitle}</Text> : null}
           </View>
         </Pressable>
+        <Pressable
+          onPress={confirmClearChat}
+          hitSlop={10}
+          style={s.headerMenuBtn}
+          accessibilityRole="button"
+          accessibilityLabel={t('chats.clearChat')}
+        >
+          <Ionicons name="ellipsis-vertical" size={20} color={colors.text.muted} />
+        </Pressable>
       </View>
 
       {convo?.pinnedMessage ? (
@@ -807,6 +827,7 @@ function buildStyles(colors: any, rtl: boolean) {
     header:   { paddingTop: 50, paddingBottom: 12, paddingHorizontal: 14, backgroundColor: '#E6F1F7', flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 10, zIndex: 2, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 4 },
     back:     { fontSize: 24, color: colors.action.primary, minWidth: 28, textAlign: 'center' },
     headerInfo: { flex: 1, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 10 },
+    headerMenuBtn: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
     headerAvatarWrap: { width: 40, height: 40 },
     headerAvatar:  { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
     headerAvatarText: { color: '#fff', fontSize: 15, fontWeight: '800' },

@@ -8,11 +8,11 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { LOCAL_FIRST_CONVERSATION_ENABLED } from '../config/features';
-import { initLocalDb, messagesRepo, setActiveConversation } from '../localdb';
+import { initLocalDb, messagesRepo, setActiveConversation, clearChat, getChatClearedAt } from '../localdb';
 import { startConversationFeeder } from '../localdb/sync/conversationFeeder';
 import { pullMessagesBefore } from '../localdb/sync/firebasePull';
 import { importLegacyQueueOnce } from '../localdb/sync/legacyImport';
-import { mapAndOrderMessages } from './messageModel';
+import { mapAndOrderMessages, effectiveTimeMs } from './messageModel';
 import type { Message } from '../lib/conversations';
 
 export type ConversationSource = 'disabled' | 'local' | 'firestoreFallback';
@@ -25,6 +25,7 @@ export interface LocalConversation {
   source: ConversationSource;
   refresh: () => void;
   loadOlder: () => void;
+  clear: () => Promise<void>;
 }
 
 export function useLocalConversation(conversationId: string | undefined, uid: string | undefined): LocalConversation {
@@ -36,12 +37,17 @@ export function useLocalConversation(conversationId: string | undefined, uid: st
   const refreshing = useRef(false);
   const localCountRef = useRef(0);
   const oldestMsRef = useRef<number | null>(null);
+  const clearedAtRef = useRef(0);
 
   const refresh = useCallback(async () => {
     if (!enabled || !conversationId || refreshing.current) return;
     refreshing.current = true;
     try {
-      const rows = await messagesRepo.listMessages(conversationId, limitRef.current);
+      const all = await messagesRepo.listMessages(conversationId, limitRef.current);
+      // Hide anything at/older than the "cleared chat" watermark.
+      const rows = clearedAtRef.current > 0
+        ? all.filter(r => effectiveTimeMs(r) > clearedAtRef.current)
+        : all;
       localCountRef.current = rows.length;
       // Rows are newest-first; the last one is the oldest message held locally.
       const oldest = rows[rows.length - 1];
@@ -66,6 +72,7 @@ export function useLocalConversation(conversationId: string | undefined, uid: st
         await initLocalDb(uid);
         setActiveConversation(conversationId);
         await importLegacyQueueOnce(uid);
+        clearedAtRef.current = await getChatClearedAt(conversationId);
         if (cancelled) return;
         await refresh();
         stopFeeder = startConversationFeeder(conversationId, () => { void refresh(); });
@@ -94,5 +101,12 @@ export function useLocalConversation(conversationId: string | undefined, uid: st
     }
   }, [enabled, conversationId, refresh]);
 
-  return { messages, loading, source, refresh: () => { void refresh(); }, loadOlder };
+  const clear = useCallback(async () => {
+    if (!conversationId) return;
+    await clearChat(conversationId);
+    clearedAtRef.current = Date.now();
+    setMessages([]);
+  }, [conversationId]);
+
+  return { messages, loading, source, refresh: () => { void refresh(); }, loadOlder, clear };
 }

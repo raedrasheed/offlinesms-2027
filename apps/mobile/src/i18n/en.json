@@ -56,7 +56,10 @@
     "filterAll": "All",
     "filterUnread": "Unread",
     "filterFavorites": "Favorites",
-    "filterGroups": "Groups"
+    "filterGroups": "Groups",
+    "clearChat": "Clear chat",
+    "clearChatTitle": "Clear chat?",
+    "clearChatMessage": "This removes the messages from this device. Messages others have are not affected."
   },
   "status": {
     "title": "Status",

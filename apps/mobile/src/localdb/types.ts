@@ -202,4 +202,6 @@ export type SyncStateKey =
   | 'legacy_queue_migrated'
   | 'last_prune_at'
   // Per-conversation message high-water mark (max remote createdAt pulled).
-  | `msg_cursor:${string}`;
+  | `msg_cursor:${string}`
+  // Per-conversation "cleared chat" watermark (hide messages at/older than ms).
+  | `chat_cleared:${string}`;

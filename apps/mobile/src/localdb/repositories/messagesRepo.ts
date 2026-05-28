@@ -50,6 +50,14 @@ export async function getByLocalId(localId: string): Promise<MessageRow | null> 
   return getDb().first<MessageRow>(`SELECT * FROM messages WHERE local_id = ?`, [localId]);
 }
 
+/** Phase 23 — delete all local messages for a conversation ("clear chat"). */
+export async function deleteConversationMessages(conversationId: string): Promise<number> {
+  const before = await getDb().first<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ?`, [conversationId]);
+  await getDb().run(`DELETE FROM messages WHERE conversation_id = ?`, [conversationId]);
+  return before?.n ?? 0;
+}
+
 /**
  * Retention: keep the most recent `keepPerConversation` messages per
  * conversation and evict older ones, bounding DB growth. Only fully-synced rows

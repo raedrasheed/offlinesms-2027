@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  FlatList, View, Text, Pressable, StyleSheet, TextInput, Image,
+  FlatList, View, Text, Pressable, StyleSheet, TextInput, Image, Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
@@ -19,6 +19,7 @@ import { isRTL } from '../i18n';
 import { radius } from '../theme';
 import { avatarColor, initials } from '../lib/avatar';
 import { setUnreadTotal } from '../lib/unreadStore';
+import { clearChat } from '../localdb';
 import { LoadingState, EmptyState } from '../components/state';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -156,6 +157,17 @@ export default function ChatsList({ navigation }: any) {
 
   useEffect(() => { setUnreadTotal(unreadCounts.all); }, [unreadCounts.all]);
 
+  const confirmClearChat = (cid: string, name: string) => {
+    Alert.alert(
+      t('chats.clearChatTitle'),
+      name ? `${t('chats.clearChatMessage')}\n\n${name}` : t('chats.clearChatMessage'),
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        { text: t('chats.clearChat'), style: 'destructive', onPress: () => { void clearChat(cid).then(() => local.refresh?.()); } },
+      ],
+    );
+  };
+
   const FILTER_LABELS: Record<Filter, string> = {
     all:       t('chats.filterAll'),
     unread:    t('chats.filterUnread'),
@@ -240,6 +252,8 @@ export default function ChatsList({ navigation }: any) {
             <Pressable
               style={s.row}
               onPress={() => navigation.navigate('Conversation', { id: item.id })}
+              onLongPress={() => confirmClearChat(item.id, item.peerName ?? '')}
+              delayLongPress={300}
               accessible={true}
               accessibilityRole="button"
               accessibilityLabel={`${item.peerName}${(item.state?.unreadCount ?? 0) > 0 ? `, ${item.state?.unreadCount} unread` : ''}`}

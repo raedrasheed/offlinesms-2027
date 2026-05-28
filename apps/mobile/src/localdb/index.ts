@@ -12,7 +12,7 @@ import { openForUser, closeDb, wipeUserData, getCurrentUid } from './connection'
 import { startScheduler, stopScheduler, kick } from './sync/syncScheduler';
 import * as messagesRepo from './repositories/messagesRepo';
 import * as outboxRepo from './repositories/outboxRepo';
-import { getDeviceId } from './repositories/syncStateRepo';
+import { getDeviceId, getCursor, setCursor } from './repositories/syncStateRepo';
 import { idempotencyKey, localId } from './sync/ids';
 import { toggleReaction } from './sync/reactionLogic';
 import type { MessageRow } from './types';
@@ -227,6 +227,24 @@ export async function retryMediaMessage(localMessageId: string): Promise<void> {
   await messagesRepo.setMediaProgress(localMessageId, 0);
   await outboxRepo.retryByEntityId(localMessageId);
   kick('outbox');
+}
+
+/**
+ * Phase 23 — clear a chat's history on this device. Deletes the local messages
+ * and records a "cleared" watermark so the realtime feeder / catch-up pull don't
+ * resurrect older messages; messages sent after this point still appear.
+ */
+export async function clearChat(conversationId: string): Promise<void> {
+  if (!getCurrentUid()) return;
+  const now = Date.now();
+  await setCursor(`chat_cleared:${conversationId}`, now);
+  // Advance the message cursor so the catch-up pull won't re-fetch older msgs.
+  await setCursor(`msg_cursor:${conversationId}`, now);
+  await messagesRepo.deleteConversationMessages(conversationId);
+}
+
+export async function getChatClearedAt(conversationId: string): Promise<number> {
+  return getCursor(`chat_cleared:${conversationId}`);
 }
 
 export interface ActionResult { ok: boolean; reason?: 'not-initialised' | 'not-delivered' }
