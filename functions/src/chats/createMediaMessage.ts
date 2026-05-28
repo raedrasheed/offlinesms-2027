@@ -136,7 +136,10 @@ export const createMediaMessage = onCall(async (request) => {
   }
 
   const msgRef = convoRef.collection('messages').doc();
-  const base = `chatMedia/${convoRef.id}/${msgRef.id}`;
+  // The uid is embedded in the path so Storage rules can authorize the write by
+  // comparing request.auth.uid to the path segment — no cross-service Firestore
+  // read (mirrors the conversations/{convoId}/{senderId} pattern in storage.rules).
+  const base = `chatMedia/${convoRef.id}/${uid}/${msgRef.id}`;
   const storagePath = mediaType === 'image' ? `${base}/image-original.jpg` : `${base}/voice.m4a`;
   const thumbnailPath = mediaType === 'image' ? `${base}/image-thumb.jpg` : null;
   const now = FieldValue.serverTimestamp();
