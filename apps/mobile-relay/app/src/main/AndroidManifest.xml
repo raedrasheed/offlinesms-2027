@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- OfflineSMS-Business relay — outbound SMS only. Final permission set;
+         do NOT add READ_SMS / RECEIVE_SMS / contacts. -->
+    <uses-permission android:name="android.permission.SEND_SMS" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application
+        android:name=".RelayApplication"
+        android:label="@string/app_name"
+        android:allowBackup="false"
+        android:supportsRtl="true">
+
+        <!-- Phase 2: EnrollmentActivity (pairing code) is the launcher until the
+             device is enrolled; afterwards the relay dashboard screen. -->
+        <activity
+            android:name=".ui.EnrollmentActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Phase 2: foreground relay service (FOREGROUND_SERVICE_DATA_SYNC) +
+             boot receiver are declared here. -->
+
+    </application>
+</manifest>

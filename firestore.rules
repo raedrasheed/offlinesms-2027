@@ -343,6 +343,36 @@ service cloud.firestore {
     }
 
     // ════════════════════════════════════════════════════════════
+    // RELAY (Phase 24 — OfflineSMS-Business private SMS gateway)
+    //
+    // All writes flow through Admin-SDK callables (createRelayPairingCode,
+    // enrollRelayDevice, claim/report, revoke), so writes are locked here.
+    // Reads are business-scoped: an org admin reads only its own business's
+    // devices; relay devices use callables (Admin SDK) and never read jobs
+    // directly. Pairing codes are never client-readable (one-time secrets).
+    // ════════════════════════════════════════════════════════════
+    function isOrgAdminOf(businessId) {
+      return isAuthed()
+        && request.auth.token.get('role', '') == 'organization_admin'
+        && request.auth.token.get('organizationId', '') == businessId;
+    }
+    match /relayDevices/{deviceId} {
+      allow read:  if isAdmin() || isOrgAdminOf(resource.data.businessId);
+      allow write: if isAdmin();
+    }
+    match /relayJobs/{jobId} {
+      allow read:  if isAdmin();
+      allow write: if isAdmin();
+    }
+    match /relayPairingCodes/{code} {
+      allow read, write: if isAdmin();
+    }
+    match /smsConfig/{docId} {
+      allow read:  if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // ════════════════════════════════════════════════════════════
     // STATUSES — Phase 3 audience + expiry enforcement
     // ════════════════════════════════════════════════════════════
     match /statuses/{statusId} {
