@@ -93,12 +93,11 @@ function MainTabs() {
         tabBarActiveTintColor:   '#1F7BA8',
         tabBarInactiveTintColor: '#6B7488',
         tabBarStyle: {
-          height: 80 + insets.bottom,
-          paddingTop: 16,
-          paddingBottom: (insets.bottom || 10) + 6,
+          height: 70 + insets.bottom,
+          paddingBottom: insets.bottom + 6,
         },
-        tabBarIconStyle: { marginTop: 4 },
-        tabBarLabelStyle: { fontSize: 11, marginTop: 6 },
+        tabBarItemStyle: { paddingTop: 12, paddingBottom: 4 },
+        tabBarLabelStyle: { fontSize: 11, marginTop: 4 },
         tabBarIcon: ({ focused, color, size }) => {
           const set = TAB_ICONS[route.name];
           const name = focused ? set.active : set.inactive;
