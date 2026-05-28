@@ -20,6 +20,19 @@
             android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:layout_marginTop="4dp" android:textStyle="bold" />
 
+        <LinearLayout android:id="@+id/batteryWarn"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:visibility="gone"
+            android:layout_marginTop="14dp" android:padding="12dp"
+            android:background="#FEF3C7">
+            <TextView
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="@string/battery_warning" android:textColor="#92400E" />
+            <Button android:id="@+id/batteryFixBtn"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:layout_marginTop="8dp" android:text="@string/battery_fix" />
+        </LinearLayout>
+
         <TextView android:id="@+id/businessText"
             android:layout_width="match_parent" android:layout_height="wrap_content"
             android:layout_marginTop="16dp" />

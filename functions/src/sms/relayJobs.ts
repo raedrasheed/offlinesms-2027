@@ -12,9 +12,10 @@ import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore, FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { writeAuditLog } from '../lib/auditLog';
 import {
-  leaseExpiryMs, isLeaseExpired, capacityRemaining,
+  leaseExpiryMs, capacityRemaining, isClaimable,
   normalizeReportStatus, recipientStatusFor, shouldApplyReport,
-  isTerminalJobStatus, type RelayJobStatus,
+  classifyFailure, failureOutcome, backoffMs, utcDayKey,
+  type RelayJobStatus,
 } from './relayLogic';
 
 const REGION = 'us-central1';
@@ -72,6 +73,9 @@ export const claimRelayJobs = onCall({ region: REGION }, async (request) => {
       if (fresh.get('status') !== 'queued') return null;
       const a = fresh.get('assignedDeviceId') as string | undefined;
       if (a && a !== ctx.deviceId) return null;
+      // Respect exponential-backoff window for requeued jobs.
+      const nextAt = (fresh.get('nextAttemptAt') as Timestamp | undefined)?.toMillis?.() ?? null;
+      if (!isClaimable(nextAt, now)) return null;
       tx.update(doc.ref, {
         status: 'claimed',
         assignedDeviceId: ctx.deviceId,
@@ -115,6 +119,8 @@ export const reportRelayDelivery = onCall({ region: REGION }, async (request) =>
   const db = getFirestore();
   const jobRef = db.collection('relayJobs').doc(data.jobId);
 
+  const devRef = db.collection('relayDevices').doc(ctx.deviceId);
+
   const applied = await db.runTransaction(async tx => {
     const snap = await tx.get(jobRef);
     if (!snap.exists) throw new HttpsError('not-found', 'job-not-found');
@@ -123,29 +129,80 @@ export const reportRelayDelivery = onCall({ region: REGION }, async (request) =>
     if (leaseOwner !== ctx.deviceId) throw new HttpsError('permission-denied', 'not-lease-owner');
 
     const current = (snap.get('status') ?? 'queued') as RelayJobStatus;
-    if (!shouldApplyReport(current, report)) return { changed: false, batchId: snap.get('batchId'), recipientUid: snap.get('recipientUid') };
+    const base = { changed: false, requeued: false, batchId: snap.get('batchId'), recipientUid: snap.get('recipientUid') };
+    if (!shouldApplyReport(current, report)) return base;
 
-    const patch: Record<string, unknown> = { status: report, updatedAt: FieldValue.serverTimestamp() };
-    if (report === 'sent')      patch.sentAt = FieldValue.serverTimestamp();
-    if (report === 'delivered') patch.deliveredAt = FieldValue.serverTimestamp();
-    if (report === 'failed')   { patch.failedAt = FieldValue.serverTimestamp(); patch.lastError = (data.reason ?? '').slice(0, 200); patch.lastErrorCode = String(data.androidResultCode ?? ''); }
-    // Privacy: purge the body once the job reaches a terminal state.
-    if (isTerminalJobStatus(report)) patch.messageBody = FieldValue.delete();
+    const attempts = (snap.get('attempts') as number) ?? 1;
+    const maxAttempts = (snap.get('maxAttempts') as number) ?? 3;
+    const now = Date.now();
+
+    // Decide outcome. A transient failure with attempts left → requeue (keep
+    // body for resend); otherwise the report is terminal (purge body).
+    let finalStatus: RelayJobStatus = report;
+    let requeued = false;
+    if (report === 'failed') {
+      const cls = classifyFailure(data.androidResultCode, data.reason);
+      if (failureOutcome(attempts, maxAttempts, cls) === 'requeue') { finalStatus = 'queued'; requeued = true; }
+    }
+
+    const patch: Record<string, unknown> = { status: finalStatus, updatedAt: FieldValue.serverTimestamp() };
+    if (requeued) {
+      patch.leaseOwnerDeviceId = null;
+      patch.leaseExpiresAt = null;
+      patch.assignedDeviceId = null;                 // let any device pick it up
+      patch.nextAttemptAt = Timestamp.fromMillis(now + backoffMs(attempts));
+      patch.lastError = (data.reason ?? '').slice(0, 200);
+      patch.lastErrorCode = String(data.androidResultCode ?? '');
+    } else {
+      if (report === 'sent')      patch.sentAt = FieldValue.serverTimestamp();
+      if (report === 'delivered') patch.deliveredAt = FieldValue.serverTimestamp();
+      if (report === 'failed')   { patch.failedAt = FieldValue.serverTimestamp(); patch.lastError = (data.reason ?? '').slice(0, 200); patch.lastErrorCode = String(data.androidResultCode ?? ''); }
+      patch.messageBody = FieldValue.delete();        // privacy: purge on terminal
+    }
     tx.update(jobRef, patch);
-    return { changed: true, batchId: snap.get('batchId'), recipientUid: snap.get('recipientUid') };
+
+    // Device counters (daily-rolling, UTC) — only on a terminal report.
+    if (!requeued) {
+      const counterField = report === 'sent' ? 'sentToday' : report === 'delivered' ? 'deliveredToday' : 'failedToday';
+      const devSnap = await tx.get(devRef);
+      if (devSnap.exists) {
+        const day = utcDayKey();
+        const c = (devSnap.get('counters') as Record<string, unknown>) ?? {};
+        const sameDay = c.date === day;
+        const cur = sameDay ? (c[counterField] as number) ?? 0 : 0;
+        tx.set(devRef, {
+          counters: {
+            sentToday: sameDay ? (c.sentToday as number) ?? 0 : 0,
+            failedToday: sameDay ? (c.failedToday as number) ?? 0 : 0,
+            deliveredToday: sameDay ? (c.deliveredToday as number) ?? 0 : 0,
+            date: day,
+            [counterField]: cur + 1,
+          },
+          updatedAt: FieldValue.serverTimestamp(),
+        }, { merge: true });
+      }
+    }
+
+    return { changed: true, requeued, batchId: base.batchId, recipientUid: base.recipientUid };
   });
 
-  // Mirror to the existing batch recipient status so receipts/refunds keep working.
-  if (applied.changed && applied.batchId && applied.recipientUid) {
+  if (applied.changed && applied.requeued) {
+    await writeAuditLog({
+      action: 'relay.job.requeued', actor: { uid: ctx.deviceId },
+      target: { type: 'relayJob', id: data.jobId }, result: 'success',
+      metadata: { businessId: ctx.businessId, reasonCode: String(data.androidResultCode ?? '') },
+    });
+  } else if (applied.changed && applied.batchId && applied.recipientUid) {
+    // Mirror terminal status to the batch recipient so receipts/refunds keep working.
     await db.collection('smsBatches').doc(applied.batchId)
       .collection('recipients').doc(applied.recipientUid)
       .set({ smsStatus: recipientStatusFor(report), reason: report === 'failed' ? (data.reason ?? 'relay-failed') : null, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
 
     await writeAuditLog({
-      action: 'relay.delivery.reported', actor: { uid: ctx.deviceId },
+      action: `relay.job.${report}`, actor: { uid: ctx.deviceId },
       target: { type: 'relayJob', id: data.jobId }, result: report === 'failed' ? 'failure' : 'success',
       metadata: { businessId: ctx.businessId, status: report },
     });
   }
-  return { ok: true, applied: applied.changed };
+  return { ok: true, applied: applied.changed, requeued: applied.requeued };
 });

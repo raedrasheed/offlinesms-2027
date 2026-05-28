@@ -86,3 +86,6 @@ export { adminSetOrgRole } from './admin/adminSetOrgRole';
 // relay is gated by smsConfig/providers (default 'http').
 export { createRelayPairingCode, enrollRelayDevice, relayHeartbeat, revokeRelayDevice } from './sms/relayDevices';
 export { claimRelayJobs, reportRelayDelivery } from './sms/relayJobs';
+// Relay-only reaper (Phase 3): lease expiry/requeue + stale-device offline +
+// metrics. Touches relay* collections only; no production SMS impact.
+export { relayReaper } from './sms/relayReaper';

@@ -3,6 +3,8 @@ import {
   makeJobId, generatePairingCode, isPairingCodeUsable, leaseExpiryMs, isLeaseExpired,
   isHeartbeatStale, capacityRemaining, canManageBusiness, resolveBusinessId,
   normalizeReportStatus, recipientStatusFor, isTerminalJobStatus, shouldApplyReport,
+  classifyFailure, backoffMs, failureOutcome, reapDecision, isClaimable, utcDayKey,
+  BACKOFF_BASE_MS, BACKOFF_MAX_MS,
   PAIRING_CODE_TTL_MS, LEASE_TTL_MS,
 } from '../src/sms/relayLogic';
 
@@ -88,5 +90,54 @@ describe('report status mapping + idempotency', () => {
     expect(shouldApplyReport('sent', 'sent')).toBe(false);
     expect(shouldApplyReport('sent', 'delivered')).toBe(true);
     expect(shouldApplyReport('claimed', 'sent')).toBe(true);
+  });
+});
+
+describe('failure classification (Phase 3)', () => {
+  it('flags permanent vs transient by reason and Android code', () => {
+    expect(classifyFailure(null, 'invalid destination')).toBe('permanent');
+    expect(classifyFailure(null, 'permission denied')).toBe('permanent');
+    expect(classifyFailure(2, null)).toBe('permanent');   // NULL_PDU
+    expect(classifyFailure(6, null)).toBe('permanent');   // FDN
+    expect(classifyFailure(4, null)).toBe('transient');   // NO_SERVICE
+    expect(classifyFailure(3, null)).toBe('transient');   // RADIO_OFF
+    expect(classifyFailure(null, 'network unavailable')).toBe('transient');
+    expect(classifyFailure(null, null)).toBe('transient'); // unknown → retry
+  });
+});
+
+describe('backoff + failure outcome', () => {
+  it('exponential backoff is capped', () => {
+    expect(backoffMs(1)).toBe(BACKOFF_BASE_MS);
+    expect(backoffMs(2)).toBe(BACKOFF_BASE_MS * 2);
+    expect(backoffMs(3)).toBe(BACKOFF_BASE_MS * 4);
+    expect(backoffMs(99)).toBe(BACKOFF_MAX_MS);
+  });
+  it('permanent never requeues; transient requeues until attempts exhausted', () => {
+    expect(failureOutcome(1, 3, 'permanent')).toBe('fail');
+    expect(failureOutcome(1, 3, 'transient')).toBe('requeue');
+    expect(failureOutcome(2, 3, 'transient')).toBe('requeue');
+    expect(failureOutcome(3, 3, 'transient')).toBe('fail');
+    expect(failureOutcome(5, 3, 'transient')).toBe('fail');
+  });
+});
+
+describe('reaper decision + claimability', () => {
+  const now = 1_000_000;
+  it('only acts on in-flight jobs with a lapsed lease', () => {
+    expect(reapDecision({ status: 'queued', leaseExpiresAtMs: now - 1, attempts: 1, maxAttempts: 3 }, now)).toBe('none');
+    expect(reapDecision({ status: 'delivered', leaseExpiresAtMs: now - 1, attempts: 1, maxAttempts: 3 }, now)).toBe('none');
+    expect(reapDecision({ status: 'claimed', leaseExpiresAtMs: now + 1, attempts: 1, maxAttempts: 3 }, now)).toBe('none');
+    expect(reapDecision({ status: 'claimed', leaseExpiresAtMs: null, attempts: 1, maxAttempts: 3 }, now)).toBe('none');
+    expect(reapDecision({ status: 'claimed', leaseExpiresAtMs: now - 1, attempts: 1, maxAttempts: 3 }, now)).toBe('requeue');
+    expect(reapDecision({ status: 'sending', leaseExpiresAtMs: now - 1, attempts: 3, maxAttempts: 3 }, now)).toBe('fail');
+  });
+  it('isClaimable honours the backoff window', () => {
+    expect(isClaimable(null, now)).toBe(true);
+    expect(isClaimable(now - 1, now)).toBe(true);
+    expect(isClaimable(now + 1, now)).toBe(false);
+  });
+  it('utcDayKey is a UTC yyyymmdd string', () => {
+    expect(utcDayKey(new Date('2026-05-28T23:30:00Z'))).toBe('20260528');
   });
 });

@@ -47,7 +47,21 @@ class DashboardActivity : AppCompatActivity() {
         }
 
         findViewById<TextView>(R.id.statusText).text = getString(if (store.paused) R.string.relay_paused else R.string.relay_active)
+        setupBatteryWarning()
         loadStats()
+    }
+
+    /** OEM survival: warn if battery optimization could kill the background relay. */
+    private fun setupBatteryWarning() {
+        val warn = findViewById<android.view.View>(R.id.batteryWarn)
+        val pm = getSystemService(android.os.PowerManager::class.java)
+        val ignoring = pm?.isIgnoringBatteryOptimizations(packageName) == true
+        warn.visibility = if (ignoring) android.view.View.GONE else android.view.View.VISIBLE
+        findViewById<Button>(R.id.batteryFixBtn).setOnClickListener {
+            // Opens the system battery-optimization list (no special permission).
+            try { startActivity(Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
+            catch (_: Exception) { startActivity(Intent(android.provider.Settings.ACTION_SETTINGS)) }
+        }
     }
 
     private fun loadStats() {
@@ -62,5 +76,8 @@ class DashboardActivity : AppCompatActivity() {
         }
     }
 
-    override fun onResume() { super.onResume(); if (store.isEnrolled) loadStats() }
+    override fun onResume() {
+        super.onResume()
+        if (store.isEnrolled) { setupBatteryWarning(); loadStats() }
+    }
 }

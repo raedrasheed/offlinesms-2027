@@ -115,3 +115,63 @@ export function shouldApplyReport(current: RelayJobStatus, next: RelayReportStat
   if (current === 'sent' && next === 'sent') return false; // duplicate sent
   return true;
 }
+
+// ── Retry classification + backoff + reaper decisions ───────────────────────
+export type FailureClass = 'transient' | 'permanent';
+
+export const BACKOFF_BASE_MS = 30_000;
+export const BACKOFF_MAX_MS = 10 * 60 * 1000;
+
+// Android SmsManager sent-intent result codes.
+const ANDROID_GENERIC_FAILURE = 1;
+const ANDROID_NULL_PDU = 2;
+const ANDROID_RADIO_OFF = 3;
+const ANDROID_NO_SERVICE = 4;
+const ANDROID_LIMIT_EXCEEDED = 5;
+const ANDROID_FDN_CHECK_FAILURE = 6;
+
+/** Classify a send failure as retryable (transient) or not (permanent).
+ *  Unknown causes default to transient so they retry up to maxAttempts. */
+export function classifyFailure(resultCode?: number | null, reason?: string | null): FailureClass {
+  const r = (reason ?? '').toLowerCase();
+  if (/invalid|permission|revoked|disabled|null-pdu|fdn|blocked|forbidden|opt-out/.test(r)) return 'permanent';
+  if (resultCode === ANDROID_NULL_PDU || resultCode === ANDROID_FDN_CHECK_FAILURE) return 'permanent';
+  if (/no-service|radio|network|timeout|unavailable|generic|rate|limit/.test(r)) return 'transient';
+  if (resultCode === ANDROID_NO_SERVICE || resultCode === ANDROID_RADIO_OFF
+    || resultCode === ANDROID_GENERIC_FAILURE || resultCode === ANDROID_LIMIT_EXCEEDED) return 'transient';
+  return 'transient';
+}
+
+/** Exponential backoff before the next attempt may be claimed. */
+export function backoffMs(attempts: number): number {
+  const n = Math.max(1, attempts);
+  return Math.min(BACKOFF_MAX_MS, BACKOFF_BASE_MS * Math.pow(2, n - 1));
+}
+
+/** Outcome of a failed send report: requeue (retry) or terminal fail. */
+export function failureOutcome(
+  attempts: number, maxAttempts: number, cls: FailureClass,
+): 'requeue' | 'fail' {
+  if (cls === 'permanent') return 'fail';
+  return attempts < maxAttempts ? 'requeue' : 'fail';
+}
+
+/** Reaper decision for a job whose lease may have lapsed. */
+export function reapDecision(
+  job: { status: RelayJobStatus; leaseExpiresAtMs: number | null; attempts: number; maxAttempts: number },
+  nowMs: number,
+): 'none' | 'requeue' | 'fail' {
+  if (job.status !== 'claimed' && job.status !== 'sending') return 'none';
+  if (job.leaseExpiresAtMs == null || job.leaseExpiresAtMs > nowMs) return 'none';
+  return job.attempts >= job.maxAttempts ? 'fail' : 'requeue';
+}
+
+/** A job is claimable only once its backoff window (nextAttemptAt) has passed. */
+export function isClaimable(nextAttemptAtMs: number | null | undefined, nowMs: number): boolean {
+  return nextAttemptAtMs == null || nextAttemptAtMs <= nowMs;
+}
+
+/** UTC yyyymmdd — used to roll device counters over at midnight UTC. */
+export function utcDayKey(d: Date = new Date()): string {
+  return `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}`;
+}

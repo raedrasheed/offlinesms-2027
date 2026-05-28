@@ -58,6 +58,22 @@ download / MDM. Do **not** create a public Play listing (`SEND_SMS` is restricte
 `SEND_SMS`, `READ_PHONE_STATE`, `POST_NOTIFICATIONS`, `FOREGROUND_SERVICE`,
 `FOREGROUND_SERVICE_DATA_SYNC`, `RECEIVE_BOOT_COMPLETED`, `INTERNET`.
 
+## Phase 3 reliability — manual device test checklist
+Backend lease/requeue/classification/idempotency are covered by
+`functions/__tests__/relayLogic.test.ts`. On a device, verify:
+1. **Kill app during send** → reopen: in-flight jobs are re-claimed after the
+   lease expires (relayReaper requeues); no duplicate sends (stable jobId).
+2. **Reboot phone** → `BootReceiver` restarts the foreground service; pending
+   reports flush via `SyncReportsWorker`.
+3. **Disable data after an SMS is sent** → report is queued in Room.
+4. **Reconnect data** → `SyncReportsWorker` retries until the backend acks;
+   `relayJobs`/recipient status reaches sent/delivered.
+5. **Pause device while jobs exist** → no new claims; existing reports still flush.
+6. **Revoke device while jobs exist** → device can't claim/report; its leased
+   jobs are requeued by the reaper and picked up by another device.
+7. **Battery optimization** → dashboard shows the warning + "Fix battery
+   settings" opens the system list. Confirm the service survives Doze.
+
 ## Known Phase 2 limitations (hardening = Phase 3)
 - Lost FirebaseAuth session (rare) requires re-enrollment (custom tokens are
   one-time/short-lived); a refresh/re-pair flow is Phase 3.

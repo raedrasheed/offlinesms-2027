@@ -21,4 +21,6 @@
     <string name="dash_resume">Resume</string>
     <string name="dash_revoke">Unlink this device</string>
     <string name="dash_logs">Recent activity</string>
+    <string name="battery_warning">Battery optimization is on. Android may stop the relay in the background. Disable it for reliable delivery.</string>
+    <string name="battery_fix">Fix battery settings</string>
 </resources>
