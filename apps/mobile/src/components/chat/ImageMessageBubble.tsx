@@ -10,6 +10,7 @@ import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { colors } from '../../theme';
 import type { Message } from '../../lib/conversations';
+import { useCachedMediaUri } from '../../hooks/useCachedMediaUri';
 import { MediaUploadProgress } from './MediaUploadProgress';
 
 const MAX_W = 230;
@@ -26,7 +27,7 @@ export function ImageMessageBubble({
 }) {
   const { t } = useTranslation();
   const media = message.media;
-  const uri = media?.downloadURL || media?.localUri || null;
+  const uri = useCachedMediaUri(message);
 
   // Frame height from aspect ratio when known, else a sensible default box.
   let h = 170;

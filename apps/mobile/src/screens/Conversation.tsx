@@ -40,6 +40,7 @@ import { useMessagePersistence } from '../hooks/useLocalPersistence';
 import { queueSendMessage, queueEditMessage, queueMarkReceipt, retryMediaMessage, queueSendVoiceMessage, openLocalDb } from '../localdb';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
+import { prefetchMedia } from '../media/mediaCache';
 import { AttachmentSheet } from '../components/chat/AttachmentSheet';
 import { VoiceRecorderBar } from '../components/chat/VoiceRecorderBar';
 import { LockedVoiceRecorderBar } from '../components/chat/LockedVoiceRecorderBar';
@@ -276,6 +277,9 @@ export default function Conversation({ route, navigation }: any) {
     if (!effectiveMsgs) return null;
     return effectiveMsgs.filter(m => !deletedForMe.has(m.id));
   }, [effectiveMsgs, deletedForMe]);
+
+  // Cache media to the device so images/voice load instantly on revisit.
+  useEffect(() => { if (visibleMsgs) prefetchMedia(visibleMsgs); }, [visibleMsgs]);
 
   function jumpTo(messageId: string) {
     if (!visibleMsgs) return;

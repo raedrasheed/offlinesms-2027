@@ -10,6 +10,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { colors } from '../../theme';
 import type { Message } from '../../lib/conversations';
+import { useCachedMediaUri } from '../../hooks/useCachedMediaUri';
 import { formatDuration } from '../../media/mediaValidation';
 import { togglePlay, subscribePlayback } from '../../media/audio/audioPlayer';
 import { Waveform } from './Waveform';
@@ -24,7 +25,7 @@ export function VoiceMessageBubble({
 }) {
   const { t } = useTranslation();
   const media = message.media;
-  const uri = media?.downloadURL || media?.localUri || null;
+  const uri = useCachedMediaUri(message);
   const durationMs = media?.durationMs ?? 0;
   const status = media?.uploadStatus ?? 'uploaded';
   // Upload progress/retry only applies to your own outgoing message.
