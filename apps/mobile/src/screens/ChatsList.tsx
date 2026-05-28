@@ -3,9 +3,7 @@ import {
   FlatList, View, Text, Pressable, StyleSheet, TextInput, Image, Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import {
-  collection, onSnapshot, doc, query, where,
-} from 'firebase/firestore';
+import { onSnapshot, doc } from 'firebase/firestore';
 import { useTranslation } from 'react-i18next';
 import { db, auth } from '../lib/firebase';
 import {
@@ -13,6 +11,7 @@ import {
   Conversation,
   UserState,
 } from '../lib/conversations';
+import { subscribeToPresence, type ChatPresence } from '../services/presenceService';
 import { useTheme } from '../context/ThemeContext';
 import { useLocalChatList } from '../hooks/useLocalChatList';
 import { isRTL } from '../i18n';
@@ -62,10 +61,11 @@ export default function ChatsList({ navigation }: any) {
   const local = useLocalChatList(me);
   const useLocal = local.source === 'local';
 
-  // Per-conversation state + typing + peer profile, keyed by conversation id.
+  // Per-conversation state + peer profile, keyed by conversation id.
   const [states, setStates]   = useState<Record<string, UserState | undefined>>({});
-  const [typing, setTyping]   = useState<Record<string, boolean>>({});
   const [peers, setPeers]     = useState<Record<string, { name?: string; photoURL?: string | null }>>({});
+  // Live presence (online + typing/recording) per conversation, both paths.
+  const [presence, setPresence] = useState<Record<string, ChatPresence>>({});
 
   // Conversations list (Firestore path — skipped when the local DB drives the UI).
   useEffect(() => {
@@ -73,7 +73,8 @@ export default function ChatsList({ navigation }: any) {
     return subscribeConversations(setRows);
   }, [useLocal]);
 
-  // Per-conversation subscriptions: userState + typing + peer display name.
+  // Per-conversation subscriptions: userState + peer display name.
+  // (typing/recording/online come from the unified presence effect below.)
   useEffect(() => {
     if (useLocal || !me || !rows) return;
     const unsubs: Array<() => void> = [];
@@ -82,20 +83,6 @@ export default function ChatsList({ navigation }: any) {
       unsubs.push(onSnapshot(doc(db, 'conversations', c.id, 'userState', me), snap => {
         setStates(prev => ({ ...prev, [c.id]: snap.exists() ? ({ uid: me, ...snap.data() } as UserState) : undefined }));
       }));
-      // typing
-      unsubs.push(onSnapshot(
-        query(collection(db, 'conversations', c.id, 'typing'), where('isTyping', '==', true)),
-        snap => {
-          const now = Date.now();
-          let live = false;
-          for (const d of snap.docs) {
-            if (d.id === me) continue;
-            const exp = (d.data().expiresAt?.toMillis?.() ?? 0) as number;
-            if (exp > now) { live = true; break; }
-          }
-          setTyping(prev => ({ ...prev, [c.id]: live }));
-        },
-      ));
       // peer profile (direct conversations only)
       if (c.type === 'direct' && c.participantUids?.length === 2) {
         const peerUid = c.participantUids.find(u => u !== me);
@@ -124,10 +111,45 @@ export default function ChatsList({ navigation }: any) {
         state:         states[c.id],
         peerName:      displayName,
         photoURL:      isGroup ? null : (peers[c.id]?.photoURL ?? null),
-        someoneTyping: typing[c.id] ?? false,
+        someoneTyping: false,
       };
     });
-  }, [useLocal, local.items, rows, states, peers, typing]);
+  }, [useLocal, local.items, rows, states, peers]);
+
+  // Resolve the peer uid of a direct chat (Firestore: participantUids; local:
+  // the sorted participant_key "<a>_<b>").
+  const peerUidOf = (item: Row): string | null => {
+    if (item.type === 'group' || !me) return null;
+    const fromList = (item as any).participantUids as string[] | undefined;
+    if (fromList?.length) return fromList.find(u => u !== me) ?? null;
+    const key = (item as any).participantKey as string | null | undefined;
+    if (key) return key.split('_').find(u => u !== me) ?? null;
+    return null;
+  };
+
+  // Unified presence: subscribe to online + typing/recording for visible chats
+  // (both local-first and Firestore paths). Keyed on a stable id+peer signature
+  // so it only re-subscribes when the set of chats changes.
+  const presenceKey = enriched.map(e => `${e.id}:${peerUidOf(e) ?? ''}`).join(',');
+  useEffect(() => {
+    if (!me || enriched.length === 0) return;
+    const unsubs = enriched.map(item =>
+      subscribeToPresence(item.id, { peerUid: peerUidOf(item) }, p =>
+        setPresence(prev => ({ ...prev, [item.id]: p })),
+      ),
+    );
+    return () => { for (const u of unsubs) try { u(); } catch { /* noop */ } };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me, presenceKey]);
+
+  // Typing/recording preview text for a chat, or null to show the last message.
+  const activityTextOf = (id: string): string | null => {
+    const p = presence[id];
+    if (!p) return null;
+    if (p.recordingUids.length > 0) return t('presence.recording');
+    if (p.typingUids.length > 0) return t('convo.typing');
+    return null;
+  };
 
   // Archived chats are always hidden from every filter now (no archive tab).
   const visible = useMemo(() => enriched.filter(c => c.state?.archived !== true), [enriched]);
@@ -266,7 +288,7 @@ export default function ChatsList({ navigation }: any) {
                     <Text style={s.avText}>{initials(item.peerName ?? '?')}</Text>
                   </View>
                 )}
-                {item.type !== 'group' ? <View style={s.onlineDot} /> : null}
+                {item.type !== 'group' && presence[item.id]?.online ? <View style={s.onlineDot} /> : null}
               </View>
               <View style={{ flex: 1, minWidth: 0 }}>
                 <View style={s.rowTop}>
@@ -280,10 +302,9 @@ export default function ChatsList({ navigation }: any) {
                   </Text>
                 </View>
                 <View style={s.rowBot}>
-                  <Text style={s.preview} numberOfLines={1}>
-                    {item.someoneTyping
-                      ? t('convo.typing')
-                      : (item.state?.lastMessagePreview || item.lastMessageText || '')}
+                  <Text style={[s.preview, activityTextOf(item.id) ? s.previewActivity : null]} numberOfLines={1}>
+                    {activityTextOf(item.id)
+                      ?? (item.state?.lastMessagePreview || item.lastMessageText || '')}
                   </Text>
                   <View style={s.badges} accessibilityElementsHidden>
                     {item.state?.pinned   ? <Text style={s.tag}>📌</Text> : null}
@@ -342,6 +363,7 @@ function buildStyles(colors: any, rtl: boolean) {
     name:        { fontSize: 16, fontWeight: '800', color: colors.text.primary, flex: 1, textAlign: rtl ? 'right' : 'left' },
     time:        { fontSize: 12, color: colors.text.muted, writingDirection: 'ltr' },
     preview:     { fontSize: 14, color: colors.text.muted, flex: 1, textAlign: rtl ? 'right' : 'left' },
+    previewActivity: { color: colors.text.link, fontWeight: '600' },
     badges:      { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 4 },
     tag:         { fontSize: 12 },
     unread:      { minWidth: 20, height: 20, paddingHorizontal: 6, borderRadius: 10, backgroundColor: colors.action.primary, alignItems: 'center', justifyContent: 'center' },

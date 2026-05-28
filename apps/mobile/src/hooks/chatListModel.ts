@@ -21,6 +21,7 @@ export interface ChatListItem {
   peerName: string;
   photoURL?: string | null;
   memberCount?: number;
+  participantKey?: string | null;
   someoneTyping: boolean;
   lastMessageText: string | null;
   lastMessageAt: TsLike | null;
@@ -43,6 +44,7 @@ export function mapConversationRow(row: ConversationRow): ChatListItem {
     peerName: row.title || (row.type === 'group' ? 'Group' : 'Conversation'),
     photoURL: row.avatar_url,
     memberCount: row.member_count,
+    participantKey: row.participant_key,
     someoneTyping: false,
     lastMessageText: row.last_message_preview,
     lastMessageAt: at,
