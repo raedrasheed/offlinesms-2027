@@ -146,6 +146,10 @@ export type Message = {
   playedCount?:        number;
   failedCount?:        number;
   pendingCount?:       number;
+  // Local-only: last send/upload failure (e.g. a failed media upload's storage
+  // error code), surfaced in MessageInfo so it isn't logcat-only.
+  errorCode?:          string | null;
+  errorMessage?:       string | null;
 };
 
 export type UserState = {

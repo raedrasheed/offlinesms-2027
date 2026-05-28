@@ -319,6 +319,9 @@ export default function Conversation({ route, navigation }: any) {
       isGroup,
       groupName:   isGroup ? peerName : null,
       memberCount: convo?.memberCount ?? null,
+      mediaUploadError: m.type !== 'text' && m.media?.uploadStatus === 'failed'
+        ? { code: m.errorCode ?? null, message: m.errorMessage ?? null }
+        : null,
     });
   }
   async function unpin() {

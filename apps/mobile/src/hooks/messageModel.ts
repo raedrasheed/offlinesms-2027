@@ -91,6 +91,8 @@ export function mapMessageRow(row: MessageRow): Message {
     readCount: row.read_count ?? 0,
     viewedCount: row.viewed_count ?? 0,
     playedCount: row.played_count ?? 0,
+    errorCode: row.error_code ?? null,
+    errorMessage: row.error_message ?? null,
   } as Message;
 }
 
