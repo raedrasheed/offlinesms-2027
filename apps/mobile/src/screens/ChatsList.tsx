@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  FlatList, View, Text, Pressable, StyleSheet, TextInput,
+  FlatList, View, Text, Pressable, StyleSheet, TextInput, Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
@@ -29,6 +29,7 @@ type Filter = 'all' | 'unread' | 'favorites' | 'groups' | 'archived';
 type Row = Conversation & {
   state?:        UserState;
   peerName?:     string;
+  photoURL?:     string | null;
   someoneTyping: boolean;
 };
 
@@ -62,7 +63,7 @@ export default function ChatsList({ navigation }: any) {
   // Per-conversation state + typing + peer profile, keyed by conversation id.
   const [states, setStates]   = useState<Record<string, UserState | undefined>>({});
   const [typing, setTyping]   = useState<Record<string, boolean>>({});
-  const [peers, setPeers]     = useState<Record<string, { name?: string }>>({});
+  const [peers, setPeers]     = useState<Record<string, { name?: string; photoURL?: string | null }>>({});
 
   // Conversations list (Firestore path — skipped when the local DB drives the UI).
   useEffect(() => {
@@ -98,9 +99,9 @@ export default function ChatsList({ navigation }: any) {
         const peerUid = c.participantUids.find(u => u !== me);
         if (peerUid && !peers[peerUid]) {
           unsubs.push(onSnapshot(doc(db, 'users', peerUid), snap => {
-            const data = snap.data() as { displayName?: string; username?: string } | undefined;
+            const data = snap.data() as { displayName?: string; username?: string; photoURL?: string | null } | undefined;
             const name = data?.displayName || (data?.username ? `@${data.username}` : peerUid.slice(0, 6));
-            setPeers(prev => ({ ...prev, [c.id]: { name } }));
+            setPeers(prev => ({ ...prev, [c.id]: { name, photoURL: data?.photoURL ?? null } }));
           }));
         }
       }
@@ -120,6 +121,7 @@ export default function ChatsList({ navigation }: any) {
         ...c,
         state:         states[c.id],
         peerName:      displayName,
+        photoURL:      isGroup ? null : (peers[c.id]?.photoURL ?? null),
         someoneTyping: typing[c.id] ?? false,
       };
     });
@@ -221,9 +223,13 @@ export default function ChatsList({ navigation }: any) {
               accessibilityLabel={`${item.peerName}${(item.state?.unreadCount ?? 0) > 0 ? `, ${item.state?.unreadCount} unread` : ''}`}
             >
               <View style={s.avWrap} accessibilityElementsHidden>
-                <View style={[s.av, item.type === 'group' && s.avGroup, { backgroundColor: avatarColor(item.id) }]}>
-                  <Text style={s.avText}>{initials(item.peerName ?? '?')}</Text>
-                </View>
+                {item.photoURL ? (
+                  <Image source={{ uri: item.photoURL }} style={[s.av, item.type === 'group' && s.avGroup]} />
+                ) : (
+                  <View style={[s.av, item.type === 'group' && s.avGroup, { backgroundColor: avatarColor(item.id) }]}>
+                    <Text style={s.avText}>{initials(item.peerName ?? '?')}</Text>
+                  </View>
+                )}
                 {item.type !== 'group' ? <View style={s.onlineDot} /> : null}
               </View>
               <View style={{ flex: 1, minWidth: 0 }}>

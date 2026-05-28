@@ -19,6 +19,7 @@ export interface ChatListItem {
   id: string;
   type: 'direct' | 'group';
   peerName: string;
+  photoURL?: string | null;
   memberCount?: number;
   someoneTyping: boolean;
   lastMessageText: string | null;
@@ -40,6 +41,7 @@ export function mapConversationRow(row: ConversationRow): ChatListItem {
     id: row.id,
     type: row.type,
     peerName: row.title || (row.type === 'group' ? 'Group' : 'Conversation'),
+    photoURL: row.avatar_url,
     memberCount: row.member_count,
     someoneTyping: false,
     lastMessageText: row.last_message_preview,

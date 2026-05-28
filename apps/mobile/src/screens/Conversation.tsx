@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList, View, Text, TextInput, Pressable, StyleSheet, Alert,
-  KeyboardAvoidingView, Platform, PanResponder,
+  KeyboardAvoidingView, Platform, PanResponder, Image,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { doc, onSnapshot } from 'firebase/firestore';
@@ -22,8 +22,10 @@ import {
   ReplyTo,
   UserState,
   subscribeMembers,
+  GroupMember,
 } from '../lib/conversations';
 import type { ReactorInfo } from '../components/ReactionsSheet';
+import { useUserProfiles } from '../lib/userProfiles';
 import { Ionicons } from '@expo/vector-icons';
 import { MessageBubble } from '../components/MessageBubble';
 import { useTheme } from '../context/ThemeContext';
@@ -186,18 +188,31 @@ export default function Conversation({ route, navigation }: any) {
     });
   }, [id, me, convo?.type]);
 
-  // Group member names — resolves uids to names for the reactions breakdown.
-  const [reactorNames, setReactorNames] = useState<Record<string, ReactorInfo>>({});
+  // Group member names/photos — resolves uids for the reactions breakdown and
+  // sender avatars. Uses the membership snapshot first, then the user profile
+  // (covers members whose snapshot has no name/photo).
+  const [members, setMembers] = useState<GroupMember[]>([]);
   useEffect(() => {
-    if (!id || convo?.type !== 'group') { setReactorNames({}); return; }
-    return subscribeMembers(id, rows => {
-      const map: Record<string, ReactorInfo> = {};
-      for (const m of rows) {
-        map[m.uid] = { name: m.displayNameSnapshot ?? m.uid.slice(0, 6), photoURL: m.photoURLSnapshot ?? null };
-      }
-      setReactorNames(map);
-    });
+    if (!id || convo?.type !== 'group') { setMembers([]); return; }
+    return subscribeMembers(id, setMembers);
   }, [id, convo?.type]);
+  const memberUids = useMemo(() => members.map(m => m.uid), [members]);
+  const memberProfiles = useUserProfiles(memberUids);
+  // Direct-chat peer photo for the header / empty-state avatar.
+  const isDirect = convo?.type !== 'group';
+  const peerProfiles = useUserProfiles(isDirect && peerUid ? [peerUid] : []);
+  const peerPhoto = isDirect && peerUid ? (peerProfiles[peerUid]?.photoURL ?? null) : null;
+  const reactorNames = useMemo<Record<string, ReactorInfo>>(() => {
+    const map: Record<string, ReactorInfo> = {};
+    for (const m of members) {
+      const prof = memberProfiles[m.uid];
+      map[m.uid] = {
+        name: m.displayNameSnapshot || prof?.displayName || m.uid.slice(0, 6),
+        photoURL: m.photoURLSnapshot || prof?.photoURL || null,
+      };
+    }
+    return map;
+  }, [members, memberProfiles]);
 
   // Typing indicator.
   useEffect(() => {
@@ -504,9 +519,13 @@ export default function Conversation({ route, navigation }: any) {
 
     if (visibleMsgs.length === 0 && queuedItems.length === 0) return (
       <View style={s.emptyConvo}>
-        <View style={[s.emptyAvatar, { backgroundColor: avatarColor(peerUid ?? peerName) }]}>
-          <Text style={s.emptyAvatarText}>{initials(peerName)}</Text>
-        </View>
+        {peerPhoto ? (
+          <Image source={{ uri: peerPhoto }} style={s.emptyAvatar} />
+        ) : (
+          <View style={[s.emptyAvatar, { backgroundColor: avatarColor(peerUid ?? peerName) }]}>
+            <Text style={s.emptyAvatarText}>{initials(peerName)}</Text>
+          </View>
+        )}
         <Text style={s.emptyName}>{peerName}</Text>
         {peerUsername ? <Text style={s.emptyHandle}>@{peerUsername}</Text> : null}
         <View style={s.e2eNotice}>
@@ -609,9 +628,13 @@ export default function Conversation({ route, navigation }: any) {
           accessibilityLabel={isGroup ? `${peerName}, ${t('group.info')}` : peerName}
         >
           <View style={s.headerAvatarWrap}>
-            <View style={[s.headerAvatar, { backgroundColor: avatarColor(peerUid ?? peerName) }]}>
-              <Text style={s.headerAvatarText}>{initials(peerName)}</Text>
-            </View>
+            {peerPhoto ? (
+              <Image source={{ uri: peerPhoto }} style={s.headerAvatar} />
+            ) : (
+              <View style={[s.headerAvatar, { backgroundColor: avatarColor(peerUid ?? peerName) }]}>
+                <Text style={s.headerAvatarText}>{initials(peerName)}</Text>
+              </View>
+            )}
             {!isGroup ? <View style={s.onlineDot} /> : null}
           </View>
           <View style={{ flex: 1 }}>

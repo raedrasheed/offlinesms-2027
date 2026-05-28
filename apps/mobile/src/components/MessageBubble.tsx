@@ -96,6 +96,10 @@ export function MessageBubble({
   // For images without a caption, overlay time + ticks on the photo (WhatsApp
   // style) instead of below the bubble.
   const imageOverlayFooter = !deleted && m.type === 'image' && !(m.caption && m.caption.trim());
+  // Sender avatar/name: message snapshot first, then the resolved member profile.
+  const senderProfile = context.reactorNames?.[m.senderUid];
+  const senderPhoto = m.senderPhotoURL ?? senderProfile?.photoURL ?? null;
+  const senderName = m.senderDisplayName ?? senderProfile?.name ?? m.senderUid.slice(0, 2);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [reactionsOpen, setReactionsOpen] = useState(false);
 
@@ -211,11 +215,11 @@ export function MessageBubble({
     <View style={[s.row, mine ? s.rowMine : s.rowTheirs]}>
       {showAvatar ? (
         showSender ? (
-          m.senderPhotoURL ? (
-            <Image source={{ uri: m.senderPhotoURL }} style={s.avatar} />
+          senderPhoto ? (
+            <Image source={{ uri: senderPhoto }} style={s.avatar} />
           ) : (
             <View style={[s.avatar, { backgroundColor: avatarColor(m.senderUid) }]}>
-              <Text style={s.avatarText}>{initials(m.senderDisplayName ?? m.senderUid.slice(0, 2))}</Text>
+              <Text style={s.avatarText}>{initials(senderName)}</Text>
             </View>
           )
         ) : (
@@ -227,7 +231,7 @@ export function MessageBubble({
       <Pressable onLongPress={() => setSheetOpen(true)} delayLongPress={300} style={[s.bubble, mine ? s.sent : s.recv]}>
         {showSender ? (
           <Text style={[s.senderLabel, { color: avatarColor(m.senderUid) }]} numberOfLines={1}>
-            {m.senderDisplayName ?? m.senderUid.slice(0, 6)}
+            {senderName}
           </Text>
         ) : null}
         {m.forwarded ? <Text style={[s.meta, mine && { color: 'rgba(255,255,255,.85)' }]}>↪︎ Forwarded</Text> : null}
