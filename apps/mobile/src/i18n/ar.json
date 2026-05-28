@@ -83,6 +83,15 @@
     "composerPlaceholder": "رسالة",
     "e2e": "الرسائل والمكالمات مشفّرة من الطرف إلى الطرف"
   },
+  "presence": {
+    "online": "متصل",
+    "lastSeen": "آخر ظهور {{time}}",
+    "typing": "يكتب…",
+    "recording": "يسجّل صوتاً…",
+    "isTyping": "{{name}} يكتب…",
+    "typingMulti": "{{name}} و{{count}} آخرون يكتبون…",
+    "isRecording": "{{name}} يسجّل صوتاً…"
+  },
   "points": {
     "title": "نقاط OfflineSMS",
     "wallet": "محفظة النقاط",

@@ -8,12 +8,10 @@ import { doc, onSnapshot } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 import {
   subscribeMessages,
-  subscribeTyping,
   subscribeUserState,
   sendTextMessage,
   markRead,
   markReceipt,
-  setTyping,
   editMessage,
   pinMessage,
   Conversation as ConversationDoc,
@@ -26,6 +24,10 @@ import {
 } from '../lib/conversations';
 import type { ReactorInfo } from '../components/ReactionsSheet';
 import { useUserProfiles } from '../lib/userProfiles';
+import { useChatPresence, formatPresenceSubtitle } from '../hooks/useChatPresence';
+import { useTypingPresence } from '../hooks/useTypingPresence';
+import { useRecordingPresence } from '../hooks/useRecordingPresence';
+import { stopTyping } from '../services/presenceService';
 import { Ionicons } from '@expo/vector-icons';
 import { MessageBubble } from '../components/MessageBubble';
 import { useTheme } from '../context/ThemeContext';
@@ -106,7 +108,6 @@ export default function Conversation({ route, navigation }: any) {
   const [peerName, setPeerName] = useState<string>('Chat');
   const [peerUsername, setPeerUsername] = useState<string | null>(null);
   const [peerUid, setPeerUid] = useState<string | null>(null);
-  const [peerTyping, setPeerTyping] = useState(false);
   const [myRole, setMyRole] = useState<GroupRole | null>(null);
   const [memberStatus, setMemberStatus] = useState<'active' | 'removed' | 'left' | 'unknown'>('unknown');
   const [userState, setUserState] = useState<UserState | null>(null);
@@ -215,20 +216,10 @@ export default function Conversation({ route, navigation }: any) {
     return map;
   }, [members, memberProfiles]);
 
-  // Typing indicator.
-  useEffect(() => {
-    if (!id) return;
-    return subscribeTyping(id, rows => setPeerTyping(rows.length > 0));
-  }, [id]);
-
-  // Outbound typing (only when not editing — editing isn't a send).
-  useEffect(() => {
-    if (!id || editing) return;
-    if (!draft) { setTyping(id, false).catch(() => {}); return; }
-    setTyping(id, true).catch(() => {});
-    const handle = setTimeout(() => setTyping(id, false).catch(() => {}), 3500);
-    return () => clearTimeout(handle);
-  }, [draft, id, editing]);
+  // Presence: peer online/last-seen + everyone's typing/recording activity.
+  const presence = useChatPresence(id, isDirect ? peerUid : null);
+  // Outbound typing (debounced; auto-stops on send/clear/leave; off while editing).
+  useTypingPresence(id, draft, !editing);
 
   // Restore a saved draft when opening the chat.
   useEffect(() => {
@@ -392,6 +383,8 @@ export default function Conversation({ route, navigation }: any) {
   const recorder = useVoiceRecorder();
   const modeRef = useRef(recorder.mode);
   useEffect(() => { modeRef.current = recorder.mode; }, [recorder.mode]);
+  // Publish recording presence while the recorder is active (recording/locked).
+  useRecordingPresence(id, recorder.mode === 'recording' || recorder.mode === 'locked');
   const cancelArmedRef = useRef(false);
   const [cancelArmed, setCancelArmed] = useState(false);
   // Refs so the PanResponder (created once) reads current values.
@@ -491,20 +484,20 @@ export default function Conversation({ route, navigation }: any) {
         setReplyTo(null);
         setDraft('');
         clearDraft(id);
-        setTyping(id, false).catch(() => {});
+        stopTyping(id);
       } else if (isOffline) {
         // Offline-first: persist locally and deliver on reconnect.
         await enqueue({ conversationId: id, conversationType: isGroup ? 'group' : 'direct', text, replyTo: replyTo ?? null });
         setReplyTo(null);
         setDraft('');
         clearDraft(id);
-        setTyping(id, false).catch(() => {});
+        stopTyping(id);
       } else {
         await sendTextMessage(id, text, replyTo);
         setReplyTo(null);
         setDraft('');
         clearDraft(id);
-        setTyping(id, false).catch(() => {});
+        stopTyping(id);
       }
     } catch (e: any) {
       setErr(e?.message ?? 'send-failed');
@@ -516,10 +509,16 @@ export default function Conversation({ route, navigation }: any) {
   const s = buildStyles(colors, isRTL);
 
   const headerSubtitle = useMemo(() => {
-    if (peerTyping) return 'typing…';
-    if (!isGroup) return 'Online';
-    return convo?.memberCount ? `${convo.memberCount} members${convo?.status === 'locked' ? ' · locked' : ''}` : null;
-  }, [peerTyping, isGroup, convo?.memberCount, convo?.status]);
+    const groupFallback = convo?.memberCount
+      ? `${convo.memberCount} members${convo?.status === 'locked' ? ' · locked' : ''}`
+      : '';
+    return formatPresenceSubtitle(presence, {
+      isGroup,
+      t,
+      nameFor: (uid) => reactorNames[uid]?.name ?? memberProfiles[uid]?.displayName ?? uid.slice(0, 6),
+      groupFallback,
+    }) || null;
+  }, [presence, isGroup, convo?.memberCount, convo?.status, reactorNames, memberProfiles, t]);
 
   const queued = queuedFor(id);
   const body = useMemo(() => {

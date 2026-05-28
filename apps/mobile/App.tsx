@@ -24,6 +24,7 @@ import FindFriends from './src/screens/FindFriends';
 import IncomingCall from './src/screens/IncomingCall';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { useChatListPersistence } from './src/hooks/useLocalPersistence';
+import { usePresence } from './src/hooks/usePresence';
 import { useUnreadTotal } from './src/lib/unreadStore';
 import ChatsList from './src/screens/ChatsList';
 import Conversation from './src/screens/Conversation';
@@ -141,6 +142,8 @@ export default function App() {
 
   // Mirror the user's chats into the local SQLite DB for the whole session.
   useChatListPersistence(user?.uid);
+  // Presence: online while foregrounded, last-seen on background/logout.
+  usePresence(user?.uid);
 
   if (!ready) return null;
 

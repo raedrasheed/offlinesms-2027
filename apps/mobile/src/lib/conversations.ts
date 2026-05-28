@@ -7,6 +7,7 @@
 
 import {
   collection, doc, onSnapshot, orderBy, query, where, limit,
+  setDoc, serverTimestamp, Timestamp,
 } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { app, db, auth } from './firebase';
@@ -168,9 +169,20 @@ export type UserState = {
 };
 
 export type Typing = {
-  uid:       string;
-  isTyping?: boolean;
-  expiresAt?: any;
+  uid:                 string;
+  isTyping?:           boolean;
+  expiresAt?:          any;
+  // Presence activity (Phase 24) — recording shares the typing doc so it needs
+  // no extra rules; readers honour an independent TTL (recordingExpiresAt).
+  isRecording?:        boolean;
+  recordingExpiresAt?: any;
+};
+
+/** One participant's live activity in a chat (typing and/or recording). */
+export type Activity = {
+  uid:         string;
+  isTyping:    boolean;
+  isRecording: boolean;
 };
 
 // ─────────────────────────────────────────────────────────────────
@@ -249,6 +261,83 @@ export function subscribeTyping(
     }
     cb(rows);
   });
+}
+
+/**
+ * Subscribe to live activity (typing AND recording) for every participant
+ * other than the caller. Each flag honours its own TTL so a stale doc never
+ * keeps an indicator stuck.
+ */
+export function subscribeActivity(
+  conversationId: string,
+  cb: (rows: Activity[]) => void,
+) {
+  const me = auth.currentUser?.uid;
+  return onSnapshot(collection(db, 'conversations', conversationId, 'typing'), snap => {
+    const now = Date.now();
+    const rows: Activity[] = [];
+    for (const d of snap.docs) {
+      if (d.id === me) continue;
+      const data = d.data() as Typing;
+      const typingLive    = data.isTyping    === true && (data.expiresAt?.toMillis?.() ?? 0) > now;
+      const recordingLive  = data.isRecording === true && (data.recordingExpiresAt?.toMillis?.() ?? 0) > now;
+      if (typingLive || recordingLive) {
+        rows.push({ uid: d.id, isTyping: typingLive, isRecording: recordingLive });
+      }
+    }
+    cb(rows);
+  });
+}
+
+const RECORDING_TTL_MS = 8000;
+
+/**
+ * Publish the caller's recording state. Written directly to the owner-writable
+ * typing doc (merge, so it never clobbers the typing flag). Refresh while a
+ * long recording continues so the TTL doesn't lapse mid-recording.
+ */
+export async function setRecording(conversationId: string, isRecording: boolean): Promise<void> {
+  const uid = auth.currentUser?.uid;
+  if (!uid) return;
+  await setDoc(
+    doc(db, 'conversations', conversationId, 'typing', uid),
+    {
+      uid,
+      isRecording,
+      recordingExpiresAt: isRecording
+        ? Timestamp.fromMillis(Date.now() + RECORDING_TTL_MS)
+        : Timestamp.fromMillis(0),
+    },
+    { merge: true },
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Presence — online/last-seen via a heartbeat on the user doc.
+// "online" is derived from lastSeen freshness (no extra field/rules needed).
+// ─────────────────────────────────────────────────────────────────
+
+/** Window within which a fresh lastSeen counts as "online". */
+export const ONLINE_WINDOW_MS = 45000;
+
+/** Stamp the caller's lastSeen (heartbeat + final write on background). */
+export async function updateLastSeen(): Promise<void> {
+  const uid = auth.currentUser?.uid;
+  if (!uid) return;
+  await setDoc(
+    doc(db, 'users', uid),
+    { lastSeen: serverTimestamp(), updatedAt: serverTimestamp() },
+    { merge: true },
+  );
+}
+
+/** Subscribe to another user's lastSeen (ms epoch, or null if unknown). */
+export function subscribePresence(uid: string, cb: (lastSeenAt: number | null) => void) {
+  return onSnapshot(
+    doc(db, 'users', uid),
+    snap => cb(snap.exists() ? (snap.data()?.lastSeen?.toMillis?.() ?? null) : null),
+    () => cb(null),
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────

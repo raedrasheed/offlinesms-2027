@@ -21,6 +21,7 @@ import {
 } from 'firebase/auth';
 import { auth } from './firebase';
 import { Platform } from 'react-native';
+import { setOffline } from '../services/presenceService';
 
 let confirmation: ConfirmationResult | null = null;
 let nativeVerifier: ApplicationVerifier | null = null;
@@ -118,6 +119,9 @@ export function cancelOtp(): void {
   confirmation = null;
 }
 
-export function signOut() {
+export async function signOut() {
+  // Stamp a final lastSeen (and stop the heartbeat) while still authenticated,
+  // so peers see the user go offline rather than "stuck online".
+  try { await setOffline(); } catch { /* best-effort */ }
   return auth.signOut();
 }

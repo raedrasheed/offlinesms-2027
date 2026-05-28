@@ -83,6 +83,15 @@
     "composerPlaceholder": "Message",
     "e2e": "Messages and calls are end-to-end encrypted"
   },
+  "presence": {
+    "online": "Online",
+    "lastSeen": "Last seen {{time}}",
+    "typing": "typing…",
+    "recording": "recording audio…",
+    "isTyping": "{{name}} is typing…",
+    "typingMulti": "{{name}} and {{count}} others are typing…",
+    "isRecording": "{{name}} is recording audio…"
+  },
   "points": {
     "title": "OfflineSMS Points",
     "wallet": "Points wallet",
