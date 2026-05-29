@@ -70,21 +70,35 @@ export const enrollRelayDevice = onCall({ region: REGION }, async (request) => {
   const deviceRef = db.collection('relayDevices').doc();
   const deviceId = deviceRef.id;
 
-  const businessId = await db.runTransaction(async tx => {
+  // Validate the code (pre-read) and mint the device token BEFORE persisting
+  // anything, so a token-signing failure leaves no orphan device + the code
+  // unconsumed. The transaction below re-validates to close the race.
+  const preSnap = await codeRef.get();
+  if (!preSnap.exists) throw new HttpsError('not-found', 'pairing-code-invalid');
+  const pre = preSnap.data() as { businessId: string; createdByUid: string; used?: boolean; expiresAt?: Timestamp };
+  if (!isPairingCodeUsable({ used: pre.used, expiresAtMs: pre.expiresAt?.toMillis?.() ?? 0 }, Date.now())) {
+    throw new HttpsError('failed-precondition', 'pairing-code-expired-or-used');
+  }
+  const businessId = pre.businessId;
+
+  // Mint first — if this throws (e.g. missing Token Creator role), nothing was written.
+  const customToken = await getAuth().createCustomToken(deviceId, {
+    relayDevice: true, deviceId, businessId,
+  });
+
+  // Now consume the code + create the device atomically (re-check usability).
+  await db.runTransaction(async tx => {
     const snap = await tx.get(codeRef);
     if (!snap.exists) throw new HttpsError('not-found', 'pairing-code-invalid');
-    const c = snap.data() as { businessId: string; createdByUid: string; used?: boolean; expiresAt?: Timestamp };
-    const usable = isPairingCodeUsable(
-      { used: c.used, expiresAtMs: c.expiresAt?.toMillis?.() ?? 0 },
-      Date.now(),
-    );
-    if (!usable) throw new HttpsError('failed-precondition', 'pairing-code-expired-or-used');
-
+    const c = snap.data() as { used?: boolean; expiresAt?: Timestamp };
+    if (!isPairingCodeUsable({ used: c.used, expiresAtMs: c.expiresAt?.toMillis?.() ?? 0 }, Date.now())) {
+      throw new HttpsError('failed-precondition', 'pairing-code-expired-or-used');
+    }
     tx.update(codeRef, { used: true, usedAt: FieldValue.serverTimestamp(), deviceId });
     tx.set(deviceRef, {
       deviceId,
-      businessId:     c.businessId,
-      ownerUid:       c.createdByUid,
+      businessId,
+      ownerUid:       pre.createdByUid,
       label:          typeof data.deviceLabel === 'string' ? data.deviceLabel.slice(0, 80) : 'Relay device',
       status:         'active',
       fcmToken:       typeof data.fcmToken === 'string' ? data.fcmToken : null,
@@ -100,12 +114,6 @@ export const enrollRelayDevice = onCall({ region: REGION }, async (request) => {
       createdAt:       FieldValue.serverTimestamp(),
       updatedAt:       FieldValue.serverTimestamp(),
     });
-    return c.businessId;
-  });
-
-  // Device principal: uid = deviceId, with relay claims so claim/report verify it.
-  const customToken = await getAuth().createCustomToken(deviceId, {
-    relayDevice: true, deviceId, businessId,
   });
 
   await writeAuditLog({
