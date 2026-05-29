@@ -259,6 +259,11 @@ export function subscribePackages(cb: (rows: PointsPackage[]) => void) {
   return onSnapshot(q, snap => {
     const rows = snap.docs.map(d => ({ id: d.id, ...(d.data() as Omit<PointsPackage, 'id'>) }));
     cb(rows);
+  }, err => {
+    // Without an error path a failed query (e.g. a missing composite index)
+    // would leave the screen stuck on "Loading packages…" forever.
+    console.warn('[points] subscribePackages failed:', err);
+    cb([]);
   });
 }
 
