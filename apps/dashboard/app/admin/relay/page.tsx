@@ -8,6 +8,7 @@ import { verifySession } from '@/lib/session';
 import { canDo } from '@/lib/adminPermissions';
 import { getAdminScope } from '@/lib/adminScope';
 import { adminDb } from '@/lib/firebase-admin';
+import { listOrganizations } from '@/lib/adminData';
 import { ADMIN_LABELS } from '@/lib/i18n';
 import { PermissionState } from '@/components/state';
 import RelayAdmin, { type RelayDeviceView, type RelayOrgStatus } from './RelayAdmin';
@@ -40,6 +41,15 @@ export default async function RelayAdminPage({ searchParams }: { searchParams?: 
   const scope = getAdminScope(session);
   const businessId = scope.organizationId ?? (searchParams?.org?.trim() || null);
   const canManage = canDo(session.role, 'manage:relay');
+
+  // Unrestricted (super/legacy/bootstrap) admins pick the org; org-scoped admins
+  // are already bound to their own organization.
+  const isUnrestricted = scope.organizationId === undefined;
+  let orgOptions: { id: string; name: string }[] = [];
+  if (isUnrestricted) {
+    try { orgOptions = (await listOrganizations()).map(o => ({ id: o.id ?? '', name: o.name })); }
+    catch { /* org list is best-effort */ }
+  }
 
   let q = adminDb.collection('relayDevices').limit(100) as FirebaseFirestore.Query;
   if (businessId) q = adminDb.collection('relayDevices').where('businessId', '==', businessId).limit(100);
@@ -108,6 +118,7 @@ export default async function RelayAdminPage({ searchParams }: { searchParams?: 
         fetchError={fetchError}
         queueHealth={queueHealth}
         healthyDevices={healthyDevices}
+        orgOptions={orgOptions}
       />
     </div>
   );

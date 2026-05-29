@@ -46,7 +46,7 @@ function liveStatus(d: RelayDeviceView): { text: string; color: string } {
 }
 
 export default function RelayAdmin({
-  devices, orgStatus, businessId, canManage, fetchError, queueHealth, healthyDevices,
+  devices, orgStatus, businessId, canManage, fetchError, queueHealth, healthyDevices, orgOptions,
 }: {
   devices: RelayDeviceView[];
   orgStatus: RelayOrgStatus;
@@ -55,6 +55,7 @@ export default function RelayAdmin({
   fetchError: string | null;
   queueHealth: Record<string, number>;
   healthyDevices: number;
+  orgOptions: { id: string; name: string }[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -110,6 +111,21 @@ export default function RelayAdmin({
 
   return (
     <div className="space-y-4">
+      {orgOptions.length > 0 && (
+        <div style={box} className="flex flex-wrap items-center gap-3">
+          <label className="text-sm" style={{ color: 'var(--c-text-muted)' }}>{L.relay.selectOrg}</label>
+          <select
+            value={businessId ?? ''}
+            onChange={(e) => router.push(e.target.value ? `/admin/relay?org=${e.target.value}` : '/admin/relay')}
+            className="px-3 py-2 rounded-md text-sm"
+            style={{ border: `1px solid ${BORDER}`, background: 'var(--c-bg, transparent)', color: 'inherit', minWidth: 260 }}
+          >
+            <option value="">{L.relay.selectOrgPlaceholder}</option>
+            {orgOptions.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </select>
+        </div>
+      )}
+
       {/* Org relay status + create code */}
       <div style={box} className="flex flex-wrap items-center gap-4 justify-between">
         <div>
