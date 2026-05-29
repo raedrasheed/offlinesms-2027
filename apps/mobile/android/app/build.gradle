@@ -64,10 +64,11 @@ react {
 
     /* Bundling */
     //   A list containing the node command and its flags. Default is just 'node'.
-    //   Give Metro a larger Node heap so the release bundle doesn't OOM
-    //   ("Fatal process out of memory: Zone"). Lower the value if the build
-    //   machine has less RAM.
-    nodeExecutableAndArgs = ["node", "--max-old-space-size=8192"]
+    //   Bound the Metro/Node heap. With maxWorkers=1 (metro.config.js) peak usage
+    //   is roughly one worker of this size, which keeps low-RAM machines from
+    //   thrashing into a "Fatal process out of memory: Zone" crash. Raise this if
+    //   your build box has plenty of free RAM; the workers inherit the flag.
+    nodeExecutableAndArgs = ["node", "--max-old-space-size=4096"]
 
     //
     //   The path to the CLI configuration file. Default is empty.
