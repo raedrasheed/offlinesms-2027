@@ -48,15 +48,45 @@ export const verifyPhoneOtp = onCall({ region: REGION }, async (request) => {
   // Find-or-create the phone user, mark verified, mint a custom token.
   const adminAuth = getAuth();
   let uid: string;
+  let created = false;
   try {
     uid = (await adminAuth.getUserByPhoneNumber(phone)).uid;
   } catch {
-    uid = (await adminAuth.createUser({ phoneNumber: phone })).uid; // triggers onUserCreate bootstrap
+    uid = (await adminAuth.createUser({ phoneNumber: phone })).uid;
+    created = true;
   }
-  await db.collection('users').doc(uid).set(
-    { phoneNumber: phone, phoneVerified: true, updatedAt: FieldValue.serverTimestamp() },
-    { merge: true },
-  );
+
+  const userRef = db.collection('users').doc(uid);
+  if (created) {
+    // The onUserCreate bootstrap is a beforeUserCreated *blocking* function,
+    // which does NOT fire for Admin-SDK createUser(). So bootstrap the profile
+    // (createdAt, status, onboarding gate) and the welcome wallet here, mirroring
+    // onUserCreate — otherwise the user has no createdAt (and is dropped from the
+    // admin list's orderBy) and no wallet.
+    await userRef.set({
+      displayName:      null,
+      phoneNumber:      phone,
+      email:            null,
+      username:         null,
+      usernameLower:    null,
+      about:            null,
+      profileCompleted: false,
+      status:           'active',
+      phoneVerified:    true,
+      createdAt:        FieldValue.serverTimestamp(),
+      updatedAt:        FieldValue.serverTimestamp(),
+    }, { merge: true });
+    await db.collection('wallets').doc(uid).set({
+      balance:   50,            // 50-pt welcome credit (matches onUserCreate)
+      reserved:  0,
+      createdAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+  } else {
+    await userRef.set(
+      { phoneNumber: phone, phoneVerified: true, updatedAt: FieldValue.serverTimestamp() },
+      { merge: true },
+    );
+  }
   const customToken = await adminAuth.createCustomToken(uid);
 
   await writeAuditLog({
