@@ -82,6 +82,11 @@ export const ADMIN_LABELS = {
     recentStatus:  'Status',
     recentTime:    'Time',
     recentNone:    'No messages sent yet.',
+    otpTitle:      'Default OTP sender',
+    otpHint:       'The organization whose relay device(s) send sign-in OTP codes. Any online device in that org is used (load-balanced).',
+    otpCurrent:    'Current',
+    otpNone:       'Not set',
+    otpSave:       'Set as OTP sender',
   },
   actions: {
     export:   'Export CSV',

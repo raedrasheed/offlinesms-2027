@@ -51,6 +51,11 @@ export default async function RelayAdminPage({ searchParams }: { searchParams?: 
     catch { /* org list is best-effort */ }
   }
 
+  // Platform default OTP sender org (shown/editable to platform admins only).
+  let otpOrgId: string | null = null;
+  try { otpOrgId = (await adminDb.collection('smsConfig').doc('otp').get()).data()?.businessId ?? null; }
+  catch { /* best-effort */ }
+
   let q = adminDb.collection('relayDevices').limit(100) as FirebaseFirestore.Query;
   if (businessId) q = adminDb.collection('relayDevices').where('businessId', '==', businessId).limit(100);
 
@@ -119,6 +124,7 @@ export default async function RelayAdminPage({ searchParams }: { searchParams?: 
         queueHealth={queueHealth}
         healthyDevices={healthyDevices}
         orgOptions={orgOptions}
+        otpOrgId={otpOrgId}
       />
     </div>
   );

@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { ADMIN_LABELS as L } from '@/lib/i18n';
 import {
   createRelayPairingCodeAction, setRelayDeviceStatusAction, revokeRelayDeviceAction,
-  setRelayModeAction, sendRelayTestAction,
+  setRelayModeAction, sendRelayTestAction, setOtpOrgAction,
 } from '@/lib/relayActions';
 
 export type RelayDeviceView = {
@@ -46,7 +46,7 @@ function liveStatus(d: RelayDeviceView): { text: string; color: string } {
 }
 
 export default function RelayAdmin({
-  devices, orgStatus, businessId, canManage, fetchError, queueHealth, healthyDevices, orgOptions,
+  devices, orgStatus, businessId, canManage, fetchError, queueHealth, healthyDevices, orgOptions, otpOrgId,
 }: {
   devices: RelayDeviceView[];
   orgStatus: RelayOrgStatus;
@@ -56,6 +56,7 @@ export default function RelayAdmin({
   queueHealth: Record<string, number>;
   healthyDevices: number;
   orgOptions: { id: string; name: string }[];
+  otpOrgId: string | null;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -112,6 +113,15 @@ export default function RelayAdmin({
       if (res.error) setErr(res.error); else router.refresh();
     });
   }
+  function setOtpOrg(id: string) {
+    if (!id) return;
+    setErr(null);
+    startTransition(async () => {
+      const res = await setOtpOrgAction(id);
+      if (res.error) setErr(res.error); else router.refresh();
+    });
+  }
+  const otpOrgName = orgOptions.find(o => o.id === otpOrgId)?.name ?? otpOrgId;
 
   const box = { background: CARD, border: `1px solid ${BORDER}`, borderRadius: 12, padding: 16 };
   const currentMode: 'http' | 'relay' | 'hybrid' = orgStatus.mode;
@@ -136,6 +146,30 @@ export default function RelayAdmin({
             <option value="">{L.relay.selectOrgPlaceholder}</option>
             {orgOptions.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
           </select>
+        </div>
+      )}
+
+      {orgOptions.length > 0 && (
+        <div style={box} className="space-y-2">
+          <div>
+            <div className="font-medium">{L.relay.otpTitle}</div>
+            <div className="text-xs" style={{ color: 'var(--c-text-muted)' }}>{L.relay.otpHint}</div>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-sm" style={{ color: 'var(--c-text-muted)' }}>
+              {L.relay.otpCurrent}: <b style={{ color: 'var(--c-text)' }}>{otpOrgName ?? L.relay.otpNone}</b>
+            </span>
+            <select
+              defaultValue={otpOrgId ?? ''}
+              onChange={(e) => setOtpOrg(e.target.value)}
+              disabled={pending}
+              className="px-3 py-2 rounded-md text-sm"
+              style={{ border: `1px solid ${BORDER}`, background: 'transparent', color: 'inherit', minWidth: 260 }}
+            >
+              <option value="">{L.relay.otpNone}</option>
+              {orgOptions.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </select>
+          </div>
         </div>
       )}
 

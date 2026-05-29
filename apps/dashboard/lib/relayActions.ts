@@ -78,6 +78,27 @@ export async function setRelayModeAction(mode: 'http' | 'relay' | 'hybrid', targ
 
 const E164 = /^\+[1-9]\d{6,14}$/;
 
+/** Platform setting: which org's relay sends sign-in OTP (smsConfig/otp). Only
+ *  unrestricted (super/legacy/bootstrap) admins may set it — it's global. */
+export async function setOtpOrgAction(businessId: string): Promise<RelayActionState> {
+  const session = await authorize();
+  if ('error' in session) return session;
+  if (getAdminScope(session).organizationId !== undefined) {
+    return { error: 'Only a platform admin can set the default OTP organization.' };
+  }
+  if (!businessId.trim()) return { error: 'Select an organization.' };
+  try {
+    await adminDb.collection('smsConfig').doc('otp').set(
+      { businessId: businessId.trim(), updatedAt: FieldValue.serverTimestamp() }, { merge: true },
+    );
+  } catch {
+    return { error: 'Could not save the OTP organization.' };
+  }
+  await audit('relay.otp.org.set', session, businessId.trim(), { businessId: businessId.trim() });
+  revalidatePath('/admin/relay');
+  return { success: true };
+}
+
 export async function sendRelayTestAction(phoneE164: string, body: string, targetBusiness?: string): Promise<RelayActionState> {
   const session = await authorize();
   if ('error' in session) return session;
