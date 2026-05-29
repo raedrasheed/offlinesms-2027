@@ -71,6 +71,12 @@ export const ADMIN_LABELS = {
     qExpired:      'Expired',
     noHealthyDevices: 'Relay is enabled but no devices are online. Messages will queue (or fall back to HTTP in hybrid) until a device comes online.',
     healthyDevices: 'Online devices',
+    sendTitle:     'Send SMS via relay',
+    sendHint:      'Sends one SMS from this organization’s relay device (no Points charged).',
+    sendPhonePlaceholder: '+972591234567',
+    sendBodyPlaceholder:  'Message text',
+    sendBtn:       'Send SMS',
+    sendQueued:    'Queued — the device will send shortly.',
   },
   actions: {
     export:   'Export CSV',

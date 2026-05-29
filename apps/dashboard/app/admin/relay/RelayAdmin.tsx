@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { ADMIN_LABELS as L } from '@/lib/i18n';
 import {
   createRelayPairingCodeAction, setRelayDeviceStatusAction, revokeRelayDeviceAction,
-  setRelayModeAction,
+  setRelayModeAction, sendRelayTestAction,
 } from '@/lib/relayActions';
 
 export type RelayDeviceView = {
@@ -62,6 +62,19 @@ export default function RelayAdmin({
   const [code, setCode] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [sendPhone, setSendPhone] = useState('');
+  const [sendBody, setSendBody] = useState('');
+  const [sendMsg, setSendMsg] = useState<string | null>(null);
+  const [sendErr, setSendErr] = useState<string | null>(null);
+
+  function sendTest() {
+    setSendMsg(null); setSendErr(null);
+    startTransition(async () => {
+      const res = await sendRelayTestAction(sendPhone, sendBody, businessId ?? undefined);
+      if (res.error) setSendErr(res.error);
+      else { setSendMsg(L.relay.sendQueued); setSendBody(''); router.refresh(); }
+    });
+  }
 
   const modeLabel = orgStatus.mode === 'relay' ? L.relay.modeRelay
     : orgStatus.mode === 'hybrid' ? L.relay.modeHybrid : L.relay.modeHttp;
@@ -179,6 +192,42 @@ export default function RelayAdmin({
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {canManage && businessId && (
+        <div style={box} className="space-y-2">
+          <div>
+            <div className="font-medium">{L.relay.sendTitle}</div>
+            <div className="text-xs" style={{ color: 'var(--c-text-muted)' }}>{L.relay.sendHint}</div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <input
+              value={sendPhone}
+              onChange={(e) => setSendPhone(e.target.value)}
+              placeholder={L.relay.sendPhonePlaceholder}
+              className="px-3 py-2 rounded-md text-sm"
+              style={{ border: `1px solid ${BORDER}`, background: 'transparent', color: 'inherit', minWidth: 200 }}
+            />
+            <input
+              value={sendBody}
+              onChange={(e) => setSendBody(e.target.value)}
+              placeholder={L.relay.sendBodyPlaceholder}
+              maxLength={300}
+              className="px-3 py-2 rounded-md text-sm flex-1"
+              style={{ border: `1px solid ${BORDER}`, background: 'transparent', color: 'inherit', minWidth: 240 }}
+            />
+            <button
+              onClick={sendTest}
+              disabled={pending || !sendPhone.trim() || !sendBody.trim()}
+              className="px-3 py-2 rounded-md text-sm font-medium"
+              style={{ background: 'var(--c-accent, #1D6E92)', color: '#fff', opacity: pending ? 0.6 : 1 }}
+            >
+              {L.relay.sendBtn}
+            </button>
+          </div>
+          {sendMsg && <div className="text-sm" style={{ color: '#166534' }}>{sendMsg}</div>}
+          {sendErr && <div className="text-sm" style={{ color: '#991B1B' }}>{sendErr}</div>}
         </div>
       )}
 

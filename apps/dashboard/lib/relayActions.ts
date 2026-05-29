@@ -76,6 +76,41 @@ export async function setRelayModeAction(mode: 'http' | 'relay' | 'hybrid', targ
   return { success: true };
 }
 
+const E164 = /^\+[1-9]\d{6,14}$/;
+
+export async function sendRelayTestAction(phoneE164: string, body: string, targetBusiness?: string): Promise<RelayActionState> {
+  const session = await authorize();
+  if ('error' in session) return session;
+  const businessId = targetBusinessId(session, targetBusiness);
+  if (!businessId) return { error: 'Select an organization first.' };
+
+  const to = (phoneE164 ?? '').trim();
+  const text = (body ?? '').trim();
+  if (!E164.test(to)) return { error: 'Enter a phone number in E.164 format, e.g. +972591234567.' };
+  if (text.length === 0) return { error: 'Message is required.' };
+  if (text.length > 300) return { error: 'Message must be 300 characters or less.' };
+
+  const jobId = `test_${businessId}_${Date.now()}`;
+  try {
+    await adminDb.collection('relayJobs').doc(jobId).create({
+      jobId, businessId,
+      batchId: null, recipientUid: null,   // no billing batch → no Points/settlement
+      phoneE164: to, messageBody: text,
+      assignedDeviceId: null, assignedSimSubscriptionId: null,
+      status: 'queued', attempts: 0, maxAttempts: 3,
+      leaseOwnerDeviceId: null, leaseExpiresAt: null, nextAttemptAt: null,
+      traceId: jobId,
+      createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
+    });
+  } catch {
+    return { error: 'Could not queue the message. Try again.' };
+  }
+  // Audit without the recipient number / body (redacted by the logger anyway).
+  await audit('relay.test.queued', session, businessId, { businessId, jobId });
+  revalidatePath('/admin/relay');
+  return { success: true };
+}
+
 export async function createRelayPairingCodeAction(targetBusiness?: string): Promise<RelayActionState> {
   const session = await authorize();
   if ('error' in session) return session;
