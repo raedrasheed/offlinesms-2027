@@ -146,6 +146,10 @@ export const reportRelayDelivery = onCall({ region: REGION }, async (request) =>
       if (failureOutcome(attempts, maxAttempts, cls) === 'requeue') { finalStatus = 'queued'; requeued = true; }
     }
 
+    // Firestore transactions require ALL reads before ANY writes — so read the
+    // device doc (for terminal counters) up front, before updating the job.
+    const devSnap = !requeued ? await tx.get(devRef) : null;
+
     const patch: Record<string, unknown> = { status: finalStatus, updatedAt: FieldValue.serverTimestamp() };
     if (requeued) {
       patch.leaseOwnerDeviceId = null;
@@ -163,25 +167,22 @@ export const reportRelayDelivery = onCall({ region: REGION }, async (request) =>
     tx.update(jobRef, patch);
 
     // Device counters (daily-rolling, UTC) — only on a terminal report.
-    if (!requeued) {
+    if (!requeued && devSnap?.exists) {
       const counterField = report === 'sent' ? 'sentToday' : report === 'delivered' ? 'deliveredToday' : 'failedToday';
-      const devSnap = await tx.get(devRef);
-      if (devSnap.exists) {
-        const day = utcDayKey();
-        const c = (devSnap.get('counters') as Record<string, unknown>) ?? {};
-        const sameDay = c.date === day;
-        const cur = sameDay ? (c[counterField] as number) ?? 0 : 0;
-        tx.set(devRef, {
-          counters: {
-            sentToday: sameDay ? (c.sentToday as number) ?? 0 : 0,
-            failedToday: sameDay ? (c.failedToday as number) ?? 0 : 0,
-            deliveredToday: sameDay ? (c.deliveredToday as number) ?? 0 : 0,
-            date: day,
-            [counterField]: cur + 1,
-          },
-          updatedAt: FieldValue.serverTimestamp(),
-        }, { merge: true });
-      }
+      const day = utcDayKey();
+      const c = (devSnap.get('counters') as Record<string, unknown>) ?? {};
+      const sameDay = c.date === day;
+      const cur = sameDay ? (c[counterField] as number) ?? 0 : 0;
+      tx.set(devRef, {
+        counters: {
+          sentToday: sameDay ? (c.sentToday as number) ?? 0 : 0,
+          failedToday: sameDay ? (c.failedToday as number) ?? 0 : 0,
+          deliveredToday: sameDay ? (c.deliveredToday as number) ?? 0 : 0,
+          date: day,
+          [counterField]: cur + 1,
+        },
+        updatedAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
     }
 
     return { changed: true, requeued, batchId: base.batchId, recipientUid: base.recipientUid };
