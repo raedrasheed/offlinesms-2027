@@ -59,7 +59,8 @@ export default function PackageForm({ action, submitLabel, initial }: Props) {
       <div className="grid grid-cols-2 gap-4">
         <div>
           <label className="block text-xs font-bold mb-1" style={{ color: 'var(--c-text-2)' }}>Price <span style={{ color: '#EF4444' }}>*</span></label>
-          <input name="price" type="number" min={0} step="0.01" defaultValue={initial?.price ?? ''} required className={inputCls} style={inputSx} placeholder="4.99" />
+          {/* Entered/displayed in major units (dollars); stored as cents. */}
+          <input name="price" type="number" min={0} step="0.01" defaultValue={initial ? (initial.price / 100).toFixed(2) : ''} required className={inputCls} style={inputSx} placeholder="4.99" />
         </div>
         <div>
           <label className="block text-xs font-bold mb-1" style={{ color: 'var(--c-text-2)' }}>Currency <span style={{ color: '#EF4444' }}>*</span></label>
