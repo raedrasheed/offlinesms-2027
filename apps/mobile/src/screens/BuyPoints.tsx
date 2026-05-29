@@ -1,11 +1,9 @@
 // BuyPoints — Phase 10 purchase flow.
 //
-// Lists active packages, runs createPurchase (which never credits),
-// then watches the resulting payments/{id} doc for status transitions.
-// Wallet credit only happens after confirmPayment (or confirmPaymentMock
-// in the emulator) flips the status to 'completed'. In emulator runs the
-// screen offers a "Confirm payment (dev)" button so a developer can
-// exercise the success path end to end.
+// Lists active packages, runs createPurchase (which never credits), then
+// watches the resulting payments/{id} doc for status transitions. The wallet
+// is credited only after an admin confirms the payment from the dashboard,
+// which flips the status to 'completed'; this screen just waits.
 
 import { useEffect, useState } from 'react';
 import {
@@ -15,7 +13,7 @@ import { auth } from '../lib/firebase';
 import {
   PointsPackage, Payment, PurchaseResult,
   subscribePackages, subscribePayment,
-  createPurchase, confirmPaymentMock,
+  createPurchase,
   pointsErrorCopy, pointsErrorReason,
   subscribeWallet, Wallet,
 } from '../lib/points';
@@ -60,16 +58,6 @@ export default function BuyPoints({ navigation }: any) {
       const result = await createPurchase(pkg.id);
       setPurchase(result);
       setStep('pending');
-    } catch (e: any) {
-      setErr(pointsErrorCopy(e?.code ?? 'internal', pointsErrorReason(e)));
-    } finally { setBusy(false); }
-  }
-
-  async function devConfirm(status: 'completed' | 'failed') {
-    if (!purchase) return;
-    setBusy(true); setErr(null);
-    try {
-      await confirmPaymentMock(purchase.paymentId, status);
     } catch (e: any) {
       setErr(pointsErrorCopy(e?.code ?? 'internal', pointsErrorReason(e)));
     } finally { setBusy(false); }
@@ -129,20 +117,6 @@ export default function BuyPoints({ navigation }: any) {
               <Text style={s.cardSub}>{currency(purchase.amount, purchase.currency)} · paymentId {purchase.paymentId}</Text>
             </View>
             <LoadingState compact title="Waiting for confirmation…" description="Your points will be added once OfflineSMS confirms the payment." />
-
-            {/* Dev-only quick path. confirmPaymentMock refuses outside the
-                emulator, so this button is a no-op (returns an error) in
-                production builds. */}
-            <View style={s.row}>
-              <Pressable style={[s.secondaryBtn, { flex: 1 }]} onPress={() => devConfirm('failed')} disabled={busy}>
-                <Text style={s.secondaryBtnText}>Simulate failure (dev)</Text>
-              </Pressable>
-              <Pressable style={[s.primaryBtn, { flex: 1 }]} onPress={() => devConfirm('completed')} disabled={busy}>
-                <Text style={s.primaryBtnText}>Confirm payment (dev)</Text>
-              </Pressable>
-            </View>
-
-            {err ? <ErrorState compact title="Couldn’t complete" description={err} /> : null}
           </View>
         ) : null}
 

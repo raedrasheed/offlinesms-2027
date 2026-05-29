@@ -11,6 +11,7 @@ import { listPayments } from '@/lib/adminData';
 import { PermissionState, EmptyState } from '@/components/state';
 import StatusBadge from '@/components/admin/StatusBadge';
 import FilterBar from '@/components/admin/FilterBar';
+import PaymentActions from './PaymentActions';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -32,6 +33,7 @@ export default async function PaymentsPage({
 
   const statusFilter = searchParams?.status ?? '';
   const canExport    = canDo(session.role, 'export:points');
+  const canManage    = canDo(session.role, 'manage:wallets');
 
   let rows: Awaited<ReturnType<typeof listPayments>> = [];
   let fetchError: string | null = null;
@@ -95,10 +97,10 @@ export default async function PaymentsPage({
           <table className="w-full text-[12px] border-collapse">
             <thead>
               <tr style={{ borderBottom: `1px solid ${BORDER}` }}>
-                {['Payment ID', 'User', 'Points', 'Amount', 'Currency', 'Status', 'Created'].map((h, idx) => (
+                {['Payment ID', 'User', 'Points', 'Amount', 'Currency', 'Status', 'Created', ...(canManage ? ['Actions'] : [])].map((h, idx) => (
                   <th
                     key={h}
-                    className={`px-4 py-3 text-[10px] font-semibold uppercase tracking-wider ${[2,3].includes(idx) ? 'text-right' : 'text-left'}`}
+                    className={`px-4 py-3 text-[10px] font-semibold uppercase tracking-wider ${[2,3].includes(idx) ? 'text-right' : h === 'Actions' ? 'text-right' : 'text-left'}`}
                     style={{ color: 'var(--c-text-4)' }}
                   >
                     {h}
@@ -120,10 +122,17 @@ export default async function PaymentsPage({
                     </Link>
                   </td>
                   <td className="px-4 py-3 text-right font-mono text-[11px] font-bold" style={{ color: '#22C55E' }}>{p.totalPoints}</td>
-                  <td className="px-4 py-3 text-right font-mono text-[11px]" style={{ color: 'var(--c-text-2)' }}>{p.amount}</td>
+                  <td className="px-4 py-3 text-right font-mono text-[11px]" style={{ color: 'var(--c-text-2)' }}>{(p.amount / 100).toFixed(2)}</td>
                   <td className="px-4 py-3 font-mono text-[11px]" style={{ color: 'var(--c-text-2)' }}>{p.currency}</td>
                   <td className="px-4 py-3"><StatusBadge status={p.status} /></td>
                   <td className="px-4 py-3 text-[11px] whitespace-nowrap" style={{ color: 'var(--c-text-4)' }}>{p.createdAt}</td>
+                  {canManage && (
+                    <td className="px-4 py-3">
+                      {(p.status === 'pending' || p.status === 'processing')
+                        ? <PaymentActions paymentId={p.id} />
+                        : <span className="text-[11px]" style={{ color: 'var(--c-text-4)' }}>—</span>}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
