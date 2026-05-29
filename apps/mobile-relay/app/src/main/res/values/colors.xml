@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Brand colors mirrored from the OfflineSMS app design tokens. -->
+    <color name="brand_primary">#1F7BA8</color>
+    <color name="brand_primary_dark">#155E83</color>
+    <color name="ic_launcher_background">#01A0E1</color>
+
+    <!-- Recent-activity terminal. -->
+    <color name="terminal_bg">#000000</color>
+    <color name="terminal_fg">#FFFFFF</color>
+</resources>
