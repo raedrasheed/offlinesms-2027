@@ -1,24 +1,16 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { View, Text, TextInput, Pressable, StyleSheet, Alert, SafeAreaView, Modal, FlatList } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius } from '../theme';
 import { requestPhoneOtp, otpErrorCopy } from '../lib/auth';
+import { COUNTRIES, PRIORITY_CODES, flagEmoji, type Country } from '../lib/countries';
 
-type Country = { code: string; dial: string; flag: string; name: string };
+const DEFAULT_COUNTRY = COUNTRIES.find(c => c.code === 'PS') ?? COUNTRIES[0];
 
-const COUNTRIES: Country[] = [
-  { code: 'US', dial: '+1',   flag: '🇺🇸', name: 'United States' },
-  { code: 'CA', dial: '+1',   flag: '🇨🇦', name: 'Canada' },
-  { code: 'GB', dial: '+44',  flag: '🇬🇧', name: 'United Kingdom' },
-  { code: 'PS', dial: '+970', flag: '🇵🇸', name: 'Palestine' },
-  { code: 'IL', dial: '+972', flag: '🇮🇱', name: 'Israel' },
-  { code: 'JO', dial: '+962', flag: '🇯🇴', name: 'Jordan' },
-  { code: 'AE', dial: '+971', flag: '🇦🇪', name: 'United Arab Emirates' },
-  { code: 'SA', dial: '+966', flag: '🇸🇦', name: 'Saudi Arabia' },
-  { code: 'EG', dial: '+20',  flag: '🇪🇬', name: 'Egypt' },
-  { code: 'DE', dial: '+49',  flag: '🇩🇪', name: 'Germany' },
-  { code: 'FR', dial: '+33',  flag: '🇫🇷', name: 'France' },
-  { code: 'IN', dial: '+91',  flag: '🇮🇳', name: 'India' },
+// Priority countries first (region-relevant), then the rest alphabetically.
+const ORDERED: Country[] = [
+  ...PRIORITY_CODES.map(code => COUNTRIES.find(c => c.code === code)).filter((c): c is Country => !!c),
+  ...COUNTRIES.filter(c => !PRIORITY_CODES.includes(c.code)),
 ];
 
 function formatPhone(digits: string): string {
@@ -29,11 +21,27 @@ function formatPhone(digits: string): string {
 }
 
 export default function PhoneEntry({ navigation }: any) {
-  const [country, setCountry] = useState<Country>(COUNTRIES[0]);
+  const [country, setCountry] = useState<Country>(DEFAULT_COUNTRY);
   const [digits, setDigits]   = useState('');
   const [picker, setPicker]   = useState(false);
+  const [search, setSearch]   = useState('');
   const [busy, setBusy]       = useState(false);
   const canSubmit = digits.length >= 7 && !busy;
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return ORDERED;
+    const qDial = q.replace(/^\+/, '');
+    return ORDERED.filter(c =>
+      c.name.toLowerCase().includes(q) || c.dial.replace('+', '').startsWith(qDial),
+    );
+  }, [search]);
+
+  function pick(c: Country) {
+    setCountry(c);
+    setPicker(false);
+    setSearch('');
+  }
 
   async function next() {
     // E.164 = dial code (already has +) + local digits.
@@ -60,7 +68,7 @@ export default function PhoneEntry({ navigation }: any) {
 
       <View style={s.row}>
         <Pressable style={s.country} onPress={() => setPicker(true)}>
-          <Text style={s.flag}>{country.flag}</Text>
+          <Text style={s.flag}>{flagEmoji(country.code)}</Text>
           <Text style={s.dial}>{country.dial}</Text>
           <Ionicons name="chevron-down" size={14} color={colors.ink500} />
         </Pressable>
@@ -90,16 +98,30 @@ export default function PhoneEntry({ navigation }: any) {
         <SafeAreaView style={s.modal}>
           <View style={s.modalHeader}>
             <Text style={s.modalTitle}>Choose country</Text>
-            <Pressable onPress={() => setPicker(false)} hitSlop={12}>
+            <Pressable onPress={() => { setPicker(false); setSearch(''); }} hitSlop={12}>
               <Ionicons name="close" size={26} color={colors.ink} />
             </Pressable>
           </View>
+          <View style={s.searchWrap}>
+            <Ionicons name="search" size={16} color={colors.ink400} />
+            <TextInput
+              style={s.search}
+              value={search}
+              onChangeText={setSearch}
+              placeholder="Search country or code"
+              placeholderTextColor={colors.ink400}
+              autoCorrect={false}
+              autoCapitalize="none"
+            />
+          </View>
           <FlatList
-            data={COUNTRIES}
+            data={filtered}
             keyExtractor={c => c.code}
+            keyboardShouldPersistTaps="handled"
+            ListEmptyComponent={<Text style={s.empty}>No countries match “{search}”.</Text>}
             renderItem={({ item }) => (
-              <Pressable style={s.countryRow} onPress={() => { setCountry(item); setPicker(false); }}>
-                <Text style={s.flag}>{item.flag}</Text>
+              <Pressable style={s.countryRow} onPress={() => pick(item)}>
+                <Text style={s.flag}>{flagEmoji(item.code)}</Text>
                 <Text style={s.countryName}>{item.name}</Text>
                 <Text style={s.countryDial}>{item.dial}</Text>
               </Pressable>
@@ -132,6 +154,9 @@ const s = StyleSheet.create({
   modal:        { flex: 1, backgroundColor: '#fff' },
   modalHeader:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, borderBottomWidth: 1, borderBottomColor: colors.ink100 },
   modalTitle:   { fontSize: 18, fontWeight: '800', color: colors.ink },
+  searchWrap:   { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 20, marginVertical: 12, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: colors.ink200, borderRadius: radius.md, backgroundColor: '#fff' },
+  search:       { flex: 1, fontSize: 15, color: colors.ink, padding: 0 },
+  empty:        { textAlign: 'center', color: colors.ink500, fontSize: 14, marginTop: 24 },
   countryRow:   { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.ink100 },
   countryName:  { flex: 1, fontSize: 15, fontWeight: '600', color: colors.ink },
   countryDial:  { fontSize: 14, fontWeight: '700', color: colors.ink500 },
