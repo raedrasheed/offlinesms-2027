@@ -9,7 +9,7 @@ import {
   Users, Building2, MessageCircle, Globe,
   Inbox, Phone, Send,
   Coins, ArrowLeftRight,
-  LifeBuoy, Flag, Radio,
+  LifeBuoy, Flag, Radio, Smartphone,
   Shield, ScrollText, Bell, Settings,
   ChevronLeft, ChevronRight,
   type LucideIcon,
@@ -73,9 +73,10 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Operations',
     items: [
-      { href: '/admin/support',    label: 'Support',    icon: LifeBuoy, capability: 'view:support' },
-      { href: '/admin/moderation', label: 'Moderation', icon: Flag,     capability: 'view:moderation' },
-      { href: '/admin/sms',        label: 'Gateway',    icon: Radio,    capability: 'view:sms' },
+      { href: '/admin/support',    label: 'Support',    icon: LifeBuoy,   capability: 'view:support' },
+      { href: '/admin/moderation', label: 'Moderation', icon: Flag,       capability: 'view:moderation' },
+      { href: '/admin/sms',        label: 'Gateway',    icon: Radio,      capability: 'view:sms' },
+      { href: '/admin/relay',      label: 'SMS Relay',  icon: Smartphone, capability: 'view:relay' },
     ],
   },
   {
