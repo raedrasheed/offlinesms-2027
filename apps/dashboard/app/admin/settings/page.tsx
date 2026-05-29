@@ -6,9 +6,12 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { verifySession } from '@/lib/session';
 import { canDo } from '@/lib/adminPermissions';
-import { getSystemSettings } from '@/lib/adminData';
+import { getAdminScope } from '@/lib/adminScope';
+import { getSystemSettings, listOrganizations } from '@/lib/adminData';
+import { adminDb } from '@/lib/firebase-admin';
 import { PermissionState } from '@/components/state';
 import SettingsForm from './SettingsForm';
+import OtpSenderSetting from './OtpSenderSetting';
 import { updateSystemSettings } from '@/lib/settingsActions';
 
 export const dynamic = 'force-dynamic';
@@ -26,6 +29,16 @@ export default async function SettingsPage() {
   }
 
   const canManage = canDo(session.role, 'manage:settings');
+  // The default OTP sender is a platform-global setting — only unrestricted
+  // (super/legacy/bootstrap) admins may view or change it.
+  const isPlatformAdmin = canManage && getAdminScope(session).organizationId === undefined;
+
+  let otpOrgOptions: { id: string; name: string }[] = [];
+  let otpOrgId: string | null = null;
+  if (isPlatformAdmin) {
+    try { otpOrgOptions = (await listOrganizations()).map(o => ({ id: o.id ?? '', name: o.name })); } catch { /* soft-fail */ }
+    try { otpOrgId = (await adminDb.collection('smsConfig').doc('otp').get()).data()?.businessId ?? null; } catch { /* soft-fail */ }
+  }
 
   let settings = await getSystemSettings().catch(() => null);
   if (!settings) {
@@ -53,7 +66,10 @@ export default async function SettingsPage() {
       </div>
 
       {canManage ? (
-        <SettingsForm action={updateSystemSettings} initial={settings} />
+        <>
+          <SettingsForm action={updateSystemSettings} initial={settings} />
+          {isPlatformAdmin && <OtpSenderSetting orgOptions={otpOrgOptions} otpOrgId={otpOrgId} />}
+        </>
       ) : (
         <div className="rounded-2xl p-6 space-y-4" style={{ background: CARD, border: `1px solid ${BORDER}` }}>
           <Row label="App name"          value={settings.appName} />
