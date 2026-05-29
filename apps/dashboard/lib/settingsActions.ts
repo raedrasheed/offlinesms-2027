@@ -25,8 +25,10 @@ export async function updateSystemSettings(
   const supportEmail        = (data.get('supportEmail')        as string | null)?.trim() ?? '';
   const defaultLanguage     = (data.get('defaultLanguage')     as string | null)?.trim() ?? 'en';
   const defaultTimezone     = (data.get('defaultTimezone')     as string | null)?.trim() ?? 'UTC';
-  const smsEscalationEnabled = data.get('smsEscalationEnabled') === 'true';
-  const pointsEnabled        = data.get('pointsEnabled')        === 'true';
+  // Toggle posts a hidden "false" + a checkbox "true" under the same name;
+  // read all values so a checked box (present "true") registers correctly.
+  const smsEscalationEnabled = data.getAll('smsEscalationEnabled').includes('true');
+  const pointsEnabled        = data.getAll('pointsEnabled').includes('true');
 
   if (!appName)                                           return { error: 'App name is required.' };
   if (appName.length > 60)                               return { error: 'App name must be 60 characters or less.' };
