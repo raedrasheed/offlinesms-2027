@@ -77,6 +77,11 @@ export const ADMIN_LABELS = {
     sendBodyPlaceholder:  'Message text',
     sendBtn:       'Send SMS',
     sendQueued:    'Queued — the device will send shortly.',
+    recentTitle:   'Recent sends',
+    recentTo:      'To',
+    recentStatus:  'Status',
+    recentTime:    'Time',
+    recentNone:    'No messages sent yet.',
   },
   actions: {
     export:   'Export CSV',
