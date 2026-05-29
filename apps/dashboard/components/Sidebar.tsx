@@ -77,6 +77,7 @@ const NAV_GROUPS: NavGroup[] = [
       { href: '/admin/moderation', label: 'Moderation', icon: Flag,       capability: 'view:moderation' },
       { href: '/admin/sms',        label: 'Gateway',    icon: Radio,      capability: 'view:sms' },
       { href: '/admin/relay',      label: 'SMS Relay',  icon: Smartphone, capability: 'view:relay' },
+      { href: '/admin/relay/send', label: 'Send SMS',   icon: Send,       capability: 'manage:relay' },
     ],
   },
   {
