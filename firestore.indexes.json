@@ -88,6 +88,14 @@
       "collectionGroup": "smsBatches",
       "queryScope": "COLLECTION",
       "fields": [
+        { "fieldPath": "conversationId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt",      "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "smsBatches",
+      "queryScope": "COLLECTION",
+      "fields": [
         { "fieldPath": "senderId",  "order": "ASCENDING" },
         { "fieldPath": "messageId", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
