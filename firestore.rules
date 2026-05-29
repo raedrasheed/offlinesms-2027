@@ -371,6 +371,10 @@ service cloud.firestore {
       allow read:  if isAdmin();
       allow write: if isAdmin();
     }
+    // OTP challenges — written/read only by the OTP callables (Admin SDK).
+    match /otpChallenges/{phoneKey} {
+      allow read, write: if isAdmin();
+    }
 
     // ════════════════════════════════════════════════════════════
     // STATUSES — Phase 3 audience + expiry enforcement

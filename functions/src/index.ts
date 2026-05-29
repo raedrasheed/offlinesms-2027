@@ -89,3 +89,7 @@ export { claimRelayJobs, reportRelayDelivery } from './sms/relayJobs';
 // Relay-only reaper (Phase 3): lease expiry/requeue + stale-device offline +
 // metrics. Touches relay* collections only; no production SMS impact.
 export { relayReaper } from './sms/relayReaper';
+
+// Phase 24 — OTP over relay (custom-token phone sign-in; no Firebase phone auth).
+export { requestPhoneOtp } from './auth/requestPhoneOtp';
+export { verifyPhoneOtp } from './auth/verifyPhoneOtp';

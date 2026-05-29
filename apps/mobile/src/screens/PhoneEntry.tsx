@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { View, Text, TextInput, Pressable, StyleSheet, Alert, SafeAreaView, Modal, FlatList } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius } from '../theme';
+import { requestPhoneOtp, otpErrorCopy } from '../lib/auth';
 
 type Country = { code: string; dial: string; flag: string; name: string };
 
@@ -31,14 +32,21 @@ export default function PhoneEntry({ navigation }: any) {
   const [country, setCountry] = useState<Country>(COUNTRIES[0]);
   const [digits, setDigits]   = useState('');
   const [picker, setPicker]   = useState(false);
-  const canSubmit = digits.length >= 7;
+  const [busy, setBusy]       = useState(false);
+  const canSubmit = digits.length >= 7 && !busy;
 
-  function next() {
-    Alert.alert(
-      'Coming soon',
-      'Phone sign-in isn’t available in this build yet. Go back and tap “Use email” to sign in.',
-      [{ text: 'OK', onPress: () => navigation.goBack() }],
-    );
+  async function next() {
+    // E.164 = dial code (already has +) + local digits.
+    const phoneE164 = `${country.dial}${digits.replace(/\D/g, '')}`;
+    setBusy(true);
+    try {
+      await requestPhoneOtp(phoneE164);
+      navigation.navigate('Otp', { phone: phoneE164 });
+    } catch (e: any) {
+      Alert.alert('Couldn’t send code', otpErrorCopy(e?.message ?? e?.code));
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
