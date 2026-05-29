@@ -15,7 +15,7 @@ import {
   COOLDOWN_MS, COST_PER_SMS, MAX_BATCHES_PER_DAY, MAX_RECIPIENTS_PER_BATCH,
   todayKey,
 } from './recipients';
-import { resolveProvider } from './provider';
+import { resolveProvider, resolveDefaultRelayBusiness } from './provider';
 import { relayModeEngaged, isHybrid } from './relayLogic';
 import { dispatchBatchToRelay } from './relayDispatcher';
 import { maybeFinalizeRelayBatch } from './relaySettlement';
@@ -154,6 +154,12 @@ export const escalateSms = onCall({ region: 'us-central1' }, async (request) => 
     recipientCount:    eligible.length,
     eligibleCount:     eligible.length,
     excludedCount:     excluded.length,
+    // Aggregate counters surfaced by the admin Gateway list.
+    totalCount:        eligible.length,
+    queuedCount:       eligible.length,
+    sentCount:         0,
+    deliveredCount:    0,
+    failedCount:       0,
     estimatedCost:     cost,
     pointsCost:        cost,
     pointsReserved:    cost,
@@ -218,7 +224,11 @@ export const escalateSms = onCall({ region: 'us-central1' }, async (request) => 
   // configured for 'relay' / hybrid. Billing is identical to HTTP: eligible
   // recipients are 'queued' and the batch is set 'accepted', so the existing
   // onSmsBatchAccepted settles unchanged (Points/refund logic untouched).
-  const orgId = (request.auth?.token?.organizationId as string | undefined) ?? null;
+  // Relay org: the sender's own org (org admins) or, for regular users with no
+  // org claim, the configured default relay business so escalations still route
+  // to the relay device.
+  const orgId = (request.auth?.token?.organizationId as string | undefined)
+    ?? (await resolveDefaultRelayBusiness());
   const providerMode = await resolveProvider(orgId);
 
   if (relayModeEngaged(providerMode) && orgId) {
@@ -331,6 +341,8 @@ export const escalateSms = onCall({ region: 'us-central1' }, async (request) => 
     status:            finalStatus,
     gatewayBatchId:    result.gatewayBatchId,
     offlineSmsBatchId: result.gatewayBatchId,
+    queuedCount:       eligible.length - failedCount,
+    failedCount:       failedCount,
     updatedAt:         FieldValue.serverTimestamp(),
   });
   sendsBatch.set(quotaRef, {

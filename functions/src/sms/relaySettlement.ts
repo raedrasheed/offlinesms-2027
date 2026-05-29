@@ -59,6 +59,12 @@ export async function maybeFinalizeRelayBatch(batchId: string): Promise<boolean>
       relayFinalizedAt: FieldValue.serverTimestamp(),
       relayFinalStatus: 'completed',
       relayTerminalCounts: { delivered, sent, failed },
+      // Authoritative aggregate counters for the admin Gateway list. A
+      // delivered job was also sent, so it counts once toward delivered.
+      deliveredCount: delivered,
+      sentCount:      sent,
+      failedCount:    failed,
+      queuedCount:    0,
       updatedAt: FieldValue.serverTimestamp(),
     });
     return true;

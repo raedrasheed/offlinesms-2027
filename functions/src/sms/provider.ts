@@ -23,6 +23,24 @@ export async function resolveProvider(businessId?: string | null): Promise<SmsPr
   }
 }
 
+/** The business whose relay device(s) handle SMS when the sender has no org of
+ *  their own (e.g. a regular app user). Configured via
+ *  smsConfig/providers.defaultBusinessId, falling back to the OTP relay org
+ *  (smsConfig/otp.businessId). Returns null when neither is set. */
+export async function resolveDefaultRelayBusiness(): Promise<string | null> {
+  try {
+    const db = getFirestore();
+    const prov = await db.collection('smsConfig').doc('providers').get();
+    const provDefault = prov.data()?.defaultBusinessId as string | undefined;
+    if (provDefault && provDefault.trim()) return provDefault.trim();
+    const otp = await db.collection('smsConfig').doc('otp').get();
+    const otpBiz = otp.data()?.businessId as string | undefined;
+    return otpBiz && otpBiz.trim() ? otpBiz.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
 export function relayEnabled(mode: SmsProviderMode): boolean {
   return mode === 'relay' || mode === 'relay_with_http_fallback';
 }
