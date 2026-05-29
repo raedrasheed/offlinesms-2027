@@ -42,3 +42,8 @@ coverage/
 
 # Misc
 .cache/
+
+# Android signing (relay + mobile) — never commit
+keystore.properties
+*.keystore
+!debug.keystore
