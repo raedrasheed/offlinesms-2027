@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useEffect, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { ADMIN_LABELS as L } from '@/lib/i18n';
 import {
@@ -29,19 +29,23 @@ const ONLINE_WINDOW_MS = 90_000;
 const CARD = 'var(--c-card)';
 const BORDER = 'var(--c-border)';
 
-function relativeTime(ms: number | null): string {
+// `now` is null during SSR and the first client render, then set after mount.
+// Time-relative output must be deterministic across both to avoid React
+// hydration mismatches, so we render a stable placeholder until `now` exists.
+function relativeTime(ms: number | null, now: number | null): string {
   if (!ms) return L.relay.never;
-  const diff = Date.now() - ms;
+  if (now == null) return '…';
+  const diff = now - ms;
   if (diff < 60_000) return `${Math.max(1, Math.round(diff / 1000))}s ago`;
   if (diff < 3_600_000) return `${Math.round(diff / 60_000)}m ago`;
   if (diff < 86_400_000) return `${Math.round(diff / 3_600_000)}h ago`;
   return new Date(ms).toLocaleDateString();
 }
 
-function liveStatus(d: RelayDeviceView): { text: string; color: string } {
+function liveStatus(d: RelayDeviceView, now: number | null): { text: string; color: string } {
   if (d.status === 'revoked') return { text: L.relay.revoked, color: '#991B1B' };
   if (d.status === 'paused') return { text: L.relay.paused, color: '#92400E' };
-  const online = d.lastHeartbeatAt != null && Date.now() - d.lastHeartbeatAt < ONLINE_WINDOW_MS;
+  const online = now != null && d.lastHeartbeatAt != null && now - d.lastHeartbeatAt < ONLINE_WINDOW_MS;
   return online ? { text: L.relay.online, color: '#166534' } : { text: L.relay.offline, color: '#6B7280' };
 }
 
@@ -66,6 +70,13 @@ export default function RelayAdmin({
   const [sendBody, setSendBody] = useState('');
   const [sendMsg, setSendMsg] = useState<string | null>(null);
   const [sendErr, setSendErr] = useState<string | null>(null);
+  const [now, setNow] = useState<number | null>(null);
+
+  useEffect(() => {
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 15_000);
+    return () => clearInterval(id);
+  }, []);
 
   function sendTest() {
     setSendMsg(null); setSendErr(null);
@@ -252,7 +263,7 @@ export default function RelayAdmin({
       ) : (
         <div className="space-y-3">
           {devices.map(d => {
-            const s = liveStatus(d);
+            const s = liveStatus(d, now);
             return (
               <div key={d.deviceId} style={box} className="space-y-2">
                 <div className="flex items-center justify-between gap-3">
@@ -262,7 +273,7 @@ export default function RelayAdmin({
                   </span>
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-1 text-sm" style={{ color: 'var(--c-text-muted)' }}>
-                  <div>{L.relay.lastSeen}: {relativeTime(d.lastHeartbeatAt)}</div>
+                  <div>{L.relay.lastSeen}: {relativeTime(d.lastHeartbeatAt, now)}</div>
                   <div>{L.relay.app}: {d.appVersion ?? '—'}</div>
                   <div>{L.relay.device}: {[d.manufacturer, d.model].filter(Boolean).join(' ') || '—'}</div>
                   <div>{L.relay.sim}: {d.simInfo.map(s => s.carrierName).filter(Boolean).join(', ') || '—'}</div>
