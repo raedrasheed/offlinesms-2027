@@ -55,6 +55,7 @@ import EditProfile from './src/screens/EditProfile';
 import ImagePreviewScreen from './src/screens/ImagePreviewScreen';
 import ImageViewerScreen from './src/screens/ImageViewerScreen';
 import JoinGroup from './src/screens/JoinGroup';
+import NotificationSettings from './src/screens/NotificationSettings';
 import { inviteCodeFromUrl, setPendingInvite, takePendingInvite } from './src/lib/deepLinks';
 import * as Notifications from 'expo-notifications';
 import { installForegroundHandler, registerForPush, routeFromNotification } from './src/lib/notifications';
@@ -249,6 +250,7 @@ export default function App() {
             <RootStack.Screen name="BuyPoints" component={BuyPoints} />
             <RootStack.Screen name="TransferPoints" component={TransferPoints} />
             <RootStack.Screen name="ChatWallpaper" component={ChatWallpaper} />
+            <RootStack.Screen name="NotificationSettings" component={NotificationSettings} />
             <RootStack.Screen name="SmsBatchReport" component={SmsBatchReport} />
             <RootStack.Screen name="Points" component={Points} />
             <RootStack.Screen name="Privacy" component={Privacy} />

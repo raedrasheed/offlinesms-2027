@@ -300,6 +300,15 @@ export default function Settings({ navigation }: any) {
           <Text style={s.linkRowText}>Chat wallpaper</Text>
           <Ionicons name="chevron-forward" size={18} color={colors.text.muted} />
         </Pressable>
+        <Pressable
+          style={s.linkRow}
+          onPress={() => (navigation as any).navigate('NotificationSettings')}
+          accessibilityRole="button"
+          accessibilityLabel="Notifications"
+        >
+          <Text style={s.linkRowText}>Notifications</Text>
+          <Ionicons name="chevron-forward" size={18} color={colors.text.muted} />
+        </Pressable>
       </View>
 
       {/* Time format */}
