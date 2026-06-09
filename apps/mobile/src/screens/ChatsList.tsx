@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  FlatList, View, Text, Pressable, StyleSheet, TextInput, Image, Alert,
+  FlatList, View, Text, Pressable, StyleSheet, TextInput, Alert, Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { onSnapshot, doc } from 'firebase/firestore';
@@ -16,10 +16,10 @@ import { useTheme } from '../context/ThemeContext';
 import { useLocalChatList } from '../hooks/useLocalChatList';
 import { isRTL } from '../i18n';
 import { radius } from '../theme';
-import { avatarColor, initials } from '../lib/avatar';
 import { setUnreadTotal } from '../lib/unreadStore';
 import { clearChat } from '../localdb';
 import { LoadingState, EmptyState } from '../components/state';
+import { ChatRow } from './ChatRow';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { useOffline } from '../context/OfflineContext';
@@ -142,15 +142,6 @@ export default function ChatsList({ navigation }: any) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me, presenceKey]);
 
-  // Typing/recording preview text for a chat, or null to show the last message.
-  const activityTextOf = (id: string): string | null => {
-    const p = presence[id];
-    if (!p) return null;
-    if (p.recordingUids.length > 0) return t('presence.recording');
-    if (p.typingUids.length > 0) return t('convo.typing');
-    return null;
-  };
-
   // Archived chats are always hidden from every filter now (no archive tab).
   const visible = useMemo(() => enriched.filter(c => c.state?.archived !== true), [enriched]);
 
@@ -179,7 +170,7 @@ export default function ChatsList({ navigation }: any) {
 
   useEffect(() => { setUnreadTotal(unreadCounts.all); }, [unreadCounts.all]);
 
-  const confirmClearChat = (cid: string, name: string) => {
+  const confirmClearChat = useCallback((cid: string, name: string) => {
     Alert.alert(
       t('chats.clearChatTitle'),
       name ? `${t('chats.clearChatMessage')}\n\n${name}` : t('chats.clearChatMessage'),
@@ -188,7 +179,13 @@ export default function ChatsList({ navigation }: any) {
         { text: t('chats.clearChat'), style: 'destructive', onPress: () => { void clearChat(cid).then(() => local.refresh?.()); } },
       ],
     );
-  };
+  }, [t, local]);
+
+  // Stable handlers passed to every ChatRow so the row's memo comparator
+  // sees identical references across parent renders.
+  const openConversation = useCallback((cid: string) => navigation.navigate('Conversation', { id: cid }), [navigation]);
+  const typingLabel    = t('convo.typing');
+  const recordingLabel = t('presence.recording');
 
   const FILTER_LABELS: Record<Filter, string> = {
     all:       t('chats.filterAll'),
@@ -270,56 +267,26 @@ export default function ChatsList({ navigation }: any) {
           data={filtered}
           keyExtractor={r => r.id}
           contentContainerStyle={{ paddingTop: 4, paddingBottom: 96 }}
+          initialNumToRender={12}
+          maxToRenderPerBatch={10}
+          windowSize={10}
+          updateCellsBatchingPeriod={50}
+          removeClippedSubviews={Platform.OS === 'android'}
+          // `extraData` so FlatList knows to call renderItem when the presence
+          // map identity changes (memoised row will then bail out if its slice
+          // is unchanged).
+          extraData={presence}
           renderItem={({ item }) => (
-            <Pressable
-              style={s.row}
-              onPress={() => navigation.navigate('Conversation', { id: item.id })}
-              onLongPress={() => confirmClearChat(item.id, item.peerName ?? '')}
-              delayLongPress={300}
-              accessible={true}
-              accessibilityRole="button"
-              accessibilityLabel={`${item.peerName}${(item.state?.unreadCount ?? 0) > 0 ? `, ${item.state?.unreadCount} unread` : ''}`}
-            >
-              <View style={s.avWrap} accessibilityElementsHidden>
-                {item.photoURL ? (
-                  <Image source={{ uri: item.photoURL }} style={[s.av, item.type === 'group' && s.avGroup]} />
-                ) : (
-                  <View style={[s.av, item.type === 'group' && s.avGroup, { backgroundColor: avatarColor(item.id) }]}>
-                    <Text style={s.avText}>{initials(item.peerName ?? '?')}</Text>
-                  </View>
-                )}
-                {item.type !== 'group' && presence[item.id]?.online ? <View style={s.onlineDot} /> : null}
-              </View>
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <View style={s.rowTop}>
-                  <Text style={s.name} numberOfLines={1}>
-                    {item.peerName}
-                    {item.type === 'group' && item.memberCount ? `  · ${item.memberCount}` : ''}
-                  </Text>
-                  {/* Timestamp is always LTR to prevent digit reversal in RTL */}
-                  <Text style={s.time} accessibilityElementsHidden>
-                    {formatTime(item.state?.lastMessageAt ?? item.lastMessageAt)}
-                  </Text>
-                </View>
-                <View style={s.rowBot}>
-                  <Text style={[s.preview, activityTextOf(item.id) ? s.previewActivity : null]} numberOfLines={1}>
-                    {activityTextOf(item.id)
-                      ?? (item.state?.lastMessagePreview || item.lastMessageText || '')}
-                  </Text>
-                  <View style={s.badges} accessibilityElementsHidden>
-                    {item.state?.pinned   ? <Text style={s.tag}>📌</Text> : null}
-                    {item.state?.muted    ? <Text style={s.tag}>🔕</Text> : null}
-                    {(item.state?.unreadCount ?? 0) > 0 ? (
-                      <View style={s.unread}>
-                        <Text style={s.unreadText}>
-                          {(item.state?.unreadCount ?? 0) > 99 ? '99+' : item.state?.unreadCount}
-                        </Text>
-                      </View>
-                    ) : null}
-                  </View>
-                </View>
-              </View>
-            </Pressable>
+            <ChatRow
+              item={item}
+              presence={presence[item.id]}
+              typingLabel={typingLabel}
+              recordingLabel={recordingLabel}
+              onOpen={openConversation}
+              onLongPress={confirmClearChat}
+              formatTime={formatTime}
+              colors={colors}
+            />
           )}
         />
       )}
