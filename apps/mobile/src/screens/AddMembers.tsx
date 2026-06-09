@@ -14,6 +14,8 @@ import { normalizeUsername } from '../lib/username';
 import { normalizePhoneToE164 } from '../lib/phone';
 import { LOCAL_FIRST_CONVERSATION_ENABLED } from '../config/features';
 import { queueAddExternalContactToGroup, getCurrentUid } from '../localdb';
+import { ContactPickerModal, type PickedContact } from '../components/ContactPickerModal';
+import { Ionicons } from '@expo/vector-icons';
 import { colors, radius } from '../theme';
 import { LoadingState, EmptyState, ErrorState } from '../components/state';
 
@@ -84,6 +86,13 @@ export default function AddMembers({ route, navigation }: any) {
   const [phoneMode, setPhoneMode] = useState(false);
   const [contactName, setContactName] = useState('');
   const [contactPhone, setContactPhone] = useState('');
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  function applyPickedContact(c: PickedContact) {
+    setContactName(c.name);
+    setContactPhone(c.phoneE164);
+    setPickerOpen(false);
+  }
 
   async function addPhoneContact() {
     const name = contactName.trim();
@@ -148,6 +157,10 @@ export default function AddMembers({ route, navigation }: any) {
         {phoneMode ? (
           <View style={s.phonePanel}>
             <Text style={s.phoneHint}>Add someone by phone number. They’ll receive group messages by SMS, and become a full member automatically if they sign up with that number.</Text>
+            <Pressable style={s.pickBtn} onPress={() => setPickerOpen(true)}>
+              <Ionicons name="people-outline" size={18} color={colors.primary} />
+              <Text style={s.pickBtnText}>Pick from contacts</Text>
+            </Pressable>
             <TextInput
               style={s.input}
               value={contactName}
@@ -168,6 +181,11 @@ export default function AddMembers({ route, navigation }: any) {
               <Text style={s.phoneBtnText}>{busy ? 'Adding…' : 'Add to group'}</Text>
             </Pressable>
             {err ? <ErrorState compact title="Couldn’t complete" description={err} /> : null}
+            <ContactPickerModal
+              visible={pickerOpen}
+              onClose={() => setPickerOpen(false)}
+              onPick={applyPickedContact}
+            />
           </View>
         ) : (
         <>
@@ -249,4 +267,6 @@ const s = StyleSheet.create({
   phoneHint:  { fontSize: 12, color: colors.ink500, lineHeight: 18, marginTop: 6 },
   phoneBtn:   { padding: 14, backgroundColor: colors.primary, borderRadius: radius.md, alignItems: 'center' },
   phoneBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  pickBtn:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 12, borderRadius: radius.md, backgroundColor: colors.primaryLight, borderWidth: 1, borderColor: colors.primary },
+  pickBtnText:{ color: colors.primary, fontWeight: '700', fontSize: 14 },
 });
