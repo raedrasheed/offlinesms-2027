@@ -47,3 +47,7 @@ coverage/
 keystore.properties
 *.keystore
 !debug.keystore
+
+# Firebase app config (FCM) — contains keys, keep out of git
+google-services.json
+GoogleService-Info.plist
