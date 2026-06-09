@@ -12,6 +12,8 @@ import { db, auth } from '../lib/firebase';
 import { addGroupMembers, addExternalContactToGroup, groupErrorCopy } from '../lib/conversations';
 import { normalizeUsername } from '../lib/username';
 import { normalizePhoneToE164 } from '../lib/phone';
+import { LOCAL_FIRST_CONVERSATION_ENABLED } from '../config/features';
+import { queueAddExternalContactToGroup, getCurrentUid } from '../localdb';
 import { colors, radius } from '../theme';
 import { LoadingState, EmptyState, ErrorState } from '../components/state';
 
@@ -90,10 +92,17 @@ export default function AddMembers({ route, navigation }: any) {
     if (!e164) { Alert.alert('Invalid number', 'Enter a phone number in international format, e.g. +972591234567.'); return; }
     setBusy(true); setErr(null);
     try {
-      const res = await addExternalContactToGroup({ conversationId: id, displayName: name, phoneNumber: e164 });
-      if (res.alreadyMember) Alert.alert('Already a member', 'That number already belongs to a member of this group.');
-      else if (res.alreadyExternal) Alert.alert('Already added', 'That contact is already in this group.');
-      else navigation.goBack();
+      // Local-first: queue optimistically (survives offline + app restart, shows
+      // immediately in GroupInfo). Falls back to the direct callable otherwise.
+      if (LOCAL_FIRST_CONVERSATION_ENABLED && getCurrentUid()) {
+        await queueAddExternalContactToGroup({ conversationId: id, displayName: name, phoneE164: e164 });
+        navigation.goBack();
+      } else {
+        const res = await addExternalContactToGroup({ conversationId: id, displayName: name, phoneNumber: e164 });
+        if (res.alreadyMember) Alert.alert('Already a member', 'That number already belongs to a member of this group.');
+        else if (res.alreadyExternal) Alert.alert('Already added', 'That contact is already in this group.');
+        else navigation.goBack();
+      }
     } catch (e: any) {
       const copy = groupErrorCopy(e?.code ?? 'internal');
       setErr(copy);

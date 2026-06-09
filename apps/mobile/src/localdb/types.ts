@@ -44,7 +44,10 @@ export type OutboxType =
   | 'create_group'
   | 'group_action'
   | 'sms_escalation'
-  | 'support_ticket';
+  | 'support_ticket'
+  | 'create_phone_contact'
+  | 'add_external_contact_to_group'
+  | 'remove_external_contact_from_group';
 
 export type OutboxStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'dead';
 

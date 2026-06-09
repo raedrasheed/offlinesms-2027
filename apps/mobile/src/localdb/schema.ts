@@ -3,7 +3,7 @@
 // Pure strings (no native import) so migrations.ts can apply them and tests can
 // assert on them. Booleans are stored as INTEGER 0/1; timestamps as INTEGER ms.
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 // Phase 22C — columns added to `messages` in migration v2 (ALTER, applied on
 // top of the v1 CREATE so existing installs upgrade cleanly).
@@ -129,6 +129,24 @@ CREATE TABLE IF NOT EXISTS group_members (
   UNIQUE(conversation_id, uid)
 );`;
 
+// Phase 25 — external phone-only group members (migration v4). Mirrors the
+// Firestore conversations/{id}/externalMembers subcollection for offline-first
+// display; `pending` marks rows added optimistically while offline.
+export const CREATE_EXTERNAL_MEMBERS = `
+CREATE TABLE IF NOT EXISTS external_members (
+  id TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL,
+  contact_id TEXT NOT NULL,
+  display_name TEXT,
+  phone_e164 TEXT,
+  normalized_phone TEXT,
+  is_registered INTEGER DEFAULT 0,
+  linked_uid TEXT,
+  pending INTEGER DEFAULT 0,
+  updated_at INTEGER,
+  UNIQUE(conversation_id, contact_id)
+);`;
+
 export const CREATE_OUTBOX = `
 CREATE TABLE IF NOT EXISTS outbox (
   id TEXT PRIMARY KEY,
@@ -179,6 +197,13 @@ export const CREATE_INDEXES = [
   `CREATE INDEX IF NOT EXISTS idx_outbox_status_next_attempt ON outbox(status, next_attempt_at);`,
   `CREATE INDEX IF NOT EXISTS idx_outbox_conversation ON outbox(conversation_id);`,
   `CREATE INDEX IF NOT EXISTS idx_outbox_entity ON outbox(entity_type, entity_id);`,
+  `CREATE INDEX IF NOT EXISTS idx_external_members_conversation ON external_members(conversation_id);`,
+];
+
+// v4 — create the external_members table on existing installs.
+export const EXTERNAL_MEMBERS_V4 = [
+  CREATE_EXTERNAL_MEMBERS,
+  `CREATE INDEX IF NOT EXISTS idx_external_members_conversation ON external_members(conversation_id);`,
 ];
 
 export const ALL_TABLE_STATEMENTS = [
@@ -187,6 +212,7 @@ export const ALL_TABLE_STATEMENTS = [
   CREATE_MESSAGE_REACTIONS,
   CREATE_MESSAGE_RECEIPTS,
   CREATE_GROUP_MEMBERS,
+  CREATE_EXTERNAL_MEMBERS,
   CREATE_OUTBOX,
   CREATE_SYNC_STATE,
   CREATE_TOMBSTONES,
@@ -199,6 +225,7 @@ export const USER_DATA_TABLES = [
   'message_reactions',
   'message_receipts',
   'group_members',
+  'external_members',
   'outbox',
   'tombstones',
 ];

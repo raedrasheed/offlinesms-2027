@@ -12,9 +12,11 @@ import { openForUser, closeDb, wipeUserData, getCurrentUid } from './connection'
 import { startScheduler, stopScheduler, kick } from './sync/syncScheduler';
 import * as messagesRepo from './repositories/messagesRepo';
 import * as outboxRepo from './repositories/outboxRepo';
+import * as externalMembersRepo from './repositories/externalMembersRepo';
 import { getDeviceId, getCursor, setCursor } from './repositories/syncStateRepo';
 import { idempotencyKey, localId } from './sync/ids';
 import { toggleReaction } from './sync/reactionLogic';
+import { phoneDigits } from '../lib/phone';
 import type { MessageRow } from './types';
 
 export * from './types';
@@ -22,6 +24,7 @@ export { getDb, getCurrentUid } from './connection';
 export * as conversationsRepo from './repositories/conversationsRepo';
 export * as messagesRepo from './repositories/messagesRepo';
 export * as outboxRepo from './repositories/outboxRepo';
+export * as externalMembersRepo from './repositories/externalMembersRepo';
 export * as receiptsRepo from './repositories/receiptsRepo';
 export * as membersRepo from './repositories/membersRepo';
 export * as syncStateRepo from './repositories/syncStateRepo';
@@ -352,6 +355,56 @@ export async function queueMarkReceipt(args: { conversationId: string; messageId
     // Idempotent per (message, status) → repeated receipts collapse to one item.
     idempotencyKey: idempotencyKey(['receipt', args.messageId, args.status]),
     payload: { conversationId: args.conversationId, messageId: args.messageId, status: args.status },
+  });
+  kick('outbox');
+  return { ok: true };
+}
+
+// ── External phone contacts (Phase 25) ──────────────────────────────────────
+// Optimistic local write to external_members + durable outbox item, so adds
+// survive offline / app restart and sync on reconnect. Idempotency keys are
+// stable per (conversation, phone) so a retry never double-adds.
+
+export async function queueAddExternalContactToGroup(args: {
+  conversationId: string; displayName: string; phoneE164: string; defaultCountry?: string;
+}): Promise<ActionResult> {
+  if (!getCurrentUid()) return { ok: false, reason: 'not-initialised' };
+  const digits = phoneDigits(args.phoneE164);
+  // Optimistic row (pending) — appears immediately in GroupInfo, even offline.
+  await externalMembersRepo.upsertExternalMember({
+    conversationId:  args.conversationId,
+    contactId:       digits,                 // matches the server's externalMember id
+    displayName:     args.displayName,
+    phoneE164:       args.phoneE164,
+    normalizedPhone: digits,
+    isRegistered:    false,
+    pending:         true,
+  });
+  await outboxRepo.enqueue({
+    type: 'add_external_contact_to_group', entityType: 'externalMember', entityId: digits,
+    conversationId: args.conversationId,
+    idempotencyKey: idempotencyKey(['addExternal', args.conversationId, digits]),
+    payload: {
+      conversationId: args.conversationId,
+      displayName: args.displayName,
+      phoneNumber: args.phoneE164,
+      defaultCountry: args.defaultCountry,
+    },
+  });
+  kick('outbox');
+  return { ok: true };
+}
+
+export async function queueRemoveExternalContactFromGroup(args: {
+  conversationId: string; contactId: string;
+}): Promise<ActionResult> {
+  if (!getCurrentUid()) return { ok: false, reason: 'not-initialised' };
+  await externalMembersRepo.removeExternalMember(args.conversationId, args.contactId);
+  await outboxRepo.enqueue({
+    type: 'remove_external_contact_from_group', entityType: 'externalMember', entityId: args.contactId,
+    conversationId: args.conversationId,
+    idempotencyKey: idempotencyKey(['removeExternal', args.conversationId, args.contactId]),
+    payload: { conversationId: args.conversationId, contactId: args.contactId },
   });
   kick('outbox');
   return { ok: true };

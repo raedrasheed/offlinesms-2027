@@ -25,6 +25,8 @@ import {
   groupErrorCopy,
 } from '../lib/conversations';
 import { maskPhone } from '../lib/phone';
+import { LOCAL_FIRST_CONVERSATION_ENABLED } from '../config/features';
+import { queueRemoveExternalContactFromGroup, externalMembersRepo, getCurrentUid } from '../localdb';
 import { colors, radius } from '../theme';
 import { RegisteredBadge } from '../components/RegisteredBadge';
 import { LoadingState, EmptyState, PermissionState } from '../components/state';
@@ -43,7 +45,8 @@ export default function GroupInfo({ route, navigation }: any) {
 
   const [convo, setConvo]     = useState<Conversation | null | undefined>(undefined);
   const [members, setMembers] = useState<GroupMember[] | null>(null);
-  const [externals, setExternals] = useState<ExternalMember[]>([]);
+  const [remoteExternals, setRemoteExternals] = useState<ExternalMember[]>([]);
+  const [pendingExternals, setPendingExternals] = useState<ExternalMember[]>([]);
   const [busy, setBusy]       = useState(false);
 
   useEffect(() => {
@@ -53,7 +56,32 @@ export default function GroupInfo({ route, navigation }: any) {
   }, [id]);
 
   useEffect(() => subscribeMembers(id, setMembers), [id]);
-  useEffect(() => subscribeExternalMembers(id, setExternals), [id]);
+  useEffect(() => subscribeExternalMembers(id, setRemoteExternals), [id]);
+
+  // Merge offline-queued (pending) external contacts that the server snapshot
+  // doesn't have yet, so an add made while offline shows immediately. Pure
+  // additive — never deletes from the remote list. Refreshes whenever the
+  // remote list changes (a synced row drops out of the pending set).
+  useEffect(() => {
+    if (!LOCAL_FIRST_CONVERSATION_ENABLED || !getCurrentUid()) { setPendingExternals([]); return; }
+    let alive = true;
+    (async () => {
+      try {
+        const local = await externalMembersRepo.listExternalMembers(id);
+        const remoteIds = new Set(remoteExternals.map(r => r.contactId));
+        const pend = local
+          .filter(l => l.pending && !remoteIds.has(l.contactId))
+          .map(l => ({
+            contactId: l.contactId, displayName: l.displayName, phoneE164: l.phoneE164,
+            normalizedPhone: l.normalizedPhone, isRegistered: l.isRegistered, linkedUid: l.linkedUid,
+          }));
+        if (alive) setPendingExternals(pend);
+      } catch { if (alive) setPendingExternals([]); }
+    })();
+    return () => { alive = false; };
+  }, [id, remoteExternals]);
+
+  const externals = useMemo(() => [...remoteExternals, ...pendingExternals], [remoteExternals, pendingExternals]);
 
   const myRole: GroupMember['role'] | null = useMemo(() => {
     const m = members?.find(x => x.uid === me);
@@ -93,7 +121,10 @@ export default function GroupInfo({ route, navigation }: any) {
       `Remove ${c.displayName} from this group?`,
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Remove', style: 'destructive', onPress: () => withBusy(() => removeExternalContactFromGroup(id, c.contactId), 'Couldn’t remove') },
+        { text: 'Remove', style: 'destructive', onPress: () => withBusy(async () => {
+          if (LOCAL_FIRST_CONVERSATION_ENABLED && getCurrentUid()) { await queueRemoveExternalContactFromGroup({ conversationId: id, contactId: c.contactId }); setPendingExternals(p => p.filter(x => x.contactId !== c.contactId)); }
+          else await removeExternalContactFromGroup(id, c.contactId);
+        }, 'Couldn’t remove') },
       ],
     );
   }

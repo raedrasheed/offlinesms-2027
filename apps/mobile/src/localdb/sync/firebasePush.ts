@@ -205,6 +205,15 @@ export async function pushOutboxItem(item: OutboxRow): Promise<PushResult> {
     case 'support_ticket':
       await call('createSupportTicket', payload);
       return { ok: true };
+    case 'create_phone_contact':
+      await call('createPhoneContact', payload);
+      return { ok: true };
+    case 'add_external_contact_to_group':
+      await call('addExternalContactToGroup', payload);
+      return { ok: true };
+    case 'remove_external_contact_from_group':
+      await call('removeExternalContactFromGroup', payload);
+      return { ok: true };
     default:
       throw Object.assign(new Error(`unknown outbox type: ${item.type}`), { code: 'functions/invalid-argument' });
   }
