@@ -596,6 +596,21 @@ service cloud.firestore {
     }
 
     // ════════════════════════════════════════════════════════════
+    // BROADCAST NOTIFICATIONS (Phase 28) — admin-composed push announcements.
+    // Read is admin-only (the page lists past broadcasts); ALL writes are
+    // server-only via the createNotificationBroadcast / sendNotificationBroadcast
+    // callables. organization_admin's audience scope is enforced server-side.
+    // ════════════════════════════════════════════════════════════
+    match /notificationBroadcasts/{broadcastId} {
+      allow read:  if isAdmin();
+      allow write: if isAdmin();
+      match /deliveries/{deliveryId} {
+        allow read:  if isAdmin();
+        allow write: if isAdmin();
+      }
+    }
+
+    // ════════════════════════════════════════════════════════════
     // INVITE CODES (Phase 26) — reverse index code → group. Fully locked:
     // clients resolve/join only through the invite callables, so the mapping
     // (and which groups exist) is never enumerable from the client. Deleting a
