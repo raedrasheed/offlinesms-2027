@@ -217,3 +217,7 @@ if (rnVersion < versionToNumber(0, 75, 0)) {
     apply from: new File(["node", "--print", "require.resolve('@react-native-community/cli-platform-android/package.json', { paths: [require.resolve('react-native/package.json')] })"].execute(null, rootDir).text.trim(), "../native_modules.gradle");
     applyNativeModulesAppBuildGradle(project)
 }
+
+// FCM (Phase 27) — apply last so it can read the merged config + dependencies.
+// Requires android/app/google-services.json (gitignored).
+apply plugin: 'com.google.gms.google-services'
