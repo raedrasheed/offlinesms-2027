@@ -14,14 +14,19 @@ import { db, auth } from '../lib/firebase';
 import {
   Conversation,
   GroupMember,
+  ExternalMember,
   subscribeMembers,
+  subscribeExternalMembers,
+  removeExternalContactFromGroup,
   removeGroupMember,
   changeGroupRole,
   leaveGroup,
   lockGroup,
   groupErrorCopy,
 } from '../lib/conversations';
+import { maskPhone } from '../lib/phone';
 import { colors, radius } from '../theme';
+import { RegisteredBadge } from '../components/RegisteredBadge';
 import { LoadingState, EmptyState, PermissionState } from '../components/state';
 
 function roleBadge(role: GroupMember['role']) {
@@ -38,6 +43,7 @@ export default function GroupInfo({ route, navigation }: any) {
 
   const [convo, setConvo]     = useState<Conversation | null | undefined>(undefined);
   const [members, setMembers] = useState<GroupMember[] | null>(null);
+  const [externals, setExternals] = useState<ExternalMember[]>([]);
   const [busy, setBusy]       = useState(false);
 
   useEffect(() => {
@@ -47,6 +53,7 @@ export default function GroupInfo({ route, navigation }: any) {
   }, [id]);
 
   useEffect(() => subscribeMembers(id, setMembers), [id]);
+  useEffect(() => subscribeExternalMembers(id, setExternals), [id]);
 
   const myRole: GroupMember['role'] | null = useMemo(() => {
     const m = members?.find(x => x.uid === me);
@@ -77,6 +84,16 @@ export default function GroupInfo({ route, navigation }: any) {
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Remove', style: 'destructive', onPress: () => withBusy(() => removeGroupMember(id, m.uid), 'Couldn’t remove') },
+      ],
+    );
+  }
+  function confirmRemoveExternal(c: ExternalMember) {
+    Alert.alert(
+      'Remove contact',
+      `Remove ${c.displayName} from this group?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Remove', style: 'destructive', onPress: () => withBusy(() => removeExternalContactFromGroup(id, c.contactId), 'Couldn’t remove') },
       ],
     );
   }
@@ -139,7 +156,7 @@ export default function GroupInfo({ route, navigation }: any) {
         <View style={s.hero}>
           <View style={s.avatar}><Text style={s.avatarText}>{(convo.name ?? '?').slice(0, 1).toUpperCase()}</Text></View>
           <Text style={s.name}>{convo.name ?? 'Group'}</Text>
-          <Text style={s.sub}>{members.length} member{members.length === 1 ? '' : 's'}{locked ? ' · locked' : disabled ? ' · disabled' : ''}</Text>
+          <Text style={s.sub}>{members.length + externals.length} member{(members.length + externals.length) === 1 ? '' : 's'}{locked ? ' · locked' : disabled ? ' · disabled' : ''}</Text>
         </View>
 
         <View style={s.section}>
@@ -179,7 +196,11 @@ export default function GroupInfo({ route, navigation }: any) {
                 const isSelf = item.uid === me;
                 return (
                   <Pressable style={s.memberRow} onPress={() => memberActions(item)}>
-                    <View style={s.memberAvatar}><Text style={s.memberAvatarText}>{(item.displayNameSnapshot ?? item.uid).slice(0, 1).toUpperCase()}</Text></View>
+                    <View style={s.memberAvatar}>
+                      <Text style={s.memberAvatarText}>{(item.displayNameSnapshot ?? item.uid).slice(0, 1).toUpperCase()}</Text>
+                      {/* Registered app users get the badge. */}
+                      <RegisteredBadge registered size={15} />
+                    </View>
                     <View style={{ flex: 1 }}>
                       <Text style={s.memberName}>{item.displayNameSnapshot ?? item.uid}{isSelf ? ' (you)' : ''}</Text>
                     </View>
@@ -194,6 +215,33 @@ export default function GroupInfo({ route, navigation }: any) {
             />
           )}
         </View>
+
+        {externals.length > 0 ? (
+          <View style={s.section}>
+            <Text style={s.sectionLabel}>Phone contacts ({externals.length})</Text>
+            <FlatList
+              scrollEnabled={false}
+              data={externals}
+              keyExtractor={e => e.contactId}
+              renderItem={({ item }) => (
+                <Pressable
+                  style={s.memberRow}
+                  onPress={() => { if (isAdmin) confirmRemoveExternal(item); }}
+                >
+                  <View style={s.memberAvatar}>
+                    <Text style={s.memberAvatarText}>{(item.displayName ?? '?').slice(0, 1).toUpperCase()}</Text>
+                    {/* Badge only once the contact has registered with this number. */}
+                    <RegisteredBadge registered={item.isRegistered} size={15} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.memberName}>{item.displayName}</Text>
+                    <Text style={s.memberSub}>{maskPhone(item.phoneE164)}{item.isRegistered ? ' · on OfflineSMS' : ' · SMS only'}</Text>
+                  </View>
+                </Pressable>
+              )}
+            />
+          </View>
+        ) : null}
       </ScrollView>
     </View>
   );
@@ -219,6 +267,7 @@ const s = StyleSheet.create({
   memberAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.primaryLight, alignItems: 'center', justifyContent: 'center' },
   memberAvatarText: { fontWeight: '700', color: colors.primaryDark },
   memberName: { fontSize: 14, color: colors.ink, fontWeight: '600' },
+  memberSub:  { fontSize: 12, color: colors.ink500, marginTop: 2 },
   badge:     { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
   badgeText: { fontSize: 10, fontWeight: '700' },
 });

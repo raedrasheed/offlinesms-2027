@@ -9,8 +9,9 @@ import {
   collection, getDocs, limit, onSnapshot, orderBy, query, where,
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
-import { addGroupMembers, groupErrorCopy } from '../lib/conversations';
+import { addGroupMembers, addExternalContactToGroup, groupErrorCopy } from '../lib/conversations';
 import { normalizeUsername } from '../lib/username';
+import { normalizePhoneToE164 } from '../lib/phone';
 import { colors, radius } from '../theme';
 import { LoadingState, EmptyState, ErrorState } from '../components/state';
 
@@ -77,6 +78,29 @@ export default function AddMembers({ route, navigation }: any) {
   function add(u: UserRow) { setSelected(s => [...s, u]); setTerm(''); }
   function remove(uid: string) { setSelected(s => s.filter(u => u.uid !== uid)); }
 
+  // ── Add by phone (external phone-only contact) ──
+  const [phoneMode, setPhoneMode] = useState(false);
+  const [contactName, setContactName] = useState('');
+  const [contactPhone, setContactPhone] = useState('');
+
+  async function addPhoneContact() {
+    const name = contactName.trim();
+    const e164 = normalizePhoneToE164(contactPhone.trim());
+    if (!name) { Alert.alert('Name required', 'Enter a contact name.'); return; }
+    if (!e164) { Alert.alert('Invalid number', 'Enter a phone number in international format, e.g. +972591234567.'); return; }
+    setBusy(true); setErr(null);
+    try {
+      const res = await addExternalContactToGroup({ conversationId: id, displayName: name, phoneNumber: e164 });
+      if (res.alreadyMember) Alert.alert('Already a member', 'That number already belongs to a member of this group.');
+      else if (res.alreadyExternal) Alert.alert('Already added', 'That contact is already in this group.');
+      else navigation.goBack();
+    } catch (e: any) {
+      const copy = groupErrorCopy(e?.code ?? 'internal');
+      setErr(copy);
+      Alert.alert('Couldn’t add contact', copy);
+    } finally { setBusy(false); }
+  }
+
   const canSubmit = selected.length > 0 && !busy;
 
   async function submit() {
@@ -103,6 +127,41 @@ export default function AddMembers({ route, navigation }: any) {
       </View>
 
       <ScrollView keyboardShouldPersistTaps="handled" style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }}>
+        <View style={s.modeRow}>
+          <Pressable style={[s.modeTab, !phoneMode && s.modeTabOn]} onPress={() => setPhoneMode(false)}>
+            <Text style={[s.modeTabText, !phoneMode && s.modeTabTextOn]}>Registered users</Text>
+          </Pressable>
+          <Pressable style={[s.modeTab, phoneMode && s.modeTabOn]} onPress={() => setPhoneMode(true)}>
+            <Text style={[s.modeTabText, phoneMode && s.modeTabTextOn]}>Add phone contact</Text>
+          </Pressable>
+        </View>
+
+        {phoneMode ? (
+          <View style={s.phonePanel}>
+            <Text style={s.phoneHint}>Add someone by phone number. They’ll receive group messages by SMS, and become a full member automatically if they sign up with that number.</Text>
+            <TextInput
+              style={s.input}
+              value={contactName}
+              onChangeText={setContactName}
+              placeholder="Name"
+              autoFocus
+            />
+            <TextInput
+              style={s.input}
+              value={contactPhone}
+              onChangeText={setContactPhone}
+              placeholder="+972591234567"
+              keyboardType="phone-pad"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <Pressable style={[s.phoneBtn, busy && { opacity: 0.5 }]} onPress={addPhoneContact} disabled={busy}>
+              <Text style={s.phoneBtnText}>{busy ? 'Adding…' : 'Add to group'}</Text>
+            </Pressable>
+            {err ? <ErrorState compact title="Couldn’t complete" description={err} /> : null}
+          </View>
+        ) : (
+        <>
         {selected.length > 0 ? (
           <View style={s.chips}>
             {selected.map(u => (
@@ -148,6 +207,8 @@ export default function AddMembers({ route, navigation }: any) {
             )}
           />
         ) : null}
+        </>
+        )}
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -170,4 +231,13 @@ const s = StyleSheet.create({
   name:   { fontSize: 14, fontWeight: '700', color: colors.ink },
   handle: { fontSize: 12, color: colors.ink500, marginTop: 2 },
   add:    { fontSize: 22, color: colors.primary, fontWeight: '700' },
+  modeRow:  { flexDirection: 'row', gap: 8, paddingHorizontal: 14, paddingTop: 14 },
+  modeTab:  { flex: 1, paddingVertical: 9, borderRadius: radius.pill, backgroundColor: '#fff', borderWidth: 1, borderColor: colors.ink200, alignItems: 'center' },
+  modeTabOn: { backgroundColor: colors.primary, borderColor: colors.primary },
+  modeTabText:   { fontSize: 13, fontWeight: '700', color: colors.ink500 },
+  modeTabTextOn: { color: '#fff' },
+  phonePanel: { paddingHorizontal: 14, paddingTop: 8, gap: 12 },
+  phoneHint:  { fontSize: 12, color: colors.ink500, lineHeight: 18, marginTop: 6 },
+  phoneBtn:   { padding: 14, backgroundColor: colors.primary, borderRadius: radius.md, alignItems: 'center' },
+  phoneBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
 });
