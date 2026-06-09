@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList, View, Text, TextInput, Pressable, StyleSheet, Alert,
   KeyboardAvoidingView, Platform, PanResponder, Image,
@@ -54,6 +54,12 @@ import { validateMediaMessage, type AttachmentKey } from '../media/mediaValidati
 type ComposerGate =
   | { kind: 'allowed' }
   | { kind: 'blocked'; reason: string };
+
+// Stable no-op callbacks reused for pending-bubble props (which can never
+// actually fire). Sharing one reference each lets MessageBubble's memo
+// comparator skip re-renders.
+const NOOP_MSG: (m: Message) => void = () => {};
+const NOOP_ID: (id: string) => void  = () => {};
 
 function gateFor(
   convo: ConversationDoc | null | undefined,
@@ -276,13 +282,15 @@ export default function Conversation({ route, navigation }: any) {
   // Cache media to the device so images/voice load instantly on revisit.
   useEffect(() => { if (visibleMsgs) prefetchMedia(visibleMsgs); }, [visibleMsgs]);
 
-  function jumpTo(messageId: string) {
+  // Bubble handlers — useCallback so MessageBubble's memo comparator sees
+  // stable references and only re-renders when its own data changes.
+  const jumpTo = useCallback((messageId: string) => {
     if (!visibleMsgs) return;
     const idx = visibleMsgs.findIndex(m => m.id === messageId);
     if (idx >= 0) listRef.current?.scrollToIndex?.({ index: idx, animated: true, viewPosition: 0.3 });
-  }
+  }, [visibleMsgs]);
 
-  function startReply(m: Message) {
+  const startReply = useCallback((m: Message) => {
     if (m.deletedForEveryone) return;
     setEditing(null);
     setReplyTo({
@@ -293,23 +301,23 @@ export default function Conversation({ route, navigation }: any) {
       type:              'text',
       createdAt:         m.createdAt,
     });
-  }
-  function startEdit(m: Message) {
+  }, []);
+  const startEdit = useCallback((m: Message) => {
     setReplyTo(null);
     setEditing({ messageId: m.id, originalText: m.text ?? '' });
     setDraft(m.text ?? '');
-  }
+  }, []);
   function cancelEdit() {
     setEditing(null);
     setDraft('');
   }
-  function startForward(m: Message) {
+  const startForward = useCallback((m: Message) => {
     navigation.navigate('ForwardPicker', {
       sourceConversationId: id,
       messageIds: [m.id],
     });
-  }
-  function openInfo(m: Message) {
+  }, [navigation, id]);
+  const openInfo = useCallback((m: Message) => {
     navigation.navigate('MessageInfo', {
       id,
       messageId:   m.id,
@@ -322,7 +330,7 @@ export default function Conversation({ route, navigation }: any) {
         ? { code: m.errorCode ?? null, message: m.errorMessage ?? null }
         : null,
     });
-  }
+  }, [navigation, id, isGroup, peerName, convo?.memberCount]);
   async function unpin() {
     const messageId = convo?.pinnedMessage?.messageId;
     if (!messageId) return;
@@ -366,8 +374,13 @@ export default function Conversation({ route, navigation }: any) {
     }
   }
 
-  const openImage = (uri: string) => navigation.navigate('ImageViewer', { uri });
-  const retryMedia = (msg: Message) => { void retryMediaMessage(msg.id); };
+  const openImage  = useCallback((uri: string) => navigation.navigate('ImageViewer', { uri }), [navigation]);
+  const retryMedia = useCallback((msg: Message) => { void retryMediaMessage(msg.id); }, []);
+  const onSendViaSms = useCallback((msg: Message) => navigation.navigate('SmsEscalation', {
+    conversationId: id,
+    messageId:      msg.id,
+    messageText:    msg.text,
+  }), [navigation, id]);
 
   function confirmClearChat() {
     Alert.alert(
@@ -379,9 +392,9 @@ export default function Conversation({ route, navigation }: any) {
       ],
     );
   }
-  const onPlayedVoice = (msg: Message) => {
+  const onPlayedVoice = useCallback((msg: Message) => {
     if (msg.senderUid !== me) void queueMarkReceipt({ conversationId: id, messageId: msg.id, status: 'played' });
-  };
+  }, [id, me]);
 
   // Phase 23 — voice recording (hold mic → record, slide left → cancel, swipe up → lock).
   const recorder = useVoiceRecorder();
@@ -551,18 +564,30 @@ export default function Conversation({ route, navigation }: any) {
   }, [presence, isGroup, convo?.memberCount, convo?.status, reactorNames, memberProfiles, t]);
 
   const queued = queuedFor(id);
+
+  // Build the queued (legacy offline-queue) bubbles separately so we can
+  // memoise them by `queued` reference and keep `data` stable when nothing
+  // changed.
+  const queuedItems = useMemo(() => queued.map(q => ({
+    id:             q.localQueueId,
+    conversationId: id,
+    senderUid:      me,
+    type:           'text' as const,
+    text:           q.text,
+    createdAt:      { toMillis: () => q.createdAt },
+    __pending:      q.status as 'queued' | 'syncing' | 'failed',
+  })), [queued, id, me]);
+
+  // Single useMemo for the FlatList `data` so its reference is stable when
+  // neither input changed — saves FlatList an O(n) diff per parent render.
+  const data = useMemo<any[]>(() => {
+    if (!visibleMsgs) return [];
+    if (queuedItems.length === 0) return visibleMsgs;
+    return [...visibleMsgs, ...queuedItems];
+  }, [visibleMsgs, queuedItems]);
+
   const body = useMemo(() => {
     if (visibleMsgs === null) return <LoadingState fullPage title="Loading messages…" />;
-
-    const queuedItems = queued.map(q => ({
-      id:             q.localQueueId,
-      conversationId: id,
-      senderUid:      me,
-      type:           'text' as const,
-      text:           q.text,
-      createdAt:      { toMillis: () => q.createdAt },
-      __pending:      q.status as 'queued' | 'syncing' | 'failed',
-    }));
 
     if (visibleMsgs.length === 0 && queuedItems.length === 0) return (
       <View style={s.emptyConvo}>
@@ -583,7 +608,6 @@ export default function Conversation({ route, navigation }: any) {
       </View>
     );
 
-    const data: any[] = [...visibleMsgs, ...queuedItems];
     return (
       <FlatList
         ref={listRef}
@@ -601,6 +625,15 @@ export default function Conversation({ route, navigation }: any) {
           </View>
         }
         onContentSizeChange={() => listRef.current?.scrollToEnd?.({ animated: false })}
+        // FlatList tuning: only render what's near the viewport on first
+        // paint, batch new rows in small windows, and let RN unmount rows
+        // that scroll out of the viewport on Android. Big wins for long
+        // chat histories.
+        initialNumToRender={15}
+        maxToRenderPerBatch={10}
+        windowSize={10}
+        updateCellsBatchingPeriod={50}
+        removeClippedSubviews={Platform.OS === 'android'}
         renderItem={({ item, index }) => {
           if (item.__pending) {
             return (
@@ -609,11 +642,11 @@ export default function Conversation({ route, navigation }: any) {
                 pending={item.__pending}
                 showSender={false}
                 context={{ conversationId: id, isGroup, isMyMessage: true, myRoleIsAdmin, isStarred: false, isPinned: false, myUid: me, memberCount: convo?.memberCount, localFirst: useLocal }}
-                onReply={() => {}}
-                onEditStart={() => {}}
-                onForward={() => {}}
-                onJumpTo={() => {}}
-                onInfo={() => {}}
+                onReply={NOOP_MSG}
+                onEditStart={NOOP_MSG}
+                onForward={NOOP_MSG}
+                onJumpTo={NOOP_ID}
+                onInfo={NOOP_MSG}
               />
             );
           }
@@ -644,17 +677,13 @@ export default function Conversation({ route, navigation }: any) {
               onOpenImage={openImage}
               onRetryMedia={retryMedia}
               onPlayedVoice={onPlayedVoice}
-              onSendViaSms={msg => navigation.navigate('SmsEscalation', {
-                conversationId: id,
-                messageId:      msg.id,
-                messageText:    msg.text,
-              })}
+              onSendViaSms={onSendViaSms}
             />
           );
         }}
       />
     );
-  }, [visibleMsgs, queued, me, isGroup, id, myRoleIsAdmin, starred, convo?.pinnedMessage, convo?.memberCount, reactorNames]);
+  }, [data, visibleMsgs, queuedItems, me, isGroup, id, myRoleIsAdmin, starred, convo?.pinnedMessage, convo?.memberCount, reactorNames, useLocal, startReply, startEdit, startForward, jumpTo, openInfo, openImage, retryMedia, onPlayedVoice, onSendViaSms]);
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.root}>
