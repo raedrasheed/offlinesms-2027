@@ -16,13 +16,11 @@
 
 import { onDocumentCreated } from 'firebase-functions/v2/firestore';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
-import { getMessaging, type TokenMessage } from 'firebase-admin/messaging';
 import {
-  buildNotification, decideForRecipient, isDeadTokenError, collapseKey,
+  buildNotification, decideForRecipient,
   type ChatType, type NotifSettings,
 } from './notifyLogic';
-
-interface DeviceDoc { fcmToken?: string; enabled?: boolean; platform?: string }
+import { sendPushToUser } from './send';
 
 export const onMessageCreateNotify = onDocumentCreated(
   'conversations/{convoId}/messages/{msgId}',
@@ -49,12 +47,8 @@ export const onMessageCreateNotify = onDocumentCreated(
     const senderName: string = msg.senderDisplayName ?? 'Someone';
     const groupName = convo.name ?? 'Group';
 
-    // Resolve per-recipient: mute (userState) + settings, then their devices.
-    const messaging = getMessaging();
-    const cleanups: Promise<unknown>[] = [];
-    let sent = 0;
-
-    await Promise.all(recipients.map(async (uid) => {
+    // Resolve per-recipient: mute (userState) + settings, then send.
+    const counts = await Promise.all(recipients.map(async (uid) => {
       const [stateSnap, settingsSnap] = await Promise.all([
         convoRef.collection('userState').doc(uid).get(),
         db.collection('users').doc(uid).collection('notificationSettings').doc('current').get(),
@@ -63,57 +57,22 @@ export const onMessageCreateNotify = onDocumentCreated(
       const settings = (settingsSnap.data() ?? {}) as NotifSettings;
 
       const decision = decideForRecipient({ uid, muted, settings }, chatType, senderUid);
-      if (!decision.notify) return;
-
-      const devicesSnap = await db.collection('users').doc(uid).collection('devices')
-        .where('enabled', '==', true).get();
-      if (devicesSnap.empty) return;
+      if (!decision.notify) return 0;
 
       const { title, body } = buildNotification({
         chatType, groupName, senderName, msg: msg as any, showPreview: settings.showPreview !== false,
       });
 
-      const data: Record<string, string> = {
-        type: 'chat_message', conversationId: convoId, messageId: msgId,
-        senderUid, chatType, route: 'Conversation',
-      };
-
-      for (const dev of devicesSnap.docs) {
-        const d = dev.data() as DeviceDoc;
-        const token = d.fcmToken;
-        if (!token) continue;
-
-        const message: TokenMessage = {
-          token,
-          data,
-          notification: { title, body },
-          android: {
-            collapseKey: collapseKey(convoId),
-            priority: decision.silent ? 'normal' : 'high',
-            notification: {
-              tag: collapseKey(convoId),
-              ...(decision.silent ? { defaultSound: false } : { defaultSound: true, defaultVibrateTimings: true }),
-            },
-          },
-          apns: {
-            headers: { 'apns-collapse-id': collapseKey(convoId) },
-            payload: { aps: decision.silent ? { sound: undefined } : { sound: 'default' } },
-          },
-        };
-
-        try {
-          await messaging.send(message);
-          sent++;
-        } catch (e: any) {
-          const code = e?.errorInfo?.code ?? e?.code;
-          if (isDeadTokenError(code)) {
-            cleanups.push(dev.ref.set({ enabled: false, disabledAt: FieldValue.serverTimestamp(), disabledReason: code }, { merge: true }));
-          }
-        }
-      }
+      return sendPushToUser(uid, {
+        title, body, silent: decision.silent, conversationId: convoId,
+        data: {
+          type: 'chat_message', conversationId: convoId, messageId: msgId,
+          senderUid, chatType, route: 'Conversation',
+        },
+      });
     }));
 
-    await Promise.allSettled(cleanups);
+    const sent = counts.reduce((a, b) => a + b, 0);
     // Lightweight delivery log (best-effort).
     if (sent > 0) {
       try {

@@ -96,6 +96,37 @@ export function decideForRecipient(
   return { notify: true, silent };
 }
 
+/** Per-recipient decision for a REACTION notification (gated by the separate
+ *  `reactions` setting). Reaction bodies never contain message text, so
+ *  showPreview doesn't apply here. */
+export function decideReactionForRecipient(
+  recipient: RecipientCtx,
+  authorUid: string,
+  actorUid: string,
+): NotifyDecision {
+  if (authorUid === actorUid) return { notify: false, silent: true, reason: 'sender' };
+  const s = recipient.settings ?? {};
+  if (s.enabled === false) return { notify: false, silent: true, reason: 'disabled' };
+  if (s.reactions === false) return { notify: false, silent: true, reason: 'type-off' };
+  const silent = !!recipient.muted || s.sound === false;
+  return { notify: true, silent };
+}
+
+/** Title/body for a reaction notification. The emoji + who reacted are shown
+ *  (not the message text), so this is independent of showPreview. */
+export function buildReactionNotification(args: {
+  chatType: ChatType;
+  groupName?: string | null;
+  actorName?: string | null;
+  emoji: string;
+}): BuiltNotification {
+  const actor = (args.actorName ?? 'Someone').trim() || 'Someone';
+  if (args.chatType === 'group') {
+    return { title: (args.groupName ?? 'Group').trim() || 'Group', body: `${actor} reacted ${args.emoji} to your message` };
+  }
+  return { title: actor, body: `Reacted ${args.emoji} to your message` };
+}
+
 /** FCM messaging error codes that mean a token is dead and should be removed. */
 const DEAD_TOKEN_CODES = new Set([
   'messaging/registration-token-not-registered',

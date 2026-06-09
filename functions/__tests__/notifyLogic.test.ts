@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   messagePreview, buildNotification, decideForRecipient, isDeadTokenError, collapseKey,
+  decideReactionForRecipient, buildReactionNotification,
 } from '../src/notifications/notifyLogic';
 
 describe('messagePreview', () => {
@@ -70,5 +71,32 @@ describe('isDeadTokenError', () => {
 describe('collapseKey', () => {
   it('is stable per conversation', () => {
     expect(collapseKey('g1')).toBe('convo_g1');
+  });
+});
+
+describe('decideReactionForRecipient', () => {
+  it('never notifies for a self-reaction', () => {
+    expect(decideReactionForRecipient({ uid: 'author' }, 'author', 'author')).toMatchObject({ notify: false, reason: 'sender' });
+  });
+  it('default-on notifies the author', () => {
+    expect(decideReactionForRecipient({ uid: 'author' }, 'author', 'actor')).toMatchObject({ notify: true, silent: false });
+  });
+  it('respects the reactions toggle', () => {
+    expect(decideReactionForRecipient({ uid: 'author', settings: { reactions: false } }, 'author', 'actor')).toMatchObject({ notify: false, reason: 'type-off' });
+  });
+  it('respects master enabled + mute (silent)', () => {
+    expect(decideReactionForRecipient({ uid: 'author', settings: { enabled: false } }, 'author', 'actor').notify).toBe(false);
+    expect(decideReactionForRecipient({ uid: 'author', muted: true }, 'author', 'actor')).toMatchObject({ notify: true, silent: true });
+  });
+});
+
+describe('buildReactionNotification', () => {
+  it('direct: actor title + "Reacted <emoji>"', () => {
+    expect(buildReactionNotification({ chatType: 'direct', actorName: 'Ahmed', emoji: '👍' }))
+      .toEqual({ title: 'Ahmed', body: 'Reacted 👍 to your message' });
+  });
+  it('group: group title + "Actor reacted <emoji>"', () => {
+    expect(buildReactionNotification({ chatType: 'group', groupName: 'Team', actorName: 'Ahmed', emoji: '❤️' }))
+      .toEqual({ title: 'Team', body: 'Ahmed reacted ❤️ to your message' });
   });
 });
