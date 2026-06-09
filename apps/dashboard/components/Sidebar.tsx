@@ -85,7 +85,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: '/admin/roles',         label: 'Roles & perms', icon: Shield,     capability: 'view:roles' },
       { href: '/admin/audit',         label: 'Audit logs',    icon: ScrollText, capability: 'view:audit' },
-      { href: '/admin/notifications', label: 'Notifications', icon: Bell,       capability: 'view:notifications' },
+      { href: '/admin/notifications', label: 'Notifications', icon: Bell,       capability: 'view:broadcast_notifications' },
       { href: '/admin/settings',      label: 'Settings',      icon: Settings,   capability: 'view:settings' },
     ],
   },
