@@ -264,6 +264,23 @@ service cloud.firestore {
                           );
       }
 
+      // Group invite settings (Phase 26). Members may read the current invite
+      // (so the admin UI shows live state); ALL writes are server-only via the
+      // invite callables (Admin SDK).
+      match /inviteSettings/{docId} {
+        allow read:  if isMember(convoId) || isConversationParticipant(convoId) || isAdmin();
+        allow write: if isAdmin();
+      }
+
+      // Join requests (Phase 26). A group admin sees every request; a requester
+      // sees only their own. Writes are server-only (join/approve/reject/cancel
+      // callables).
+      match /joinRequests/{requestId} {
+        allow read:  if isAdmin() || isGroupAdmin(convoId) || isSelf(requestId)
+                       || (isAuthed() && resource.data.requesterUid == request.auth.uid);
+        allow write: if isAdmin();
+      }
+
       // External phone-only members (Phase 25). Group members can read them
       // (so the roster + recipient list render); ALL writes are server-only via
       // the addExternalContactToGroup / removeExternalContactFromGroup /
@@ -558,6 +575,23 @@ service cloud.firestore {
     match /phoneContacts/{contactId} {
       allow read:  if isAdmin() || (isAuthed() && resource.data.ownerUid == request.auth.uid);
       allow write: if isAdmin();
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // INVITE CODES (Phase 26) — reverse index code → group. Fully locked:
+    // clients resolve/join only through the invite callables, so the mapping
+    // (and which groups exist) is never enumerable from the client. Deleting a
+    // code doc on reset makes old links stop resolving immediately.
+    // ════════════════════════════════════════════════════════════
+    match /inviteCodes/{code} {
+      allow read, write: if isAdmin();
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // RATE LIMITS (Phase 26) — server-only counters for invite join attempts.
+    // ════════════════════════════════════════════════════════════
+    match /rateLimits/{key} {
+      allow read, write: if false;
     }
 
     // ════════════════════════════════════════════════════════════

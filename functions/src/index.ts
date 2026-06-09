@@ -23,6 +23,12 @@ export { leaveGroup }    from './chats/leaveGroup';
 export { createPhoneContact } from './contacts/createPhoneContact';
 export { addExternalContactToGroup, removeExternalContactFromGroup } from './contacts/externalMembers';
 export { linkPhoneContactsOnUserWrite } from './contacts/linkPhoneContacts';
+
+// Phase 26 — group invite links.
+export {
+  createOrUpdateGroupInviteLink, resetGroupInviteLink, resolveGroupInviteLink,
+  joinGroupByInviteLink, approveGroupJoinRequest, rejectGroupJoinRequest, cancelMyJoinRequest,
+} from './chats/groupInvites';
 export { lockGroup }     from './chats/lockGroup';
 
 // Phase 6 — message actions.
