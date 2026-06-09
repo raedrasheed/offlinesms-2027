@@ -778,26 +778,40 @@ export default function Conversation({ route, navigation }: any) {
               </>
             ) : (
               <>
-                {!editing ? (
-                  <Pressable
-                    style={s.attachBtn}
-                    onPress={() => setAttachOpen(true)}
-                    accessibilityRole="button"
-                    accessibilityLabel={t('media.attach')}
-                  >
-                    <Ionicons name="add" size={24} color={colors.text.muted} />
-                  </Pressable>
-                ) : null}
-                <TextInput
-                  value={draft}
-                  onChangeText={setDraft}
-                  placeholder={editing ? t('messageActions.editingMessage') : isOffline ? 'Type · saved as draft' : t('convo.composerPlaceholder')}
-                  style={s.input}
-                  multiline
-                  maxLength={4000}
-                  textAlign={isRTL ? 'right' : 'left'}
-                  accessibilityLabel={t('convo.composerPlaceholder')}
-                />
+                <View style={s.inputPill}>
+                  <TextInput
+                    value={draft}
+                    onChangeText={setDraft}
+                    placeholder={editing ? t('messageActions.editingMessage') : isOffline ? 'Type · saved as draft' : t('convo.composerPlaceholder')}
+                    style={s.input}
+                    multiline
+                    maxLength={4000}
+                    textAlign={isRTL ? 'right' : 'left'}
+                    accessibilityLabel={t('convo.composerPlaceholder')}
+                  />
+                  {!editing ? (
+                    <>
+                      <Pressable
+                        style={s.inlineIcon}
+                        onPress={() => setAttachOpen(true)}
+                        accessibilityRole="button"
+                        accessibilityLabel={t('media.attach')}
+                      >
+                        <Ionicons name="attach" size={22} color={colors.text.muted} />
+                      </Pressable>
+                      {draft.trim() === '' ? (
+                        <Pressable
+                          style={s.inlineIcon}
+                          onPress={() => onAttachSelect('camera')}
+                          accessibilityRole="button"
+                          accessibilityLabel={t('media.camera')}
+                        >
+                          <Ionicons name="camera-outline" size={22} color={colors.text.muted} />
+                        </Pressable>
+                      ) : null}
+                    </>
+                  ) : null}
+                </View>
                 {(draft.trim() !== '' || editing) ? (
                   <Pressable
                     style={[s.sendBtn, busy && { opacity: 0.4 }]}
@@ -874,10 +888,14 @@ function buildStyles(colors: any, rtl: boolean) {
     composerPreviewTitle: { fontSize: 11, fontWeight: '700', color: colors.action.primary, textAlign: rtl ? 'right' : 'left' },
     composerPreviewBody:  { fontSize: 12, color: colors.text.primary, marginTop: 2, textAlign: rtl ? 'right' : 'left' },
     composerPreviewClose: { fontSize: 18, color: colors.text.muted, fontWeight: '700', paddingHorizontal: 6, minWidth: 36, minHeight: 36, textAlignVertical: 'center', textAlign: 'center' },
+    // Constant composer-bar background — never shows the wallpaper through.
     composer: { padding: 12, paddingBottom: 24, flexDirection: rtl ? 'row-reverse' : 'row', gap: 8, alignItems: 'flex-end', backgroundColor: '#EAF2FB' },
-    input:    { flex: 1, minHeight: 40, maxHeight: 120, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: colors.background.surface, borderRadius: 22, borderWidth: 1, borderColor: colors.border.subtle, fontSize: 14, color: colors.text.primary },
+    // WhatsApp-style input pill: holds the text field plus inline attach/camera
+    // icons. Opaque surface so the input area stays constant over any wallpaper.
+    inputPill: { flex: 1, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'flex-end', minHeight: 44, paddingHorizontal: 6, backgroundColor: colors.background.surface, borderRadius: 22, borderWidth: 1, borderColor: colors.border.subtle },
+    input:    { flex: 1, minHeight: 40, maxHeight: 120, paddingHorizontal: 10, paddingVertical: 10, backgroundColor: 'transparent', fontSize: 14, color: colors.text.primary },
+    inlineIcon: { width: 34, height: 44, alignItems: 'center', justifyContent: 'center' },
     sendBtn:  { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.action.primary, alignItems: 'center', justifyContent: 'center' },
-    attachBtn:{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
     micWrap:  { width: 40, alignItems: 'center', justifyContent: 'center' },
     micRecording: { transform: [{ scale: 1.5 }] },
     lockPill: { position: 'absolute', bottom: 52, width: 34, paddingVertical: 8, borderRadius: 18, backgroundColor: colors.background.surface, alignItems: 'center', gap: 4, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 4, shadowOffset: { width: 0, height: 1 }, elevation: 3 },

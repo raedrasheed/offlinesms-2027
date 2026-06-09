@@ -90,7 +90,7 @@ export default function ChatWallpaperScreen({ route, navigation }: any) {
         />
         <PickerRow
           icon="refresh-outline"
-          label={isPerChat ? 'Use global default' : 'Reset to theme default'}
+          label={isPerChat ? 'Use global default' : 'Use default wallpaper'}
           onPress={onUseDefault}
           disabled={busy}
           colors={colors}
