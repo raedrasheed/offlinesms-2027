@@ -391,6 +391,16 @@ export default function Conversation({ route, navigation }: any) {
   useRecordingPresence(id, recorder.mode === 'recording' || recorder.mode === 'locked');
   const cancelArmedRef = useRef(false);
   const [cancelArmed, setCancelArmed] = useState(false);
+  // Hold threshold: a quick tap on the mic must not start recording (otherwise
+  // a tap → release races recorder.start() and ends up sending an empty/
+  // too-short voice note). Recording only starts after the user has held the
+  // mic for ~250ms; releasing earlier cancels the pending start cleanly.
+  const HOLD_MS = 250;
+  const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startedRef   = useRef(false);
+  function clearHoldTimer() {
+    if (holdTimerRef.current) { clearTimeout(holdTimerRef.current); holdTimerRef.current = null; }
+  }
   // Refs so the PanResponder (created once) reads current values.
   const draftEmptyRef = useRef(true);
   const editingRef = useRef(false);
@@ -436,10 +446,19 @@ export default function Conversation({ route, navigation }: any) {
       onPanResponderTerminationRequest: () => false,
       onShouldBlockNativeResponder: () => true,
       onPanResponderGrant: () => {
-        void (async () => {
-          const ok = await recorder.start();
-          if (!ok) Alert.alert(t('media.microphonePermissionTitle'), t('media.microphonePermissionMessage'));
-        })();
+        // Schedule the actual start. A quick tap (release before HOLD_MS)
+        // cancels the timer and never enters the recorder, so there's no
+        // empty/too-short voice note and no race with stop().
+        startedRef.current = false;
+        clearHoldTimer();
+        holdTimerRef.current = setTimeout(() => {
+          holdTimerRef.current = null;
+          void (async () => {
+            const ok = await recorder.start();
+            if (!ok) { Alert.alert(t('media.microphonePermissionTitle'), t('media.microphonePermissionMessage')); return; }
+            startedRef.current = true;
+          })();
+        }, HOLD_MS);
       },
       onPanResponderMove: (_evt, g) => {
         if (modeRef.current !== 'recording') return;
@@ -448,14 +467,21 @@ export default function Conversation({ route, navigation }: any) {
         if (armed !== cancelArmedRef.current) { cancelArmedRef.current = armed; setCancelArmed(armed); }
       },
       onPanResponderRelease: () => {
+        // Released before the hold threshold → no recording was ever started.
+        if (holdTimerRef.current) { clearHoldTimer(); return; }
         void (async () => {
           if (modeRef.current === 'locked') return; // locked → use bar buttons
           if (cancelArmedRef.current) { cancelArmedRef.current = false; setCancelArmed(false); await recorder.cancel(); return; }
+          if (!startedRef.current)    { await recorder.cancel(); return; } // start() failed
           const res = await recorder.stop();
+          startedRef.current = false;
           await sendVoice(res);
         })();
       },
-      onPanResponderTerminate: () => { if (modeRef.current !== 'locked') void recorder.cancel(); },
+      onPanResponderTerminate: () => {
+        if (holdTimerRef.current) { clearHoldTimer(); return; }
+        if (modeRef.current !== 'locked' && startedRef.current) void recorder.cancel();
+      },
     }),
   ).current;
 
