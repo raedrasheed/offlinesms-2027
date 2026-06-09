@@ -779,6 +779,16 @@ export default function Conversation({ route, navigation }: any) {
             ) : (
               <>
                 <View style={s.inputPill}>
+                  {!editing ? (
+                    <Pressable
+                      style={s.inlineIconLead}
+                      onPress={() => { /* emoji picker hook-in (no-op for now) */ }}
+                      accessibilityRole="button"
+                      accessibilityLabel="Emoji"
+                    >
+                      <Ionicons name="happy-outline" size={24} color={colors.text.muted} />
+                    </Pressable>
+                  ) : null}
                   <TextInput
                     value={draft}
                     onChangeText={setDraft}
@@ -830,7 +840,7 @@ export default function Conversation({ route, navigation }: any) {
                     accessibilityRole="button"
                     accessibilityLabel={t('media.holdToRecord')}
                   >
-                    <Ionicons name="mic" size={20} color={colors.action.primaryFg} />
+                    <Ionicons name="mic" size={22} color={colors.action.primaryFg} />
                   </View>
                 )}
               </>
@@ -888,12 +898,14 @@ function buildStyles(colors: any, rtl: boolean) {
     composerPreviewTitle: { fontSize: 11, fontWeight: '700', color: colors.action.primary, textAlign: rtl ? 'right' : 'left' },
     composerPreviewBody:  { fontSize: 12, color: colors.text.primary, marginTop: 2, textAlign: rtl ? 'right' : 'left' },
     composerPreviewClose: { fontSize: 18, color: colors.text.muted, fontWeight: '700', paddingHorizontal: 6, minWidth: 36, minHeight: 36, textAlignVertical: 'center', textAlign: 'center' },
-    // Constant composer-bar background — never shows the wallpaper through.
-    composer: { padding: 12, paddingBottom: 24, flexDirection: rtl ? 'row-reverse' : 'row', gap: 8, alignItems: 'flex-end', backgroundColor: '#EAF2FB' },
-    // WhatsApp-style input pill: holds the text field plus inline attach/camera
-    // icons. Opaque surface so the input area stays constant over any wallpaper.
-    inputPill: { flex: 1, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'flex-end', minHeight: 44, paddingHorizontal: 6, backgroundColor: colors.background.surface, borderRadius: 22, borderWidth: 1, borderColor: colors.border.subtle },
-    input:    { flex: 1, minHeight: 40, maxHeight: 120, paddingHorizontal: 10, paddingVertical: 10, backgroundColor: 'transparent', fontSize: 14, color: colors.text.primary },
+    // Composer bar is transparent — the wallpaper shows through to either side
+    // of the input pill, matching WhatsApp. Only the pill itself is opaque.
+    composer: { padding: 12, paddingBottom: 24, flexDirection: rtl ? 'row-reverse' : 'row', gap: 8, alignItems: 'flex-end', backgroundColor: 'transparent' },
+    // WhatsApp-style input pill: emoji (leading) + text field + attach + camera.
+    // Opaque surface so the input area stays constant over any wallpaper.
+    inputPill: { flex: 1, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', minHeight: 46, paddingHorizontal: 4, backgroundColor: colors.background.surface, borderRadius: 24, borderWidth: 1, borderColor: colors.border.subtle },
+    input:    { flex: 1, minHeight: 38, maxHeight: 120, paddingHorizontal: 6, paddingVertical: 8, backgroundColor: 'transparent', fontSize: 15, color: colors.text.primary },
+    inlineIconLead: { width: 38, height: 44, alignItems: 'center', justifyContent: 'center' },
     inlineIcon: { width: 34, height: 44, alignItems: 'center', justifyContent: 'center' },
     sendBtn:  { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.action.primary, alignItems: 'center', justifyContent: 'center' },
     micWrap:  { width: 40, alignItems: 'center', justifyContent: 'center' },
