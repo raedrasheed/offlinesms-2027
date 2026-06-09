@@ -268,10 +268,13 @@ export async function queueReactMessage(args: { conversationId: string; messageI
   if (!msg) return { ok: false, reason: 'not-delivered' };
   const next = toggleReaction(parseReactions(msg.reactions_json), args.emoji, args.uid);
   await messagesRepo.updateReactions(args.messageId, next);
+  // Idempotency key is stable per (message, user, emoji) — double-taps before
+  // the worker drains MUST collapse to a single outbox row, not enqueue two.
+  // The outbox UNIQUE constraint then naturally dedupes the rapid retap.
   await outboxRepo.enqueue({
     type: 'react_message', entityType: 'message', entityId: args.messageId,
     conversationId: args.conversationId,
-    idempotencyKey: idempotencyKey(['react', args.messageId, args.uid, args.emoji, localId('tap')]),
+    idempotencyKey: idempotencyKey(['react', args.messageId, args.uid, args.emoji]),
     payload: { conversationId: args.conversationId, messageId: args.messageId, emoji: args.emoji },
   });
   kick('outbox');

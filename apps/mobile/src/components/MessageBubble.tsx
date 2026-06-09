@@ -12,7 +12,7 @@
 //
 // All state writes go through callables.
 
-import { memo, useMemo, useState } from 'react';
+import { memo, useMemo, useRef, useState } from 'react';
 import {
   View, Text, Pressable, Alert, StyleSheet, Clipboard, Image,
 } from 'react-native';
@@ -164,11 +164,19 @@ function MessageBubbleImpl({
   function copyText() {
     try { (Clipboard as any).setString?.(m.text ?? ''); } catch {}
   }
+  // Busy gate: drop a second tap on the SAME emoji while the first is still
+  // in flight. Without this a rapid double-tap fires two toggles back-to-back
+  // (the server is idempotent but the local optimistic state visibly flips
+  // twice and the outbox churns).
+  const reactInFlight = useRef<string | null>(null);
   async function react(emoji: string) {
+    if (reactInFlight.current === emoji) return;
+    reactInFlight.current = emoji;
     try {
       if (context.localFirst) await queueReactMessage({ conversationId: context.conversationId, messageId: m.id, emoji, uid: context.myUid });
       else await reactToMessage(context.conversationId, m.id, emoji);
     } catch (e: any) { Alert.alert('Couldn’t react', e?.message ?? 'try-again'); }
+    finally { reactInFlight.current = null; }
   }
   async function toggleStar() {
     try {

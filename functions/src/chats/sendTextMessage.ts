@@ -169,7 +169,10 @@ export const sendTextMessage = onCall(async (request) => {
     ...(isGroup ? { senderDisplayName, senderPhotoURL } : {}),
   });
 
-  await writeAuditLog({
+  // Fire-and-forget — writeAuditLog already soft-fails internally, and on the
+  // send hot path we don't want to add a Firestore round-trip to the client
+  // response time. A failed log won't roll back the message.
+  void writeAuditLog({
     action: 'chat.message.sent',
     actor:  { uid },
     target: { type: 'message', id: msgRef.id },
@@ -178,7 +181,7 @@ export const sendTextMessage = onCall(async (request) => {
       conversationId: convoRef.id,
       length:         text.length,
     },
-  });
+  }).catch(() => {});
 
   return { messageId: msgRef.id, idempotent: false };
 });

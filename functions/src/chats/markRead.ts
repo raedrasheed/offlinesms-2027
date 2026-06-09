@@ -36,12 +36,14 @@ export const markRead = onCall(async (request) => {
     updatedAt:   FieldValue.serverTimestamp(),
   }, { merge: true });
 
-  await writeAuditLog({
+  // Fire-and-forget — markRead is on the chat-open hot path; soft-fails
+  // internally and the audit row is not relied on by any logic.
+  void writeAuditLog({
     action: 'chat.markRead',
     actor:  { uid },
     target: { type: 'conversation', id: convoRef.id },
     result: 'success',
-  });
+  }).catch(() => {});
 
   return { ok: true };
 });
