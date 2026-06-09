@@ -22,6 +22,12 @@ export function setActiveConversation(id?: string): void {
   if (id) void syncNow('active-change', id);
 }
 
+/** The conversation the user is currently viewing (for foreground push
+ *  suppression), or undefined. */
+export function getActiveConversationId(): string | undefined {
+  return activeConversationId;
+}
+
 function startTimer(): void {
   if (timer) return;
   timer = setInterval(() => { void syncNow('timer', activeConversationId); }, FOREGROUND_INTERVAL_MS);

@@ -56,8 +56,23 @@ import ImagePreviewScreen from './src/screens/ImagePreviewScreen';
 import ImageViewerScreen from './src/screens/ImageViewerScreen';
 import JoinGroup from './src/screens/JoinGroup';
 import { inviteCodeFromUrl, setPendingInvite, takePendingInvite } from './src/lib/deepLinks';
+import * as Notifications from 'expo-notifications';
+import { installForegroundHandler, registerForPush, routeFromNotification } from './src/lib/notifications';
 
 const navRef = createNavigationContainerRef();
+
+// Foreground display behaviour — must be set once at module load.
+installForegroundHandler();
+
+function routeFromPush(data: unknown) {
+  const r = routeFromNotification(data);
+  if (!r || !navRef.isReady()) return;
+  if (r.type === 'group_join_request' && r.conversationId) {
+    (navRef as any).navigate('JoinRequests', { id: r.conversationId });
+  } else if (r.conversationId) {
+    (navRef as any).navigate('Conversation', { id: r.conversationId });
+  }
+}
 
 const AuthStack = createNativeStackNavigator();
 const OnboardingStack = createNativeStackNavigator();
@@ -161,6 +176,23 @@ export default function App() {
     }
     Linking.getInitialURL().then(handle);
     const sub = Linking.addEventListener('url', e => handle(e.url));
+    return () => sub.remove();
+  }, []);
+
+  // Register for push once authenticated + onboarded (asks permission then).
+  useEffect(() => {
+    if (user && profileCompleted === true) void registerForPush(user.uid);
+  }, [user, profileCompleted]);
+
+  // Route notification taps (cold start + warm). Cold-start tap is delivered
+  // via getLastNotificationResponseAsync.
+  useEffect(() => {
+    Notifications.getLastNotificationResponseAsync().then(resp => {
+      if (resp) routeFromPush(resp.notification.request.content.data);
+    });
+    const sub = Notifications.addNotificationResponseReceivedListener(resp => {
+      routeFromPush(resp.notification.request.content.data);
+    });
     return () => sub.remove();
   }, []);
 

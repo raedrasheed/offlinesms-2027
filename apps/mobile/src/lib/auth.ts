@@ -24,6 +24,7 @@ import { getFunctions, httpsCallable } from 'firebase/functions';
 import { auth, app } from './firebase';
 import { Platform } from 'react-native';
 import { setOffline } from '../services/presenceService';
+import { unregisterForPush } from './notifications';
 
 // ── OTP over relay (custom-token phone sign-in; no Firebase phone auth) ──
 const fns = () => getFunctions(app, 'us-central1');
@@ -157,5 +158,10 @@ export async function signOut() {
   // Stamp a final lastSeen (and stop the heartbeat) while still authenticated,
   // so peers see the user go offline rather than "stuck online".
   try { await setOffline(); } catch { /* best-effort */ }
+  // Disable this device's push token so a logged-out device stops receiving.
+  try {
+    const uid = auth.currentUser?.uid;
+    if (uid) await unregisterForPush(uid);
+  } catch { /* best-effort */ }
   return auth.signOut();
 }
