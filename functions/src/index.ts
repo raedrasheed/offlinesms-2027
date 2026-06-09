@@ -5,6 +5,9 @@ initializeApp();
 
 export { onMessageCreate } from './chats/onMessageCreate';
 export { onMessageCreateNotify } from './notifications/onMessageCreateNotify';
+export {
+  estimateBroadcastAudience, createNotificationBroadcast, sendNotificationBroadcast,
+} from './notifications/broadcasts';
 export { getOrCreateDirectConversation } from './chats/getOrCreateDirectConversation';
 export { sendTextMessage }                from './chats/sendTextMessage';
 
