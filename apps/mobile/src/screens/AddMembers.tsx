@@ -87,11 +87,47 @@ export default function AddMembers({ route, navigation }: any) {
   const [contactName, setContactName] = useState('');
   const [contactPhone, setContactPhone] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [bulkPickerOpen, setBulkPickerOpen] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState<{ total: number; done: number; failed: number } | null>(null);
 
   function applyPickedContact(c: PickedContact) {
     setContactName(c.name);
     setContactPhone(c.phoneE164);
     setPickerOpen(false);
+  }
+
+  // Bulk add: iterate the picked contacts, persisting each via the local-first
+  // queue when available (so it survives offline / app restart), otherwise via
+  // the direct callable. Errors per contact are counted but never block the
+  // rest — we surface a single summary alert at the end.
+  async function applyBulkPickedContacts(cs: PickedContact[]) {
+    setBulkPickerOpen(false);
+    if (cs.length === 0) return;
+    const useLocalQueue = LOCAL_FIRST_CONVERSATION_ENABLED && !!getCurrentUid();
+    setBusy(true); setErr(null);
+    setBulkProgress({ total: cs.length, done: 0, failed: 0 });
+    let done = 0; let failed = 0;
+    for (const c of cs) {
+      try {
+        if (useLocalQueue) {
+          await queueAddExternalContactToGroup({ conversationId: id, displayName: c.name, phoneE164: c.phoneE164 });
+        } else {
+          await addExternalContactToGroup({ conversationId: id, displayName: c.name, phoneNumber: c.phoneE164 });
+        }
+        done++;
+      } catch {
+        failed++;
+      }
+      setBulkProgress({ total: cs.length, done: done + failed, failed });
+    }
+    setBusy(false);
+    setBulkProgress(null);
+    const summary = failed === 0
+      ? `Added ${done} contact${done === 1 ? '' : 's'} to the group.`
+      : `Added ${done}, failed ${failed}. Try again for the failed ones.`;
+    Alert.alert(failed === 0 ? 'Done' : 'Partially added', summary, [
+      { text: 'OK', onPress: () => failed === 0 ? navigation.goBack() : undefined },
+    ]);
   }
 
   async function addPhoneContact() {
@@ -157,10 +193,19 @@ export default function AddMembers({ route, navigation }: any) {
         {phoneMode ? (
           <View style={s.phonePanel}>
             <Text style={s.phoneHint}>Add someone by phone number. They’ll receive group messages by SMS, and become a full member automatically if they sign up with that number.</Text>
-            <Pressable style={s.pickBtn} onPress={() => setPickerOpen(true)}>
-              <Ionicons name="people-outline" size={18} color={colors.primary} />
-              <Text style={s.pickBtnText}>Pick from contacts</Text>
-            </Pressable>
+            <View style={s.pickRow}>
+              <Pressable style={[s.pickBtn, { flex: 1 }]} onPress={() => setPickerOpen(true)} disabled={busy}>
+                <Ionicons name="person-outline" size={18} color={colors.primary} />
+                <Text style={s.pickBtnText}>Pick one</Text>
+              </Pressable>
+              <Pressable style={[s.pickBtn, { flex: 1 }]} onPress={() => setBulkPickerOpen(true)} disabled={busy}>
+                <Ionicons name="people-outline" size={18} color={colors.primary} />
+                <Text style={s.pickBtnText}>Pick many</Text>
+              </Pressable>
+            </View>
+            {bulkProgress ? (
+              <Text style={s.phoneHint}>Adding {bulkProgress.done} of {bulkProgress.total}{bulkProgress.failed > 0 ? ` · ${bulkProgress.failed} failed` : ''}…</Text>
+            ) : null}
             <TextInput
               style={s.input}
               value={contactName}
@@ -185,6 +230,13 @@ export default function AddMembers({ route, navigation }: any) {
               visible={pickerOpen}
               onClose={() => setPickerOpen(false)}
               onPick={applyPickedContact}
+            />
+            <ContactPickerModal
+              visible={bulkPickerOpen}
+              multi
+              onClose={() => setBulkPickerOpen(false)}
+              onPick={() => { /* unused in multi */ }}
+              onPickMulti={applyBulkPickedContacts}
             />
           </View>
         ) : (
@@ -269,4 +321,5 @@ const s = StyleSheet.create({
   phoneBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
   pickBtn:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 12, borderRadius: radius.md, backgroundColor: colors.primaryLight, borderWidth: 1, borderColor: colors.primary },
   pickBtnText:{ color: colors.primary, fontWeight: '700', fontSize: 14 },
+  pickRow:    { flexDirection: 'row', gap: 8 },
 });
