@@ -264,6 +264,16 @@ service cloud.firestore {
                           );
       }
 
+      // External phone-only members (Phase 25). Group members can read them
+      // (so the roster + recipient list render); ALL writes are server-only via
+      // the addExternalContactToGroup / removeExternalContactFromGroup /
+      // linkPhoneContacts callables (Admin SDK). isRegistered/linkedUid in
+      // particular must only ever be set by trusted backend code.
+      match /externalMembers/{contactId} {
+        allow read:  if isMember(convoId) || isConversationParticipant(convoId) || isAdmin();
+        allow write: if isAdmin();
+      }
+
       // Per-user conversation state (Phase 4).
       match /userState/{uid} {
         allow read:   if isSelf(uid) || isAdmin();
@@ -534,6 +544,20 @@ service cloud.firestore {
                           resource.data.toUserId   == request.auth.uid
                        ));
       allow write: if false;
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // PHONE CONTACTS (Phase 25) — a user's private, phone-only contacts.
+    //
+    // An owner may read their own contacts. All writes are server-only via the
+    // createPhoneContact callable (Admin SDK) so normalization, dedupe, and the
+    // server-controlled fields (isRegistered / linkedUid) can't be forged.
+    // Cross-organization exposure is prevented by ownerUid scoping: a contact
+    // is only ever readable by the user who created it.
+    // ════════════════════════════════════════════════════════════
+    match /phoneContacts/{contactId} {
+      allow read:  if isAdmin() || (isAuthed() && resource.data.ownerUid == request.auth.uid);
+      allow write: if isAdmin();
     }
 
     // ════════════════════════════════════════════════════════════
