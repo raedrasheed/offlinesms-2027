@@ -156,6 +156,10 @@ export default function GroupInfo({ route, navigation }: any) {
               </Pressable>
             </>
           ) : null}
+          <Pressable style={s.actionRow} onPress={() => navigation.navigate('ChatWallpaper', { conversationId: id })}>
+            <Text style={s.actionText}>Chat wallpaper</Text>
+            <Text style={s.actionChevron}>›</Text>
+          </Pressable>
           <Pressable style={[s.actionRow, s.dangerRow]} onPress={confirmLeave} disabled={busy}>
             <Text style={[s.actionText, { color: colors.err }]}>Leave group</Text>
           </Pressable>

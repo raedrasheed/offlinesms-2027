@@ -39,6 +39,7 @@ import MessageInfo from './src/screens/MessageInfo';
 import TransactionDetail from './src/screens/TransactionDetail';
 import BuyPoints from './src/screens/BuyPoints';
 import TransferPoints from './src/screens/TransferPoints';
+import ChatWallpaper from './src/screens/ChatWallpaper';
 import SmsBatchReport from './src/screens/SmsBatchReport';
 import Status from './src/screens/Status';
 import Calls from './src/screens/Calls';
@@ -174,6 +175,7 @@ export default function App() {
             <RootStack.Screen name="TransactionDetail" component={TransactionDetail} />
             <RootStack.Screen name="BuyPoints" component={BuyPoints} />
             <RootStack.Screen name="TransferPoints" component={TransferPoints} />
+            <RootStack.Screen name="ChatWallpaper" component={ChatWallpaper} />
             <RootStack.Screen name="SmsBatchReport" component={SmsBatchReport} />
             <RootStack.Screen name="Points" component={Points} />
             <RootStack.Screen name="Privacy" component={Privacy} />

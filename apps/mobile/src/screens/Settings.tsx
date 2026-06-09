@@ -288,6 +288,20 @@ export default function Settings({ navigation }: any) {
         </View>
       </View>
 
+      {/* Appearance — chat wallpaper */}
+      <View style={s.section}>
+        <Text style={s.sectionLabel}>Appearance</Text>
+        <Pressable
+          style={s.linkRow}
+          onPress={() => (navigation as any).navigate('ChatWallpaper')}
+          accessibilityRole="button"
+          accessibilityLabel="Chat wallpaper"
+        >
+          <Text style={s.linkRowText}>Chat wallpaper</Text>
+          <Ionicons name="chevron-forward" size={18} color={colors.text.muted} />
+        </Pressable>
+      </View>
+
       {/* Time format */}
       <View style={s.section}>
         <Text style={s.sectionLabel}>{t('settings.timeFormat')}</Text>
@@ -405,6 +419,8 @@ function buildStyles(colors: any, rtl: boolean) {
     section:      { backgroundColor: colors.background.surface, borderRadius: radius.md, padding: 14 },
     sectionLabel: { fontSize: 12, fontWeight: '700', color: colors.text.muted, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5, textAlign: rtl ? 'right' : 'left' },
     chipRow:      { flexDirection: rtl ? 'row-reverse' : 'row', gap: 8, flexWrap: 'wrap' },
+    linkRow:      { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12, marginTop: 8 },
+    linkRowText:  { fontSize: 15, fontWeight: '600', color: colors.text.primary },
     chip:         { paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.pill, backgroundColor: colors.background.subtle, borderWidth: 1, borderColor: colors.border.subtle, minHeight: 36, justifyContent: 'center' },
     chipActive:   { backgroundColor: colors.action.primary, borderColor: colors.action.primary },
     chipText:     { fontSize: 13, fontWeight: '600', color: colors.text.secondary },

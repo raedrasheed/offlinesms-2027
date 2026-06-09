@@ -28,6 +28,8 @@ import { useChatPresence, formatPresenceSubtitle } from '../hooks/useChatPresenc
 import { useTypingPresence } from '../hooks/useTypingPresence';
 import { useRecordingPresence } from '../hooks/useRecordingPresence';
 import { stopTyping } from '../services/presenceService';
+import { useWallpaper } from '../lib/wallpaper';
+import { ChatWallpaperBackground } from '../components/ChatWallpaperBackground';
 import { Ionicons } from '@expo/vector-icons';
 import { MessageBubble } from '../components/MessageBubble';
 import { useTheme } from '../context/ThemeContext';
@@ -79,6 +81,8 @@ export default function Conversation({ route, navigation }: any) {
   const { id } = route.params as { id: string };
   const me = auth.currentUser?.uid ?? '';
   const { isOffline, enqueue, queuedFor, deliveredFor, deliveredNonce } = useOffline();
+  const wallpaper = useWallpaper(id);
+  const wallpaperUri = wallpaper.type === 'custom' ? wallpaper.uri : undefined;
 
   // Phase 22C — local-first conversation (flag-gated). `useLocal` is true only
   // when the flag is on AND the local DB initialised; otherwise the Firestore +
@@ -628,6 +632,9 @@ export default function Conversation({ route, navigation }: any) {
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.root}>
+      {/* Wallpaper layer — absolute-fill, behind everything; theme bg is the
+          fallback when no wallpaper is set. Memoised on the URI. */}
+      <ChatWallpaperBackground uri={wallpaperUri} />
       <View style={s.header}>
         <Pressable
           onPress={() => navigation.goBack()}
@@ -658,6 +665,15 @@ export default function Conversation({ route, navigation }: any) {
             <Text style={s.title} numberOfLines={1}>{peerName}</Text>
             {headerSubtitle ? <Text style={s.subtitle}>{headerSubtitle}</Text> : null}
           </View>
+        </Pressable>
+        <Pressable
+          onPress={() => navigation.navigate('ChatWallpaper', { conversationId: id })}
+          hitSlop={10}
+          style={s.headerMenuBtn}
+          accessibilityRole="button"
+          accessibilityLabel="Chat wallpaper"
+        >
+          <Ionicons name="image-outline" size={20} color={colors.text.muted} />
         </Pressable>
         <Pressable
           onPress={confirmClearChat}
@@ -821,7 +837,11 @@ export default function Conversation({ route, navigation }: any) {
 function buildStyles(colors: any, rtl: boolean) {
   return StyleSheet.create({
     root:     { flex: 1, backgroundColor: '#FFFFFF' },
-    msgList:  { flex: 1, backgroundColor: '#EAF2FB' },
+    // Transparent so the ChatWallpaperBackground layer (or theme fallback)
+    // shows through. The previous solid #EAF2FB now lives in the wallpaper
+    // component's fallback so there's no visual regression when no wallpaper
+    // is set.
+    msgList:  { flex: 1, backgroundColor: 'transparent' },
     emptyConvo:    { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40, gap: 6 },
     emptyAvatar:   { width: 96, height: 96, borderRadius: 48, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
     emptyAvatarText:{ color: '#fff', fontSize: 34, fontWeight: '800' },
