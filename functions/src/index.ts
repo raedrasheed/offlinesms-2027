@@ -18,6 +18,10 @@ export { addMembers }    from './chats/addMembers';
 export { removeMember }  from './chats/removeMember';
 export { changeRole }    from './chats/changeRole';
 export { leaveGroup }    from './chats/leaveGroup';
+
+// Phase 25 — external phone contacts.
+export { createPhoneContact } from './contacts/createPhoneContact';
+export { addExternalContactToGroup, removeExternalContactFromGroup } from './contacts/externalMembers';
 export { lockGroup }     from './chats/lockGroup';
 
 // Phase 6 — message actions.
