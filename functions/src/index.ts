@@ -22,6 +22,7 @@ export { leaveGroup }    from './chats/leaveGroup';
 // Phase 25 — external phone contacts.
 export { createPhoneContact } from './contacts/createPhoneContact';
 export { addExternalContactToGroup, removeExternalContactFromGroup } from './contacts/externalMembers';
+export { linkPhoneContactsOnUserWrite } from './contacts/linkPhoneContacts';
 export { lockGroup }     from './chats/lockGroup';
 
 // Phase 6 — message actions.
