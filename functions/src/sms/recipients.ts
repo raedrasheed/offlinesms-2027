@@ -206,3 +206,64 @@ export function todayKey(d: Date = new Date()): string {
   const day = String(d.getUTCDate()).padStart(2, '0');
   return `${y}${m}${day}`;
 }
+
+// ─── External phone contacts (Phase 25) ─────────────────────────────────────
+
+/** Recipient id prefix that marks a phone-only (non-user) recipient. */
+export const EXTERNAL_PREFIX = 'ext:';
+
+export function isExternalRecipientId(id: string): boolean {
+  return typeof id === 'string' && id.startsWith(EXTERNAL_PREFIX);
+}
+
+export function externalRecipientId(normalizedPhone: string): string {
+  return EXTERNAL_PREFIX + normalizedPhone;
+}
+
+/**
+ * Build Eligible rows for a group's external phone members, reusing the same
+ * shape as registered recipients so the rest of the pipeline is unchanged. The
+ * `uid` carries an `ext:<digits>` synthetic id and `phone` is the contact's
+ * E.164 number (there is no users/{uid} doc to look up).
+ *
+ * Skips:
+ *  - external members already linked to a registered participant (they get the
+ *    in-app message + are counted as a registered recipient → no double-send);
+ *  - phone numbers already present in `existingPhones` (registered eligible);
+ *  - duplicate phones within the external set itself.
+ */
+export async function loadExternalEligibles(
+  db: Firestore,
+  conversationId: string,
+  participantUids: string[],
+  existingPhones: Set<string>,
+): Promise<Eligible[]> {
+  const snap = await db.collection('conversations').doc(conversationId)
+    .collection('externalMembers').get();
+  if (snap.empty) return [];
+
+  const out: Eligible[] = [];
+  const seen = new Set<string>(existingPhones);
+  const participants = new Set(participantUids);
+
+  for (const d of snap.docs) {
+    const m = d.data() as {
+      phoneE164?: string; normalizedPhone?: string; displayName?: string;
+      isRegistered?: boolean; linkedUid?: string | null;
+    };
+    const phone = m.phoneE164 ?? '';
+    if (!phone) continue;
+    // Linked + already a real participant → handled via in-app path.
+    if (m.linkedUid && participants.has(m.linkedUid)) continue;
+    if (seen.has(phone)) continue;       // dedupe across registered + external
+    seen.add(phone);
+    out.push({
+      uid:              externalRecipientId(m.normalizedPhone ?? phone.replace(/\D/g, '')),
+      phone,
+      maskedPhone:      maskPhone(phone),
+      displayName:      m.displayName ?? null,
+      appReceiptStatus: null,
+    });
+  }
+  return out;
+}

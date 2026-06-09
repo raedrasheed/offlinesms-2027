@@ -61,6 +61,12 @@ export async function dispatchBatchToRelay(
 
   const recips = await batchRef.collection('recipients').where('smsStatus', '==', 'queued').get();
   const recipientUids = recips.docs.map(d => d.id);
+  // External (phone-only) recipients carry their number on the recipient doc —
+  // there is no users/{uid} to look up. Registered recipients fall back to the
+  // user profile, unchanged.
+  const phoneOnDoc = new Map<string, string | null>(
+    recips.docs.map(d => [d.id, (d.get('phoneE164') as string | null) ?? null]),
+  );
 
   const devices = await routableDevices(businessId, now);
   const { assignments, unrouted } = routeLeastLoaded(recipientUids, devices);
@@ -74,8 +80,11 @@ export async function dispatchBatchToRelay(
     const deviceId = assignedDevice.get(recipientUid) ?? null;
     if (!deviceId && !allowUnassignedQueue) { trulyUnrouted.push(recipientUid); continue; }
 
-    const userSnap = await db.collection('users').doc(recipientUid).get();
-    const phoneE164 = (userSnap.get('phoneNumber') as string | null) ?? null;
+    let phoneE164 = phoneOnDoc.get(recipientUid) ?? null;
+    if (!phoneE164) {
+      const userSnap = await db.collection('users').doc(recipientUid).get();
+      phoneE164 = (userSnap.get('phoneNumber') as string | null) ?? null;
+    }
     if (!phoneE164) { if (!deviceId) trulyUnrouted.push(recipientUid); continue; }
 
     const jobId = makeJobId(batchId, recipientUid);

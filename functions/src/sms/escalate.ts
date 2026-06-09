@@ -11,6 +11,7 @@ import { getFirestore, FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { sendBatch } from './gateway';
 import {
   canonicalAudience, classifyRecipients, filterByAudience, findAlreadySentUids,
+  loadExternalEligibles, isExternalRecipientId,
   AudienceInput,
   COOLDOWN_MS, COST_PER_SMS, MAX_BATCHES_PER_DAY, MAX_RECIPIENTS_PER_BATCH,
   todayKey,
@@ -122,6 +123,18 @@ export const escalateSms = onCall({ region: 'us-central1' }, async (request) => 
   const { candidates } = filterByAudience(audience, participants, senderUid ?? uid, receiptsByUid);
   const alreadySent = await findAlreadySentUids(db, uid, data.messageId);
   const { eligible, excluded } = await classifyRecipients(db, candidates, alreadySent);
+
+  // Phase 25 — include the group's external phone contacts in the recipient
+  // set. They get an `ext:<digits>` synthetic id and carry their own phone, so
+  // the rest of the pipeline (cost, relay jobs, recipient docs, settlement)
+  // treats them like any other recipient. Audience filters apply only to
+  // in-app receipts, so external contacts are always targeted (they have no
+  // in-app delivery state).
+  if (convo.type === 'group') {
+    const existingPhones = new Set(eligible.map(e => e.phone));
+    const externalEligible = await loadExternalEligibles(db, data.conversationId, participants, existingPhones);
+    for (const e of externalEligible) eligible.push(e);
+  }
 
   if (eligible.length === 0) throw new HttpsError('failed-precondition', 'no-eligible-recipients');
   if (eligible.length > MAX_RECIPIENTS_PER_BATCH) {
@@ -237,9 +250,13 @@ export const escalateSms = onCall({ region: 'us-central1' }, async (request) => 
     // Mark eligible recipients queued (relay pending).
     const recipBatch = db.batch();
     for (const e of eligible) {
+      const ext = isExternalRecipientId(e.uid);
       recipBatch.set(batchRef.collection('recipients').doc(e.uid), {
         userId: e.uid, maskedPhone: e.maskedPhone, appReceiptStatus: e.appReceiptStatus,
         smsStatus: 'queued', skipReason: null, reason: null, updatedAt: FieldValue.serverTimestamp(),
+        // External recipients have no users/{uid} doc, so the relay dispatcher
+        // reads the number straight off the recipient row.
+        ...(ext ? { isExternal: true, phoneE164: e.phone } : {}),
       });
     }
     await recipBatch.commit();
@@ -326,6 +343,7 @@ export const escalateSms = onCall({ region: 'us-central1' }, async (request) => 
       userId:           e.uid,
       maskedPhone:      e.maskedPhone,
       appReceiptStatus: e.appReceiptStatus,
+      ...(isExternalRecipientId(e.uid) ? { isExternal: true, phoneE164: e.phone } : {}),
       smsStatus:        ok ? 'queued' : 'failed',
       skipReason:       null,
       reason:           ok ? null : (rejection?.reason ?? 'gateway-error'),
