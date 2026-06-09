@@ -4,6 +4,7 @@ import { initializeApp } from 'firebase-admin/app';
 initializeApp();
 
 export { onMessageCreate } from './chats/onMessageCreate';
+export { onMessageCreateNotify } from './notifications/onMessageCreateNotify';
 export { getOrCreateDirectConversation } from './chats/getOrCreateDirectConversation';
 export { sendTextMessage }                from './chats/sendTextMessage';
 

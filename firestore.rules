@@ -202,6 +202,24 @@ service cloud.firestore {
       allow update: if isAdmin() ||
                        (isSelf(uid) && onlyAllowedUserProfileUpdates());
       allow delete: if isAdmin();
+
+      // Push device tokens (Phase 27) — a user manages only their own devices;
+      // the backend (Admin SDK) sends to them + purges dead ones.
+      match /devices/{deviceId} {
+        allow read, write: if isSelf(uid) || isAdmin();
+      }
+
+      // Per-user notification preferences (Phase 27) — own read/write only.
+      match /notificationSettings/{docId} {
+        allow read, write: if isSelf(uid) || isAdmin();
+      }
+
+      // In-app notifications feed (e.g. group-join approved) — own read; writes
+      // are server-only (Admin SDK).
+      match /notifications/{notifId} {
+        allow read:  if isSelf(uid) || isAdmin();
+        allow write: if isAdmin();
+      }
     }
 
     // ════════════════════════════════════════════════════════════
