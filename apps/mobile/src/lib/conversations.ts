@@ -222,10 +222,16 @@ export function subscribeMessages(
     orderBy('createdAt', 'desc'),
     limit(100),
   );
-  return onSnapshot(q, snap => {
-    const rows = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Message[];
-    cb(rows.reverse());
-  });
+  return onSnapshot(
+    q,
+    snap => {
+      const rows = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Message[];
+      cb(rows.reverse());
+    },
+    // Without an error sink a failed query (e.g. a transient rules failure or
+    // missing index) leaves the screen stuck on "Loading messages…" forever.
+    err => { if (__DEV__) console.warn('[conversations] subscribeMessages failed:', err); },
+  );
 }
 
 export function subscribeUserState(
@@ -237,6 +243,7 @@ export function subscribeUserState(
   return onSnapshot(
     doc(db, 'conversations', conversationId, 'userState', uid),
     snap => cb(snap.exists() ? ({ uid, ...snap.data() } as UserState) : null),
+    err => { if (__DEV__) console.warn('[conversations] subscribeUserState failed:', err); },
   );
 }
 
@@ -457,6 +464,7 @@ export function subscribeMembers(
         .filter(m => (m.status ?? 'active') === 'active');
       cb(rows);
     },
+    err => { if (__DEV__) console.warn('[conversations] subscribeMembers failed:', err); },
   );
 }
 

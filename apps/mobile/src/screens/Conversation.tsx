@@ -127,11 +127,19 @@ export default function Conversation({ route, navigation }: any) {
 
   const listRef = useRef<FlatList<Message>>(null);
 
-  // Conversation doc.
+  // Conversation doc. Firestore hands us a fresh object on every snapshot —
+  // even when nothing actually changed for this screen (e.g. lastMessage
+  // updates on every message). Dedupe via JSON so unchanged snapshots don't
+  // re-render the whole conversation tree.
   useEffect(() => {
     if (!id) return;
+    let prevKey: string | null = null;
     return onSnapshot(doc(db, 'conversations', id), snap => {
-      setConvo(snap.exists() ? ({ id, ...snap.data() } as ConversationDoc) : null);
+      const next = snap.exists() ? ({ id, ...snap.data() } as ConversationDoc) : null;
+      const nextKey = next ? JSON.stringify(next) : '';
+      if (nextKey === prevKey) return;
+      prevKey = nextKey;
+      setConvo(next);
     });
   }, [id]);
 
