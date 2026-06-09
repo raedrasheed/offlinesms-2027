@@ -59,6 +59,8 @@ import NotificationSettings from './src/screens/NotificationSettings';
 import { inviteCodeFromUrl, setPendingInvite, takePendingInvite } from './src/lib/deepLinks';
 import * as Notifications from 'expo-notifications';
 import { installForegroundHandler, registerForPush, routeFromNotification } from './src/lib/notifications';
+import { dispatchForRoute } from './src/lib/pushRouting';
+import { Linking as RNLinking } from 'react-native';
 
 const navRef = createNavigationContainerRef();
 
@@ -66,13 +68,12 @@ const navRef = createNavigationContainerRef();
 installForegroundHandler();
 
 function routeFromPush(data: unknown) {
-  const r = routeFromNotification(data);
-  if (!r || !navRef.isReady()) return;
-  if (r.type === 'group_join_request' && r.conversationId) {
-    (navRef as any).navigate('JoinRequests', { id: r.conversationId });
-  } else if (r.conversationId) {
-    (navRef as any).navigate('Conversation', { id: r.conversationId });
-  }
+  const decision = dispatchForRoute(routeFromNotification(data));
+  if (decision.kind === 'none') return;
+  if (decision.kind === 'url') { void RNLinking.openURL(decision.href); return; }
+  if (!navRef.isReady()) return;
+  if (decision.name === 'Tabs') { (navRef as any).navigate('Tabs'); return; }
+  (navRef as any).navigate(decision.name, decision.params);
 }
 
 const AuthStack = createNativeStackNavigator();
