@@ -424,6 +424,50 @@ export async function addGroupMembers(conversationId: string, memberUids: string
   return res.data.added;
 }
 
+// ── External phone contacts (Phase 25) ──────────────────────────────────────
+
+export type ExternalMember = {
+  contactId:       string;
+  displayName:     string;
+  phoneE164:       string;
+  normalizedPhone: string;
+  isRegistered:    boolean;
+  linkedUid:       string | null;
+};
+
+export async function createPhoneContact(args: { displayName: string; phoneNumber: string; defaultCountry?: string }) {
+  const res = await fn<typeof args, { contactId: string; phoneE164: string; displayName: string; isRegistered: boolean; linkedUid: string | null; created: boolean }>(
+    'createPhoneContact',
+  )(args);
+  return res.data;
+}
+
+export async function addExternalContactToGroup(args: {
+  conversationId: string; contactId?: string; displayName?: string; phoneNumber?: string; defaultCountry?: string;
+}) {
+  const res = await fn<typeof args, { added: number; contactId: string; isRegistered?: boolean; alreadyMember?: boolean; alreadyExternal?: boolean }>(
+    'addExternalContactToGroup',
+  )(args);
+  return res.data;
+}
+
+export async function removeExternalContactFromGroup(conversationId: string, contactId: string): Promise<void> {
+  await fn<{ conversationId: string; contactId: string }, { removed: number }>(
+    'removeExternalContactFromGroup',
+  )({ conversationId, contactId });
+}
+
+export function subscribeExternalMembers(
+  conversationId: string,
+  cb: (rows: ExternalMember[]) => void,
+) {
+  return onSnapshot(
+    collection(db, 'conversations', conversationId, 'externalMembers'),
+    snap => cb(snap.docs.map(d => ({ contactId: d.id, ...(d.data() as Omit<ExternalMember, 'contactId'>) }))),
+    err => { if (__DEV__) console.warn('[conversations] subscribeExternalMembers failed:', err); },
+  );
+}
+
 export async function removeGroupMember(conversationId: string, memberUid: string): Promise<void> {
   await fn<{ conversationId: string; memberUid: string }, { ok: true }>(
     'removeMember',
