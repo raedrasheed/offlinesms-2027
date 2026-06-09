@@ -9,6 +9,7 @@ import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore } from 'firebase-admin/firestore';
 import {
   AudienceInput, canonicalAudience, classifyRecipients, filterByAudience, findAlreadySentUids,
+  loadExternalEligibles,
   COST_PER_SMS, MAX_RECIPIENTS_PER_BATCH,
 } from './recipients';
 
@@ -70,6 +71,15 @@ export const previewSmsEscalation = onCall({ region: 'us-central1' }, async (req
   const { candidates } = filterByAudience(audience, participants, senderUid ?? uid, receiptsByUid);
   const alreadySent = await findAlreadySentUids(db, uid, data.messageId);
   const { eligible, excluded } = await classifyRecipients(db, candidates, alreadySent);
+
+  // Phase 25 — include the group's external phone contacts in the preview so
+  // their count + masked-phone row shows up in the Recipients step and the
+  // Points/Audience math matches what escalateSms will actually charge.
+  if (convo.type === 'group') {
+    const existingPhones = new Set(eligible.map(e => e.phone));
+    const externalEligible = await loadExternalEligibles(db, data.conversationId, participants, existingPhones);
+    for (const e of externalEligible) eligible.push(e);
+  }
 
   const wallet = await db.collection('wallets').doc(uid).get();
   const balance  = (wallet.data()?.balance  as number) ?? 0;
