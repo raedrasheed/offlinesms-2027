@@ -77,13 +77,19 @@ export const createOrUpdateGroupInviteLink = onCall(async (request) => {
 
   const code = cur?.inviteCode ?? generateInviteCode();
   const now = FieldValue.serverTimestamp();
+  const isFirstWrite = !cur?.inviteCode;
   const batch = db.batch();
+  // Conditional spread: omit createdBy/createdAt on subsequent writes. Firestore
+  // Admin SDK rejects `undefined` field values unless `ignoreUndefinedProperties`
+  // is enabled (it isn't, see functions/src/index.ts initializeApp). Writing
+  // `undefined` here threw on the second toggle (e.g. switching joinMode to
+  // approval_required after enabling the link), which surfaced as a generic
+  // "Couldn't update" alert in the mobile group settings screen.
   batch.set(settingsRef, {
     enabled: data.enabled,
     inviteCode: code,
     joinMode: data.joinMode,
-    createdByUid: cur?.inviteCode ? undefined : uid,
-    createdAt: cur?.createdAt ? undefined : now,
+    ...(isFirstWrite ? { createdByUid: uid, createdAt: now } : {}),
     updatedAt: now,
     revokedAt: null,
   }, { merge: true });
