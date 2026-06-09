@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import { useEffect, useRef, useState } from 'react';
+import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import * as Linking from 'expo-linking';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -53,6 +54,10 @@ import SupportTicket from './src/screens/SupportTicket';
 import EditProfile from './src/screens/EditProfile';
 import ImagePreviewScreen from './src/screens/ImagePreviewScreen';
 import ImageViewerScreen from './src/screens/ImageViewerScreen';
+import JoinGroup from './src/screens/JoinGroup';
+import { inviteCodeFromUrl, setPendingInvite, takePendingInvite } from './src/lib/deepLinks';
+
+const navRef = createNavigationContainerRef();
 
 const AuthStack = createNativeStackNavigator();
 const OnboardingStack = createNativeStackNavigator();
@@ -142,6 +147,39 @@ export default function App() {
     });
   }, [user]);
 
+  // Invite deep links (offlinesms://join/{code} | https://offlinesms.com/join/
+  // {code}). If logged in + onboarded, open JoinGroup now; otherwise stash the
+  // code and replay it after auth (effect below).
+  const authedRef = useRef(false);
+  authedRef.current = !!user && profileCompleted === true;
+  useEffect(() => {
+    function handle(url: string | null) {
+      const code = inviteCodeFromUrl(url);
+      if (!code) return;
+      if (authedRef.current && navRef.isReady()) (navRef as any).navigate('JoinGroup', { code });
+      else void setPendingInvite(code);
+    }
+    Linking.getInitialURL().then(handle);
+    const sub = Linking.addEventListener('url', e => handle(e.url));
+    return () => sub.remove();
+  }, []);
+
+  // Replay a stashed invite once the user is authenticated + onboarded.
+  useEffect(() => {
+    if (!(user && profileCompleted === true)) return;
+    let cancelled = false;
+    (async () => {
+      const code = await takePendingInvite();
+      if (!code || cancelled) return;
+      const tryNav = () => {
+        if (navRef.isReady()) (navRef as any).navigate('JoinGroup', { code });
+        else setTimeout(tryNav, 150);
+      };
+      tryNav();
+    })();
+    return () => { cancelled = true; };
+  }, [user, profileCompleted]);
+
   // Mirror the user's chats into the local SQLite DB for the whole session.
   useChatListPersistence(user?.uid);
   // Presence: online while foregrounded, last-seen on background/logout.
@@ -154,7 +192,7 @@ export default function App() {
     <OfflineProvider>
     <SafeAreaProvider>
       <ErrorBoundary>
-      <NavigationContainer>
+      <NavigationContainer ref={navRef}>
         {!user ? (
           <AuthFlow />
         ) : profileCompleted === null ? (
@@ -172,6 +210,7 @@ export default function App() {
             <RootStack.Screen name="GroupInfo" component={GroupInfo} />
             <RootStack.Screen name="AddMembers" component={AddMembers} />
             <RootStack.Screen name="JoinRequests" component={JoinRequests} />
+            <RootStack.Screen name="JoinGroup" component={JoinGroup} options={{ presentation: 'modal' }} />
             <RootStack.Screen name="ForwardPicker" component={ForwardPicker} />
             <RootStack.Screen name="MessageInfo" component={MessageInfo} />
             <RootStack.Screen name="TransactionDetail" component={TransactionDetail} />

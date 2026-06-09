@@ -23,7 +23,8 @@
         "NSPhotoLibraryUsageDescription": "OfflineSMS accesses your photo library to share images in conversations.",
         "NSPhotoLibraryAddUsageDescription": "OfflineSMS saves received media to your photo library.",
         "NSContactsUsageDescription": "OfflineSMS uses your contacts to help you find and message people."
-      }
+      },
+      "associatedDomains": ["applinks:offlinesms.com"]
     },
     "android": {
       "package": "app.offlinesms.mobile",
@@ -38,6 +39,14 @@
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.READ_CONTACTS"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [{ "scheme": "https", "host": "offlinesms.com", "pathPrefix": "/join" }],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
       ]
     },
     "web": {
