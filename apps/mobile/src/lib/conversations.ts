@@ -468,6 +468,87 @@ export function subscribeExternalMembers(
   );
 }
 
+// ── Group invite links (Phase 26) ───────────────────────────────────────────
+
+export type InviteJoinMode = 'open' | 'approval_required';
+
+export type InviteSettings = {
+  enabled: boolean;
+  inviteCode?: string;
+  joinMode: InviteJoinMode;
+  revokedAt?: unknown;
+};
+
+export type JoinRequest = {
+  requestId: string;
+  requesterUid: string;
+  requesterName: string;
+  requesterPhotoURL?: string | null;
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
+  requestedAt?: any;
+};
+
+export type InvitePreview = {
+  conversationId: string;
+  groupName: string;
+  groupPhotoURL: string | null;
+  memberCount: number;
+  joinMode: InviteJoinMode;
+  isMember: boolean;
+  hasPendingRequest: boolean;
+  status: 'can_join' | 'already_member' | 'request_pending' | 'disabled';
+};
+
+export async function createOrUpdateGroupInviteLink(conversationId: string, enabled: boolean, joinMode: InviteJoinMode) {
+  const res = await fn<{ conversationId: string; enabled: boolean; joinMode: InviteJoinMode }, { inviteCode: string; enabled: boolean; joinMode: InviteJoinMode; url: string }>(
+    'createOrUpdateGroupInviteLink',
+  )({ conversationId, enabled, joinMode });
+  return res.data;
+}
+
+export async function resetGroupInviteLink(conversationId: string) {
+  const res = await fn<{ conversationId: string }, { inviteCode: string; url: string }>('resetGroupInviteLink')({ conversationId });
+  return res.data;
+}
+
+export async function resolveGroupInviteLink(inviteCode: string): Promise<InvitePreview> {
+  const res = await fn<{ inviteCode: string }, InvitePreview>('resolveGroupInviteLink')({ inviteCode });
+  return res.data;
+}
+
+export async function joinGroupByInviteLink(inviteCode: string) {
+  const res = await fn<{ inviteCode: string }, { status: 'joined' | 'pending' | 'already_member'; conversationId: string }>('joinGroupByInviteLink')({ inviteCode });
+  return res.data;
+}
+
+export async function approveGroupJoinRequest(conversationId: string, requestId: string) {
+  await fn<{ conversationId: string; requestId: string }, { ok: true }>('approveGroupJoinRequest')({ conversationId, requestId });
+}
+
+export async function rejectGroupJoinRequest(conversationId: string, requestId: string, reason?: string) {
+  await fn<{ conversationId: string; requestId: string; reason?: string }, { ok: true }>('rejectGroupJoinRequest')({ conversationId, requestId, reason });
+}
+
+export async function cancelMyJoinRequest(conversationId: string, requestId: string) {
+  await fn<{ conversationId: string; requestId: string }, { ok: true }>('cancelMyJoinRequest')({ conversationId, requestId });
+}
+
+export function subscribeInviteSettings(conversationId: string, cb: (s: InviteSettings | null) => void) {
+  return onSnapshot(
+    doc(db, 'conversations', conversationId, 'inviteSettings', 'current'),
+    snap => cb(snap.exists() ? (snap.data() as InviteSettings) : null),
+    err => { if (__DEV__) console.warn('[conversations] subscribeInviteSettings failed:', err); },
+  );
+}
+
+export function subscribePendingJoinRequests(conversationId: string, cb: (rows: JoinRequest[]) => void) {
+  return onSnapshot(
+    query(collection(db, 'conversations', conversationId, 'joinRequests'), where('status', '==', 'pending')),
+    snap => cb(snap.docs.map(d => ({ requestId: d.id, ...(d.data() as Omit<JoinRequest, 'requestId'>) }))),
+    err => { if (__DEV__) console.warn('[conversations] subscribePendingJoinRequests failed:', err); },
+  );
+}
+
 export async function removeGroupMember(conversationId: string, memberUid: string): Promise<void> {
   await fn<{ conversationId: string; memberUid: string }, { ok: true }>(
     'removeMember',

@@ -7,7 +7,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
-  View, Text, FlatList, Pressable, StyleSheet, Alert, ScrollView,
+  View, Text, FlatList, Pressable, StyleSheet, Alert, ScrollView, Share, Clipboard,
 } from 'react-native';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
@@ -23,7 +23,11 @@ import {
   leaveGroup,
   lockGroup,
   groupErrorCopy,
+  InviteSettings, InviteJoinMode,
+  subscribeInviteSettings, subscribePendingJoinRequests,
+  createOrUpdateGroupInviteLink, resetGroupInviteLink,
 } from '../lib/conversations';
+import { inviteUrl } from '../lib/invite';
 import { maskPhone } from '../lib/phone';
 import { LOCAL_FIRST_CONVERSATION_ENABLED } from '../config/features';
 import { queueRemoveExternalContactFromGroup, externalMembersRepo, getCurrentUid } from '../localdb';
@@ -57,6 +61,12 @@ export default function GroupInfo({ route, navigation }: any) {
 
   useEffect(() => subscribeMembers(id, setMembers), [id]);
   useEffect(() => subscribeExternalMembers(id, setRemoteExternals), [id]);
+
+  const [invite, setInvite] = useState<InviteSettings | null>(null);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [inviteBusy, setInviteBusy] = useState(false);
+  useEffect(() => subscribeInviteSettings(id, setInvite), [id]);
+  useEffect(() => subscribePendingJoinRequests(id, rows => setPendingCount(rows.length)), [id]);
 
   // Merge offline-queued (pending) external contacts that the server snapshot
   // doesn't have yet, so an add made while offline shows immediately. Pure
@@ -128,6 +138,38 @@ export default function GroupInfo({ route, navigation }: any) {
       ],
     );
   }
+  // ── Invite link handlers ──
+  async function setInviteEnabled(enabled: boolean) {
+    setInviteBusy(true);
+    try { await createOrUpdateGroupInviteLink(id, enabled, invite?.joinMode ?? 'open'); }
+    catch (e: any) { Alert.alert('Couldn’t update', groupErrorCopy(e?.code ?? 'internal')); }
+    finally { setInviteBusy(false); }
+  }
+  async function setInviteMode(mode: InviteJoinMode) {
+    setInviteBusy(true);
+    try { await createOrUpdateGroupInviteLink(id, invite?.enabled ?? true, mode); }
+    catch (e: any) { Alert.alert('Couldn’t update', groupErrorCopy(e?.code ?? 'internal')); }
+    finally { setInviteBusy(false); }
+  }
+  function copyInvite() {
+    if (!invite?.inviteCode) return;
+    try { (Clipboard as any).setString?.(inviteUrl(invite.inviteCode)); Alert.alert('Copied', 'Invite link copied to clipboard.'); } catch { /* noop */ }
+  }
+  async function shareInvite() {
+    if (!invite?.inviteCode) return;
+    try { await Share.share({ message: `Join my group on OfflineSMS: ${inviteUrl(invite.inviteCode)}` }); } catch { /* user cancelled */ }
+  }
+  function confirmResetInvite() {
+    Alert.alert(
+      'Reset invite link',
+      'The current link will stop working and a new one will be created.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Reset', style: 'destructive', onPress: () => withBusy(() => resetGroupInviteLink(id).then(() => undefined), 'Couldn’t reset') },
+      ],
+    );
+  }
+
   function confirmChangeRole(m: GroupMember, role: 'admin' | 'member') {
     const verb = role === 'admin' ? 'Promote to admin' : 'Demote to member';
     Alert.alert(
@@ -213,6 +255,53 @@ export default function GroupInfo({ route, navigation }: any) {
           </Pressable>
         </View>
 
+        {isAdmin ? (
+          <View style={s.section}>
+            <Text style={s.sectionLabel}>Invite link</Text>
+            <View style={s.actionRow}>
+              <Text style={s.actionText}>Enable invite link</Text>
+              <Pressable
+                onPress={() => setInviteEnabled(!(invite?.enabled))}
+                disabled={inviteBusy}
+                style={[s.toggle, invite?.enabled && s.toggleOn]}
+              >
+                <View style={[s.knob, invite?.enabled && s.knobOn]} />
+              </Pressable>
+            </View>
+
+            {invite?.enabled ? (
+              <>
+                <View style={s.modeRow}>
+                  <Pressable style={[s.modeChip, invite.joinMode === 'open' && s.modeChipOn]} onPress={() => setInviteMode('open')} disabled={inviteBusy}>
+                    <Text style={[s.modeChipText, invite.joinMode === 'open' && s.modeChipTextOn]}>Anyone can join</Text>
+                  </Pressable>
+                  <Pressable style={[s.modeChip, invite.joinMode === 'approval_required' && s.modeChipOn]} onPress={() => setInviteMode('approval_required')} disabled={inviteBusy}>
+                    <Text style={[s.modeChipText, invite.joinMode === 'approval_required' && s.modeChipTextOn]}>Admin approval</Text>
+                  </Pressable>
+                </View>
+
+                {invite.inviteCode ? <Text style={s.inviteUrl} numberOfLines={1}>{inviteUrl(invite.inviteCode)}</Text> : null}
+
+                <View style={s.inviteBtns}>
+                  <Pressable style={s.inviteBtn} onPress={copyInvite}><Text style={s.inviteBtnText}>Copy</Text></Pressable>
+                  <Pressable style={s.inviteBtn} onPress={shareInvite}><Text style={s.inviteBtnText}>Share</Text></Pressable>
+                  <Pressable style={s.inviteBtn} onPress={confirmResetInvite}><Text style={s.inviteBtnText}>Reset</Text></Pressable>
+                </View>
+
+                {invite.joinMode === 'approval_required' ? (
+                  <Pressable style={s.actionRow} onPress={() => navigation.navigate('JoinRequests', { id })}>
+                    <Text style={s.actionText}>Pending requests</Text>
+                    <View style={s.countRow}>
+                      {pendingCount > 0 ? <View style={s.countBadge}><Text style={s.countBadgeText}>{pendingCount}</Text></View> : null}
+                      <Text style={s.actionChevron}>›</Text>
+                    </View>
+                  </Pressable>
+                ) : null}
+              </>
+            ) : null}
+          </View>
+        ) : null}
+
         <View style={s.section}>
           <Text style={s.sectionLabel}>Members ({members.length})</Text>
           {members.length === 0 ? (
@@ -293,6 +382,22 @@ const s = StyleSheet.create({
   actionRow: { flexDirection: 'row', alignItems: 'center', padding: 14, borderTopWidth: 1, borderColor: colors.ink100 },
   actionText:{ flex: 1, fontSize: 14, color: colors.ink, fontWeight: '600' },
   actionChevron: { fontSize: 18, color: colors.ink400 },
+  toggle:  { width: 46, height: 28, borderRadius: 14, backgroundColor: colors.ink200, padding: 3, justifyContent: 'center' },
+  toggleOn:{ backgroundColor: colors.primary },
+  knob:    { width: 22, height: 22, borderRadius: 11, backgroundColor: '#fff' },
+  knobOn:  { alignSelf: 'flex-end' },
+  modeRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 14, paddingTop: 12 },
+  modeChip:{ flex: 1, paddingVertical: 8, borderRadius: radius.pill, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.ink200, alignItems: 'center' },
+  modeChipOn: { backgroundColor: colors.primaryLight, borderColor: colors.primary },
+  modeChipText:   { fontSize: 12, fontWeight: '700', color: colors.ink500 },
+  modeChipTextOn: { color: colors.primaryDark },
+  inviteUrl: { fontSize: 12, color: colors.ink500, paddingHorizontal: 14, paddingTop: 12 },
+  inviteBtns:{ flexDirection: 'row', gap: 8, padding: 14 },
+  inviteBtn: { flex: 1, paddingVertical: 9, borderRadius: radius.md, backgroundColor: colors.primaryLight, alignItems: 'center' },
+  inviteBtnText: { fontSize: 13, fontWeight: '700', color: colors.primaryDark },
+  countRow:  { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  countBadge:{ minWidth: 22, paddingHorizontal: 6, height: 22, borderRadius: 11, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  countBadgeText: { color: '#fff', fontSize: 12, fontWeight: '800' },
   dangerRow: {},
   memberRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderTopWidth: 1, borderColor: colors.ink100 },
   memberAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.primaryLight, alignItems: 'center', justifyContent: 'center' },

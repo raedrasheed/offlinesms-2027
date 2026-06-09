@@ -34,6 +34,7 @@ import NewGroup from './src/screens/NewGroup';
 import GroupCreateInfo from './src/screens/GroupCreateInfo';
 import GroupInfo from './src/screens/GroupInfo';
 import AddMembers from './src/screens/AddMembers';
+import JoinRequests from './src/screens/JoinRequests';
 import ForwardPicker from './src/screens/ForwardPicker';
 import MessageInfo from './src/screens/MessageInfo';
 import TransactionDetail from './src/screens/TransactionDetail';
@@ -170,6 +171,7 @@ export default function App() {
             <RootStack.Screen name="ImageViewer" component={ImageViewerScreen} options={{ presentation: 'fullScreenModal' }} />
             <RootStack.Screen name="GroupInfo" component={GroupInfo} />
             <RootStack.Screen name="AddMembers" component={AddMembers} />
+            <RootStack.Screen name="JoinRequests" component={JoinRequests} />
             <RootStack.Screen name="ForwardPicker" component={ForwardPicker} />
             <RootStack.Screen name="MessageInfo" component={MessageInfo} />
             <RootStack.Screen name="TransactionDetail" component={TransactionDetail} />
