@@ -53,6 +53,11 @@ export default function GroupInfo({ route, navigation }: any) {
   const [remoteExternals, setRemoteExternals] = useState<ExternalMember[]>([]);
   const [pendingExternals, setPendingExternals] = useState<ExternalMember[]>([]);
   const [busy, setBusy]       = useState(false);
+  // Member action sheet (custom modal so all entries are guaranteed visible;
+  // Alert.alert can clip or reorder >3 buttons on some Android dialogs).
+  // MUST stay above the early returns below — otherwise the hook count
+  // changes between loading and loaded renders ("rendered more hooks…").
+  const [actionMember, setActionMember] = useState<GroupMember | null>(null);
 
   useEffect(() => {
     return onSnapshot(doc(db, 'conversations', id), snap => {
@@ -212,9 +217,6 @@ export default function GroupInfo({ route, navigation }: any) {
     } finally { setBusy(false); }
   }
 
-  // Member action sheet (custom modal so all entries are guaranteed visible;
-  // Alert.alert can clip or reorder >3 buttons on some Android dialogs).
-  const [actionMember, setActionMember] = useState<GroupMember | null>(null);
   function memberActions(m: GroupMember) {
     if (m.uid === me) return;
     setActionMember(m);
