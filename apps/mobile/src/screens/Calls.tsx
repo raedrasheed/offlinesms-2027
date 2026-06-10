@@ -37,7 +37,7 @@ export default function Calls() {
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingBottom: 96 }}>
+      <ScrollView contentContainerStyle={{ paddingBottom: 150 }}>
         <View style={s.emptyWrap}>
           <View style={s.emptyIcon}>
             <Ionicons name="call-outline" size={28} color={colors.text.disabled} />

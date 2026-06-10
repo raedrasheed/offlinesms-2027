@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  FlatList, View, Text, Pressable, StyleSheet, TextInput, Alert, Platform,
+  FlatList, View, Text, Pressable, StyleSheet, TextInput, Alert, Platform, ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { onSnapshot, doc } from 'firebase/firestore';
@@ -207,17 +207,40 @@ export default function ChatsList({ navigation }: any) {
     <View style={s.root}>
       <StatusBar style="dark" translucent backgroundColor="transparent" />
       <View style={[s.header, { paddingTop: insets.top + 4 }]}>
-        <Text style={s.h1}>OfflineSMS</Text>
-        <TextInput
-          style={s.search}
-          placeholder={t('chats.search')}
-          value={search}
-          onChangeText={setSearch}
-          autoCapitalize="none"
-          textAlign={isRTL ? 'right' : 'left'}
-          accessibilityLabel={t('chats.search')}
-        />
-        <View style={s.chips}>
+        <View style={s.headerRow}>
+          <Text style={s.h1}>OfflineSMS</Text>
+          <Pressable
+            onPress={() => navigation.navigate('Settings')}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel={t('tabs.settings', { defaultValue: 'Settings' })}
+          >
+            <Ionicons name="ellipsis-vertical" size={20} color={colors.text.primary} />
+          </Pressable>
+        </View>
+        <View style={s.searchWrap}>
+          <Ionicons name="search" size={17} color={colors.text.muted} />
+          <TextInput
+            style={s.search}
+            placeholder={t('chats.search')}
+            placeholderTextColor={colors.text.muted}
+            value={search}
+            onChangeText={setSearch}
+            autoCapitalize="none"
+            textAlign={isRTL ? 'right' : 'left'}
+            accessibilityLabel={t('chats.search')}
+          />
+        </View>
+      </View>
+
+      {/* Telegram-style folder strip: a rounded card holding scrollable filter
+          chips; the active chip gets a soft blue pill, inactive are plain text. */}
+      <View style={s.chipsCard}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={s.chipsContent}
+        >
           {(['all','unread','favorites','groups'] as Filter[]).map(f => {
             const count = unreadCounts[f];
             return (
@@ -242,7 +265,7 @@ export default function ChatsList({ navigation }: any) {
               </Pressable>
             );
           })}
-        </View>
+        </ScrollView>
       </View>
 
       {isSyncing && queuedCount > 0 ? <SyncingBanner count={queuedCount} /> : isOffline ? <OfflineBanner /> : null}
@@ -266,7 +289,7 @@ export default function ChatsList({ navigation }: any) {
         <FlatList
           data={filtered}
           keyExtractor={r => r.id}
-          contentContainerStyle={{ paddingTop: 4, paddingBottom: 96 }}
+          contentContainerStyle={{ paddingTop: 4, paddingBottom: 150 }}
           initialNumToRender={12}
           maxToRenderPerBatch={10}
           windowSize={10}
@@ -307,18 +330,21 @@ export default function ChatsList({ navigation }: any) {
 function buildStyles(colors: any, rtl: boolean) {
   return StyleSheet.create({
     root:        { flex: 1, backgroundColor: colors.background.app },
-    header:      { paddingHorizontal: 14, paddingBottom: 14, backgroundColor: colors.background.app, gap: 12 },
+    header:      { paddingHorizontal: 14, paddingBottom: 12, backgroundColor: colors.background.app, gap: 14 },
+    headerRow:   { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', justifyContent: 'space-between' },
     h1:          { fontSize: 26, fontWeight: '800', color: colors.action.primary, textAlign: rtl ? 'right' : 'left' },
-    search:      { padding: 12, backgroundColor: colors.background.subtle, borderRadius: radius.md, fontSize: 14, color: colors.text.primary },
-    chips:       { flexDirection: rtl ? 'row-reverse' : 'row', gap: 8, flexWrap: 'wrap' },
-    chip:        { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 7, borderRadius: radius.pill, backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.border.strong, minHeight: 32 },
-    chipActive:  { backgroundColor: colors.action.primary, borderColor: colors.action.primary },
-    chipText:    { fontSize: 13, color: colors.text.secondary, fontWeight: '700' },
-    chipTextActive: { color: colors.action.primaryFg },
-    chipBadge:   { minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 5, backgroundColor: colors.action.primary, alignItems: 'center', justifyContent: 'center' },
-    chipBadgeActive: { backgroundColor: colors.action.primaryFg },
-    chipBadgeText: { fontSize: 10, fontWeight: '800', color: colors.action.primaryFg },
-    chipBadgeTextActive: { color: colors.action.primary },
+    searchWrap:  { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, backgroundColor: colors.background.subtle, borderRadius: 999, minHeight: 46 },
+    search:      { flex: 1, paddingVertical: 12, fontSize: 15, color: colors.text.primary },
+    chipsCard:   { marginHorizontal: 10, marginBottom: 8, backgroundColor: colors.background.surface, borderRadius: 24, borderWidth: 1, borderColor: colors.border.subtle, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 10, shadowOffset: { width: 0, height: 3 }, elevation: 2 },
+    chipsContent:{ flexDirection: rtl ? 'row-reverse' : 'row', gap: 4, paddingHorizontal: 6, paddingVertical: 6 },
+    chip:        { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 9, borderRadius: 999, backgroundColor: 'transparent', minHeight: 36 },
+    chipActive:  { backgroundColor: colors.action.subtle },
+    chipText:    { fontSize: 14, color: colors.text.muted, fontWeight: '600' },
+    chipTextActive: { color: colors.action.primary, fontWeight: '800' },
+    chipBadge:   { minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 5, backgroundColor: colors.text.muted, alignItems: 'center', justifyContent: 'center' },
+    chipBadgeActive: { backgroundColor: colors.action.primary },
+    chipBadgeText: { fontSize: 10, fontWeight: '800', color: colors.background.surface },
+    chipBadgeTextActive: { color: colors.action.primaryFg },
     row:         { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 14, paddingVertical: 12, paddingHorizontal: 16 },
     avWrap:      { width: 52, height: 52 },
     av:          { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
@@ -335,7 +361,7 @@ function buildStyles(colors: any, rtl: boolean) {
     tag:         { fontSize: 12 },
     unread:      { minWidth: 20, height: 20, paddingHorizontal: 6, borderRadius: 10, backgroundColor: colors.action.primary, alignItems: 'center', justifyContent: 'center' },
     unreadText:  { color: colors.action.primaryFg, fontSize: 11, fontWeight: '800' },
-    fab:         { position: 'absolute', right: 18, bottom: 22, width: 60, height: 60, borderRadius: 20, backgroundColor: colors.action.primary, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 6 },
+    fab:         { position: 'absolute', right: 18, bottom: 108, width: 60, height: 60, borderRadius: 20, backgroundColor: colors.action.primary, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 6 },
     fabText:     { color: colors.action.primaryFg, fontSize: 28, fontWeight: '700', marginTop: -2 },
   });
 }

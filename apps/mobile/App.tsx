@@ -113,16 +113,38 @@ function MainTabs() {
   const unread = useUnreadTotal();
   return (
     <Tabs.Navigator
+      // Telegram-style floating pill bar: detached from the screen edges,
+      // fully rounded, with a soft-blue pill behind the active tab.
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarActiveTintColor:   '#1F7BA8',
-        tabBarInactiveTintColor: '#6B7488',
+        tabBarInactiveTintColor: '#3A4452',
+        tabBarActiveBackgroundColor: '#E3F1FA',
         tabBarStyle: {
-          height: 70 + insets.bottom,
-          paddingBottom: insets.bottom + 6,
+          position: 'absolute',
+          left: 12,
+          right: 12,
+          bottom: insets.bottom + 10,
+          height: 72,
+          borderRadius: 999,
+          backgroundColor: '#FFFFFF',
+          borderTopWidth: 0,
+          paddingHorizontal: 6,
+          shadowColor: '#000',
+          shadowOpacity: 0.12,
+          shadowRadius: 16,
+          shadowOffset: { width: 0, height: 6 },
+          elevation: 12,
         },
-        tabBarItemStyle: { paddingTop: 12, paddingBottom: 4 },
-        tabBarLabelStyle: { fontSize: 11, marginTop: 4 },
+        tabBarItemStyle: {
+          borderRadius: 999,
+          overflow: 'hidden',
+          marginVertical: 9,
+          marginHorizontal: 4,
+          paddingTop: 6,
+          paddingBottom: 6,
+        },
+        tabBarLabelStyle: { fontSize: 12, fontWeight: '700', marginTop: 2 },
         tabBarIcon: ({ focused, color, size }) => {
           const set = TAB_ICONS[route.name];
           const name = focused ? set.active : set.inactive;

@@ -413,7 +413,7 @@ export default function Settings({ navigation }: any) {
 function buildStyles(colors: any, rtl: boolean) {
   return StyleSheet.create({
     root:         { flex: 1, backgroundColor: colors.background.app },
-    content:      { padding: 14, paddingBottom: 96, gap: 8 },
+    content:      { padding: 14, paddingBottom: 150, gap: 8 },
     row:          { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', paddingVertical: 16, paddingHorizontal: 14, backgroundColor: colors.background.surface, borderRadius: radius.md, gap: 10 },
     toggleRow:    { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', paddingVertical: 16, paddingHorizontal: 14, backgroundColor: colors.background.surface, borderRadius: radius.md, gap: 12 },
     profileCard:  { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 14, padding: 14, backgroundColor: colors.background.surface, borderRadius: radius.md },
