@@ -382,7 +382,10 @@ export default function GroupInfo({ route, navigation }: any) {
                 <Pressable style={s.sheetItem} onPress={() => { const m = actionMember!; closeActions(); void openMemberChat(m); }}>
                   <Text style={s.sheetItemText}>Message</Text>
                 </Pressable>
-                {isOwner && actionMember.role !== 'owner' ? (
+                {/* Any admin (owner included) can promote/demote any non-owner.
+                    The server changeRole callable enforces the same rule and
+                    rejects role changes on the owner. */}
+                {isAdmin && actionMember.role !== 'owner' ? (
                   actionMember.role === 'admin' ? (
                     <Pressable style={s.sheetItem} onPress={() => { const m = actionMember!; closeActions(); confirmChangeRole(m, 'member'); }}>
                       <Text style={s.sheetItemText}>Remove admin permission</Text>
@@ -393,7 +396,9 @@ export default function GroupInfo({ route, navigation }: any) {
                     </Pressable>
                   )
                 ) : null}
-                {(isOwner && actionMember.role !== 'owner') || (isAdmin && !isOwner && actionMember.role === 'member') ? (
+                {/* Any admin can remove any non-owner; the server removeMember
+                    callable enforces "cannot remove owner". */}
+                {isAdmin && actionMember.role !== 'owner' ? (
                   <Pressable style={s.sheetItem} onPress={() => { const m = actionMember!; closeActions(); confirmRemove(m); }}>
                     <Text style={[s.sheetItemText, { color: colors.err }]}>Remove from group</Text>
                   </Pressable>
