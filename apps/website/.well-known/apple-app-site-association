@@ -1,0 +1,12 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["TEAMID.app.offlinesms.mobile"],
+        "components": [
+          { "/": "/join/*", "comment": "Group invite links" }
+        ]
+      }
+    ]
+  }
+}
