@@ -26,6 +26,7 @@ import {
   InviteSettings, InviteJoinMode,
   subscribeInviteSettings, subscribePendingJoinRequests,
   createOrUpdateGroupInviteLink, resetGroupInviteLink,
+  getOrCreateDirectConversation,
 } from '../lib/conversations';
 import { inviteUrl } from '../lib/invite';
 import { maskPhone } from '../lib/phone';
@@ -201,19 +202,34 @@ export default function GroupInfo({ route, navigation }: any) {
     withBusy(() => lockGroup(id, next), next ? 'Couldn’t lock' : 'Couldn’t unlock');
   }
 
+  async function openMemberChat(m: GroupMember) {
+    setBusy(true);
+    try {
+      const conversationId = await getOrCreateDirectConversation(m.uid);
+      navigation.navigate('Conversation', { id: conversationId });
+    } catch (e: any) {
+      Alert.alert('Couldn’t open chat', groupErrorCopy(e?.code ?? 'internal'));
+    } finally { setBusy(false); }
+  }
+
   function memberActions(m: GroupMember) {
     if (m.uid === me) return;
-    if (m.role === 'owner') return; // owner is immutable from here
     const buttons: Array<{ text: string; onPress?: () => void; style?: 'destructive' | 'cancel' }> = [];
 
-    if (isOwner) {
-      if (m.role === 'admin') buttons.push({ text: 'Demote to member', onPress: () => confirmChangeRole(m, 'member') });
-      else                    buttons.push({ text: 'Promote to admin', onPress: () => confirmChangeRole(m, 'admin') });
-    }
-    if (isOwner) buttons.push({ text: 'Remove from group', style: 'destructive', onPress: () => confirmRemove(m) });
-    else if (isAdmin && m.role === 'member') buttons.push({ text: 'Remove from group', style: 'destructive', onPress: () => confirmRemove(m) });
+    // Always offer a direct chat with any other member — previously taps on
+    // the owner, fellow admins, or anyone (as a regular member) fell through
+    // every permission branch and showed nothing at all.
+    buttons.push({ text: 'Message', onPress: () => void openMemberChat(m) });
 
-    if (buttons.length === 0) return;
+    if (m.role !== 'owner') { // owner is immutable from here
+      if (isOwner) {
+        if (m.role === 'admin') buttons.push({ text: 'Demote to member', onPress: () => confirmChangeRole(m, 'member') });
+        else                    buttons.push({ text: 'Promote to admin', onPress: () => confirmChangeRole(m, 'admin') });
+      }
+      if (isOwner) buttons.push({ text: 'Remove from group', style: 'destructive', onPress: () => confirmRemove(m) });
+      else if (isAdmin && m.role === 'member') buttons.push({ text: 'Remove from group', style: 'destructive', onPress: () => confirmRemove(m) });
+    }
+
     buttons.push({ text: 'Cancel', style: 'cancel' });
     Alert.alert(m.displayNameSnapshot ?? m.uid, undefined, buttons);
   }
