@@ -7,7 +7,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
-  View, Text, FlatList, Pressable, StyleSheet, Alert, ScrollView, Share, Clipboard,
+  View, Text, FlatList, Pressable, StyleSheet, Alert, ScrollView, Share, Clipboard, Modal,
 } from 'react-native';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
@@ -212,27 +212,14 @@ export default function GroupInfo({ route, navigation }: any) {
     } finally { setBusy(false); }
   }
 
+  // Member action sheet (custom modal so all entries are guaranteed visible;
+  // Alert.alert can clip or reorder >3 buttons on some Android dialogs).
+  const [actionMember, setActionMember] = useState<GroupMember | null>(null);
   function memberActions(m: GroupMember) {
     if (m.uid === me) return;
-    const buttons: Array<{ text: string; onPress?: () => void; style?: 'destructive' | 'cancel' }> = [];
-
-    // Always offer a direct chat with any other member — previously taps on
-    // the owner, fellow admins, or anyone (as a regular member) fell through
-    // every permission branch and showed nothing at all.
-    buttons.push({ text: 'Message', onPress: () => void openMemberChat(m) });
-
-    if (m.role !== 'owner') { // owner is immutable from here
-      if (isOwner) {
-        if (m.role === 'admin') buttons.push({ text: 'Demote to member', onPress: () => confirmChangeRole(m, 'member') });
-        else                    buttons.push({ text: 'Promote to admin', onPress: () => confirmChangeRole(m, 'admin') });
-      }
-      if (isOwner) buttons.push({ text: 'Remove from group', style: 'destructive', onPress: () => confirmRemove(m) });
-      else if (isAdmin && m.role === 'member') buttons.push({ text: 'Remove from group', style: 'destructive', onPress: () => confirmRemove(m) });
-    }
-
-    buttons.push({ text: 'Cancel', style: 'cancel' });
-    Alert.alert(m.displayNameSnapshot ?? m.uid, undefined, buttons);
+    setActionMember(m);
   }
+  function closeActions() { setActionMember(null); }
 
   return (
     <View style={s.root}>
@@ -379,6 +366,44 @@ export default function GroupInfo({ route, navigation }: any) {
           </View>
         ) : null}
       </ScrollView>
+
+      {/* Member action sheet — appears on tapping any other member. Always
+          includes Message; promote/demote and remove are conditional on the
+          caller's role + target's role (mirrors the server changeRole rule:
+          owner-only for promote/demote). */}
+      <Modal visible={!!actionMember} transparent animationType="fade" onRequestClose={closeActions}>
+        <Pressable style={s.sheetBackdrop} onPress={closeActions}>
+          <Pressable style={s.sheet} onPress={() => { /* swallow */ }}>
+            {actionMember ? (
+              <>
+                <Text style={s.sheetTitle} numberOfLines={1}>{actionMember.displayNameSnapshot ?? actionMember.uid}</Text>
+                <Pressable style={s.sheetItem} onPress={() => { const m = actionMember!; closeActions(); void openMemberChat(m); }}>
+                  <Text style={s.sheetItemText}>Message</Text>
+                </Pressable>
+                {isOwner && actionMember.role !== 'owner' ? (
+                  actionMember.role === 'admin' ? (
+                    <Pressable style={s.sheetItem} onPress={() => { const m = actionMember!; closeActions(); confirmChangeRole(m, 'member'); }}>
+                      <Text style={s.sheetItemText}>Remove admin permission</Text>
+                    </Pressable>
+                  ) : (
+                    <Pressable style={s.sheetItem} onPress={() => { const m = actionMember!; closeActions(); confirmChangeRole(m, 'admin'); }}>
+                      <Text style={s.sheetItemText}>Make group admin</Text>
+                    </Pressable>
+                  )
+                ) : null}
+                {(isOwner && actionMember.role !== 'owner') || (isAdmin && !isOwner && actionMember.role === 'member') ? (
+                  <Pressable style={s.sheetItem} onPress={() => { const m = actionMember!; closeActions(); confirmRemove(m); }}>
+                    <Text style={[s.sheetItemText, { color: colors.err }]}>Remove from group</Text>
+                  </Pressable>
+                ) : null}
+                <Pressable style={[s.sheetItem, s.sheetCancel]} onPress={closeActions}>
+                  <Text style={[s.sheetItemText, { color: colors.ink500, fontWeight: '700' }]}>Cancel</Text>
+                </Pressable>
+              </>
+            ) : null}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -422,4 +447,10 @@ const s = StyleSheet.create({
   memberSub:  { fontSize: 12, color: colors.ink500, marginTop: 2 },
   badge:     { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
   badgeText: { fontSize: 10, fontWeight: '700' },
+  sheetBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'flex-end' },
+  sheet:        { backgroundColor: '#fff', borderTopLeftRadius: 16, borderTopRightRadius: 16, paddingBottom: 16, paddingTop: 6 },
+  sheetTitle:   { fontSize: 13, fontWeight: '700', color: colors.ink500, paddingHorizontal: 18, paddingVertical: 14, borderBottomWidth: 1, borderColor: colors.ink100 },
+  sheetItem:    { paddingHorizontal: 18, paddingVertical: 16, borderBottomWidth: 1, borderColor: colors.ink100 },
+  sheetItemText:{ fontSize: 15, color: colors.ink, fontWeight: '600' },
+  sheetCancel:  { borderBottomWidth: 0, marginTop: 4 },
 });

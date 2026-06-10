@@ -722,7 +722,7 @@ export default function Conversation({ route, navigation }: any) {
                 <Text style={s.headerAvatarText}>{initials(peerName)}</Text>
               </View>
             )}
-            {!isGroup ? <View style={s.onlineDot} /> : null}
+            {!isGroup && presence.online ? <View style={s.onlineDot} /> : null}
           </View>
           <View style={{ flex: 1 }}>
             <Text style={s.title} numberOfLines={1}>{peerName}</Text>

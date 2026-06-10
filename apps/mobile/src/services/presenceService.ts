@@ -102,17 +102,31 @@ export function subscribeToPresence(
   });
 
   let unsubPresence: (() => void) | null = null;
+  let stalenessTimer: ReturnType<typeof setInterval> | null = null;
+  // Snapshot of the latest server-known online flag — we recompute the derived
+  // `online` (flag && fresh) on every snapshot AND on a timer, since when the
+  // peer stops heartbeating no new snapshot fires and the dot would otherwise
+  // linger past the freshness window.
+  let lastFlag = false;
   if (opts.peerUid) {
     unsubPresence = subscribePresence(opts.peerUid, ({ online, lastSeenAt }) => {
-      // Online only when the flag is set AND the heartbeat is still fresh — so a
-      // crash that never cleared the flag still resolves to offline after the window.
+      lastFlag = online;
       const fresh = lastSeenAt != null && Date.now() - lastSeenAt < ONLINE_WINDOW_MS;
       state = { ...state, lastSeenAt, online: online && fresh };
       emit();
     });
+    stalenessTimer = setInterval(() => {
+      const fresh = state.lastSeenAt != null && Date.now() - state.lastSeenAt < ONLINE_WINDOW_MS;
+      const next = lastFlag && fresh;
+      if (next !== state.online) { state = { ...state, online: next }; emit(); }
+    }, 5000);
   }
 
-  return () => { try { unsubActivity(); } catch { /* noop */ } try { unsubPresence?.(); } catch { /* noop */ } };
+  return () => {
+    try { unsubActivity(); } catch { /* noop */ }
+    try { unsubPresence?.(); } catch { /* noop */ }
+    if (stalenessTimer) { clearInterval(stalenessTimer); stalenessTimer = null; }
+  };
 }
 
 /** Clear the caller's typing + recording for one chat (leave/background/logout). */
