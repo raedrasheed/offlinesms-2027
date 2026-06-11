@@ -966,14 +966,14 @@ function buildStyles(colors: any, rtl: boolean) {
     e2eNotice:     { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FBEFD0', paddingHorizontal: 14, paddingVertical: 9, borderRadius: 14, marginTop: 16 },
     e2eText:       { fontSize: 12, color: '#92400E' },
     emptyNudge:    { fontSize: 13, color: colors.text.muted, textAlign: 'center', marginTop: 14, lineHeight: 19 },
-    header:   { paddingTop: 50, paddingBottom: 12, paddingHorizontal: 14, backgroundColor: '#E6F1F7', flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 10, zIndex: 2, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 4 },
+    header:   { paddingTop: 50, paddingBottom: 12, paddingHorizontal: 14, backgroundColor: colors.background.surface, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 10, zIndex: 2, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 4 },
     back:     { fontSize: 24, color: colors.action.primary, minWidth: 28, textAlign: 'center' },
     headerInfo: { flex: 1, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 10 },
     headerMenuBtn: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
     headerAvatarWrap: { width: 40, height: 40 },
     headerAvatar:  { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
     headerAvatarText: { color: '#fff', fontSize: 15, fontWeight: '800' },
-    onlineDot: { position: 'absolute', bottom: -1, right: rtl ? undefined : -1, left: rtl ? -1 : undefined, width: 13, height: 13, borderRadius: 7, backgroundColor: '#22C55E', borderWidth: 2, borderColor: '#E6F1F7' },
+    onlineDot: { position: 'absolute', bottom: -1, right: rtl ? undefined : -1, left: rtl ? -1 : undefined, width: 13, height: 13, borderRadius: 7, backgroundColor: '#22C55E', borderWidth: 2, borderColor: colors.background.surface },
     title:    { fontSize: 16, fontWeight: '800', color: colors.text.primary, textAlign: rtl ? 'right' : 'left' },
     subtitle: { fontSize: 12, color: colors.action.primary, marginTop: 1, textAlign: rtl ? 'right' : 'left' },
     listHeader: { alignItems: 'center', gap: 10, paddingTop: 6, paddingBottom: 8 },
@@ -990,12 +990,12 @@ function buildStyles(colors: any, rtl: boolean) {
     composerPreviewTitle: { fontSize: 11, fontWeight: '700', color: colors.action.primary, textAlign: rtl ? 'right' : 'left' },
     composerPreviewBody:  { fontSize: 12, color: colors.text.primary, marginTop: 2, textAlign: rtl ? 'right' : 'left' },
     composerPreviewClose: { fontSize: 18, color: colors.text.muted, fontWeight: '700', paddingHorizontal: 6, minWidth: 36, minHeight: 36, textAlignVertical: 'center', textAlign: 'center' },
-    // Composer bar is transparent — the wallpaper shows through to either side
-    // of the input pill, matching WhatsApp. Only the pill itself is opaque.
-    composer: { padding: 12, paddingBottom: 24, flexDirection: rtl ? 'row-reverse' : 'row', gap: 8, alignItems: 'flex-end', backgroundColor: 'transparent' },
+    // Telegram-style composer: a solid surface bar with a hairline top border
+    // (the wallpaper stops above it), input pill inside.
+    composer: { padding: 12, paddingBottom: 24, flexDirection: rtl ? 'row-reverse' : 'row', gap: 8, alignItems: 'flex-end', backgroundColor: colors.background.surface, borderTopWidth: StyleSheet.hairlineWidth, borderColor: colors.border.subtle },
     // WhatsApp-style input pill: emoji (leading) + text field + attach + camera.
     // Opaque surface so the input area stays constant over any wallpaper.
-    inputPill: { flex: 1, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', minHeight: 46, paddingHorizontal: 4, backgroundColor: colors.background.surface, borderRadius: 24, borderWidth: 1, borderColor: colors.border.subtle },
+    inputPill: { flex: 1, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', minHeight: 46, paddingHorizontal: 4, backgroundColor: colors.background.subtle, borderRadius: 24 },
     input:    { flex: 1, minHeight: 38, maxHeight: 120, paddingHorizontal: 6, paddingVertical: 8, backgroundColor: 'transparent', fontSize: 15, color: colors.text.primary },
     inlineIconLead: { width: 38, height: 44, alignItems: 'center', justifyContent: 'center' },
     inlineIcon: { width: 34, height: 44, alignItems: 'center', justifyContent: 'center' },

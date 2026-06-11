@@ -42,6 +42,9 @@ import {
 
 const EDIT_WINDOW_MS = 15 * 60 * 1000;
 const SMALL_GROUP_MAX = 20;
+// Telegram light-theme accents for the sent (green) bubble.
+const TG_GREEN      = '#5FA84E';
+const TG_GREEN_DARK = '#3E7B33';
 
 export type BubbleContext = {
   conversationId: string;
@@ -123,15 +126,15 @@ function MessageBubbleImpl({
   // video message would share the same `media` shape if/when it lands.
   const mediaMessage      = !deleted && m.type === 'image';
   const transparentBubble = !deleted && !!emoji3d;
-  // A "mine" message is normally blue → white text. Media (light-gray card)
-  // and emoji (transparent) bubbles aren't blue, so their in-bubble content
-  // and footer need dark ink even when the message is mine.
-  const darkContent = mediaMessage || transparentBubble;
-  const footColor = darkContent
-    ? { color: colors.ink500 }
-    : (mine ? { color: 'rgba(255,255,255,.7)' } : undefined);
-  // Where we'd normally tint mine content white, only do so on the blue bubble.
-  const mineWhite = mine && !darkContent;
+  // Footer tone: white inside the emoji pill (sits on the wallpaper), ink on
+  // the gray media card, Telegram green on the sent bubble, default gray on
+  // received bubbles. Both bubble colors are light, so text is always dark.
+  const footColor = transparentBubble
+    ? { color: 'rgba(255,255,255,0.95)' }
+    : mediaMessage
+      ? { color: colors.ink500 }
+      : (mine ? { color: TG_GREEN } : undefined);
+  const receiptTone: ReceiptTone = transparentBubble ? 'white' : mediaMessage ? 'ink' : 'green';
 
   if (pending) {
     return (
@@ -142,26 +145,26 @@ function MessageBubbleImpl({
       >
         <View style={[s.bubble, s.sent, pending !== 'failed' && { opacity: 0.92 }]}>
           <View style={s.bubbleRow}>
-            <Text style={[s.bubbleText, { color: '#fff' }]}>{m.text ?? ''}</Text>
+            <Text style={s.bubbleText}>{m.text ?? ''}</Text>
           </View>
           <View style={s.bubbleFooter}>
             {pending === 'failed' ? (
               <>
-                <Ionicons name="alert-circle" size={12} color="#FFD9D9" />
-                <Text style={[s.foot, { color: '#FFD9D9' }]}>Failed · tap to retry</Text>
+                <Ionicons name="alert-circle" size={12} color={colors.err} />
+                <Text style={[s.foot, { color: colors.err }]}>Failed · tap to retry</Text>
               </>
             ) : pending === 'syncing' ? (
               <>
-                <Ionicons name="sync-outline" size={12} color="rgba(255,255,255,.85)" />
-                <Text style={[s.foot, { color: 'rgba(255,255,255,.85)' }]}>Sending…</Text>
+                <Ionicons name="sync-outline" size={12} color={TG_GREEN} />
+                <Text style={[s.foot, { color: TG_GREEN }]}>Sending…</Text>
               </>
             ) : (
               <>
-                <Ionicons name="time-outline" size={12} color="rgba(255,255,255,.85)" />
-                <Text style={[s.foot, { color: 'rgba(255,255,255,.85)' }]}>Queued · sends when online</Text>
+                <Ionicons name="time-outline" size={12} color={TG_GREEN} />
+                <Text style={[s.foot, { color: TG_GREEN }]}>Queued · sends when online</Text>
               </>
             )}
-            <Text style={[s.foot, { color: 'rgba(255,255,255,.7)' }]}>{timeText}</Text>
+            <Text style={[s.foot, { color: TG_GREEN }]}>{timeText}</Text>
           </View>
         </View>
       </Pressable>
@@ -279,17 +282,17 @@ function MessageBubbleImpl({
             {senderName}
           </Text>
         ) : null}
-        {m.forwarded ? <Text style={[s.meta, mineWhite && { color: 'rgba(255,255,255,.85)' }]}>↪︎ Forwarded</Text> : null}
+        {m.forwarded ? <Text style={s.meta}>↪︎ Forwarded</Text> : null}
 
         {m.replyTo ? (
           <Pressable
             onPress={() => onJumpTo(m.replyTo!.messageId)}
-            style={[s.replyPreview, mineWhite && s.replyPreviewMine]}
+            style={[s.replyPreview, mine && !mediaMessage && s.replyPreviewMine]}
           >
-            <Text style={[s.replyName, mineWhite && { color: '#fff' }]} numberOfLines={1}>
+            <Text style={[s.replyName, mine && !mediaMessage && s.replyNameMine]} numberOfLines={1}>
               {m.replyTo.senderDisplayName || m.replyTo.senderUid.slice(0, 6)}
             </Text>
-            <Text style={[s.replyText, mineWhite && { color: 'rgba(255,255,255,.85)' }]} numberOfLines={2}>
+            <Text style={s.replyText} numberOfLines={2}>
               {m.replyTo.preview}
             </Text>
           </Pressable>
@@ -304,7 +307,7 @@ function MessageBubbleImpl({
             footer={imageOverlayFooter ? (
               <>
                 <Text style={s.imgFootTime}>{timeText}</Text>
-                {mine ? <ReceiptIndicator message={m} isGroup={context.isGroup} memberCount={context.memberCount} /> : null}
+                {mine ? <ReceiptIndicator message={m} isGroup={context.isGroup} memberCount={context.memberCount} tone="white" /> : null}
               </>
             ) : null}
           />
@@ -331,7 +334,7 @@ function MessageBubbleImpl({
           </Pressable>
         ) : (
           <View style={s.bubbleRow}>
-            <Text style={[s.bubbleText, mine && { color: '#fff' }, deleted && (mine ? s.deletedTextMine : s.deletedText)]}>
+            <Text style={[s.bubbleText, deleted && s.deletedText]}>
               {deleted ? 'This message was deleted.' : (m.text ?? '')}
             </Text>
           </View>
@@ -343,7 +346,7 @@ function MessageBubbleImpl({
             {context.isStarred ? <Text style={s.star}>★</Text> : null}
             {context.isPinned ? <Text style={s.foot}>📌</Text> : null}
             {mine && !deleted ? (
-              <ReceiptIndicator message={m} isGroup={context.isGroup} memberCount={context.memberCount} dark={darkContent} />
+              <ReceiptIndicator message={m} isGroup={context.isGroup} memberCount={context.memberCount} tone={receiptTone} />
             ) : null}
             <Text style={[s.foot, footColor]}>{timeText}</Text>
           </View>
@@ -395,13 +398,18 @@ function MessageBubbleImpl({
  * Small groups (< 20): eye + "Seen by N"
  * Larger groups: ✓✓ delivered count · eye read count
  */
-function ReceiptIndicator({ message, isGroup, memberCount, dark }: { message: Message; isGroup: boolean; memberCount?: number; dark?: boolean }) {
+type ReceiptTone = 'green' | 'ink' | 'white';
+
+function ReceiptIndicator({ message, isGroup, memberCount, tone = 'green' }: { message: Message; isGroup: boolean; memberCount?: number; tone?: ReceiptTone }) {
   const delivered = message.deliveredCount ?? 0;
   const read      = message.readCount ?? 0;
-  // On a transparent emoji bubble the footer sits on the wallpaper, so use
-  // dark ink; inside a sent (blue) bubble keep the translucent white.
-  const fg     = dark ? colors.ink500 : 'rgba(255,255,255,.85)';
-  const tickRead = dark ? colors.primary : '#9BD2EE';
+  // green → Telegram-style on the light-green sent bubble; ink → on the gray
+  // media card; white → inside the translucent pill over the wallpaper.
+  const fg = tone === 'green' ? TG_GREEN : tone === 'ink' ? colors.ink500 : 'rgba(255,255,255,.95)';
+  // Read vs delivered: read keeps the strong accent, delivered drops to a
+  // muted tint of the same tone (both bubbles are light now, so color — not
+  // glyph count — still carries the distinction at a glance).
+  const fgMuted = tone === 'green' ? '#9CC78F' : tone === 'ink' ? colors.ink400 : 'rgba(255,255,255,.6)';
 
   if (isGroup) {
     if (memberCount && memberCount < SMALL_GROUP_MAX) {
@@ -421,9 +429,9 @@ function ReceiptIndicator({ message, isGroup, memberCount, dark }: { message: Me
       </View>
     );
   }
-  if (read > 0)      return <Text style={[s.tick, { color: tickRead }]}>✓✓</Text>;
-  if (delivered > 0) return <Text style={[s.tick, { color: fg }]}>✓✓</Text>;
-  return <Text style={[s.tick, { color: dark ? colors.ink400 : 'rgba(255,255,255,.6)' }]}>✓</Text>;
+  if (read > 0)      return <Text style={[s.tick, { color: fg }]}>✓✓</Text>;
+  if (delivered > 0) return <Text style={[s.tick, { color: fgMuted }]}>✓✓</Text>;
+  return <Text style={[s.tick, { color: fgMuted }]}>✓</Text>;
 }
 
 const s = StyleSheet.create({
@@ -438,23 +446,28 @@ const s = StyleSheet.create({
   avatarSpacer:   { width: 36 },
   senderLabel:    { fontSize: 12, fontWeight: '800', marginBottom: 2 },
   bubble:         { maxWidth: '100%', paddingHorizontal: 11, paddingVertical: 7, borderRadius: 18, shadowColor: '#000', shadowOpacity: 0.10, shadowRadius: 3, shadowOffset: { width: 0, height: 1 }, elevation: 2 },
-  sent:           { backgroundColor: '#1E88E5', borderTopRightRadius: 5 },
-  recv:           { backgroundColor: '#fff', borderTopLeftRadius: 5 },
+  // Telegram light theme: sent = soft green with dark text, received = white;
+  // bubble tails sit at the BOTTOM corner nearest the sender.
+  sent:           { backgroundColor: '#EFFDDE', borderBottomRightRadius: 5 },
+  recv:           { backgroundColor: '#fff', borderBottomLeftRadius: 5 },
   // Image/video card: light-gray fill + thin border, tight padding so the
   // frame reads as a slim mat around the media.
   bubbleMedia:    { backgroundColor: colors.ink100, borderWidth: 1, borderColor: colors.ink200, paddingHorizontal: 4, paddingVertical: 4 },
-  // Emoji message: no bubble chrome at all — the 3D emoji sits on the wallpaper.
+  // Emoji message: no bubble chrome at all — the 3D emoji sits on the wallpaper
+  // and its time/ticks live in a translucent pill (Telegram sticker style).
   bubbleEmoji:    { backgroundColor: 'transparent', paddingHorizontal: 0, paddingVertical: 0, shadowOpacity: 0, elevation: 0 },
-  bubbleFooterEmoji: { paddingHorizontal: 4, paddingTop: 2 },
+  bubbleFooterEmoji: { alignSelf: 'flex-end', backgroundColor: 'rgba(0,0,0,0.30)', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3, marginTop: 2 },
   bubbleRow:      { flexDirection: 'row', alignItems: 'flex-end', gap: 6 },
   emoji3dWrap:    { alignItems: 'center', justifyContent: 'center', paddingVertical: 4, paddingHorizontal: 8 },
   bubbleText:     { fontSize: 16, color: colors.ink, lineHeight: 22, flexShrink: 1 },
   deletedText:    { fontStyle: 'italic', color: colors.ink500 },
-  deletedTextMine:{ fontStyle: 'italic', color: 'rgba(255,255,255,.8)' },
+  deletedTextMine:{ fontStyle: 'italic', color: colors.ink500 },
   meta:           { fontSize: 11, color: colors.ink500, marginBottom: 4, fontWeight: '600' },
   replyPreview:   { borderLeftWidth: 3, borderLeftColor: colors.primaryDark, paddingLeft: 8, marginBottom: 6, backgroundColor: 'rgba(0,0,0,.04)', borderRadius: 6, padding: 6 },
-  replyPreviewMine:{ backgroundColor: 'rgba(255,255,255,.16)', borderLeftColor: '#fff' },
+  // On the green sent bubble the reply accent goes green (Telegram-style).
+  replyPreviewMine:{ backgroundColor: 'rgba(95,168,78,0.12)', borderLeftColor: TG_GREEN },
   replyName:      { fontSize: 11, fontWeight: '700', color: colors.primaryDark },
+  replyNameMine:  { color: TG_GREEN_DARK },
   replyText:      { fontSize: 12, color: colors.ink, marginTop: 2 },
   bubbleFooter:   { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 6, marginTop: 4 },
   foot:           { fontSize: 10, color: colors.ink500 },

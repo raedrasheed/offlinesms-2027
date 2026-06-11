@@ -54,8 +54,10 @@ export function VoiceMessageBubble({
     }
   }), [message.id]);
 
-  const fg = mine ? '#fff' : colors.ink;
-  const sub = mine ? 'rgba(255,255,255,0.75)' : colors.ink500;
+  // Telegram light theme: the sent bubble is light green, so "mine" uses
+  // green accents — white would vanish on the pale bubble.
+  const TG_GREEN = '#5FA84E';
+  const sub = mine ? TG_GREEN : colors.ink500;
   const progress = durationMs > 0 ? positionMs / durationMs : 0;
   const remaining = playing && positionMs > 0 ? Math.max(0, durationMs - positionMs) : durationMs;
 
@@ -95,8 +97,8 @@ export function VoiceMessageBubble({
         <Waveform
           bars={media?.waveform ?? null}
           progress={progress}
-          color={mine ? 'rgba(255,255,255,0.45)' : colors.ink300}
-          playedColor={mine ? '#fff' : colors.primary}
+          color={mine ? 'rgba(95,168,78,0.35)' : colors.ink300}
+          playedColor={mine ? TG_GREEN : colors.primary}
           height={26}
         />
         <Text style={[s.duration, { color: sub }]}>
@@ -110,7 +112,7 @@ export function VoiceMessageBubble({
 const s = StyleSheet.create({
   row:           { flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 200, paddingVertical: 2 },
   playBtn:       { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
-  playBtnMine:   { backgroundColor: 'rgba(255,255,255,0.18)' },
+  playBtnMine:   { backgroundColor: '#5FA84E' },
   playBtnTheirs: { backgroundColor: colors.primaryLight },
   middle:        { flex: 1, gap: 3 },
   duration:      { fontSize: 11, fontWeight: '600' },
