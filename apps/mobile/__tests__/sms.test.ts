@@ -2,38 +2,27 @@ import { describe, it, expect } from 'vitest';
 import { buildDefaultSmsBody, smsSkipReasonCopy } from '../src/lib/sms.helpers';
 
 describe('buildDefaultSmsBody', () => {
-  it('uses OfflineSMS when no conversation name', () => {
-    const body = buildDefaultSmsBody(null, 'hello world');
-    expect(body).toContain('OfflineSMS');
-    expect(body).toContain('hello world');
+  it('defaults to the original message text', () => {
+    expect(buildDefaultSmsBody('hello world')).toBe('hello world');
   });
 
-  it('uses provided conversation name', () => {
-    const body = buildDefaultSmsBody('Family Group', 'lunch?');
-    expect(body).toContain('Family Group');
-    expect(body).toContain('lunch?');
+  it('returns empty for a missing message', () => {
+    expect(buildDefaultSmsBody(null)).toBe('');
+    expect(buildDefaultSmsBody(undefined)).toBe('');
   });
 
   it('collapses whitespace in the message', () => {
-    const body = buildDefaultSmsBody('Team', 'one    two\n\nthree');
-    expect(body).toContain('one two three');
+    expect(buildDefaultSmsBody('one    two\n\nthree')).toBe('one two three');
   });
 
-  it('truncates very long messages with an ellipsis', () => {
-    const long = 'x'.repeat(500);
-    const body = buildDefaultSmsBody('Team', long);
-    expect(body.length).toBeLessThan(300);
+  it('truncates very long messages with an ellipsis at the 320-char cap', () => {
+    const body = buildDefaultSmsBody('x'.repeat(500));
+    expect(body.length).toBe(320);
     expect(body).toContain('…');
   });
 
-  it('keeps the closing CTA on every body', () => {
-    const body = buildDefaultSmsBody('Team', 'short');
-    expect(body).toContain('Open OfflineSMS');
-  });
-
   it('never embeds raw newlines from the message body', () => {
-    const body = buildDefaultSmsBody('Team', 'line1\nline2\nline3');
-    expect(body).not.toContain('\n');
+    expect(buildDefaultSmsBody('line1\nline2\nline3')).not.toContain('\n');
   });
 });
 

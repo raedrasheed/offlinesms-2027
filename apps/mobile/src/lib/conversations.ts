@@ -7,6 +7,7 @@
 
 import {
   collection, doc, onSnapshot, orderBy, query, where, limit,
+  setDoc, serverTimestamp, Timestamp,
 } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { app, db, auth } from './firebase';
@@ -146,6 +147,10 @@ export type Message = {
   playedCount?:        number;
   failedCount?:        number;
   pendingCount?:       number;
+  // Local-only: last send/upload failure (e.g. a failed media upload's storage
+  // error code), surfaced in MessageInfo so it isn't logcat-only.
+  errorCode?:          string | null;
+  errorMessage?:       string | null;
 };
 
 export type UserState = {
@@ -164,9 +169,20 @@ export type UserState = {
 };
 
 export type Typing = {
-  uid:       string;
-  isTyping?: boolean;
-  expiresAt?: any;
+  uid:                 string;
+  isTyping?:           boolean;
+  expiresAt?:          any;
+  // Presence activity (Phase 24) — recording shares the typing doc so it needs
+  // no extra rules; readers honour an independent TTL (recordingExpiresAt).
+  isRecording?:        boolean;
+  recordingExpiresAt?: any;
+};
+
+/** One participant's live activity in a chat (typing and/or recording). */
+export type Activity = {
+  uid:         string;
+  isTyping:    boolean;
+  isRecording: boolean;
 };
 
 // ─────────────────────────────────────────────────────────────────
@@ -206,10 +222,16 @@ export function subscribeMessages(
     orderBy('createdAt', 'desc'),
     limit(100),
   );
-  return onSnapshot(q, snap => {
-    const rows = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Message[];
-    cb(rows.reverse());
-  });
+  return onSnapshot(
+    q,
+    snap => {
+      const rows = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Message[];
+      cb(rows.reverse());
+    },
+    // Without an error sink a failed query (e.g. a transient rules failure or
+    // missing index) leaves the screen stuck on "Loading messages…" forever.
+    err => { if (__DEV__) console.warn('[conversations] subscribeMessages failed:', err); },
+  );
 }
 
 export function subscribeUserState(
@@ -221,6 +243,7 @@ export function subscribeUserState(
   return onSnapshot(
     doc(db, 'conversations', conversationId, 'userState', uid),
     snap => cb(snap.exists() ? ({ uid, ...snap.data() } as UserState) : null),
+    err => { if (__DEV__) console.warn('[conversations] subscribeUserState failed:', err); },
   );
 }
 
@@ -245,6 +268,95 @@ export function subscribeTyping(
     }
     cb(rows);
   });
+}
+
+/**
+ * Subscribe to live activity (typing AND recording) for every participant
+ * other than the caller. Each flag honours its own TTL so a stale doc never
+ * keeps an indicator stuck.
+ */
+export function subscribeActivity(
+  conversationId: string,
+  cb: (rows: Activity[]) => void,
+) {
+  const me = auth.currentUser?.uid;
+  return onSnapshot(collection(db, 'conversations', conversationId, 'typing'), snap => {
+    const now = Date.now();
+    const rows: Activity[] = [];
+    for (const d of snap.docs) {
+      if (d.id === me) continue;
+      const data = d.data() as Typing;
+      const typingLive    = data.isTyping    === true && (data.expiresAt?.toMillis?.() ?? 0) > now;
+      const recordingLive  = data.isRecording === true && (data.recordingExpiresAt?.toMillis?.() ?? 0) > now;
+      if (typingLive || recordingLive) {
+        rows.push({ uid: d.id, isTyping: typingLive, isRecording: recordingLive });
+      }
+    }
+    cb(rows);
+  });
+}
+
+const RECORDING_TTL_MS = 8000;
+
+/**
+ * Publish the caller's recording state. Written directly to the owner-writable
+ * typing doc (merge, so it never clobbers the typing flag). Refresh while a
+ * long recording continues so the TTL doesn't lapse mid-recording.
+ */
+export async function setRecording(conversationId: string, isRecording: boolean): Promise<void> {
+  const uid = auth.currentUser?.uid;
+  if (!uid) return;
+  await setDoc(
+    doc(db, 'conversations', conversationId, 'typing', uid),
+    {
+      uid,
+      isRecording,
+      recordingExpiresAt: isRecording
+        ? Timestamp.fromMillis(Date.now() + RECORDING_TTL_MS)
+        : Timestamp.fromMillis(0),
+    },
+    { merge: true },
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Presence — online/last-seen via a heartbeat on the user doc.
+// "online" is derived from lastSeen freshness (no extra field/rules needed).
+// ─────────────────────────────────────────────────────────────────
+
+/** Freshness window: an `online:true` user whose lastSeen is older than this is
+ *  treated as offline anyway (covers a crash that never wrote online:false). */
+export const ONLINE_WINDOW_MS = 45000;
+
+export interface PresenceSnapshot {
+  online: boolean;       // explicit flag (instant offline on background)
+  lastSeenAt: number | null;
+}
+
+/** Write the caller's presence: explicit online flag + lastSeen heartbeat. */
+export async function writePresence(online: boolean): Promise<void> {
+  const uid = auth.currentUser?.uid;
+  if (!uid) return;
+  await setDoc(
+    doc(db, 'users', uid),
+    { online, lastSeen: serverTimestamp(), updatedAt: serverTimestamp() },
+    { merge: true },
+  );
+}
+
+/** Heartbeat: keep online=true and lastSeen fresh while foregrounded. */
+export const updateLastSeen = () => writePresence(true);
+
+/** Subscribe to another user's presence (explicit flag + lastSeen). */
+export function subscribePresence(uid: string, cb: (p: PresenceSnapshot) => void) {
+  return onSnapshot(
+    doc(db, 'users', uid),
+    snap => {
+      const d = snap.exists() ? snap.data() : null;
+      cb({ online: d?.online === true, lastSeenAt: d?.lastSeen?.toMillis?.() ?? null });
+    },
+    () => cb({ online: false, lastSeenAt: null }),
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -312,6 +424,131 @@ export async function addGroupMembers(conversationId: string, memberUids: string
   return res.data.added;
 }
 
+// ── External phone contacts (Phase 25) ──────────────────────────────────────
+
+export type ExternalMember = {
+  contactId:       string;
+  displayName:     string;
+  phoneE164:       string;
+  normalizedPhone: string;
+  isRegistered:    boolean;
+  linkedUid:       string | null;
+};
+
+export async function createPhoneContact(args: { displayName: string; phoneNumber: string; defaultCountry?: string }) {
+  const res = await fn<typeof args, { contactId: string; phoneE164: string; displayName: string; isRegistered: boolean; linkedUid: string | null; created: boolean }>(
+    'createPhoneContact',
+  )(args);
+  return res.data;
+}
+
+export async function addExternalContactToGroup(args: {
+  conversationId: string; contactId?: string; displayName?: string; phoneNumber?: string; defaultCountry?: string;
+}) {
+  const res = await fn<typeof args, { added: number; contactId: string; isRegistered?: boolean; alreadyMember?: boolean; alreadyExternal?: boolean }>(
+    'addExternalContactToGroup',
+  )(args);
+  return res.data;
+}
+
+export async function removeExternalContactFromGroup(conversationId: string, contactId: string): Promise<void> {
+  await fn<{ conversationId: string; contactId: string }, { removed: number }>(
+    'removeExternalContactFromGroup',
+  )({ conversationId, contactId });
+}
+
+export function subscribeExternalMembers(
+  conversationId: string,
+  cb: (rows: ExternalMember[]) => void,
+) {
+  return onSnapshot(
+    collection(db, 'conversations', conversationId, 'externalMembers'),
+    snap => cb(snap.docs.map(d => ({ contactId: d.id, ...(d.data() as Omit<ExternalMember, 'contactId'>) }))),
+    err => { if (__DEV__) console.warn('[conversations] subscribeExternalMembers failed:', err); },
+  );
+}
+
+// ── Group invite links (Phase 26) ───────────────────────────────────────────
+
+export type InviteJoinMode = 'open' | 'approval_required';
+
+export type InviteSettings = {
+  enabled: boolean;
+  inviteCode?: string;
+  joinMode: InviteJoinMode;
+  revokedAt?: unknown;
+};
+
+export type JoinRequest = {
+  requestId: string;
+  requesterUid: string;
+  requesterName: string;
+  requesterPhotoURL?: string | null;
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
+  requestedAt?: any;
+};
+
+export type InvitePreview = {
+  conversationId: string;
+  groupName: string;
+  groupPhotoURL: string | null;
+  memberCount: number;
+  joinMode: InviteJoinMode;
+  isMember: boolean;
+  hasPendingRequest: boolean;
+  status: 'can_join' | 'already_member' | 'request_pending' | 'disabled';
+};
+
+export async function createOrUpdateGroupInviteLink(conversationId: string, enabled: boolean, joinMode: InviteJoinMode) {
+  const res = await fn<{ conversationId: string; enabled: boolean; joinMode: InviteJoinMode }, { inviteCode: string; enabled: boolean; joinMode: InviteJoinMode; url: string }>(
+    'createOrUpdateGroupInviteLink',
+  )({ conversationId, enabled, joinMode });
+  return res.data;
+}
+
+export async function resetGroupInviteLink(conversationId: string) {
+  const res = await fn<{ conversationId: string }, { inviteCode: string; url: string }>('resetGroupInviteLink')({ conversationId });
+  return res.data;
+}
+
+export async function resolveGroupInviteLink(inviteCode: string): Promise<InvitePreview> {
+  const res = await fn<{ inviteCode: string }, InvitePreview>('resolveGroupInviteLink')({ inviteCode });
+  return res.data;
+}
+
+export async function joinGroupByInviteLink(inviteCode: string) {
+  const res = await fn<{ inviteCode: string }, { status: 'joined' | 'pending' | 'already_member'; conversationId: string }>('joinGroupByInviteLink')({ inviteCode });
+  return res.data;
+}
+
+export async function approveGroupJoinRequest(conversationId: string, requestId: string) {
+  await fn<{ conversationId: string; requestId: string }, { ok: true }>('approveGroupJoinRequest')({ conversationId, requestId });
+}
+
+export async function rejectGroupJoinRequest(conversationId: string, requestId: string, reason?: string) {
+  await fn<{ conversationId: string; requestId: string; reason?: string }, { ok: true }>('rejectGroupJoinRequest')({ conversationId, requestId, reason });
+}
+
+export async function cancelMyJoinRequest(conversationId: string, requestId: string) {
+  await fn<{ conversationId: string; requestId: string }, { ok: true }>('cancelMyJoinRequest')({ conversationId, requestId });
+}
+
+export function subscribeInviteSettings(conversationId: string, cb: (s: InviteSettings | null) => void) {
+  return onSnapshot(
+    doc(db, 'conversations', conversationId, 'inviteSettings', 'current'),
+    snap => cb(snap.exists() ? (snap.data() as InviteSettings) : null),
+    err => { if (__DEV__) console.warn('[conversations] subscribeInviteSettings failed:', err); },
+  );
+}
+
+export function subscribePendingJoinRequests(conversationId: string, cb: (rows: JoinRequest[]) => void) {
+  return onSnapshot(
+    query(collection(db, 'conversations', conversationId, 'joinRequests'), where('status', '==', 'pending')),
+    snap => cb(snap.docs.map(d => ({ requestId: d.id, ...(d.data() as Omit<JoinRequest, 'requestId'>) }))),
+    err => { if (__DEV__) console.warn('[conversations] subscribePendingJoinRequests failed:', err); },
+  );
+}
+
 export async function removeGroupMember(conversationId: string, memberUid: string): Promise<void> {
   await fn<{ conversationId: string; memberUid: string }, { ok: true }>(
     'removeMember',
@@ -352,6 +589,7 @@ export function subscribeMembers(
         .filter(m => (m.status ?? 'active') === 'active');
       cb(rows);
     },
+    err => { if (__DEV__) console.warn('[conversations] subscribeMembers failed:', err); },
   );
 }
 

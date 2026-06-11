@@ -135,7 +135,7 @@ service cloud.firestore {
       // timeFormat are user-controlled preference fields.
       return [
         'displayName', 'photoURL', 'about', 'profileCompleted',
-        'fcmTokens', 'lastSeen', 'updatedAt',
+        'fcmTokens', 'lastSeen', 'online', 'updatedAt',
         'smsOptOut',
         'preferredLanguage', 'preferredTheme', 'inAppNotifications', 'timeFormat'
       ];
@@ -202,6 +202,24 @@ service cloud.firestore {
       allow update: if isAdmin() ||
                        (isSelf(uid) && onlyAllowedUserProfileUpdates());
       allow delete: if isAdmin();
+
+      // Push device tokens (Phase 27) — a user manages only their own devices;
+      // the backend (Admin SDK) sends to them + purges dead ones.
+      match /devices/{deviceId} {
+        allow read, write: if isSelf(uid) || isAdmin();
+      }
+
+      // Per-user notification preferences (Phase 27) — own read/write only.
+      match /notificationSettings/{docId} {
+        allow read, write: if isSelf(uid) || isAdmin();
+      }
+
+      // In-app notifications feed (e.g. group-join approved) — own read; writes
+      // are server-only (Admin SDK).
+      match /notifications/{notifId} {
+        allow read:  if isSelf(uid) || isAdmin();
+        allow write: if isAdmin();
+      }
     }
 
     // ════════════════════════════════════════════════════════════
@@ -262,6 +280,33 @@ service cloud.firestore {
                             get(/databases/$(database)/documents/conversations/$(convoId)).data.type != 'group'
                             && (isGroupAdmin(convoId) || isSelf(uid))
                           );
+      }
+
+      // Group invite settings (Phase 26). Members may read the current invite
+      // (so the admin UI shows live state); ALL writes are server-only via the
+      // invite callables (Admin SDK).
+      match /inviteSettings/{docId} {
+        allow read:  if isMember(convoId) || isConversationParticipant(convoId) || isAdmin();
+        allow write: if isAdmin();
+      }
+
+      // Join requests (Phase 26). A group admin sees every request; a requester
+      // sees only their own. Writes are server-only (join/approve/reject/cancel
+      // callables).
+      match /joinRequests/{requestId} {
+        allow read:  if isAdmin() || isGroupAdmin(convoId) || isSelf(requestId)
+                       || (isAuthed() && resource.data.requesterUid == request.auth.uid);
+        allow write: if isAdmin();
+      }
+
+      // External phone-only members (Phase 25). Group members can read them
+      // (so the roster + recipient list render); ALL writes are server-only via
+      // the addExternalContactToGroup / removeExternalContactFromGroup /
+      // linkPhoneContacts callables (Admin SDK). isRegistered/linkedUid in
+      // particular must only ever be set by trusted backend code.
+      match /externalMembers/{contactId} {
+        allow read:  if isMember(convoId) || isConversationParticipant(convoId) || isAdmin();
+        allow write: if isAdmin();
       }
 
       // Per-user conversation state (Phase 4).
@@ -340,6 +385,40 @@ service cloud.firestore {
         allow read:  if isAuthed();
         allow write: if isAdmin();
       }
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // RELAY (Phase 24 — OfflineSMS-Business private SMS gateway)
+    //
+    // All writes flow through Admin-SDK callables (createRelayPairingCode,
+    // enrollRelayDevice, claim/report, revoke), so writes are locked here.
+    // Reads are business-scoped: an org admin reads only its own business's
+    // devices; relay devices use callables (Admin SDK) and never read jobs
+    // directly. Pairing codes are never client-readable (one-time secrets).
+    // ════════════════════════════════════════════════════════════
+    function isOrgAdminOf(businessId) {
+      return isAuthed()
+        && request.auth.token.get('role', '') == 'organization_admin'
+        && request.auth.token.get('organizationId', '') == businessId;
+    }
+    match /relayDevices/{deviceId} {
+      allow read:  if isAdmin() || isOrgAdminOf(resource.data.businessId);
+      allow write: if isAdmin();
+    }
+    match /relayJobs/{jobId} {
+      allow read:  if isAdmin();
+      allow write: if isAdmin();
+    }
+    match /relayPairingCodes/{code} {
+      allow read, write: if isAdmin();
+    }
+    match /smsConfig/{docId} {
+      allow read:  if isAdmin();
+      allow write: if isAdmin();
+    }
+    // OTP challenges — written/read only by the OTP callables (Admin SDK).
+    match /otpChallenges/{phoneKey} {
+      allow read, write: if isAdmin();
     }
 
     // ════════════════════════════════════════════════════════════
@@ -500,6 +579,52 @@ service cloud.firestore {
                           resource.data.toUserId   == request.auth.uid
                        ));
       allow write: if false;
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // PHONE CONTACTS (Phase 25) — a user's private, phone-only contacts.
+    //
+    // An owner may read their own contacts. All writes are server-only via the
+    // createPhoneContact callable (Admin SDK) so normalization, dedupe, and the
+    // server-controlled fields (isRegistered / linkedUid) can't be forged.
+    // Cross-organization exposure is prevented by ownerUid scoping: a contact
+    // is only ever readable by the user who created it.
+    // ════════════════════════════════════════════════════════════
+    match /phoneContacts/{contactId} {
+      allow read:  if isAdmin() || (isAuthed() && resource.data.ownerUid == request.auth.uid);
+      allow write: if isAdmin();
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // BROADCAST NOTIFICATIONS (Phase 28) — admin-composed push announcements.
+    // Read is admin-only (the page lists past broadcasts); ALL writes are
+    // server-only via the createNotificationBroadcast / sendNotificationBroadcast
+    // callables. organization_admin's audience scope is enforced server-side.
+    // ════════════════════════════════════════════════════════════
+    match /notificationBroadcasts/{broadcastId} {
+      allow read:  if isAdmin();
+      allow write: if isAdmin();
+      match /deliveries/{deliveryId} {
+        allow read:  if isAdmin();
+        allow write: if isAdmin();
+      }
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // INVITE CODES (Phase 26) — reverse index code → group. Fully locked:
+    // clients resolve/join only through the invite callables, so the mapping
+    // (and which groups exist) is never enumerable from the client. Deleting a
+    // code doc on reset makes old links stop resolving immediately.
+    // ════════════════════════════════════════════════════════════
+    match /inviteCodes/{code} {
+      allow read, write: if isAdmin();
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // RATE LIMITS (Phase 26) — server-only counters for invite join attempts.
+    // ════════════════════════════════════════════════════════════
+    match /rateLimits/{key} {
+      allow read, write: if false;
     }
 
     // ════════════════════════════════════════════════════════════

@@ -24,7 +24,7 @@ export default function Status() {
         <Text style={s.h1}>{t('status.title')}</Text>
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingBottom: 96 }}>
+      <ScrollView contentContainerStyle={{ paddingBottom: 150 }}>
         <Pressable
           style={s.myRow}
           onPress={() => Alert.alert(t('status.myStatus'), t('status.comingSoon'))}

@@ -61,25 +61,22 @@ export default function SmsEscalation({ route, navigation }: any) {
   const [previewBusy, setPreviewBusy] = useState(false);
   const [previewErr, setPreviewErr]   = useState<string | null>(null);
 
-  const [smsBody, setSmsBody]     = useState(buildDefaultSmsBody(null, messageText));
+  const [smsBody, setSmsBody]     = useState(buildDefaultSmsBody(messageText));
   const [confirmed, setConfirmed] = useState(false);
   const [step, setStep]           = useState<Step>('audience');
 
   const [result, setResult]   = useState<EscalationResult | null>(null);
   const [resultErr, setResultErr] = useState<string | null>(null);
 
-  // Pull the conversation name (groups) or peer name fallback so the
-  // generated SMS body is informative without leaking content.
+  // Track the conversation name (groups) for display. The SMS body defaults to
+  // the original message and is owned by the user once editable, so it isn't
+  // re-set here.
   useEffect(() => {
     return onSnapshot(doc(db, 'conversations', conversationId), snap => {
       const data = snap.data() as { name?: string; type?: string } | undefined;
-      if (!data) return;
-      if (data.name) {
-        setConversationName(data.name);
-        setSmsBody(buildDefaultSmsBody(data.name, messageText));
-      }
+      if (data?.name) setConversationName(data.name);
     });
-  }, [conversationId, messageText]);
+  }, [conversationId]);
 
   // Re-run preview whenever audience changes.
   useEffect(() => {

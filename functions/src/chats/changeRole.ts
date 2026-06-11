@@ -1,7 +1,8 @@
 // Callable: promote/demote a group member.
 //
-// Owner-only. Cannot change the owner role from this path; owner-transfer
-// is deferred to a later phase. Target must be an active member.
+// Owner or admin may call this. Cannot change the owner's role from this
+// path; owner-transfer is deferred to a later phase. Target must be an
+// active member, and the caller cannot change their own role.
 
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
@@ -43,8 +44,10 @@ export const changeRole = onCall(async (request) => {
   if ((convoSnap.data() as { type?: string }).type !== 'group') {
     throw new HttpsError('failed-precondition', 'not-a-group');
   }
-  if ((callerSnap.data()?.role ?? '') !== 'owner') {
-    throw new HttpsError('permission-denied', 'owner-required');
+  const callerRole = (callerSnap.data()?.role ?? '') as string;
+  const callerActive = (callerSnap.data()?.status ?? 'active') === 'active';
+  if (!callerActive || (callerRole !== 'owner' && callerRole !== 'admin')) {
+    throw new HttpsError('permission-denied', 'admins-only');
   }
   if (!targetSnap.exists) throw new HttpsError('not-found', 'member-not-found');
   if ((targetSnap.data()?.status ?? 'active') !== 'active') {

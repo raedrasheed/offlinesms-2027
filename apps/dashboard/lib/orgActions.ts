@@ -22,8 +22,11 @@ function validate(data: FormData): {
   const slug   = (data.get('slug')   as string | null)?.trim().toLowerCase() ?? '';
   const status = (data.get('status') as string | null)?.trim() ?? 'active';
   const ownerUid = (data.get('ownerUid') as string | null)?.trim() ?? '';
-  const smsEnabled    = data.get('smsEnabled')    === 'true';
-  const pointsEnabled = data.get('pointsEnabled') === 'true';
+  // Toggle posts a hidden "false" + a checkbox "true" under the same name, so
+  // read all values and treat a present "true" as checked (get() returns the
+  // hidden "false" first and would never register the checked state).
+  const smsEnabled    = data.getAll('smsEnabled').includes('true');
+  const pointsEnabled = data.getAll('pointsEnabled').includes('true');
   const defaultLanguage = (data.get('defaultLanguage') as string | null)?.trim() ?? 'en';
   const timezone = (data.get('timezone') as string | null)?.trim() ?? 'UTC';
 

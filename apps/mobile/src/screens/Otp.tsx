@@ -1,16 +1,19 @@
 import { useEffect, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, SafeAreaView } from 'react-native';
+import { View, Text, Pressable, StyleSheet, SafeAreaView, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius } from '../theme';
 import NumberPad from '../components/NumberPad';
+import { verifyPhoneOtpAndSignIn, requestPhoneOtp, otpErrorCopy } from '../lib/auth';
 
 const LENGTH = 6;
 const RESEND_SECONDS = 42;
 
 export default function Otp({ navigation, route }: any) {
-  const phone: string = route?.params?.phone ?? '+1 (415) 555-0188';
+  const phone: string = route?.params?.phone ?? '';
   const [code, setCode] = useState('');
   const [remaining, setRemaining] = useState(RESEND_SECONDS);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
     if (remaining <= 0) return;
@@ -18,16 +21,29 @@ export default function Otp({ navigation, route }: any) {
     return () => clearInterval(t);
   }, [remaining]);
 
+  // Auto-verify once all digits are entered.
+  useEffect(() => {
+    if (code.length !== LENGTH || busy) return;
+    setBusy(true); setErr(null);
+    verifyPhoneOtpAndSignIn(phone, code)
+      // On success the app's auth listener routes onward — nothing to do here.
+      .catch((e: any) => { setErr(otpErrorCopy(e?.message ?? e?.code)); setCode(''); })
+      .finally(() => setBusy(false));
+  }, [code, busy, phone]);
+
   function pressDigit(d: string) {
-    if (code.length >= LENGTH) return;
+    if (busy || code.length >= LENGTH) return;
+    setErr(null);
     setCode(c => c + d);
   }
   function pressDelete() {
     setCode(c => c.slice(0, -1));
   }
-  function resend() {
-    if (remaining > 0) return;
-    setRemaining(RESEND_SECONDS);
+  async function resend() {
+    if (remaining > 0 || busy) return;
+    setErr(null); setCode('');
+    try { await requestPhoneOtp(phone); setRemaining(RESEND_SECONDS); }
+    catch (e: any) { setErr(otpErrorCopy(e?.message ?? e?.code)); }
   }
 
   const mm = Math.floor(remaining / 60).toString().padStart(1, '0');
@@ -53,6 +69,9 @@ export default function Otp({ navigation, route }: any) {
           );
         })}
       </View>
+
+      {busy ? <ActivityIndicator style={{ marginTop: 16 }} color={colors.primary} /> : null}
+      {err ? <Text style={s.err}>{err}</Text> : null}
 
       <View style={s.resendRow}>
         <Text style={s.didnt}>Didn’t receive?</Text>
@@ -81,6 +100,7 @@ const s = StyleSheet.create({
   boxFilled: { borderColor: colors.ink300 },
   boxActive: { borderColor: colors.primary, borderWidth: 2 },
   boxText:   { fontSize: 24, fontWeight: '800', color: colors.ink },
+  err:       { marginTop: 14, fontSize: 13, color: '#B91C1C', fontWeight: '600' },
 
   resendRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 18 },
   didnt:  { fontSize: 13, color: colors.ink500 },

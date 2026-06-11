@@ -4,6 +4,10 @@ import { initializeApp } from 'firebase-admin/app';
 initializeApp();
 
 export { onMessageCreate } from './chats/onMessageCreate';
+export { onMessageCreateNotify } from './notifications/onMessageCreateNotify';
+export {
+  estimateBroadcastAudience, createNotificationBroadcast, sendNotificationBroadcast,
+} from './notifications/broadcasts';
 export { getOrCreateDirectConversation } from './chats/getOrCreateDirectConversation';
 export { sendTextMessage }                from './chats/sendTextMessage';
 
@@ -18,6 +22,17 @@ export { addMembers }    from './chats/addMembers';
 export { removeMember }  from './chats/removeMember';
 export { changeRole }    from './chats/changeRole';
 export { leaveGroup }    from './chats/leaveGroup';
+
+// Phase 25 — external phone contacts.
+export { createPhoneContact } from './contacts/createPhoneContact';
+export { addExternalContactToGroup, removeExternalContactFromGroup } from './contacts/externalMembers';
+export { linkPhoneContactsOnUserWrite } from './contacts/linkPhoneContacts';
+
+// Phase 26 — group invite links.
+export {
+  createOrUpdateGroupInviteLink, resetGroupInviteLink, resolveGroupInviteLink,
+  joinGroupByInviteLink, approveGroupJoinRequest, rejectGroupJoinRequest, cancelMyJoinRequest,
+} from './chats/groupInvites';
 export { lockGroup }     from './chats/lockGroup';
 
 // Phase 6 — message actions.
@@ -80,3 +95,16 @@ export { adminSetWalletStatus } from './admin/adminSetWalletStatus';
 
 // Phase 18 — org-scoped role assignment.
 export { adminSetOrgRole } from './admin/adminSetOrgRole';
+
+// Phase 24 — OfflineSMS-Business relay (private, business-only SMS gateway).
+// Additive only: the HTTP provider path (escalateSms/gateway) is unchanged and
+// relay is gated by smsConfig/providers (default 'http').
+export { createRelayPairingCode, enrollRelayDevice, relayHeartbeat, revokeRelayDevice } from './sms/relayDevices';
+export { claimRelayJobs, reportRelayDelivery } from './sms/relayJobs';
+// Relay-only reaper (Phase 3): lease expiry/requeue + stale-device offline +
+// metrics. Touches relay* collections only; no production SMS impact.
+export { relayReaper } from './sms/relayReaper';
+
+// Phase 24 — OTP over relay (custom-token phone sign-in; no Firebase phone auth).
+export { requestPhoneOtp } from './auth/requestPhoneOtp';
+export { verifyPhoneOtp } from './auth/verifyPhoneOtp';

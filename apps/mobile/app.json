@@ -23,11 +23,13 @@
         "NSPhotoLibraryUsageDescription": "OfflineSMS accesses your photo library to share images in conversations.",
         "NSPhotoLibraryAddUsageDescription": "OfflineSMS saves received media to your photo library.",
         "NSContactsUsageDescription": "OfflineSMS uses your contacts to help you find and message people."
-      }
+      },
+      "associatedDomains": ["applinks:offlinesms.com"]
     },
     "android": {
       "package": "app.offlinesms.mobile",
       "versionCode": 1,
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#01A0E1"
@@ -37,7 +39,16 @@
         "android.permission.RECORD_AUDIO",
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.READ_CONTACTS"
+        "android.permission.READ_CONTACTS",
+        "android.permission.POST_NOTIFICATIONS"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [{ "scheme": "https", "host": "offlinesms.com", "pathPrefix": "/join" }],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
       ]
     },
     "web": {
@@ -46,7 +57,14 @@
       "output": "static"
     },
     "plugins": [
-      "expo-localization"
+      "expo-localization",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/adaptive-icon.png",
+          "color": "#1F7BA8"
+        }
+      ]
     ]
   }
 }

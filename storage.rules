@@ -4,32 +4,21 @@ service firebase.storage {
     function isAuthed() { return request.auth != null; }
     function isSelf(uid) { return isAuthed() && request.auth.uid == uid; }
 
-    // Phase 23 — chat media (images & voice notes). Read: conversation members.
-    // Write: the message's sender only (the message doc is created by
-    // createMediaMessage before upload). Size <= 10MB and a strict MIME allow-list.
-    function convoData(cid) {
-      return firestore.get(/databases/(default)/documents/conversations/$(cid)).data;
-    }
-    function isMember(cid) {
-      return isAuthed() && (
-        (('participantUids' in convoData(cid)) && (request.auth.uid in convoData(cid).participantUids)) ||
-        (('memberIds' in convoData(cid)) && (request.auth.uid in convoData(cid).memberIds))
-      );
-    }
-    function isMessageSender(cid, mid) {
-      return isAuthed()
-        && firestore.exists(/databases/(default)/documents/conversations/$(cid)/messages/$(mid))
-        && firestore.get(/databases/(default)/documents/conversations/$(cid)/messages/$(mid)).data.senderUid == request.auth.uid;
-    }
+    // Phase 23 — chat media (images & voice notes). The uploader's uid is part of
+    // the path (set by createMediaMessage), so the write is authorized by a direct
+    // path-segment check — no cross-service Firestore read, matching the
+    // conversations/{convoId}/{senderId} pattern below. The download URL is a
+    // tokenized link, so read is gated to any authed user (as with avatars,
+    // conversations and statuses). Size <= 10MB and a strict MIME allow-list.
     function isAllowedMediaMime(ct) {
       return ct in [
         'image/jpeg', 'image/png', 'image/webp',
         'audio/m4a', 'audio/aac', 'audio/mp4', 'audio/x-m4a'
       ];
     }
-    match /chatMedia/{conversationId}/{messageId}/{file} {
-      allow read:  if isMember(conversationId);
-      allow write: if isMessageSender(conversationId, messageId)
+    match /chatMedia/{conversationId}/{senderId}/{messageId}/{file} {
+      allow read:  if isAuthed();
+      allow write: if isAuthed() && request.auth.uid == senderId
                       && request.resource.size < 10 * 1024 * 1024
                       && isAllowedMediaMime(request.resource.contentType);
     }

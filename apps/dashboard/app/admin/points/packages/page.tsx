@@ -83,7 +83,7 @@ export default async function PackagesPage() {
                   <td className="px-4 py-3 font-semibold" style={{ color: 'var(--c-text)' }}>{p.name}</td>
                   <td className="px-4 py-3 text-right font-mono text-[11px] font-bold" style={{ color: '#22C55E' }}>{p.points}</td>
                   <td className="px-4 py-3 text-right font-mono text-[11px]" style={{ color: '#F59E0B' }}>{p.bonusPoints || '—'}</td>
-                  <td className="px-4 py-3 text-right font-mono text-[11px]" style={{ color: 'var(--c-text-2)' }}>{p.price}</td>
+                  <td className="px-4 py-3 text-right font-mono text-[11px]" style={{ color: 'var(--c-text-2)' }}>{(p.price / 100).toFixed(2)}</td>
                   <td className="px-4 py-3 font-mono text-[11px]" style={{ color: 'var(--c-text-2)' }}>{p.currency}</td>
                   <td className="px-4 py-3"><StatusBadge status={p.status} /></td>
                   <td className="px-4 py-3 text-right text-[11px]" style={{ color: 'var(--c-text-4)' }}>{p.sortOrder}</td>

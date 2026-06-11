@@ -15,12 +15,48 @@
 
 import {
   signInWithPhoneNumber,
+  signInWithCustomToken,
   RecaptchaVerifier,
   type ConfirmationResult,
   type ApplicationVerifier,
 } from 'firebase/auth';
-import { auth } from './firebase';
+import { getFunctions, httpsCallable } from 'firebase/functions';
+import { auth, app } from './firebase';
 import { Platform } from 'react-native';
+import { setOffline } from '../services/presenceService';
+import { unregisterForPush } from './notifications';
+
+// ── OTP over relay (custom-token phone sign-in; no Firebase phone auth) ──
+const fns = () => getFunctions(app, 'us-central1');
+
+/** Request a sign-in OTP, sent via the OfflineSMS relay. */
+export async function requestPhoneOtp(phoneE164: string): Promise<void> {
+  await httpsCallable<{ phoneE164: string }, { ok: boolean }>(fns(), 'requestPhoneOtp')({ phoneE164 });
+}
+
+/** Verify the OTP and sign in with the returned custom token. */
+export async function verifyPhoneOtpAndSignIn(phoneE164: string, code: string): Promise<void> {
+  const res = await httpsCallable<{ phoneE164: string; code: string }, { customToken: string }>(
+    fns(), 'verifyPhoneOtp',
+  )({ phoneE164, code });
+  await signInWithCustomToken(auth, res.data.customToken);
+}
+
+/** Map an OTP callable error (message or code) to user-facing copy. */
+export function otpErrorCopy(reason?: string): string {
+  switch (reason) {
+    case 'phone-invalid':          return 'Enter a valid phone number.';
+    case 'otp-not-configured':     return 'Phone sign-in isn’t available yet. Please use email.';
+    case 'otp-cooldown':           return 'Please wait a moment before requesting another code.';
+    case 'otp-rate-limited':       return 'Too many codes requested. Try again later.';
+    case 'otp-not-requested':      return 'Request a code first.';
+    case 'otp-expired':            return 'That code expired — request a new one.';
+    case 'otp-too-many-attempts':  return 'Too many attempts — request a new code.';
+    case 'otp-incorrect':
+    case 'code-invalid':           return 'Incorrect code. Try again.';
+    default:                       return 'Something went wrong. Please try again.';
+  }
+}
 
 let confirmation: ConfirmationResult | null = null;
 let nativeVerifier: ApplicationVerifier | null = null;
@@ -118,6 +154,14 @@ export function cancelOtp(): void {
   confirmation = null;
 }
 
-export function signOut() {
+export async function signOut() {
+  // Stamp a final lastSeen (and stop the heartbeat) while still authenticated,
+  // so peers see the user go offline rather than "stuck online".
+  try { await setOffline(); } catch { /* best-effort */ }
+  // Disable this device's push token so a logged-out device stops receiving.
+  try {
+    const uid = auth.currentUser?.uid;
+    if (uid) await unregisterForPush(uid);
+  } catch { /* best-effort */ }
   return auth.signOut();
 }

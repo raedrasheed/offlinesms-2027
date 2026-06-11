@@ -10,6 +10,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { colors } from '../../theme';
 import type { Message } from '../../lib/conversations';
+import { useCachedMediaUri } from '../../hooks/useCachedMediaUri';
+import { useTransfer } from '../../hooks/useTransfer';
+import { retryDownload } from '../../media/mediaCache';
 import { formatDuration } from '../../media/mediaValidation';
 import { togglePlay, subscribePlayback } from '../../media/audio/audioPlayer';
 import { Waveform } from './Waveform';
@@ -24,12 +27,18 @@ export function VoiceMessageBubble({
 }) {
   const { t } = useTranslation();
   const media = message.media;
-  const uri = media?.downloadURL || media?.localUri || null;
+  const uri = useCachedMediaUri(message);
+  const transfer = useTransfer(message.id);
   const durationMs = media?.durationMs ?? 0;
   const status = media?.uploadStatus ?? 'uploaded';
   // Upload progress/retry only applies to your own outgoing message.
   const uploading = mine && (status === 'pending' || status === 'uploading');
-  const failed = mine && status === 'failed';
+  const uploadFailed = mine && status === 'failed';
+  // Download progress/retry applies to a received voice note being cached.
+  const downloading = !mine && transfer?.kind === 'download' && !transfer.failed;
+  const downloadFailed = !mine && transfer?.kind === 'download' && transfer.failed;
+  const busy = uploading || downloading;
+  const livePct = Math.round(((transfer?.progress ?? media?.uploadProgress ?? 0)) * 100);
 
   const [playing, setPlaying] = useState(false);
   const [positionMs, setPositionMs] = useState(0);
@@ -51,28 +60,34 @@ export function VoiceMessageBubble({
   const remaining = playing && positionMs > 0 ? Math.max(0, durationMs - positionMs) : durationMs;
 
   async function onPress() {
-    if (!uri || uploading || failed) return;
+    if (uploadFailed) { onRetry?.(); return; }
+    if (downloadFailed) { void retryDownload(message); return; }
+    if (!uri || busy) return;
     if (!playedRef.current) { playedRef.current = true; onPlayed?.(); }
     try { await togglePlay(message.id, uri); } catch { /* noop */ }
   }
 
+  const icon = downloadFailed ? 'arrow-down-circle'
+    : uploadFailed ? 'arrow-up-circle'
+    : playing ? 'pause' : 'play';
+
   return (
     <View style={s.row}>
       <Pressable
-        onPress={failed ? onRetry : onPress}
-        disabled={uploading}
+        onPress={onPress}
+        disabled={busy}
         style={[s.playBtn, mine ? s.playBtnMine : s.playBtnTheirs]}
         accessibilityRole="button"
-        accessibilityLabel={failed ? t('media.retryUpload') : t('media.tapToPlay')}
+        accessibilityLabel={
+          uploadFailed ? t('media.retryUpload')
+          : downloadFailed ? t('media.retryDownload')
+          : t('media.tapToPlay')
+        }
       >
-        {uploading ? (
+        {busy ? (
           <ActivityIndicator size="small" color={mine ? '#fff' : colors.primary} />
         ) : (
-          <Ionicons
-            name={failed ? 'refresh' : playing ? 'pause' : 'play'}
-            size={20}
-            color={mine ? '#fff' : colors.primary}
-          />
+          <Ionicons name={icon} size={20} color={mine ? '#fff' : colors.primary} />
         )}
       </Pressable>
 
@@ -85,7 +100,7 @@ export function VoiceMessageBubble({
           height={26}
         />
         <Text style={[s.duration, { color: sub }]}>
-          {uploading ? `${Math.round((media?.uploadProgress ?? 0) * 100)}%` : formatDuration(remaining)}
+          {busy ? `${livePct}%` : formatDuration(remaining)}
         </Text>
       </View>
     </View>

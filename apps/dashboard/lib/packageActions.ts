@@ -26,14 +26,17 @@ function validate(data: FormData): {
   if (!name)         return { error: 'Name is required.' };
   if (name.length > 80) return { error: 'Name must be 80 characters or less.' };
 
-  const points      = parseInt(pointsRaw,  10);
-  const bonusPoints = parseInt(bonusRaw,   10);
-  const price       = parseFloat(priceRaw);
-  const sortOrder   = parseInt(orderRaw,   10);
+  const points       = parseInt(pointsRaw,  10);
+  const bonusPoints  = parseInt(bonusRaw,   10);
+  const priceDollars = parseFloat(priceRaw);
+  const sortOrder    = parseInt(orderRaw,   10);
 
-  if (isNaN(points)      || points      <= 0)  return { error: 'Points must be a positive integer.' };
-  if (isNaN(bonusPoints) || bonusPoints <  0)  return { error: 'Bonus points must be 0 or greater.' };
-  if (isNaN(price)       || price       <  0)  return { error: 'Price must be 0 or greater.' };
+  if (isNaN(points)       || points       <= 0)  return { error: 'Points must be a positive integer.' };
+  if (isNaN(bonusPoints)  || bonusPoints  <  0)  return { error: 'Bonus points must be 0 or greater.' };
+  if (isNaN(priceDollars) || priceDollars <  0)  return { error: 'Price must be 0 or greater.' };
+  // Stored in the smallest currency unit (cents): the app and the purchase
+  // callable treat `price` as cents, so $2.99 → 299.
+  const price = Math.round(priceDollars * 100);
   if (!currency)                               return { error: 'Currency is required.' };
   if (currency.length > 10)                    return { error: 'Currency code too long.' };
   if (!['active', 'disabled'].includes(status)) return { error: 'Invalid status.' };

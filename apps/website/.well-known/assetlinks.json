@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "app.offlinesms.mobile",
+      "sha256_cert_fingerprints": [
+        "CC:B6:5F:82:A8:0B:E3:37:CA:7F:60:F6:E6:A2:0B:BE:4D:AB:3B:D3:42:61:E4:31:86:F9:B6:9C:4D:6B:99:D1"
+      ]
+    }
+  }
+]

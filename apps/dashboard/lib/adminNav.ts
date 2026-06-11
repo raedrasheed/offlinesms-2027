@@ -1,6 +1,6 @@
 import {
   BarChart3, Users, Inbox, MessageCircle, Phone,
-  Send, Coins, FileText, LifeBuoy, Shield, Settings, ScrollText, Building2, Globe, Flag, Bell,
+  Send, Coins, FileText, LifeBuoy, Shield, Settings, ScrollText, Building2, Globe, Flag, Bell, Smartphone,
   type LucideIcon,
 } from 'lucide-react';
 import type { AdminCapability } from './adminPermissions';
@@ -22,6 +22,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: '/admin/calls',         label: 'Calls',         icon: Phone,        capability: 'view:calls' },
   { href: '/admin/chats',         label: 'Chats',         icon: Inbox,        capability: 'view:groups' },
   { href: '/admin/sms',           label: 'SMS Gateway',   icon: Send,         capability: 'view:sms' },
+  { href: '/admin/relay',         label: 'SMS Relay',     icon: Smartphone,   capability: 'view:relay' },
   { href: '/admin/points',        label: 'Points',        icon: Coins,        capability: 'view:points' },
   { href: '/admin/reports',       label: 'Reports',       icon: FileText,     capability: 'view:reports' },
   { href: '/admin/support',       label: 'Support',       icon: LifeBuoy,     capability: 'view:support' },

@@ -1,0 +1,196 @@
+// Relay device lifecycle callables (Phase 24).
+//
+//   createRelayPairingCode — dashboard (org_admin/super_admin) → one-time code
+//   enrollRelayDevice      — relay app (UNAUTH; authenticated by the code) →
+//                            creates the device + returns a Firebase custom token
+//   relayHeartbeat         — device (custom-token auth) → liveness/health
+//   revokeRelayDevice      — dashboard → disable a device
+//
+// Business rule: relay is business-only. businessId = caller's organizationId
+// claim; only organization_admin (own org) or super_admin may manage devices.
+
+import { onCall, HttpsError } from 'firebase-functions/v2/https';
+import { getFirestore, FieldValue, Timestamp } from 'firebase-admin/firestore';
+import { getAuth } from 'firebase-admin/auth';
+import { writeAuditLog } from '../lib/auditLog';
+import {
+  generatePairingCode, isPairingCodeUsable, resolveBusinessId, canManageBusiness,
+  PAIRING_CODE_TTL_MS,
+} from './relayLogic';
+import { DEFAULT_RELAY_CAPS } from './relayTypes';
+
+const REGION = 'us-central1';
+
+export const createRelayPairingCode = onCall({ region: REGION }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'sign-in-required');
+  const token = request.auth?.token as Record<string, unknown> | undefined;
+  const data = (request.data ?? {}) as { businessId?: string; label?: string };
+
+  const businessId = resolveBusinessId(token, data.businessId);
+  if (!businessId) throw new HttpsError('permission-denied', 'relay-business-only');
+
+  const db = getFirestore();
+  const code = generatePairingCode();
+  const expiresAt = Timestamp.fromMillis(Date.now() + PAIRING_CODE_TTL_MS);
+  await db.collection('relayPairingCodes').doc(code).set({
+    code,
+    businessId,
+    createdByUid: uid,
+    label: typeof data.label === 'string' ? data.label.slice(0, 80) : null,
+    used: false,
+    expiresAt,
+    createdAt: FieldValue.serverTimestamp(),
+  });
+
+  await writeAuditLog({
+    action: 'relay.pairing.created', actor: { uid }, result: 'success',
+    target: { type: 'relayBusiness', id: businessId },
+    metadata: { businessId },
+  });
+
+  return { code, expiresAt: expiresAt.toMillis(), businessId };
+});
+
+export const enrollRelayDevice = onCall({ region: REGION }, async (request) => {
+  // Intentionally callable without Firebase auth — the device has no identity
+  // yet. It is authenticated by the one-time, business-scoped pairing code.
+  // TODO(security): enforce App Check once the relay app ships an attestation.
+  const data = (request.data ?? {}) as {
+    pairingCode?: string; deviceLabel?: string; fcmToken?: string; appVersion?: string;
+    androidInfo?: { manufacturer?: string; model?: string; androidVersion?: string };
+    simInfo?: Array<{ subscriptionId: number; slotIndex?: number; carrierName?: string }>;
+  };
+  if (typeof data.pairingCode !== 'string' || !data.pairingCode) {
+    throw new HttpsError('invalid-argument', 'pairingCode-required');
+  }
+
+  const db = getFirestore();
+  const codeRef = db.collection('relayPairingCodes').doc(data.pairingCode);
+  const deviceRef = db.collection('relayDevices').doc();
+  const deviceId = deviceRef.id;
+
+  // Validate the code (pre-read) and mint the device token BEFORE persisting
+  // anything, so a token-signing failure leaves no orphan device + the code
+  // unconsumed. The transaction below re-validates to close the race.
+  const preSnap = await codeRef.get();
+  if (!preSnap.exists) throw new HttpsError('not-found', 'pairing-code-invalid');
+  const pre = preSnap.data() as { businessId: string; createdByUid: string; used?: boolean; expiresAt?: Timestamp };
+  if (!isPairingCodeUsable({ used: pre.used, expiresAtMs: pre.expiresAt?.toMillis?.() ?? 0 }, Date.now())) {
+    throw new HttpsError('failed-precondition', 'pairing-code-expired-or-used');
+  }
+  const businessId = pre.businessId;
+
+  // Mint first — if this throws (e.g. missing Token Creator role), nothing was written.
+  const customToken = await getAuth().createCustomToken(deviceId, {
+    relayDevice: true, deviceId, businessId,
+  });
+
+  // Now consume the code + create the device atomically (re-check usability).
+  await db.runTransaction(async tx => {
+    const snap = await tx.get(codeRef);
+    if (!snap.exists) throw new HttpsError('not-found', 'pairing-code-invalid');
+    const c = snap.data() as { used?: boolean; expiresAt?: Timestamp };
+    if (!isPairingCodeUsable({ used: c.used, expiresAtMs: c.expiresAt?.toMillis?.() ?? 0 }, Date.now())) {
+      throw new HttpsError('failed-precondition', 'pairing-code-expired-or-used');
+    }
+    tx.update(codeRef, { used: true, usedAt: FieldValue.serverTimestamp(), deviceId });
+    tx.set(deviceRef, {
+      deviceId,
+      businessId,
+      ownerUid:       pre.createdByUid,
+      label:          typeof data.deviceLabel === 'string' ? data.deviceLabel.slice(0, 80) : 'Relay device',
+      status:         'active',
+      fcmToken:       typeof data.fcmToken === 'string' ? data.fcmToken : null,
+      appVersion:     typeof data.appVersion === 'string' ? data.appVersion : null,
+      androidVersion: data.androidInfo?.androidVersion ?? null,
+      manufacturer:   data.androidInfo?.manufacturer ?? null,
+      model:          data.androidInfo?.model ?? null,
+      simInfo:        Array.isArray(data.simInfo) ? data.simInfo.slice(0, 4) : [],
+      caps:           DEFAULT_RELAY_CAPS,
+      counters:       { sentToday: 0, failedToday: 0, deliveredToday: 0 },
+      lastHeartbeatAt: FieldValue.serverTimestamp(),
+      lastSeenAt:      FieldValue.serverTimestamp(),
+      createdAt:       FieldValue.serverTimestamp(),
+      updatedAt:       FieldValue.serverTimestamp(),
+    });
+  });
+
+  await writeAuditLog({
+    action: 'relay.device.enrolled', actor: { uid: deviceId },
+    target: { type: 'relayDevice', id: deviceId }, result: 'success',
+    metadata: { businessId },
+  });
+
+  return { deviceId, businessId, customToken };
+});
+
+export const relayHeartbeat = onCall({ region: REGION }, async (request) => {
+  const token = request.auth?.token as Record<string, unknown> | undefined;
+  const data = (request.data ?? {}) as {
+    deviceId?: string; fcmToken?: string; appVersion?: string;
+    simInfo?: unknown[]; queueDepth?: number; sentToday?: number;
+    failedToday?: number; lastError?: string;
+  };
+  if (token?.relayDevice !== true || typeof data.deviceId !== 'string' || token.deviceId !== data.deviceId) {
+    throw new HttpsError('permission-denied', 'not-a-relay-device');
+  }
+
+  const db = getFirestore();
+  const ref = db.collection('relayDevices').doc(data.deviceId);
+  const snap = await ref.get();
+  if (!snap.exists) throw new HttpsError('not-found', 'device-not-found');
+  if (snap.get('status') === 'revoked') throw new HttpsError('permission-denied', 'device-revoked');
+
+  const wasOffline = snap.get('status') === 'offline';
+  const patch: Record<string, unknown> = {
+    lastHeartbeatAt: FieldValue.serverTimestamp(),
+    lastSeenAt:      FieldValue.serverTimestamp(),
+    updatedAt:       FieldValue.serverTimestamp(),
+  };
+  if (typeof data.fcmToken === 'string')   patch.fcmToken = data.fcmToken;
+  if (typeof data.appVersion === 'string') patch.appVersion = data.appVersion;
+  if (Array.isArray(data.simInfo))         patch.simInfo = data.simInfo.slice(0, 4);
+  if (typeof data.sentToday === 'number')   patch['counters.sentToday'] = data.sentToday;
+  if (typeof data.failedToday === 'number') patch['counters.failedToday'] = data.failedToday;
+  // Revive an 'offline' device that's heartbeating again (don't override pause).
+  if (wasOffline) patch.status = 'active';
+  await ref.update(patch);
+
+  // Audit only meaningful transitions, not every heartbeat.
+  if (wasOffline) {
+    await writeAuditLog({
+      action: 'relay.device.online', actor: { uid: data.deviceId },
+      target: { type: 'relayDevice', id: data.deviceId }, result: 'success',
+    });
+  }
+  return { ok: true };
+});
+
+export const revokeRelayDevice = onCall({ region: REGION }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'sign-in-required');
+  const token = request.auth?.token as Record<string, unknown> | undefined;
+  const data = (request.data ?? {}) as { deviceId?: string };
+  if (typeof data.deviceId !== 'string' || !data.deviceId) {
+    throw new HttpsError('invalid-argument', 'deviceId-required');
+  }
+
+  const db = getFirestore();
+  const ref = db.collection('relayDevices').doc(data.deviceId);
+  const snap = await ref.get();
+  if (!snap.exists) throw new HttpsError('not-found', 'device-not-found');
+  if (!canManageBusiness(token, snap.get('businessId'))) {
+    throw new HttpsError('permission-denied', 'not-your-business');
+  }
+
+  await ref.update({ status: 'revoked', revokedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
+  try { await getAuth().revokeRefreshTokens(data.deviceId); } catch { /* best-effort */ }
+
+  await writeAuditLog({
+    action: 'relay.device.revoked', actor: { uid },
+    target: { type: 'relayDevice', id: data.deviceId }, result: 'success',
+    metadata: { businessId: snap.get('businessId') },
+  });
+  return { ok: true };
+});

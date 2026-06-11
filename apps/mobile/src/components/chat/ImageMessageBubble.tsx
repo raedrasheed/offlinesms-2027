@@ -10,6 +10,9 @@ import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { colors } from '../../theme';
 import type { Message } from '../../lib/conversations';
+import { useCachedMediaUri } from '../../hooks/useCachedMediaUri';
+import { useTransfer } from '../../hooks/useTransfer';
+import { retryDownload } from '../../media/mediaCache';
 import { MediaUploadProgress } from './MediaUploadProgress';
 
 const MAX_W = 230;
@@ -26,7 +29,8 @@ export function ImageMessageBubble({
 }) {
   const { t } = useTranslation();
   const media = message.media;
-  const uri = media?.downloadURL || media?.localUri || null;
+  const uri = useCachedMediaUri(message);
+  const transfer = useTransfer(message.id);
 
   // Frame height from aspect ratio when known, else a sensible default box.
   let h = 170;
@@ -36,16 +40,20 @@ export function ImageMessageBubble({
   }
 
   const status = media?.uploadStatus ?? 'uploaded';
-  // Upload progress/retry only applies to your own outgoing message. A received
-  // image is never "uploading" on this device — show it (or a placeholder).
+  // Upload progress/retry only applies to your own outgoing message.
   const uploading = mine && (status === 'pending' || status === 'uploading');
-  const failed = mine && status === 'failed';
+  const uploadFailed = mine && status === 'failed';
+  const uploadPct = transfer?.kind === 'upload' ? transfer.progress : (media?.uploadProgress ?? 0);
+  // Download progress/retry applies to a received image being cached.
+  const downloading = !mine && transfer?.kind === 'download' && !transfer.failed;
+  const downloadFailed = !mine && transfer?.kind === 'download' && transfer.failed;
   const caption = message.caption?.trim();
+  const busy = uploading || uploadFailed || downloadFailed;
 
   return (
     <View>
       <Pressable
-        onPress={() => uri && !uploading && !failed && onOpen(uri)}
+        onPress={() => uri && !busy && onOpen(uri)}
         accessibilityRole="imagebutton"
         accessibilityLabel={t('media.openImage')}
         style={[s.frame, { width: MAX_W, height: h }]}
@@ -56,10 +64,16 @@ export function ImageMessageBubble({
           <View style={[s.image, s.placeholder]} />
         )}
         {uploading ? (
-          <MediaUploadProgress progress={media?.uploadProgress ?? 0} />
+          <MediaUploadProgress progress={uploadPct} mode="upload" />
         ) : null}
-        {failed ? (
-          <MediaUploadProgress progress={0} failed onRetry={onRetry} />
+        {uploadFailed ? (
+          <MediaUploadProgress progress={0} failed mode="upload" onRetry={onRetry} />
+        ) : null}
+        {downloading ? (
+          <MediaUploadProgress progress={transfer?.progress ?? 0} mode="download" />
+        ) : null}
+        {downloadFailed ? (
+          <MediaUploadProgress progress={0} failed mode="download" onRetry={() => { void retryDownload(message); }} />
         ) : null}
         {footer ? <View style={s.footerOverlay}>{footer}</View> : null}
       </Pressable>

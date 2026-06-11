@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList, View, Text, TextInput, Pressable, StyleSheet, Alert,
   KeyboardAvoidingView, Platform, PanResponder, Image,
@@ -8,12 +8,10 @@ import { doc, onSnapshot } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 import {
   subscribeMessages,
-  subscribeTyping,
   subscribeUserState,
   sendTextMessage,
   markRead,
   markReceipt,
-  setTyping,
   editMessage,
   pinMessage,
   Conversation as ConversationDoc,
@@ -26,6 +24,12 @@ import {
 } from '../lib/conversations';
 import type { ReactorInfo } from '../components/ReactionsSheet';
 import { useUserProfiles } from '../lib/userProfiles';
+import { useChatPresence, formatPresenceSubtitle } from '../hooks/useChatPresence';
+import { useTypingPresence } from '../hooks/useTypingPresence';
+import { useRecordingPresence } from '../hooks/useRecordingPresence';
+import { stopTyping } from '../services/presenceService';
+import { useWallpaper } from '../lib/wallpaper';
+import { ChatWallpaperBackground } from '../components/ChatWallpaperBackground';
 import { Ionicons } from '@expo/vector-icons';
 import { MessageBubble } from '../components/MessageBubble';
 import { useTheme } from '../context/ThemeContext';
@@ -40,6 +44,7 @@ import { useMessagePersistence } from '../hooks/useLocalPersistence';
 import { queueSendMessage, queueEditMessage, queueMarkReceipt, retryMediaMessage, queueSendVoiceMessage, openLocalDb } from '../localdb';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
+import { prefetchMedia } from '../media/mediaCache';
 import { AttachmentSheet } from '../components/chat/AttachmentSheet';
 import { VoiceRecorderBar } from '../components/chat/VoiceRecorderBar';
 import { LockedVoiceRecorderBar } from '../components/chat/LockedVoiceRecorderBar';
@@ -49,6 +54,12 @@ import { validateMediaMessage, type AttachmentKey } from '../media/mediaValidati
 type ComposerGate =
   | { kind: 'allowed' }
   | { kind: 'blocked'; reason: string };
+
+// Stable no-op callbacks reused for pending-bubble props (which can never
+// actually fire). Sharing one reference each lets MessageBubble's memo
+// comparator skip re-renders.
+const NOOP_MSG: (m: Message) => void = () => {};
+const NOOP_ID: (id: string) => void  = () => {};
 
 function gateFor(
   convo: ConversationDoc | null | undefined,
@@ -76,6 +87,8 @@ export default function Conversation({ route, navigation }: any) {
   const { id } = route.params as { id: string };
   const me = auth.currentUser?.uid ?? '';
   const { isOffline, enqueue, queuedFor, deliveredFor, deliveredNonce } = useOffline();
+  const wallpaper = useWallpaper(id);
+  const wallpaperUri = wallpaper.type === 'custom' ? wallpaper.uri : undefined;
 
   // Phase 22C — local-first conversation (flag-gated). `useLocal` is true only
   // when the flag is on AND the local DB initialised; otherwise the Firestore +
@@ -105,7 +118,6 @@ export default function Conversation({ route, navigation }: any) {
   const [peerName, setPeerName] = useState<string>('Chat');
   const [peerUsername, setPeerUsername] = useState<string | null>(null);
   const [peerUid, setPeerUid] = useState<string | null>(null);
-  const [peerTyping, setPeerTyping] = useState(false);
   const [myRole, setMyRole] = useState<GroupRole | null>(null);
   const [memberStatus, setMemberStatus] = useState<'active' | 'removed' | 'left' | 'unknown'>('unknown');
   const [userState, setUserState] = useState<UserState | null>(null);
@@ -115,11 +127,19 @@ export default function Conversation({ route, navigation }: any) {
 
   const listRef = useRef<FlatList<Message>>(null);
 
-  // Conversation doc.
+  // Conversation doc. Firestore hands us a fresh object on every snapshot —
+  // even when nothing actually changed for this screen (e.g. lastMessage
+  // updates on every message). Dedupe via JSON so unchanged snapshots don't
+  // re-render the whole conversation tree.
   useEffect(() => {
     if (!id) return;
+    let prevKey: string | null = null;
     return onSnapshot(doc(db, 'conversations', id), snap => {
-      setConvo(snap.exists() ? ({ id, ...snap.data() } as ConversationDoc) : null);
+      const next = snap.exists() ? ({ id, ...snap.data() } as ConversationDoc) : null;
+      const nextKey = next ? JSON.stringify(next) : '';
+      if (nextKey === prevKey) return;
+      prevKey = nextKey;
+      setConvo(next);
     });
   }, [id]);
 
@@ -214,20 +234,10 @@ export default function Conversation({ route, navigation }: any) {
     return map;
   }, [members, memberProfiles]);
 
-  // Typing indicator.
-  useEffect(() => {
-    if (!id) return;
-    return subscribeTyping(id, rows => setPeerTyping(rows.length > 0));
-  }, [id]);
-
-  // Outbound typing (only when not editing — editing isn't a send).
-  useEffect(() => {
-    if (!id || editing) return;
-    if (!draft) { setTyping(id, false).catch(() => {}); return; }
-    setTyping(id, true).catch(() => {});
-    const handle = setTimeout(() => setTyping(id, false).catch(() => {}), 3500);
-    return () => clearTimeout(handle);
-  }, [draft, id, editing]);
+  // Presence: peer online/last-seen + everyone's typing/recording activity.
+  const presence = useChatPresence(id, isDirect ? peerUid : null);
+  // Outbound typing (debounced; auto-stops on send/clear/leave; off while editing).
+  useTypingPresence(id, draft, !editing);
 
   // Restore a saved draft when opening the chat.
   useEffect(() => {
@@ -277,13 +287,18 @@ export default function Conversation({ route, navigation }: any) {
     return effectiveMsgs.filter(m => !deletedForMe.has(m.id));
   }, [effectiveMsgs, deletedForMe]);
 
-  function jumpTo(messageId: string) {
+  // Cache media to the device so images/voice load instantly on revisit.
+  useEffect(() => { if (visibleMsgs) prefetchMedia(visibleMsgs); }, [visibleMsgs]);
+
+  // Bubble handlers — useCallback so MessageBubble's memo comparator sees
+  // stable references and only re-renders when its own data changes.
+  const jumpTo = useCallback((messageId: string) => {
     if (!visibleMsgs) return;
     const idx = visibleMsgs.findIndex(m => m.id === messageId);
     if (idx >= 0) listRef.current?.scrollToIndex?.({ index: idx, animated: true, viewPosition: 0.3 });
-  }
+  }, [visibleMsgs]);
 
-  function startReply(m: Message) {
+  const startReply = useCallback((m: Message) => {
     if (m.deletedForEveryone) return;
     setEditing(null);
     setReplyTo({
@@ -294,23 +309,23 @@ export default function Conversation({ route, navigation }: any) {
       type:              'text',
       createdAt:         m.createdAt,
     });
-  }
-  function startEdit(m: Message) {
+  }, []);
+  const startEdit = useCallback((m: Message) => {
     setReplyTo(null);
     setEditing({ messageId: m.id, originalText: m.text ?? '' });
     setDraft(m.text ?? '');
-  }
+  }, []);
   function cancelEdit() {
     setEditing(null);
     setDraft('');
   }
-  function startForward(m: Message) {
+  const startForward = useCallback((m: Message) => {
     navigation.navigate('ForwardPicker', {
       sourceConversationId: id,
       messageIds: [m.id],
     });
-  }
-  function openInfo(m: Message) {
+  }, [navigation, id]);
+  const openInfo = useCallback((m: Message) => {
     navigation.navigate('MessageInfo', {
       id,
       messageId:   m.id,
@@ -319,8 +334,11 @@ export default function Conversation({ route, navigation }: any) {
       isGroup,
       groupName:   isGroup ? peerName : null,
       memberCount: convo?.memberCount ?? null,
+      mediaUploadError: m.type !== 'text' && m.media?.uploadStatus === 'failed'
+        ? { code: m.errorCode ?? null, message: m.errorMessage ?? null }
+        : null,
     });
-  }
+  }, [navigation, id, isGroup, peerName, convo?.memberCount]);
   async function unpin() {
     const messageId = convo?.pinnedMessage?.messageId;
     if (!messageId) return;
@@ -364,8 +382,13 @@ export default function Conversation({ route, navigation }: any) {
     }
   }
 
-  const openImage = (uri: string) => navigation.navigate('ImageViewer', { uri });
-  const retryMedia = (msg: Message) => { void retryMediaMessage(msg.id); };
+  const openImage  = useCallback((uri: string) => navigation.navigate('ImageViewer', { uri }), [navigation]);
+  const retryMedia = useCallback((msg: Message) => { void retryMediaMessage(msg.id); }, []);
+  const onSendViaSms = useCallback((msg: Message) => navigation.navigate('SmsEscalation', {
+    conversationId: id,
+    messageId:      msg.id,
+    messageText:    msg.text,
+  }), [navigation, id]);
 
   function confirmClearChat() {
     Alert.alert(
@@ -377,16 +400,28 @@ export default function Conversation({ route, navigation }: any) {
       ],
     );
   }
-  const onPlayedVoice = (msg: Message) => {
+  const onPlayedVoice = useCallback((msg: Message) => {
     if (msg.senderUid !== me) void queueMarkReceipt({ conversationId: id, messageId: msg.id, status: 'played' });
-  };
+  }, [id, me]);
 
   // Phase 23 — voice recording (hold mic → record, slide left → cancel, swipe up → lock).
   const recorder = useVoiceRecorder();
   const modeRef = useRef(recorder.mode);
   useEffect(() => { modeRef.current = recorder.mode; }, [recorder.mode]);
+  // Publish recording presence while the recorder is active (recording/locked).
+  useRecordingPresence(id, recorder.mode === 'recording' || recorder.mode === 'locked');
   const cancelArmedRef = useRef(false);
   const [cancelArmed, setCancelArmed] = useState(false);
+  // Hold threshold: a quick tap on the mic must not start recording (otherwise
+  // a tap → release races recorder.start() and ends up sending an empty/
+  // too-short voice note). Recording only starts after the user has held the
+  // mic for ~250ms; releasing earlier cancels the pending start cleanly.
+  const HOLD_MS = 250;
+  const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startedRef   = useRef(false);
+  function clearHoldTimer() {
+    if (holdTimerRef.current) { clearTimeout(holdTimerRef.current); holdTimerRef.current = null; }
+  }
   // Refs so the PanResponder (created once) reads current values.
   const draftEmptyRef = useRef(true);
   const editingRef = useRef(false);
@@ -432,10 +467,19 @@ export default function Conversation({ route, navigation }: any) {
       onPanResponderTerminationRequest: () => false,
       onShouldBlockNativeResponder: () => true,
       onPanResponderGrant: () => {
-        void (async () => {
-          const ok = await recorder.start();
-          if (!ok) Alert.alert(t('media.microphonePermissionTitle'), t('media.microphonePermissionMessage'));
-        })();
+        // Schedule the actual start. A quick tap (release before HOLD_MS)
+        // cancels the timer and never enters the recorder, so there's no
+        // empty/too-short voice note and no race with stop().
+        startedRef.current = false;
+        clearHoldTimer();
+        holdTimerRef.current = setTimeout(() => {
+          holdTimerRef.current = null;
+          void (async () => {
+            const ok = await recorder.start();
+            if (!ok) { Alert.alert(t('media.microphonePermissionTitle'), t('media.microphonePermissionMessage')); return; }
+            startedRef.current = true;
+          })();
+        }, HOLD_MS);
       },
       onPanResponderMove: (_evt, g) => {
         if (modeRef.current !== 'recording') return;
@@ -444,14 +488,21 @@ export default function Conversation({ route, navigation }: any) {
         if (armed !== cancelArmedRef.current) { cancelArmedRef.current = armed; setCancelArmed(armed); }
       },
       onPanResponderRelease: () => {
+        // Released before the hold threshold → no recording was ever started.
+        if (holdTimerRef.current) { clearHoldTimer(); return; }
         void (async () => {
           if (modeRef.current === 'locked') return; // locked → use bar buttons
           if (cancelArmedRef.current) { cancelArmedRef.current = false; setCancelArmed(false); await recorder.cancel(); return; }
+          if (!startedRef.current)    { await recorder.cancel(); return; } // start() failed
           const res = await recorder.stop();
+          startedRef.current = false;
           await sendVoice(res);
         })();
       },
-      onPanResponderTerminate: () => { if (modeRef.current !== 'locked') void recorder.cancel(); },
+      onPanResponderTerminate: () => {
+        if (holdTimerRef.current) { clearHoldTimer(); return; }
+        if (modeRef.current !== 'locked' && startedRef.current) void recorder.cancel();
+      },
     }),
   ).current;
 
@@ -484,20 +535,20 @@ export default function Conversation({ route, navigation }: any) {
         setReplyTo(null);
         setDraft('');
         clearDraft(id);
-        setTyping(id, false).catch(() => {});
+        stopTyping(id);
       } else if (isOffline) {
         // Offline-first: persist locally and deliver on reconnect.
         await enqueue({ conversationId: id, conversationType: isGroup ? 'group' : 'direct', text, replyTo: replyTo ?? null });
         setReplyTo(null);
         setDraft('');
         clearDraft(id);
-        setTyping(id, false).catch(() => {});
+        stopTyping(id);
       } else {
         await sendTextMessage(id, text, replyTo);
         setReplyTo(null);
         setDraft('');
         clearDraft(id);
-        setTyping(id, false).catch(() => {});
+        stopTyping(id);
       }
     } catch (e: any) {
       setErr(e?.message ?? 'send-failed');
@@ -509,24 +560,42 @@ export default function Conversation({ route, navigation }: any) {
   const s = buildStyles(colors, isRTL);
 
   const headerSubtitle = useMemo(() => {
-    if (peerTyping) return 'typing…';
-    if (!isGroup) return 'Online';
-    return convo?.memberCount ? `${convo.memberCount} members${convo?.status === 'locked' ? ' · locked' : ''}` : null;
-  }, [peerTyping, isGroup, convo?.memberCount, convo?.status]);
+    const groupFallback = convo?.memberCount
+      ? `${convo.memberCount} members${convo?.status === 'locked' ? ' · locked' : ''}`
+      : '';
+    return formatPresenceSubtitle(presence, {
+      isGroup,
+      t,
+      nameFor: (uid) => reactorNames[uid]?.name ?? memberProfiles[uid]?.displayName ?? uid.slice(0, 6),
+      groupFallback,
+    }) || null;
+  }, [presence, isGroup, convo?.memberCount, convo?.status, reactorNames, memberProfiles, t]);
 
   const queued = queuedFor(id);
+
+  // Build the queued (legacy offline-queue) bubbles separately so we can
+  // memoise them by `queued` reference and keep `data` stable when nothing
+  // changed.
+  const queuedItems = useMemo(() => queued.map(q => ({
+    id:             q.localQueueId,
+    conversationId: id,
+    senderUid:      me,
+    type:           'text' as const,
+    text:           q.text,
+    createdAt:      { toMillis: () => q.createdAt },
+    __pending:      q.status as 'queued' | 'syncing' | 'failed',
+  })), [queued, id, me]);
+
+  // Single useMemo for the FlatList `data` so its reference is stable when
+  // neither input changed — saves FlatList an O(n) diff per parent render.
+  const data = useMemo<any[]>(() => {
+    if (!visibleMsgs) return [];
+    if (queuedItems.length === 0) return visibleMsgs;
+    return [...visibleMsgs, ...queuedItems];
+  }, [visibleMsgs, queuedItems]);
+
   const body = useMemo(() => {
     if (visibleMsgs === null) return <LoadingState fullPage title="Loading messages…" />;
-
-    const queuedItems = queued.map(q => ({
-      id:             q.localQueueId,
-      conversationId: id,
-      senderUid:      me,
-      type:           'text' as const,
-      text:           q.text,
-      createdAt:      { toMillis: () => q.createdAt },
-      __pending:      q.status as 'queued' | 'syncing' | 'failed',
-    }));
 
     if (visibleMsgs.length === 0 && queuedItems.length === 0) return (
       <View style={s.emptyConvo}>
@@ -547,7 +616,6 @@ export default function Conversation({ route, navigation }: any) {
       </View>
     );
 
-    const data: any[] = [...visibleMsgs, ...queuedItems];
     return (
       <FlatList
         ref={listRef}
@@ -565,6 +633,15 @@ export default function Conversation({ route, navigation }: any) {
           </View>
         }
         onContentSizeChange={() => listRef.current?.scrollToEnd?.({ animated: false })}
+        // FlatList tuning: only render what's near the viewport on first
+        // paint, batch new rows in small windows, and let RN unmount rows
+        // that scroll out of the viewport on Android. Big wins for long
+        // chat histories.
+        initialNumToRender={15}
+        maxToRenderPerBatch={10}
+        windowSize={10}
+        updateCellsBatchingPeriod={50}
+        removeClippedSubviews={Platform.OS === 'android'}
         renderItem={({ item, index }) => {
           if (item.__pending) {
             return (
@@ -573,11 +650,11 @@ export default function Conversation({ route, navigation }: any) {
                 pending={item.__pending}
                 showSender={false}
                 context={{ conversationId: id, isGroup, isMyMessage: true, myRoleIsAdmin, isStarred: false, isPinned: false, myUid: me, memberCount: convo?.memberCount, localFirst: useLocal }}
-                onReply={() => {}}
-                onEditStart={() => {}}
-                onForward={() => {}}
-                onJumpTo={() => {}}
-                onInfo={() => {}}
+                onReply={NOOP_MSG}
+                onEditStart={NOOP_MSG}
+                onForward={NOOP_MSG}
+                onJumpTo={NOOP_ID}
+                onInfo={NOOP_MSG}
               />
             );
           }
@@ -608,20 +685,19 @@ export default function Conversation({ route, navigation }: any) {
               onOpenImage={openImage}
               onRetryMedia={retryMedia}
               onPlayedVoice={onPlayedVoice}
-              onSendViaSms={msg => navigation.navigate('SmsEscalation', {
-                conversationId: id,
-                messageId:      msg.id,
-                messageText:    msg.text,
-              })}
+              onSendViaSms={onSendViaSms}
             />
           );
         }}
       />
     );
-  }, [visibleMsgs, queued, me, isGroup, id, myRoleIsAdmin, starred, convo?.pinnedMessage, convo?.memberCount, reactorNames]);
+  }, [data, visibleMsgs, queuedItems, me, isGroup, id, myRoleIsAdmin, starred, convo?.pinnedMessage, convo?.memberCount, reactorNames, useLocal, startReply, startEdit, startForward, jumpTo, openInfo, openImage, retryMedia, onPlayedVoice, onSendViaSms]);
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.root}>
+      {/* Wallpaper layer — absolute-fill, behind everything; theme bg is the
+          fallback when no wallpaper is set. Memoised on the URI. */}
+      <ChatWallpaperBackground uri={wallpaperUri} />
       <View style={s.header}>
         <Pressable
           onPress={() => navigation.goBack()}
@@ -646,12 +722,21 @@ export default function Conversation({ route, navigation }: any) {
                 <Text style={s.headerAvatarText}>{initials(peerName)}</Text>
               </View>
             )}
-            {!isGroup ? <View style={s.onlineDot} /> : null}
+            {!isGroup && presence.online ? <View style={s.onlineDot} /> : null}
           </View>
           <View style={{ flex: 1 }}>
             <Text style={s.title} numberOfLines={1}>{peerName}</Text>
             {headerSubtitle ? <Text style={s.subtitle}>{headerSubtitle}</Text> : null}
           </View>
+        </Pressable>
+        <Pressable
+          onPress={() => navigation.navigate('ChatWallpaper', { conversationId: id })}
+          hitSlop={10}
+          style={s.headerMenuBtn}
+          accessibilityRole="button"
+          accessibilityLabel="Chat wallpaper"
+        >
+          <Ionicons name="image-outline" size={20} color={colors.text.muted} />
         </Pressable>
         <Pressable
           onPress={confirmClearChat}
@@ -756,26 +841,50 @@ export default function Conversation({ route, navigation }: any) {
               </>
             ) : (
               <>
-                {!editing ? (
-                  <Pressable
-                    style={s.attachBtn}
-                    onPress={() => setAttachOpen(true)}
-                    accessibilityRole="button"
-                    accessibilityLabel={t('media.attach')}
-                  >
-                    <Ionicons name="add" size={24} color={colors.text.muted} />
-                  </Pressable>
-                ) : null}
-                <TextInput
-                  value={draft}
-                  onChangeText={setDraft}
-                  placeholder={editing ? t('messageActions.editingMessage') : isOffline ? 'Type · saved as draft' : t('convo.composerPlaceholder')}
-                  style={s.input}
-                  multiline
-                  maxLength={4000}
-                  textAlign={isRTL ? 'right' : 'left'}
-                  accessibilityLabel={t('convo.composerPlaceholder')}
-                />
+                <View style={s.inputPill}>
+                  {!editing ? (
+                    <Pressable
+                      style={s.inlineIconLead}
+                      onPress={() => { /* emoji picker hook-in (no-op for now) */ }}
+                      accessibilityRole="button"
+                      accessibilityLabel="Emoji"
+                    >
+                      <Ionicons name="happy-outline" size={24} color={colors.text.muted} />
+                    </Pressable>
+                  ) : null}
+                  <TextInput
+                    value={draft}
+                    onChangeText={setDraft}
+                    placeholder={editing ? t('messageActions.editingMessage') : isOffline ? 'Type · saved as draft' : t('convo.composerPlaceholder')}
+                    style={s.input}
+                    multiline
+                    maxLength={4000}
+                    textAlign={isRTL ? 'right' : 'left'}
+                    accessibilityLabel={t('convo.composerPlaceholder')}
+                  />
+                  {!editing ? (
+                    <>
+                      <Pressable
+                        style={s.inlineIcon}
+                        onPress={() => setAttachOpen(true)}
+                        accessibilityRole="button"
+                        accessibilityLabel={t('media.attach')}
+                      >
+                        <Ionicons name="attach" size={22} color={colors.text.muted} />
+                      </Pressable>
+                      {draft.trim() === '' ? (
+                        <Pressable
+                          style={s.inlineIcon}
+                          onPress={() => onAttachSelect('camera')}
+                          accessibilityRole="button"
+                          accessibilityLabel={t('media.camera')}
+                        >
+                          <Ionicons name="camera-outline" size={22} color={colors.text.muted} />
+                        </Pressable>
+                      ) : null}
+                    </>
+                  ) : null}
+                </View>
                 {(draft.trim() !== '' || editing) ? (
                   <Pressable
                     style={[s.sendBtn, busy && { opacity: 0.4 }]}
@@ -794,7 +903,7 @@ export default function Conversation({ route, navigation }: any) {
                     accessibilityRole="button"
                     accessibilityLabel={t('media.holdToRecord')}
                   >
-                    <Ionicons name="mic" size={20} color={colors.action.primaryFg} />
+                    <Ionicons name="mic" size={22} color={colors.action.primaryFg} />
                   </View>
                 )}
               </>
@@ -815,7 +924,11 @@ export default function Conversation({ route, navigation }: any) {
 function buildStyles(colors: any, rtl: boolean) {
   return StyleSheet.create({
     root:     { flex: 1, backgroundColor: '#FFFFFF' },
-    msgList:  { flex: 1, backgroundColor: '#EAF2FB' },
+    // Transparent so the ChatWallpaperBackground layer (or theme fallback)
+    // shows through. The previous solid #EAF2FB now lives in the wallpaper
+    // component's fallback so there's no visual regression when no wallpaper
+    // is set.
+    msgList:  { flex: 1, backgroundColor: 'transparent' },
     emptyConvo:    { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40, gap: 6 },
     emptyAvatar:   { width: 96, height: 96, borderRadius: 48, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
     emptyAvatarText:{ color: '#fff', fontSize: 34, fontWeight: '800' },
@@ -848,10 +961,16 @@ function buildStyles(colors: any, rtl: boolean) {
     composerPreviewTitle: { fontSize: 11, fontWeight: '700', color: colors.action.primary, textAlign: rtl ? 'right' : 'left' },
     composerPreviewBody:  { fontSize: 12, color: colors.text.primary, marginTop: 2, textAlign: rtl ? 'right' : 'left' },
     composerPreviewClose: { fontSize: 18, color: colors.text.muted, fontWeight: '700', paddingHorizontal: 6, minWidth: 36, minHeight: 36, textAlignVertical: 'center', textAlign: 'center' },
-    composer: { padding: 12, paddingBottom: 24, flexDirection: rtl ? 'row-reverse' : 'row', gap: 8, alignItems: 'flex-end', backgroundColor: '#EAF2FB' },
-    input:    { flex: 1, minHeight: 40, maxHeight: 120, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: colors.background.surface, borderRadius: 22, borderWidth: 1, borderColor: colors.border.subtle, fontSize: 14, color: colors.text.primary },
+    // Composer bar is transparent — the wallpaper shows through to either side
+    // of the input pill, matching WhatsApp. Only the pill itself is opaque.
+    composer: { padding: 12, paddingBottom: 24, flexDirection: rtl ? 'row-reverse' : 'row', gap: 8, alignItems: 'flex-end', backgroundColor: 'transparent' },
+    // WhatsApp-style input pill: emoji (leading) + text field + attach + camera.
+    // Opaque surface so the input area stays constant over any wallpaper.
+    inputPill: { flex: 1, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', minHeight: 46, paddingHorizontal: 4, backgroundColor: colors.background.surface, borderRadius: 24, borderWidth: 1, borderColor: colors.border.subtle },
+    input:    { flex: 1, minHeight: 38, maxHeight: 120, paddingHorizontal: 6, paddingVertical: 8, backgroundColor: 'transparent', fontSize: 15, color: colors.text.primary },
+    inlineIconLead: { width: 38, height: 44, alignItems: 'center', justifyContent: 'center' },
+    inlineIcon: { width: 34, height: 44, alignItems: 'center', justifyContent: 'center' },
     sendBtn:  { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.action.primary, alignItems: 'center', justifyContent: 'center' },
-    attachBtn:{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
     micWrap:  { width: 40, alignItems: 'center', justifyContent: 'center' },
     micRecording: { transform: [{ scale: 1.5 }] },
     lockPill: { position: 'absolute', bottom: 52, width: 34, paddingVertical: 8, borderRadius: 18, backgroundColor: colors.background.surface, alignItems: 'center', gap: 4, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 4, shadowOffset: { width: 0, height: 1 }, elevation: 3 },

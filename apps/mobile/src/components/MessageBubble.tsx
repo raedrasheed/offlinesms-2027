@@ -12,7 +12,7 @@
 //
 // All state writes go through callables.
 
-import { useState } from 'react';
+import { memo, useMemo, useRef, useState } from 'react';
 import {
   View, Text, Pressable, Alert, StyleSheet, Clipboard, Image,
 } from 'react-native';
@@ -87,7 +87,7 @@ function formatTime(value: any): string {
   return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
-export function MessageBubble({
+function MessageBubbleImpl({
   message: m, context, showSender, onReply, onEditStart, onForward, onJumpTo, onInfo, onSendViaSms,
   onOpenImage, onRetryMedia, onPlayedVoice, pending, onRetry,
 }: MessageBubbleProps) {
@@ -102,6 +102,12 @@ export function MessageBubble({
   const senderName = m.senderDisplayName ?? senderProfile?.name ?? m.senderUid.slice(0, 2);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [reactionsOpen, setReactionsOpen] = useState(false);
+
+  // Memoise per-render allocations so a re-render (e.g. a sibling message
+  // changed) doesn't re-compute time strings, re-build the reactions list, or
+  // hand a fresh `{uri}` object to <Image> (which would re-mount the avatar).
+  const timeText      = useMemo(() => formatTime(m.createdAt), [m.createdAt]);
+  const senderImgSrc  = useMemo(() => (senderPhoto ? { uri: senderPhoto } : null), [senderPhoto]);
 
   if (pending) {
     return (
@@ -131,7 +137,7 @@ export function MessageBubble({
                 <Text style={[s.foot, { color: 'rgba(255,255,255,.85)' }]}>Queued · sends when online</Text>
               </>
             )}
-            <Text style={[s.foot, { color: 'rgba(255,255,255,.7)' }]}>{formatTime(m.createdAt)}</Text>
+            <Text style={[s.foot, { color: 'rgba(255,255,255,.7)' }]}>{timeText}</Text>
           </View>
         </View>
       </Pressable>
@@ -145,12 +151,12 @@ export function MessageBubble({
   const canDeleteForEveryone = !deleted && (mine || (context.isGroup && context.myRoleIsAdmin));
   const canPin = !deleted && (!context.isGroup || context.myRoleIsAdmin);
 
-  const reactionEntries = (() => {
+  const reactionEntries = useMemo(() => {
     if (!m.reactions) return [] as Array<{ emoji: string; count: number; mine: boolean }>;
     return Object.entries(m.reactions)
       .filter(([, uids]) => (uids ?? []).length > 0)
       .map(([emoji, uids]) => ({ emoji, count: uids.length, mine: uids.includes(context.myUid) }));
-  })();
+  }, [m.reactions, context.myUid]);
   const reactionTotal = reactionEntries.reduce((sum, r) => sum + r.count, 0);
   const iReacted = reactionEntries.some(r => r.mine);
   const showAvatar = context.isGroup && !mine;
@@ -158,11 +164,19 @@ export function MessageBubble({
   function copyText() {
     try { (Clipboard as any).setString?.(m.text ?? ''); } catch {}
   }
+  // Busy gate: drop a second tap on the SAME emoji while the first is still
+  // in flight. Without this a rapid double-tap fires two toggles back-to-back
+  // (the server is idempotent but the local optimistic state visibly flips
+  // twice and the outbox churns).
+  const reactInFlight = useRef<string | null>(null);
   async function react(emoji: string) {
+    if (reactInFlight.current === emoji) return;
+    reactInFlight.current = emoji;
     try {
       if (context.localFirst) await queueReactMessage({ conversationId: context.conversationId, messageId: m.id, emoji, uid: context.myUid });
       else await reactToMessage(context.conversationId, m.id, emoji);
     } catch (e: any) { Alert.alert('Couldn’t react', e?.message ?? 'try-again'); }
+    finally { reactInFlight.current = null; }
   }
   async function toggleStar() {
     try {
@@ -216,7 +230,7 @@ export function MessageBubble({
       {showAvatar ? (
         showSender ? (
           senderPhoto ? (
-            <Image source={{ uri: senderPhoto }} style={s.avatar} />
+            <Image source={senderImgSrc!} style={s.avatar} />
           ) : (
             <View style={[s.avatar, { backgroundColor: avatarColor(m.senderUid) }]}>
               <Text style={s.avatarText}>{initials(senderName)}</Text>
@@ -258,7 +272,7 @@ export function MessageBubble({
             onRetry={() => onRetryMedia?.(m)}
             footer={imageOverlayFooter ? (
               <>
-                <Text style={s.imgFootTime}>{formatTime(m.createdAt)}</Text>
+                <Text style={s.imgFootTime}>{timeText}</Text>
                 {mine ? <ReceiptIndicator message={m} isGroup={context.isGroup} memberCount={context.memberCount} /> : null}
               </>
             ) : null}
@@ -286,7 +300,7 @@ export function MessageBubble({
             {mine && !deleted ? (
               <ReceiptIndicator message={m} isGroup={context.isGroup} memberCount={context.memberCount} />
             ) : null}
-            <Text style={[s.foot, mine && { color: 'rgba(255,255,255,.7)' }]}>{formatTime(m.createdAt)}</Text>
+            <Text style={[s.foot, mine && { color: 'rgba(255,255,255,.7)' }]}>{timeText}</Text>
           </View>
         )}
       </Pressable>
@@ -397,3 +411,63 @@ const s = StyleSheet.create({
   reactionEmoji:  { fontSize: 13 },
   reactionCount:  { fontSize: 12, fontWeight: '700', color: colors.ink700, marginLeft: 2 },
 });
+
+// Precise equality so a parent re-render only re-renders bubbles whose data
+// actually changed. We compare specific message fields (reference compare for
+// nested objects: Firestore returns a new reactions/media object when those
+// change). Callback identity is expected to be stable from the parent — that's
+// what commit 2 sets up via useCallback.
+function areBubblePropsEqual(prev: MessageBubbleProps, next: MessageBubbleProps): boolean {
+  if (prev.showSender !== next.showSender) return false;
+  if (prev.pending    !== next.pending)    return false;
+
+  // Callbacks (parent stabilises them).
+  if (prev.onReply       !== next.onReply)       return false;
+  if (prev.onEditStart   !== next.onEditStart)   return false;
+  if (prev.onForward     !== next.onForward)     return false;
+  if (prev.onJumpTo      !== next.onJumpTo)      return false;
+  if (prev.onInfo        !== next.onInfo)        return false;
+  if (prev.onSendViaSms  !== next.onSendViaSms)  return false;
+  if (prev.onOpenImage   !== next.onOpenImage)   return false;
+  if (prev.onRetryMedia  !== next.onRetryMedia)  return false;
+  if (prev.onPlayedVoice !== next.onPlayedVoice) return false;
+  if (prev.onRetry       !== next.onRetry)       return false;
+
+  const a = prev.message, b = next.message;
+  if (a !== b) {
+    if (a.id !== b.id) return false;
+    if ((a as any).text !== (b as any).text) return false;
+    if ((a as any).caption !== (b as any).caption) return false;
+    if (a.type !== b.type) return false;
+    if (a.deletedForEveryone !== b.deletedForEveryone) return false;
+    if ((a as any).updatedAt !== (b as any).updatedAt) return false;
+    if ((a as any).editedAt !== (b as any).editedAt) return false;
+    if ((a as any).status !== (b as any).status) return false;
+    if (a.reactions     !== b.reactions)     return false; // ref compare
+    if ((a as any).pinnedBy  !== (b as any).pinnedBy)  return false;
+    if ((a as any).starredBy !== (b as any).starredBy) return false;
+    if ((a as any).media     !== (b as any).media)     return false; // media + upload progress
+    if ((a as any).replyTo   !== (b as any).replyTo)   return false;
+    if ((a as any).forwardedFrom !== (b as any).forwardedFrom) return false;
+    if (a.senderPhotoURL    !== b.senderPhotoURL)    return false;
+    if (a.senderDisplayName !== b.senderDisplayName) return false;
+  }
+
+  const c = prev.context, d = next.context;
+  if (c !== d) {
+    if (c.conversationId !== d.conversationId) return false;
+    if (c.isGroup        !== d.isGroup)        return false;
+    if (c.isMyMessage    !== d.isMyMessage)    return false;
+    if (c.myRoleIsAdmin  !== d.myRoleIsAdmin)  return false;
+    if (c.isStarred      !== d.isStarred)      return false;
+    if (c.isPinned       !== d.isPinned)       return false;
+    if (c.myUid          !== d.myUid)          return false;
+    if (c.memberCount    !== d.memberCount)    return false;
+    if (c.reactorNames   !== d.reactorNames)   return false; // ref compare
+    if (c.localFirst     !== d.localFirst)     return false;
+  }
+
+  return true;
+}
+
+export const MessageBubble = memo(MessageBubbleImpl, areBubblePropsEqual);

@@ -9,8 +9,13 @@ import {
   collection, getDocs, limit, onSnapshot, orderBy, query, where,
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
-import { addGroupMembers, groupErrorCopy } from '../lib/conversations';
+import { addGroupMembers, addExternalContactToGroup, groupErrorCopy } from '../lib/conversations';
 import { normalizeUsername } from '../lib/username';
+import { normalizePhoneToE164 } from '../lib/phone';
+import { LOCAL_FIRST_CONVERSATION_ENABLED } from '../config/features';
+import { queueAddExternalContactToGroup, getCurrentUid } from '../localdb';
+import { ContactPickerModal, type PickedContact } from '../components/ContactPickerModal';
+import { Ionicons } from '@expo/vector-icons';
 import { colors, radius } from '../theme';
 import { LoadingState, EmptyState, ErrorState } from '../components/state';
 
@@ -77,6 +82,79 @@ export default function AddMembers({ route, navigation }: any) {
   function add(u: UserRow) { setSelected(s => [...s, u]); setTerm(''); }
   function remove(uid: string) { setSelected(s => s.filter(u => u.uid !== uid)); }
 
+  // ── Add by phone (external phone-only contact) ──
+  const [phoneMode, setPhoneMode] = useState(false);
+  const [contactName, setContactName] = useState('');
+  const [contactPhone, setContactPhone] = useState('');
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [bulkPickerOpen, setBulkPickerOpen] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState<{ total: number; done: number; failed: number } | null>(null);
+
+  function applyPickedContact(c: PickedContact) {
+    setContactName(c.name);
+    setContactPhone(c.phoneE164);
+    setPickerOpen(false);
+  }
+
+  // Bulk add: iterate the picked contacts, persisting each via the local-first
+  // queue when available (so it survives offline / app restart), otherwise via
+  // the direct callable. Errors per contact are counted but never block the
+  // rest — we surface a single summary alert at the end.
+  async function applyBulkPickedContacts(cs: PickedContact[]) {
+    setBulkPickerOpen(false);
+    if (cs.length === 0) return;
+    const useLocalQueue = LOCAL_FIRST_CONVERSATION_ENABLED && !!getCurrentUid();
+    setBusy(true); setErr(null);
+    setBulkProgress({ total: cs.length, done: 0, failed: 0 });
+    let done = 0; let failed = 0;
+    for (const c of cs) {
+      try {
+        if (useLocalQueue) {
+          await queueAddExternalContactToGroup({ conversationId: id, displayName: c.name, phoneE164: c.phoneE164 });
+        } else {
+          await addExternalContactToGroup({ conversationId: id, displayName: c.name, phoneNumber: c.phoneE164 });
+        }
+        done++;
+      } catch {
+        failed++;
+      }
+      setBulkProgress({ total: cs.length, done: done + failed, failed });
+    }
+    setBusy(false);
+    setBulkProgress(null);
+    const summary = failed === 0
+      ? `Added ${done} contact${done === 1 ? '' : 's'} to the group.`
+      : `Added ${done}, failed ${failed}. Try again for the failed ones.`;
+    Alert.alert(failed === 0 ? 'Done' : 'Partially added', summary, [
+      { text: 'OK', onPress: () => failed === 0 ? navigation.goBack() : undefined },
+    ]);
+  }
+
+  async function addPhoneContact() {
+    const name = contactName.trim();
+    const e164 = normalizePhoneToE164(contactPhone.trim());
+    if (!name) { Alert.alert('Name required', 'Enter a contact name.'); return; }
+    if (!e164) { Alert.alert('Invalid number', 'Enter a phone number in international format, e.g. +972591234567.'); return; }
+    setBusy(true); setErr(null);
+    try {
+      // Local-first: queue optimistically (survives offline + app restart, shows
+      // immediately in GroupInfo). Falls back to the direct callable otherwise.
+      if (LOCAL_FIRST_CONVERSATION_ENABLED && getCurrentUid()) {
+        await queueAddExternalContactToGroup({ conversationId: id, displayName: name, phoneE164: e164 });
+        navigation.goBack();
+      } else {
+        const res = await addExternalContactToGroup({ conversationId: id, displayName: name, phoneNumber: e164 });
+        if (res.alreadyMember) Alert.alert('Already a member', 'That number already belongs to a member of this group.');
+        else if (res.alreadyExternal) Alert.alert('Already added', 'That contact is already in this group.');
+        else navigation.goBack();
+      }
+    } catch (e: any) {
+      const copy = groupErrorCopy(e?.code ?? 'internal');
+      setErr(copy);
+      Alert.alert('Couldn’t add contact', copy);
+    } finally { setBusy(false); }
+  }
+
   const canSubmit = selected.length > 0 && !busy;
 
   async function submit() {
@@ -103,6 +181,66 @@ export default function AddMembers({ route, navigation }: any) {
       </View>
 
       <ScrollView keyboardShouldPersistTaps="handled" style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }}>
+        <View style={s.modeRow}>
+          <Pressable style={[s.modeTab, !phoneMode && s.modeTabOn]} onPress={() => setPhoneMode(false)}>
+            <Text style={[s.modeTabText, !phoneMode && s.modeTabTextOn]}>Registered users</Text>
+          </Pressable>
+          <Pressable style={[s.modeTab, phoneMode && s.modeTabOn]} onPress={() => setPhoneMode(true)}>
+            <Text style={[s.modeTabText, phoneMode && s.modeTabTextOn]}>Add phone contact</Text>
+          </Pressable>
+        </View>
+
+        {phoneMode ? (
+          <View style={s.phonePanel}>
+            <Text style={s.phoneHint}>Add someone by phone number. They’ll receive group messages by SMS, and become a full member automatically if they sign up with that number.</Text>
+            <View style={s.pickRow}>
+              <Pressable style={[s.pickBtn, { flex: 1 }]} onPress={() => setPickerOpen(true)} disabled={busy}>
+                <Ionicons name="person-outline" size={18} color={colors.primary} />
+                <Text style={s.pickBtnText}>Pick one</Text>
+              </Pressable>
+              <Pressable style={[s.pickBtn, { flex: 1 }]} onPress={() => setBulkPickerOpen(true)} disabled={busy}>
+                <Ionicons name="people-outline" size={18} color={colors.primary} />
+                <Text style={s.pickBtnText}>Pick many</Text>
+              </Pressable>
+            </View>
+            {bulkProgress ? (
+              <Text style={s.phoneHint}>Adding {bulkProgress.done} of {bulkProgress.total}{bulkProgress.failed > 0 ? ` · ${bulkProgress.failed} failed` : ''}…</Text>
+            ) : null}
+            <TextInput
+              style={s.input}
+              value={contactName}
+              onChangeText={setContactName}
+              placeholder="Name"
+              autoFocus
+            />
+            <TextInput
+              style={s.input}
+              value={contactPhone}
+              onChangeText={setContactPhone}
+              placeholder="+972591234567"
+              keyboardType="phone-pad"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <Pressable style={[s.phoneBtn, busy && { opacity: 0.5 }]} onPress={addPhoneContact} disabled={busy}>
+              <Text style={s.phoneBtnText}>{busy ? 'Adding…' : 'Add to group'}</Text>
+            </Pressable>
+            {err ? <ErrorState compact title="Couldn’t complete" description={err} /> : null}
+            <ContactPickerModal
+              visible={pickerOpen}
+              onClose={() => setPickerOpen(false)}
+              onPick={applyPickedContact}
+            />
+            <ContactPickerModal
+              visible={bulkPickerOpen}
+              multi
+              onClose={() => setBulkPickerOpen(false)}
+              onPick={() => { /* unused in multi */ }}
+              onPickMulti={applyBulkPickedContacts}
+            />
+          </View>
+        ) : (
+        <>
         {selected.length > 0 ? (
           <View style={s.chips}>
             {selected.map(u => (
@@ -148,6 +286,8 @@ export default function AddMembers({ route, navigation }: any) {
             )}
           />
         ) : null}
+        </>
+        )}
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -170,4 +310,16 @@ const s = StyleSheet.create({
   name:   { fontSize: 14, fontWeight: '700', color: colors.ink },
   handle: { fontSize: 12, color: colors.ink500, marginTop: 2 },
   add:    { fontSize: 22, color: colors.primary, fontWeight: '700' },
+  modeRow:  { flexDirection: 'row', gap: 8, paddingHorizontal: 14, paddingTop: 14 },
+  modeTab:  { flex: 1, paddingVertical: 9, borderRadius: radius.pill, backgroundColor: '#fff', borderWidth: 1, borderColor: colors.ink200, alignItems: 'center' },
+  modeTabOn: { backgroundColor: colors.primary, borderColor: colors.primary },
+  modeTabText:   { fontSize: 13, fontWeight: '700', color: colors.ink500 },
+  modeTabTextOn: { color: '#fff' },
+  phonePanel: { paddingHorizontal: 14, paddingTop: 8, gap: 12 },
+  phoneHint:  { fontSize: 12, color: colors.ink500, lineHeight: 18, marginTop: 6 },
+  phoneBtn:   { padding: 14, backgroundColor: colors.primary, borderRadius: radius.md, alignItems: 'center' },
+  phoneBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  pickBtn:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 12, borderRadius: radius.md, backgroundColor: colors.primaryLight, borderWidth: 1, borderColor: colors.primary },
+  pickBtnText:{ color: colors.primary, fontWeight: '700', fontSize: 14 },
+  pickRow:    { flexDirection: 'row', gap: 8 },
 });

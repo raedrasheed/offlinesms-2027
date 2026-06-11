@@ -9,7 +9,7 @@ import {
   Users, Building2, MessageCircle, Globe,
   Inbox, Phone, Send,
   Coins, ArrowLeftRight,
-  LifeBuoy, Flag, Radio,
+  LifeBuoy, Flag, Radio, Smartphone,
   Shield, ScrollText, Bell, Settings,
   ChevronLeft, ChevronRight,
   type LucideIcon,
@@ -73,9 +73,11 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Operations',
     items: [
-      { href: '/admin/support',    label: 'Support',    icon: LifeBuoy, capability: 'view:support' },
-      { href: '/admin/moderation', label: 'Moderation', icon: Flag,     capability: 'view:moderation' },
-      { href: '/admin/sms',        label: 'Gateway',    icon: Radio,    capability: 'view:sms' },
+      { href: '/admin/support',    label: 'Support',    icon: LifeBuoy,   capability: 'view:support' },
+      { href: '/admin/moderation', label: 'Moderation', icon: Flag,       capability: 'view:moderation' },
+      { href: '/admin/sms',        label: 'Gateway',    icon: Radio,      capability: 'view:sms' },
+      { href: '/admin/relay',      label: 'SMS Relay',  icon: Smartphone, capability: 'view:relay' },
+      { href: '/admin/relay/send', label: 'Send SMS',   icon: Send,       capability: 'manage:relay' },
     ],
   },
   {
@@ -83,7 +85,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: '/admin/roles',         label: 'Roles & perms', icon: Shield,     capability: 'view:roles' },
       { href: '/admin/audit',         label: 'Audit logs',    icon: ScrollText, capability: 'view:audit' },
-      { href: '/admin/notifications', label: 'Notifications', icon: Bell,       capability: 'view:notifications' },
+      { href: '/admin/notifications', label: 'Notifications', icon: Bell,       capability: 'view:broadcast_notifications' },
       { href: '/admin/settings',      label: 'Settings',      icon: Settings,   capability: 'view:settings' },
     ],
   },

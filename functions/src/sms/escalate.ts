@@ -11,10 +11,15 @@ import { getFirestore, FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { sendBatch } from './gateway';
 import {
   canonicalAudience, classifyRecipients, filterByAudience, findAlreadySentUids,
+  loadExternalEligibles, isExternalRecipientId,
   AudienceInput,
   COOLDOWN_MS, COST_PER_SMS, MAX_BATCHES_PER_DAY, MAX_RECIPIENTS_PER_BATCH,
   todayKey,
 } from './recipients';
+import { resolveProvider, resolveDefaultRelayBusiness } from './provider';
+import { relayModeEngaged, isHybrid } from './relayLogic';
+import { dispatchBatchToRelay } from './relayDispatcher';
+import { maybeFinalizeRelayBatch } from './relaySettlement';
 import { writeAuditLog } from '../lib/auditLog';
 
 const SMS_BODY_MAX = 320;
@@ -119,6 +124,18 @@ export const escalateSms = onCall({ region: 'us-central1' }, async (request) => 
   const alreadySent = await findAlreadySentUids(db, uid, data.messageId);
   const { eligible, excluded } = await classifyRecipients(db, candidates, alreadySent);
 
+  // Phase 25 — include the group's external phone contacts in the recipient
+  // set. They get an `ext:<digits>` synthetic id and carry their own phone, so
+  // the rest of the pipeline (cost, relay jobs, recipient docs, settlement)
+  // treats them like any other recipient. Audience filters apply only to
+  // in-app receipts, so external contacts are always targeted (they have no
+  // in-app delivery state).
+  if (convo.type === 'group') {
+    const existingPhones = new Set(eligible.map(e => e.phone));
+    const externalEligible = await loadExternalEligibles(db, data.conversationId, participants, existingPhones);
+    for (const e of externalEligible) eligible.push(e);
+  }
+
   if (eligible.length === 0) throw new HttpsError('failed-precondition', 'no-eligible-recipients');
   if (eligible.length > MAX_RECIPIENTS_PER_BATCH) {
     throw new HttpsError('failed-precondition', 'audience-too-large');
@@ -150,6 +167,12 @@ export const escalateSms = onCall({ region: 'us-central1' }, async (request) => 
     recipientCount:    eligible.length,
     eligibleCount:     eligible.length,
     excludedCount:     excluded.length,
+    // Aggregate counters surfaced by the admin Gateway list.
+    totalCount:        eligible.length,
+    queuedCount:       eligible.length,
+    sentCount:         0,
+    deliveredCount:    0,
+    failedCount:       0,
     estimatedCost:     cost,
     pointsCost:        cost,
     pointsReserved:    cost,
@@ -209,6 +232,91 @@ export const escalateSms = onCall({ region: 'us-central1' }, async (request) => 
     await skipBatch.commit();
   }
 
+  // ── Phase 5: relay path (feature-flagged + organization-scoped) ──
+  // Default is HTTP. Relay engages only when the SENDER's organization is
+  // configured for 'relay' / hybrid. Billing is identical to HTTP: eligible
+  // recipients are 'queued' and the batch is set 'accepted', so the existing
+  // onSmsBatchAccepted settles unchanged (Points/refund logic untouched).
+  // Relay org: the sender's own org (org admins) or, for regular users with no
+  // org claim, the configured default relay business so escalations still route
+  // to the relay device.
+  const orgId = (request.auth?.token?.organizationId as string | undefined)
+    ?? (await resolveDefaultRelayBusiness());
+  const providerMode = await resolveProvider(orgId);
+
+  if (relayModeEngaged(providerMode) && orgId) {
+    const hybrid = isHybrid(providerMode);
+
+    // Mark eligible recipients queued (relay pending).
+    const recipBatch = db.batch();
+    for (const e of eligible) {
+      const ext = isExternalRecipientId(e.uid);
+      recipBatch.set(batchRef.collection('recipients').doc(e.uid), {
+        userId: e.uid, maskedPhone: e.maskedPhone, appReceiptStatus: e.appReceiptStatus,
+        smsStatus: 'queued', skipReason: null, reason: null, updatedAt: FieldValue.serverTimestamp(),
+        // External recipients have no users/{uid} doc, so the relay dispatcher
+        // reads the number straight off the recipient row.
+        ...(ext ? { isExternal: true, phoneE164: e.phone } : {}),
+      });
+    }
+    await recipBatch.commit();
+
+    // Route to devices. Relay-only queues unrouted recipients; hybrid returns
+    // them for HTTP fallback (no relay job exists for them → no double-send).
+    const dispatch = await dispatchBatchToRelay(batchRef.id, orgId, { allowUnassignedQueue: !hybrid });
+
+    let fallbackCount = 0;
+    if (hybrid && dispatch.unrouted.length > 0) {
+      const fb = eligible.filter(e => dispatch.unrouted.includes(e.uid));
+      fallbackCount = fb.length;
+      const fbWrites = db.batch();
+      try {
+        const r = await sendBatch(batchRef.id, smsBody, fb.map(e => ({ uid: e.uid, phone: e.phone, maskedPhone: e.maskedPhone })));
+        for (const e of fb) {
+          const ok = r.acceptedRecipientIds.includes(e.uid);
+          fbWrites.set(batchRef.collection('recipients').doc(e.uid),
+            { smsStatus: ok ? 'queued' : 'failed', reason: ok ? null : 'gateway-error', updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+        }
+      } catch {
+        for (const e of fb) fbWrites.set(batchRef.collection('recipients').doc(e.uid),
+          { smsStatus: 'failed', reason: 'gateway-error', updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      }
+      await fbWrites.commit();
+      await writeAuditLog({ action: 'relay.http_fallback', actor: { uid }, target: { type: 'message', id: data.messageId }, result: 'success', metadata: { batchId: batchRef.id, businessId: orgId, count: fallbackCount } });
+    }
+
+    // Relay batches stay 'sending'; settlement is deferred to completion
+    // reconciliation (maybeFinalizeRelayBatch → sending→completed → existing
+    // onSmsBatchAccepted), so later relay failures are refunded by the existing
+    // pipeline. The reservation is held until then.
+    await batchRef.update({ provider: providerMode, updatedAt: FieldValue.serverTimestamp() });
+    await quotaRef.set({
+      uid, date: day, batchCount: FieldValue.increment(1),
+      recipientCount: FieldValue.increment(eligible.length), pointsSpent: FieldValue.increment(cost),
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    // If nothing was routed to a relay device (e.g. hybrid where every recipient
+    // fell back to HTTP), there are no relay jobs to await → finalize now so the
+    // existing settlement runs immediately, just like the HTTP path.
+    let finalStatus = 'sending';
+    if (dispatch.routed === 0) {
+      const ok = await maybeFinalizeRelayBatch(batchRef.id);
+      if (ok) finalStatus = 'completed';
+    }
+
+    await writeAuditLog({
+      action: 'sms.escalation.accepted', actor: { uid }, target: { type: 'message', id: data.messageId }, result: 'success',
+      metadata: { batchId: batchRef.id, conversationId: data.conversationId, audience, provider: providerMode, routed: dispatch.routed, fallback: fallbackCount, pointsCost: cost },
+    });
+
+    return {
+      batchId: batchRef.id, offlineSmsBatchId: null,
+      sent: eligible.length, failed: 0, skipped: excluded.length,
+      pointsCost: cost, status: finalStatus, provider: providerMode,
+    };
+  }
+
   // Dispatch via OfflineSMS Gateway.
   let result: Awaited<ReturnType<typeof sendBatch>>;
   try {
@@ -235,6 +343,7 @@ export const escalateSms = onCall({ region: 'us-central1' }, async (request) => 
       userId:           e.uid,
       maskedPhone:      e.maskedPhone,
       appReceiptStatus: e.appReceiptStatus,
+      ...(isExternalRecipientId(e.uid) ? { isExternal: true, phoneE164: e.phone } : {}),
       smsStatus:        ok ? 'queued' : 'failed',
       skipReason:       null,
       reason:           ok ? null : (rejection?.reason ?? 'gateway-error'),
@@ -250,6 +359,8 @@ export const escalateSms = onCall({ region: 'us-central1' }, async (request) => 
     status:            finalStatus,
     gatewayBatchId:    result.gatewayBatchId,
     offlineSmsBatchId: result.gatewayBatchId,
+    queuedCount:       eligible.length - failedCount,
+    failedCount:       failedCount,
     updatedAt:         FieldValue.serverTimestamp(),
   });
   sendsBatch.set(quotaRef, {

@@ -50,6 +50,18 @@ describe('users/{uid}', () => {
     }));
   });
 
+  it('user can update own presence (online + lastSeen)', async () => {
+    await seed(async db => {
+      await setDoc(doc(db, 'users', 'u-self'), { displayName: 'Me', profileCompleted: true });
+    });
+    const db = await asUser('u-self');
+    await assertSucceeds(updateDoc(doc(db, 'users', 'u-self'), {
+      online: true,
+      lastSeen: new Date(),
+      updatedAt: new Date(),
+    }));
+  });
+
   it('user cannot set role or admin fields on own profile', async () => {
     await seed(async db => {
       await setDoc(doc(db, 'users', 'u-self'), { displayName: 'Me' });

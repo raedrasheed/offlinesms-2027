@@ -3,8 +3,7 @@
 // Permission matrix:
 //   owner  → can remove admins or members. Cannot remove self via this
 //            path — owners use leaveGroup (which has its own guard).
-//   admin  → can remove members only. Cannot remove owner. Cannot
-//            remove another admin (only owner can demote/remove admins).
+//   admin  → can remove admins or members. Cannot remove owner.
 //   member → denied.
 
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
@@ -50,9 +49,6 @@ export const removeMember = onCall(async (request) => {
 
   if (targetRole === 'owner') {
     throw new HttpsError('permission-denied', 'cannot-remove-owner');
-  }
-  if (callerRole === 'admin' && targetRole === 'admin') {
-    throw new HttpsError('permission-denied', 'owner-required-to-remove-admin');
   }
 
   const now = FieldValue.serverTimestamp();

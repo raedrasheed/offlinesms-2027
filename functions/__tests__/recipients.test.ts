@@ -79,3 +79,64 @@ describe('filterByAudience', () => {
     expect(candidates).toEqual([]);
   });
 });
+
+import {
+  isExternalRecipientId, externalRecipientId, loadExternalEligibles, EXTERNAL_PREFIX,
+} from '../src/sms/recipients';
+
+describe('external recipient ids', () => {
+  it('externalRecipientId prefixes the digits', () => {
+    expect(externalRecipientId('972591234567')).toBe(EXTERNAL_PREFIX + '972591234567');
+  });
+  it('isExternalRecipientId detects the prefix', () => {
+    expect(isExternalRecipientId('ext:972591234567')).toBe(true);
+    expect(isExternalRecipientId('uid-abc')).toBe(false);
+  });
+});
+
+// Minimal fake of the Firestore reads loadExternalEligibles performs:
+//   db.collection('conversations').doc(id).collection('externalMembers').get()
+function fakeDb(externalDocs: Array<Record<string, unknown>>) {
+  const snap = { empty: externalDocs.length === 0, docs: externalDocs.map(d => ({ data: () => d })) };
+  return {
+    collection: () => ({
+      doc: () => ({ collection: () => ({ get: async () => snap }) }),
+    }),
+  } as any;
+}
+
+describe('loadExternalEligibles (SMS recipient calculation includes external contacts)', () => {
+  it('includes an unregistered external contact', async () => {
+    const db = fakeDb([
+      { phoneE164: '+972591234567', normalizedPhone: '972591234567', displayName: 'Hashem', isRegistered: false, linkedUid: null },
+    ]);
+    const out = await loadExternalEligibles(db, 'g1', ['u-a'], new Set());
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ uid: 'ext:972591234567', phone: '+972591234567', displayName: 'Hashem' });
+  });
+
+  it('skips an external contact already linked to a participant (in-app path)', async () => {
+    const db = fakeDb([
+      { phoneE164: '+972591234567', normalizedPhone: '972591234567', displayName: 'Hashem', isRegistered: true, linkedUid: 'u-h' },
+    ]);
+    const out = await loadExternalEligibles(db, 'g1', ['u-a', 'u-h'], new Set());
+    expect(out).toHaveLength(0);
+  });
+
+  it('dedupes a phone already covered by a registered recipient', async () => {
+    const db = fakeDb([
+      { phoneE164: '+972591234567', normalizedPhone: '972591234567', displayName: 'Dup', isRegistered: false, linkedUid: null },
+    ]);
+    const out = await loadExternalEligibles(db, 'g1', ['u-a'], new Set(['+972591234567']));
+    expect(out).toHaveLength(0);
+  });
+
+  it('dedupes duplicate phones within the external set', async () => {
+    const db = fakeDb([
+      { phoneE164: '+972591234567', normalizedPhone: '972591234567', displayName: 'A', isRegistered: false, linkedUid: null },
+      { phoneE164: '+972591234567', normalizedPhone: '972591234567', displayName: 'B', isRegistered: false, linkedUid: null },
+    ]);
+    const out = await loadExternalEligibles(db, 'g1', ['u-a'], new Set());
+    expect(out).toHaveLength(1);
+  });
+});

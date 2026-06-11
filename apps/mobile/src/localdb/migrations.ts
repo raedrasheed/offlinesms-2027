@@ -6,7 +6,7 @@
 // whose version is greater than the database's current version, in order, and
 // returns the resulting version.
 
-import { ALL_TABLE_STATEMENTS, CREATE_INDEXES, MESSAGES_V2_COLUMNS, MESSAGES_V3_COLUMNS, SCHEMA_VERSION } from './schema';
+import { ALL_TABLE_STATEMENTS, CREATE_INDEXES, MESSAGES_V2_COLUMNS, MESSAGES_V3_COLUMNS, EXTERNAL_MEMBERS_V4, SCHEMA_VERSION } from './schema';
 
 export type SqlExec = (sql: string) => Promise<void>;
 
@@ -35,6 +35,13 @@ export const MIGRATIONS: Migration[] = [
     version: 3,
     up: async (exec) => {
       for (const stmt of MESSAGES_V3_COLUMNS) await exec(stmt);
+    },
+  },
+  {
+    // Phase 25 — external phone-only group members (local mirror).
+    version: 4,
+    up: async (exec) => {
+      for (const stmt of EXTERNAL_MEMBERS_V4) await exec(stmt);
     },
   },
 ];

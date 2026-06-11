@@ -46,12 +46,10 @@ export function smsSkipReasonCopy(reason: SmsSkipReason): string {
   }
 }
 
-export function buildDefaultSmsBody(conversationName: string | null | undefined, messageText: string | null | undefined): string {
-  const name = (conversationName ?? '').trim() || 'OfflineSMS';
-  const raw  = (messageText ?? '').replace(/\s+/g, ' ').trim();
-  // SMS soft cap 160 GSM-7 chars; keep an excerpt that leaves room for the
-  // surrounding sentence. Phase 8 caps total smsBody at 320 chars.
-  const excerptCap = 120;
-  const excerpt = raw.length > excerptCap ? raw.slice(0, excerptCap - 1) + '…' : raw;
-  return `OfflineSMS reminder from ${name}: ${excerpt} Open OfflineSMS to view the full message.`;
+/** Default SMS body for an escalation = the original message text, which the
+ *  sender can edit before sending. Capped at the 320-char smsBody limit. */
+export function buildDefaultSmsBody(messageText: string | null | undefined): string {
+  const raw = (messageText ?? '').replace(/\s+/g, ' ').trim();
+  const cap = 320;
+  return raw.length > cap ? raw.slice(0, cap - 1) + '…' : raw;
 }

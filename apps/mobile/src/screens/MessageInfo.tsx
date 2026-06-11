@@ -58,10 +58,11 @@ function statusMatches(filter: TabKey, status: ReceiptStatus): boolean {
 
 export default function MessageInfo({ route, navigation }: any) {
   const insets = useSafeAreaInsets();
-  const { id, messageId, messageText, createdAtMs, groupName, memberCount } = route.params as {
+  const { id, messageId, messageText, createdAtMs, groupName, memberCount, mediaUploadError } = route.params as {
     id: string; messageId: string;
     messageText?: string; createdAtMs?: number | null;
     groupName?: string | null; memberCount?: number | null;
+    mediaUploadError?: { code?: string | null; message?: string | null } | null;
   };
   const [info, setInfo] = useState<MessageInfoData | null>(null);
   const [err, setErr]   = useState<string | null>(null);
@@ -125,6 +126,20 @@ export default function MessageInfo({ route, navigation }: any) {
           </Text>
           <Text style={s.previewTime}>{fmt(info.createdAt) || (createdAtMs ? new Date(createdAtMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '')}</Text>
         </View>
+
+        {mediaUploadError ? (
+          <View style={s.uploadErrCard}>
+            <View style={s.uploadErrHead}>
+              <Ionicons name="cloud-offline-outline" size={16} color="#991B1B" />
+              <Text style={s.uploadErrTitle}>Media upload failed</Text>
+            </View>
+            <Text style={s.uploadErrCode}>{mediaUploadError.code ?? 'unknown error'}</Text>
+            {mediaUploadError.message ? (
+              <Text style={s.uploadErrMsg}>{mediaUploadError.message}</Text>
+            ) : null}
+            <Text style={s.uploadErrHint}>Tap the retry icon on the message to try sending again.</Text>
+          </View>
+        ) : null}
 
         <View style={s.statsGrid}>
           <Stat icon="checkmark-done" tint="#1D4ED8" value={a.deliveredCount} label="Delivered" />
@@ -275,6 +290,12 @@ const s = StyleSheet.create({
   preview: { backgroundColor: '#1D6E92', borderRadius: 16, padding: 14 },
   previewText: { fontSize: 15, color: '#fff', lineHeight: 21 },
   previewTime: { fontSize: 11, color: 'rgba(255,255,255,.75)', alignSelf: 'flex-end', marginTop: 6 },
+  uploadErrCard:  { marginTop: 14, padding: 14, borderRadius: radius.md, backgroundColor: '#FEE2E2', borderWidth: 1, borderColor: '#FCA5A5' },
+  uploadErrHead:  { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  uploadErrTitle: { fontSize: 13, fontWeight: '800', color: '#991B1B' },
+  uploadErrCode:  { fontSize: 13, fontWeight: '700', color: '#7F1D1D', marginTop: 6, fontFamily: 'monospace' },
+  uploadErrMsg:   { fontSize: 12, color: '#991B1B', marginTop: 4, lineHeight: 17 },
+  uploadErrHint:  { fontSize: 11, color: '#B91C1C', marginTop: 8 },
   statsGrid:{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 14 },
   statCard: { width: '47%', flexGrow: 1, backgroundColor: '#fff', borderRadius: radius.md, padding: 12, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 4, shadowOffset: { width: 0, height: 1 }, elevation: 1 },
   statTop:  { flexDirection: 'row', alignItems: 'center', gap: 6 },

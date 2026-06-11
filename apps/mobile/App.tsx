@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import { useEffect, useRef, useState } from 'react';
+import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import * as Linking from 'expo-linking';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -24,6 +25,7 @@ import FindFriends from './src/screens/FindFriends';
 import IncomingCall from './src/screens/IncomingCall';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { useChatListPersistence } from './src/hooks/useLocalPersistence';
+import { usePresence } from './src/hooks/usePresence';
 import { useUnreadTotal } from './src/lib/unreadStore';
 import ChatsList from './src/screens/ChatsList';
 import Conversation from './src/screens/Conversation';
@@ -33,11 +35,13 @@ import NewGroup from './src/screens/NewGroup';
 import GroupCreateInfo from './src/screens/GroupCreateInfo';
 import GroupInfo from './src/screens/GroupInfo';
 import AddMembers from './src/screens/AddMembers';
+import JoinRequests from './src/screens/JoinRequests';
 import ForwardPicker from './src/screens/ForwardPicker';
 import MessageInfo from './src/screens/MessageInfo';
 import TransactionDetail from './src/screens/TransactionDetail';
 import BuyPoints from './src/screens/BuyPoints';
 import TransferPoints from './src/screens/TransferPoints';
+import ChatWallpaper from './src/screens/ChatWallpaper';
 import SmsBatchReport from './src/screens/SmsBatchReport';
 import Status from './src/screens/Status';
 import Calls from './src/screens/Calls';
@@ -50,6 +54,27 @@ import SupportTicket from './src/screens/SupportTicket';
 import EditProfile from './src/screens/EditProfile';
 import ImagePreviewScreen from './src/screens/ImagePreviewScreen';
 import ImageViewerScreen from './src/screens/ImageViewerScreen';
+import JoinGroup from './src/screens/JoinGroup';
+import NotificationSettings from './src/screens/NotificationSettings';
+import { inviteCodeFromUrl, setPendingInvite, takePendingInvite } from './src/lib/deepLinks';
+import * as Notifications from 'expo-notifications';
+import { installForegroundHandler, registerForPush, routeFromNotification } from './src/lib/notifications';
+import { dispatchForRoute } from './src/lib/pushRouting';
+import { Linking as RNLinking } from 'react-native';
+
+const navRef = createNavigationContainerRef();
+
+// Foreground display behaviour — must be set once at module load.
+installForegroundHandler();
+
+function routeFromPush(data: unknown) {
+  const decision = dispatchForRoute(routeFromNotification(data));
+  if (decision.kind === 'none') return;
+  if (decision.kind === 'url') { void RNLinking.openURL(decision.href); return; }
+  if (!navRef.isReady()) return;
+  if (decision.name === 'Tabs') { (navRef as any).navigate('Tabs'); return; }
+  (navRef as any).navigate(decision.name, decision.params);
+}
 
 const AuthStack = createNativeStackNavigator();
 const OnboardingStack = createNativeStackNavigator();
@@ -88,16 +113,38 @@ function MainTabs() {
   const unread = useUnreadTotal();
   return (
     <Tabs.Navigator
+      // Telegram-style floating pill bar: detached from the screen edges,
+      // fully rounded, with a soft-blue pill behind the active tab.
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarActiveTintColor:   '#1F7BA8',
-        tabBarInactiveTintColor: '#6B7488',
+        tabBarInactiveTintColor: '#3A4452',
+        tabBarActiveBackgroundColor: '#E3F1FA',
         tabBarStyle: {
-          height: 70 + insets.bottom,
-          paddingBottom: insets.bottom + 6,
+          position: 'absolute',
+          left: 12,
+          right: 12,
+          bottom: insets.bottom + 10,
+          height: 72,
+          borderRadius: 999,
+          backgroundColor: '#FFFFFF',
+          borderTopWidth: 0,
+          paddingHorizontal: 6,
+          shadowColor: '#000',
+          shadowOpacity: 0.12,
+          shadowRadius: 16,
+          shadowOffset: { width: 0, height: 6 },
+          elevation: 12,
         },
-        tabBarItemStyle: { paddingTop: 12, paddingBottom: 4 },
-        tabBarLabelStyle: { fontSize: 11, marginTop: 4 },
+        tabBarItemStyle: {
+          borderRadius: 999,
+          overflow: 'hidden',
+          marginVertical: 9,
+          marginHorizontal: 4,
+          paddingTop: 6,
+          paddingBottom: 6,
+        },
+        tabBarLabelStyle: { fontSize: 12, fontWeight: '700', marginTop: 2 },
         tabBarIcon: ({ focused, color, size }) => {
           const set = TAB_ICONS[route.name];
           const name = focused ? set.active : set.inactive;
@@ -139,8 +186,60 @@ export default function App() {
     });
   }, [user]);
 
+  // Invite deep links (offlinesms://join/{code} | https://offlinesms.com/join/
+  // {code}). If logged in + onboarded, open JoinGroup now; otherwise stash the
+  // code and replay it after auth (effect below).
+  const authedRef = useRef(false);
+  authedRef.current = !!user && profileCompleted === true;
+  useEffect(() => {
+    function handle(url: string | null) {
+      const code = inviteCodeFromUrl(url);
+      if (!code) return;
+      if (authedRef.current && navRef.isReady()) (navRef as any).navigate('JoinGroup', { code });
+      else void setPendingInvite(code);
+    }
+    Linking.getInitialURL().then(handle);
+    const sub = Linking.addEventListener('url', e => handle(e.url));
+    return () => sub.remove();
+  }, []);
+
+  // Register for push once authenticated + onboarded (asks permission then).
+  useEffect(() => {
+    if (user && profileCompleted === true) void registerForPush(user.uid);
+  }, [user, profileCompleted]);
+
+  // Route notification taps (cold start + warm). Cold-start tap is delivered
+  // via getLastNotificationResponseAsync.
+  useEffect(() => {
+    Notifications.getLastNotificationResponseAsync().then(resp => {
+      if (resp) routeFromPush(resp.notification.request.content.data);
+    });
+    const sub = Notifications.addNotificationResponseReceivedListener(resp => {
+      routeFromPush(resp.notification.request.content.data);
+    });
+    return () => sub.remove();
+  }, []);
+
+  // Replay a stashed invite once the user is authenticated + onboarded.
+  useEffect(() => {
+    if (!(user && profileCompleted === true)) return;
+    let cancelled = false;
+    (async () => {
+      const code = await takePendingInvite();
+      if (!code || cancelled) return;
+      const tryNav = () => {
+        if (navRef.isReady()) (navRef as any).navigate('JoinGroup', { code });
+        else setTimeout(tryNav, 150);
+      };
+      tryNav();
+    })();
+    return () => { cancelled = true; };
+  }, [user, profileCompleted]);
+
   // Mirror the user's chats into the local SQLite DB for the whole session.
   useChatListPersistence(user?.uid);
+  // Presence: online while foregrounded, last-seen on background/logout.
+  usePresence(user?.uid);
 
   if (!ready) return null;
 
@@ -149,7 +248,7 @@ export default function App() {
     <OfflineProvider>
     <SafeAreaProvider>
       <ErrorBoundary>
-      <NavigationContainer>
+      <NavigationContainer ref={navRef}>
         {!user ? (
           <AuthFlow />
         ) : profileCompleted === null ? (
@@ -166,11 +265,15 @@ export default function App() {
             <RootStack.Screen name="ImageViewer" component={ImageViewerScreen} options={{ presentation: 'fullScreenModal' }} />
             <RootStack.Screen name="GroupInfo" component={GroupInfo} />
             <RootStack.Screen name="AddMembers" component={AddMembers} />
+            <RootStack.Screen name="JoinRequests" component={JoinRequests} />
+            <RootStack.Screen name="JoinGroup" component={JoinGroup} options={{ presentation: 'modal' }} />
             <RootStack.Screen name="ForwardPicker" component={ForwardPicker} />
             <RootStack.Screen name="MessageInfo" component={MessageInfo} />
             <RootStack.Screen name="TransactionDetail" component={TransactionDetail} />
             <RootStack.Screen name="BuyPoints" component={BuyPoints} />
             <RootStack.Screen name="TransferPoints" component={TransferPoints} />
+            <RootStack.Screen name="ChatWallpaper" component={ChatWallpaper} />
+            <RootStack.Screen name="NotificationSettings" component={NotificationSettings} />
             <RootStack.Screen name="SmsBatchReport" component={SmsBatchReport} />
             <RootStack.Screen name="Points" component={Points} />
             <RootStack.Screen name="Privacy" component={Privacy} />
