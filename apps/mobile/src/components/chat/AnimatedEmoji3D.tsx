@@ -28,6 +28,26 @@ const ASSETS: Record<string, ReturnType<typeof require>> = {
   heart:    require('../../../assets/emoji3d/heart.png'),
   fire:     require('../../../assets/emoji3d/fire.png'),
   clap:     require('../../../assets/emoji3d/clap.png'),
+  lovehearts:  require('../../../assets/emoji3d/lovehearts.png'),
+  kiss:        require('../../../assets/emoji3d/kiss.png'),
+  rofl:        require('../../../assets/emoji3d/rofl.png'),
+  sweat:       require('../../../assets/emoji3d/sweat.png'),
+  halo:        require('../../../assets/emoji3d/halo.png'),
+  hug:         require('../../../assets/emoji3d/hug.png'),
+  plead:       require('../../../assets/emoji3d/plead.png'),
+  scream:      require('../../../assets/emoji3d/scream.png'),
+  mindblown:   require('../../../assets/emoji3d/mindblown.png'),
+  eyeroll:     require('../../../assets/emoji3d/eyeroll.png'),
+  yummy:       require('../../../assets/emoji3d/yummy.png'),
+  starstruck:  require('../../../assets/emoji3d/starstruck.png'),
+  wave:        require('../../../assets/emoji3d/wave.png'),
+  pray:        require('../../../assets/emoji3d/pray.png'),
+  muscle:      require('../../../assets/emoji3d/muscle.png'),
+  okhand:      require('../../../assets/emoji3d/okhand.png'),
+  victory:     require('../../../assets/emoji3d/victory.png'),
+  partypopper: require('../../../assets/emoji3d/partypopper.png'),
+  brokenheart: require('../../../assets/emoji3d/brokenheart.png'),
+  hundred:     require('../../../assets/emoji3d/hundred.png'),
 };
 
 function buildLoop(mood: EmojiMood, v: Animated.Value): Animated.CompositeAnimation {
@@ -94,8 +114,18 @@ function moodTransforms(mood: EmojiMood, v: Animated.Value) {
   }
 }
 
-export function AnimatedEmoji3D({ emoji, size }: { emoji: Emoji3D; size: number }) {
+export function AnimatedEmoji3D({
+  emoji, size, replayTrigger,
+}: {
+  emoji: Emoji3D;
+  size: number;
+  /** Bump this number to replay a one-shot "pop" (scale-up flourish) on top
+   *  of the mood loop — used by tap-to-replay on emoji messages. */
+  replayTrigger?: number;
+}) {
   const v = useRef(new Animated.Value(0)).current;
+  const pop = useRef(new Animated.Value(0)).current;
+  const popArmed = useRef(false); // skip the initial mount value
 
   useEffect(() => {
     v.setValue(0);
@@ -104,10 +134,26 @@ export function AnimatedEmoji3D({ emoji, size }: { emoji: Emoji3D; size: number 
     return () => loop.stop();
   }, [emoji.key, emoji.mood, v]);
 
+  useEffect(() => {
+    if (replayTrigger === undefined) return;
+    if (!popArmed.current) { popArmed.current = true; return; }
+    pop.setValue(0);
+    Animated.sequence([
+      Animated.spring(pop, { toValue: 1, friction: 4, tension: 120, useNativeDriver: true }),
+      Animated.timing(pop, { toValue: 0, duration: 280, easing: Easing.in(Easing.quad), useNativeDriver: true }),
+    ]).start();
+  }, [replayTrigger, pop]);
+
   return (
     <Animated.Image
       source={ASSETS[emoji.key]}
-      style={{ width: size, height: size, transform: moodTransforms(emoji.mood, v) }}
+      style={{
+        width: size, height: size,
+        transform: [
+          ...moodTransforms(emoji.mood, v),
+          { scale: pop.interpolate({ inputRange: [0, 1], outputRange: [1, 1.65] }) },
+        ],
+      }}
       accessibilityLabel={emoji.char}
     />
   );

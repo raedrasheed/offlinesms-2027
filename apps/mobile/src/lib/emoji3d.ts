@@ -33,6 +33,28 @@ export const EMOJI_3D: readonly Emoji3D[] = [
   { key: 'heart',    char: '❤️', mood: 'pulse'  },
   { key: 'fire',     char: '🔥', mood: 'pulse'  },
   { key: 'clap',     char: '👏', mood: 'shake'  },
+  // Expansion set — more faces…
+  { key: 'lovehearts',  char: '🥰', mood: 'pulse'  },
+  { key: 'kiss',        char: '😘', mood: 'pulse'  },
+  { key: 'rofl',        char: '🤣', mood: 'bounce' },
+  { key: 'sweat',       char: '😅', mood: 'wiggle' },
+  { key: 'halo',        char: '😇', mood: 'wiggle' },
+  { key: 'hug',         char: '🤗', mood: 'pulse'  },
+  { key: 'plead',       char: '🥺', mood: 'droop'  },
+  { key: 'scream',      char: '😱', mood: 'shake'  },
+  { key: 'mindblown',   char: '🤯', mood: 'shake'  },
+  { key: 'eyeroll',     char: '🙄', mood: 'wiggle' },
+  { key: 'yummy',       char: '😋', mood: 'wiggle' },
+  { key: 'starstruck',  char: '🤩', mood: 'pulse'  },
+  // …and gestures/symbols.
+  { key: 'wave',        char: '👋', mood: 'shake'  },
+  { key: 'pray',        char: '🙏', mood: 'pulse'  },
+  { key: 'muscle',      char: '💪', mood: 'bounce' },
+  { key: 'okhand',      char: '👌', mood: 'wiggle' },
+  { key: 'victory',     char: '✌️', mood: 'bounce' },
+  { key: 'partypopper', char: '🎉', mood: 'bounce' },
+  { key: 'brokenheart', char: '💔', mood: 'droop'  },
+  { key: 'hundred',     char: '💯', mood: 'pulse'  },
 ] as const;
 
 /** Strip whitespace + variation selectors so '❤️' and '❤' both match. */

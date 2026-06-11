@@ -104,6 +104,7 @@ function MessageBubbleImpl({
   const senderName = m.senderDisplayName ?? senderProfile?.name ?? m.senderUid.slice(0, 2);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [reactionsOpen, setReactionsOpen] = useState(false);
+  const [emojiReplay, setEmojiReplay] = useState(0);
 
   // Memoise per-render allocations so a re-render (e.g. a sibling message
   // changed) doesn't re-compute time strings, re-build the reactions list, or
@@ -293,9 +294,18 @@ function MessageBubbleImpl({
           />
         ) : !deleted && emoji3d ? (
           // Single-emoji message → large animated 3D emoji (WhatsApp style).
-          <View style={s.emoji3dWrap}>
-            <AnimatedEmoji3D emoji={emoji3d} size={96} />
-          </View>
+          // Tap replays a bigger pop of the animation; long-press still opens
+          // the message action sheet.
+          <Pressable
+            style={s.emoji3dWrap}
+            onPress={() => setEmojiReplay(k => k + 1)}
+            onLongPress={() => setSheetOpen(true)}
+            delayLongPress={300}
+            accessibilityRole="button"
+            accessibilityLabel={emoji3d.char}
+          >
+            <AnimatedEmoji3D emoji={emoji3d} size={96} replayTrigger={emojiReplay} />
+          </Pressable>
         ) : (
           <View style={s.bubbleRow}>
             <Text style={[s.bubbleText, mine && { color: '#fff' }, deleted && (mine ? s.deletedTextMine : s.deletedText)]}>
