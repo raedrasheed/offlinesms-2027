@@ -188,9 +188,13 @@ export default function GroupInfo({ route, navigation }: any) {
     );
   }
   function confirmLeave() {
+    const otherMembers = (members?.length ?? 0) - 1 + externals.length;
+    const message = isOwner && otherMembers > 0
+      ? 'Ownership will pass to another member and you won’t receive new messages from this group.'
+      : 'You won’t receive new messages from this group.';
     Alert.alert(
       'Leave group',
-      'You won’t receive new messages from this group.',
+      message,
       [
         { text: 'Cancel', style: 'cancel' },
         {
