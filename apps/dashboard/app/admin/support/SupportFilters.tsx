@@ -5,6 +5,7 @@
 // passed from a server component — doing so throws a server-side exception.
 
 import { useRouter, useSearchParams } from 'next/navigation';
+import type { Route } from 'next';
 
 const selectStyle = {
   background: 'var(--c-card)',
@@ -27,7 +28,9 @@ export default function SupportFilters({
     else params.delete(key);
     params.delete('cursor');
     const qs = params.toString();
-    router.push(`/admin/support${qs ? `?${qs}` : ''}`);
+    // Cast for Next's experimental typedRoutes: a dynamically-built path
+    // isn't a statically-known Route literal.
+    router.push((`/admin/support${qs ? `?${qs}` : ''}`) as Route);
   }
 
   return (
