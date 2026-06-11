@@ -77,6 +77,6 @@ describe('buildInvitePreview (privacy-safe)', () => {
 
 describe('inviteUrl', () => {
   it('builds the public link', () => {
-    expect(inviteUrl('ABCDEFGH')).toBe('https://offlinesms.com/join/ABCDEFGH');
+    expect(inviteUrl('ABCDEFGH')).toBe('https://links.offlinesms.com/join/ABCDEFGH');
   });
 });

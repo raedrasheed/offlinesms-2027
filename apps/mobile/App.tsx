@@ -188,9 +188,10 @@ export default function App() {
     });
   }, [user]);
 
-  // Invite deep links (offlinesms://join/{code} | https://offlinesms.com/join/
-  // {code}). If logged in + onboarded, open JoinGroup now; otherwise stash the
-  // code and replay it after auth (effect below).
+  // Invite deep links (offlinesms://join/{code} | https://links.offlinesms.com
+  // /join/{code}, plus legacy offlinesms.com links). If logged in + onboarded,
+  // open JoinGroup now; otherwise stash the code and replay it after auth
+  // (effect below).
   const authedRef = useRef(false);
   authedRef.current = !!user && profileCompleted === true;
   useEffect(() => {

@@ -24,7 +24,7 @@
         "NSPhotoLibraryAddUsageDescription": "OfflineSMS saves received media to your photo library.",
         "NSContactsUsageDescription": "OfflineSMS uses your contacts to help you find and message people."
       },
-      "associatedDomains": ["applinks:offlinesms.com"]
+      "associatedDomains": ["applinks:links.offlinesms.com", "applinks:offlinesms.com"]
     },
     "android": {
       "package": "app.offlinesms.mobile",
@@ -46,7 +46,10 @@
         {
           "action": "VIEW",
           "autoVerify": true,
-          "data": [{ "scheme": "https", "host": "offlinesms.com", "pathPrefix": "/join" }],
+          "data": [
+            { "scheme": "https", "host": "links.offlinesms.com", "pathPrefix": "/join" },
+            { "scheme": "https", "host": "offlinesms.com", "pathPrefix": "/join" }
+          ],
           "category": ["BROWSABLE", "DEFAULT"]
         }
       ]
