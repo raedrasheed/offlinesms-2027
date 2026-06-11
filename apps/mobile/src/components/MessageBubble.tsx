@@ -23,6 +23,8 @@ import { ChatActionSheet, SheetAction } from './ChatActionSheet';
 import { ReactionsSheet, ReactorInfo } from './ReactionsSheet';
 import { ImageMessageBubble } from './chat/ImageMessageBubble';
 import { VoiceMessageBubble } from './chat/VoiceMessageBubble';
+import { AnimatedEmoji3D } from './chat/AnimatedEmoji3D';
+import { matchAnimatedEmoji } from '../lib/emoji3d';
 import {
   Message,
   REACTION_EMOJIS,
@@ -107,6 +109,11 @@ function MessageBubbleImpl({
   // changed) doesn't re-compute time strings, re-build the reactions list, or
   // hand a fresh `{uri}` object to <Image> (which would re-mount the avatar).
   const timeText      = useMemo(() => formatTime(m.createdAt), [m.createdAt]);
+  // Single-supported-emoji text message → rendered as a big animated 3D emoji.
+  const emoji3d       = useMemo(
+    () => ((m.type ?? 'text') === 'text' ? matchAnimatedEmoji(m.text) : null),
+    [m.type, m.text],
+  );
   const senderImgSrc  = useMemo(() => (senderPhoto ? { uri: senderPhoto } : null), [senderPhoto]);
 
   if (pending) {
@@ -284,6 +291,11 @@ function MessageBubbleImpl({
             onPlayed={() => onPlayedVoice?.(m)}
             onRetry={() => onRetryMedia?.(m)}
           />
+        ) : !deleted && emoji3d ? (
+          // Single-emoji message → large animated 3D emoji (WhatsApp style).
+          <View style={s.emoji3dWrap}>
+            <AnimatedEmoji3D emoji={emoji3d} size={96} />
+          </View>
         ) : (
           <View style={s.bubbleRow}>
             <Text style={[s.bubbleText, mine && { color: '#fff' }, deleted && (mine ? s.deletedTextMine : s.deletedText)]}>
@@ -392,6 +404,7 @@ const s = StyleSheet.create({
   sent:           { backgroundColor: '#1E88E5', borderTopRightRadius: 5 },
   recv:           { backgroundColor: '#fff', borderTopLeftRadius: 5 },
   bubbleRow:      { flexDirection: 'row', alignItems: 'flex-end', gap: 6 },
+  emoji3dWrap:    { alignItems: 'center', justifyContent: 'center', paddingVertical: 4, paddingHorizontal: 8 },
   bubbleText:     { fontSize: 16, color: colors.ink, lineHeight: 22, flexShrink: 1 },
   deletedText:    { fontStyle: 'italic', color: colors.ink500 },
   deletedTextMine:{ fontStyle: 'italic', color: 'rgba(255,255,255,.8)' },

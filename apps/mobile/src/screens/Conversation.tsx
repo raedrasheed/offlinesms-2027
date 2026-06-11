@@ -46,6 +46,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import { prefetchMedia } from '../media/mediaCache';
 import { AttachmentSheet } from '../components/chat/AttachmentSheet';
+import { EmojiPicker3D } from '../components/chat/EmojiPicker3D';
 import { VoiceRecorderBar } from '../components/chat/VoiceRecorderBar';
 import { LockedVoiceRecorderBar } from '../components/chat/LockedVoiceRecorderBar';
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
@@ -348,6 +349,7 @@ export default function Conversation({ route, navigation }: any) {
 
   // Phase 23 — attachment sheet + image picking.
   const [attachOpen, setAttachOpen] = useState(false);
+  const [emojiOpen, setEmojiOpen] = useState(false);
 
   async function handleAsset(res: ImagePicker.ImagePickerResult) {
     if (res.canceled || !res.assets?.[0]) return;
@@ -838,9 +840,9 @@ export default function Conversation({ route, navigation }: any) {
                     {!editing ? (
                       <Pressable
                         style={s.inlineIconLead}
-                        onPress={() => { /* emoji picker hook-in (no-op for now) */ }}
+                        onPress={() => setEmojiOpen(true)}
                         accessibilityRole="button"
-                        accessibilityLabel="Emoji"
+                        accessibilityLabel={t('convo.emojiTitle')}
                       >
                         <Ionicons name="happy-outline" size={24} color={colors.text.muted} />
                       </Pressable>
@@ -928,6 +930,12 @@ export default function Conversation({ route, navigation }: any) {
         visible={attachOpen}
         onClose={() => setAttachOpen(false)}
         onSelect={onAttachSelect}
+      />
+
+      <EmojiPicker3D
+        visible={emojiOpen}
+        onClose={() => setEmojiOpen(false)}
+        onSelect={e => setDraft(d => d + e.char)}
       />
     </KeyboardAvoidingView>
   );

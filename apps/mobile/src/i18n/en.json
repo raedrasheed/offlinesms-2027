@@ -91,7 +91,8 @@
     "online": "Online",
     "typing": "Typing…",
     "composerPlaceholder": "Message",
-    "e2e": "Messages and calls are end-to-end encrypted"
+    "e2e": "Messages and calls are end-to-end encrypted",
+    "emojiTitle": "3D emojis"
   },
   "presence": {
     "online": "Online",
