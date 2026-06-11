@@ -47,10 +47,9 @@ import * as FileSystem from 'expo-file-system';
 import { prefetchMedia } from '../media/mediaCache';
 import { AttachmentSheet } from '../components/chat/AttachmentSheet';
 import { EmojiPicker3D } from '../components/chat/EmojiPicker3D';
-import { VoiceRecorderBar } from '../components/chat/VoiceRecorderBar';
 import { LockedVoiceRecorderBar } from '../components/chat/LockedVoiceRecorderBar';
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
-import { validateMediaMessage, type AttachmentKey } from '../media/mediaValidation';
+import { validateMediaMessage, formatDuration, type AttachmentKey } from '../media/mediaValidation';
 
 type ComposerGate =
   | { kind: 'allowed' }
@@ -839,66 +838,89 @@ export default function Conversation({ route, navigation }: any) {
               />
             ) : (
               <>
-                {/* Left region — swaps between the text input pill and the live
-                    recording bar. The mic button (right) is deliberately NOT
-                    part of this swap (see below). */}
-                {recorder.mode === 'recording' ? (
-                  <VoiceRecorderBar elapsedMs={recorder.elapsedMs} bars={recorder.bars} cancelArmed={cancelArmed} />
-                ) : (
-                  <View style={s.inputPill}>
-                    {!editing ? (
-                      <Pressable
-                        style={s.inlineIconLead}
-                        onPress={() => setEmojiOpen(true)}
-                        accessibilityRole="button"
-                        accessibilityLabel={t('convo.emojiTitle')}
-                      >
-                        <Ionicons name="happy-outline" size={24} color={colors.text.muted} />
-                      </Pressable>
-                    ) : null}
-                    <TextInput
-                      value={draft}
-                      onChangeText={setDraft}
-                      placeholder={editing ? t('messageActions.editingMessage') : isOffline ? 'Type · saved as draft' : t('convo.composerPlaceholder')}
-                      style={s.input}
-                      multiline
-                      maxLength={4000}
-                      textAlign={isRTL ? 'right' : 'left'}
-                      accessibilityLabel={t('convo.composerPlaceholder')}
-                    />
-                    {!editing ? (
+                {/* The input pill is always mounted. Its left region swaps
+                    between the text controls and an inline recording indicator,
+                    but the trailing mic stays at a FIXED child index so its
+                    PanResponder survives the idle→recording transition (moving
+                    it mid-gesture used to terminate the active touch and break
+                    hold / slide-to-cancel / swipe-to-lock). */}
+                <View style={s.inputPill}>
+                  <View style={s.pillLeft}>
+                    {recorder.mode === 'recording' ? (
+                      <View style={s.recordingInline}>
+                        <View style={s.recDot} />
+                        <Text style={s.recTimer}>{formatDuration(recorder.elapsedMs)}</Text>
+                        <Text style={[s.recHint, cancelArmed && s.recHintArmed]} numberOfLines={1}>
+                          {cancelArmed ? t('media.slideToCancel') : `‹ ${t('media.slideToCancel')}`}
+                        </Text>
+                      </View>
+                    ) : (
                       <>
-                        <Pressable
-                          style={s.inlineIcon}
-                          onPress={() => setAttachOpen(true)}
-                          accessibilityRole="button"
-                          accessibilityLabel={t('media.attach')}
-                        >
-                          <Ionicons name="attach" size={22} color={colors.text.muted} />
-                        </Pressable>
-                        {draft.trim() === '' ? (
+                        {!editing ? (
+                          <Pressable
+                            style={s.inlineIconLead}
+                            onPress={() => setEmojiOpen(true)}
+                            accessibilityRole="button"
+                            accessibilityLabel={t('convo.emojiTitle')}
+                          >
+                            <Ionicons name="happy-outline" size={24} color={colors.text.muted} />
+                          </Pressable>
+                        ) : null}
+                        <TextInput
+                          value={draft}
+                          onChangeText={setDraft}
+                          placeholder={editing ? t('messageActions.editingMessage') : isOffline ? 'Type · saved as draft' : t('convo.composerPlaceholder')}
+                          style={s.input}
+                          multiline
+                          maxLength={4000}
+                          textAlign={isRTL ? 'right' : 'left'}
+                          accessibilityLabel={t('convo.composerPlaceholder')}
+                        />
+                        {!editing ? (
                           <Pressable
                             style={s.inlineIcon}
-                            onPress={() => onAttachSelect('camera')}
+                            onPress={() => setAttachOpen(true)}
                             accessibilityRole="button"
-                            accessibilityLabel={t('media.camera')}
+                            accessibilityLabel={t('media.attach')}
                           >
-                            <Ionicons name="camera-outline" size={22} color={colors.text.muted} />
+                            <Ionicons name="attach" size={22} color={colors.text.muted} />
                           </Pressable>
                         ) : null}
                       </>
-                    ) : null}
+                    )}
                   </View>
-                )}
 
-                {/* Right region. Send arrow while composing text; otherwise a
-                    PERSISTENT mic button. Its PanResponder must survive the
-                    idle→recording transition, so the mic node keeps a FIXED
-                    position in the tree (always `micWrap`'s 2nd child) and the
-                    lock pill above it is always mounted — merely hidden when
-                    not recording. Swapping the mic into a differently-shaped
-                    subtree mid-gesture used to terminate the active touch
-                    responder, breaking hold / slide-to-cancel / swipe-to-lock. */}
+                  {/* Trailing mic — lives INSIDE the field. Present only with an
+                      empty draft (and not editing); the send button outside
+                      takes over once there's text. Stays mounted across
+                      idle↔recording (both states have an empty draft). */}
+                  {!(draft.trim() !== '' || editing) ? (
+                    <View style={s.micInlineWrap}>
+                      <View
+                        style={[s.lockPill, recorder.mode !== 'recording' && s.lockPillHidden]}
+                        pointerEvents="none"
+                      >
+                        <Ionicons name="lock-closed" size={16} color={colors.text.muted} />
+                        <Ionicons name="chevron-up" size={14} color={colors.text.muted} />
+                      </View>
+                      <View
+                        style={s.micInlineBtn}
+                        {...micPan.panHandlers}
+                        accessibilityRole="button"
+                        accessibilityLabel={t('media.holdToRecord')}
+                      >
+                        <Ionicons
+                          name="mic"
+                          size={recorder.mode === 'recording' ? 26 : 24}
+                          color={recorder.mode === 'recording' ? colors.state.error : colors.action.primary}
+                        />
+                      </View>
+                    </View>
+                  ) : null}
+                </View>
+
+                {/* Send appears as a round button beside the field once the
+                    user is composing text (or editing). */}
                 {(draft.trim() !== '' || editing) ? (
                   <Pressable
                     style={[s.sendBtn, busy && { opacity: 0.4 }]}
@@ -910,25 +932,7 @@ export default function Conversation({ route, navigation }: any) {
                   >
                     <Ionicons name={editing ? 'checkmark' : 'arrow-up'} size={20} color={colors.action.primaryFg} />
                   </Pressable>
-                ) : (
-                  <View style={s.micWrap}>
-                    <View
-                      style={[s.lockPill, recorder.mode !== 'recording' && s.lockPillHidden]}
-                      pointerEvents="none"
-                    >
-                      <Ionicons name="lock-closed" size={16} color={colors.text.muted} />
-                      <Ionicons name="chevron-up" size={14} color={colors.text.muted} />
-                    </View>
-                    <View
-                      style={[s.sendBtn, recorder.mode === 'recording' && s.micRecording]}
-                      {...micPan.panHandlers}
-                      accessibilityRole="button"
-                      accessibilityLabel={t('media.holdToRecord')}
-                    >
-                      <Ionicons name="mic" size={recorder.mode === 'recording' ? 26 : 22} color={colors.action.primaryFg} />
-                    </View>
-                  </View>
-                )}
+                ) : null}
               </>
             )}
           </View>
@@ -992,10 +996,20 @@ function buildStyles(colors: any, rtl: boolean) {
     composerPreviewClose: { fontSize: 18, color: colors.text.muted, fontWeight: '700', paddingHorizontal: 6, minWidth: 36, minHeight: 36, textAlignVertical: 'center', textAlign: 'center' },
     // Telegram-style composer: a solid surface bar with a hairline top border
     // (the wallpaper stops above it), input pill inside.
-    composer: { padding: 12, paddingBottom: 24, flexDirection: rtl ? 'row-reverse' : 'row', gap: 8, alignItems: 'flex-end', backgroundColor: colors.background.surface, borderTopWidth: StyleSheet.hairlineWidth, borderColor: colors.border.subtle },
+    // Transparent bar — the wallpaper shows through behind the pill; only the
+    // pill itself is opaque (WhatsApp/Telegram style).
+    composer: { padding: 12, paddingBottom: 24, flexDirection: rtl ? 'row-reverse' : 'row', gap: 8, alignItems: 'flex-end', backgroundColor: 'transparent' },
     // WhatsApp-style input pill: emoji (leading) + text field + attach + camera.
     // Opaque surface so the input area stays constant over any wallpaper.
     inputPill: { flex: 1, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', minHeight: 46, paddingHorizontal: 4, backgroundColor: colors.background.subtle, borderRadius: 24 },
+    pillLeft:  { flex: 1, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center' },
+    micInlineWrap: { width: 40, alignItems: 'center', justifyContent: 'center' },
+    micInlineBtn:  { width: 40, height: 44, alignItems: 'center', justifyContent: 'center' },
+    recordingInline: { flex: 1, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 8, paddingHorizontal: 8, height: 44 },
+    recDot:    { width: 9, height: 9, borderRadius: 5, backgroundColor: colors.state.error },
+    recTimer:  { fontSize: 13, fontWeight: '700', color: colors.text.primary, minWidth: 42, textAlign: rtl ? 'right' : 'left' },
+    recHint:   { flex: 1, fontSize: 12, color: colors.text.muted, textAlign: rtl ? 'left' : 'right' },
+    recHintArmed: { color: colors.state.error, fontWeight: '700' },
     input:    { flex: 1, minHeight: 38, maxHeight: 120, paddingHorizontal: 6, paddingVertical: 8, backgroundColor: 'transparent', fontSize: 15, color: colors.text.primary },
     inlineIconLead: { width: 38, height: 44, alignItems: 'center', justifyContent: 'center' },
     inlineIcon: { width: 34, height: 44, alignItems: 'center', justifyContent: 'center' },
