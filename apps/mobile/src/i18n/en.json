@@ -247,7 +247,9 @@
       "alreadySent": "Already received SMS for this message",
       "rateLimited": "Rate limit reached",
       "policyBlocked": "Blocked by policy"
-    }
+    },
+    "notSyncedTitle": "Message not sent yet",
+    "notSyncedMessage": "This message hasn’t been sent to the server yet. Wait until it’s delivered, then try again."
   },
   "smsReport": {
     "title": "OfflineSMS Delivery Report",
@@ -367,7 +369,8 @@
     "localChats": "Chats",
     "localMessages": "Messages",
     "localStorageEmpty": "No chats stored on this device yet.",
-    "updateFailed": "Couldn't update setting. Please try again."
+    "updateFailed": "Couldn't update setting. Please try again.",
+    "appVersion": "App version"
   },
   "media": {
     "photo": "Photos",

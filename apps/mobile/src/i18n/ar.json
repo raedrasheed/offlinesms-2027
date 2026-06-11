@@ -247,7 +247,9 @@
       "alreadySent": "تم إرسال SMS سابقاً لهذه الرسالة",
       "rateLimited": "الحد الأقصى",
       "policyBlocked": "محظور بسياسة"
-    }
+    },
+    "notSyncedTitle": "لم تُرسل الرسالة بعد",
+    "notSyncedMessage": "لم تصل هذه الرسالة إلى الخادم بعد. انتظر حتى يتم إرسالها ثم حاول مرة أخرى."
   },
   "smsReport": {
     "title": "تقرير تسليم OfflineSMS",
@@ -367,7 +369,8 @@
     "localChats": "المحادثات",
     "localMessages": "الرسائل",
     "localStorageEmpty": "لا توجد محادثات مخزّنة على هذا الجهاز بعد.",
-    "updateFailed": "تعذّر تحديث الإعداد. يرجى المحاولة مرة أخرى."
+    "updateFailed": "تعذّر تحديث الإعداد. يرجى المحاولة مرة أخرى.",
+    "appVersion": "إصدار التطبيق"
   },
   "media": {
     "photo": "الصور",

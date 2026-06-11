@@ -460,6 +460,14 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // System settings — written by the admin dashboard (Admin SDK / server
+    // actions bypass rules). Mobile reads them for display (e.g. the App
+    // version row in Settings), so reads are open to any signed-in user.
+    match /systemSettings/{doc} {
+      allow read:  if isAuthed();
+      allow write: if isAdmin();
+    }
+
     // ════════════════════════════════════════════════════════════
     // ORGANIZATIONS (Phase 3 scaffold — admin-only until Phase 13)
     // ════════════════════════════════════════════════════════════

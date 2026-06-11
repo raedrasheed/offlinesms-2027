@@ -386,11 +386,20 @@ export default function Conversation({ route, navigation }: any) {
 
   const openImage  = useCallback((uri: string) => navigation.navigate('ImageViewer', { uri }), [navigation]);
   const retryMedia = useCallback((msg: Message) => { void retryMediaMessage(msg.id); }, []);
-  const onSendViaSms = useCallback((msg: Message) => navigation.navigate('SmsEscalation', {
-    conversationId: id,
-    messageId:      msg.id,
-    messageText:    msg.text,
-  }), [navigation, id]);
+  const onSendViaSms = useCallback((msg: Message) => {
+    // A message that hasn't synced yet only has a LOCAL id — the escalation
+    // callables would 404 on it ("Preview failed · Not found"). Block early
+    // with a clear explanation instead.
+    if (msg.status === 'sending' || msg.status === 'failed') {
+      Alert.alert(t('sms.notSyncedTitle'), t('sms.notSyncedMessage'));
+      return;
+    }
+    navigation.navigate('SmsEscalation', {
+      conversationId: id,
+      messageId:      msg.id,
+      messageText:    msg.text,
+    });
+  }, [navigation, id, t]);
 
   function confirmClearChat() {
     Alert.alert(

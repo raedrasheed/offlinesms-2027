@@ -38,6 +38,21 @@ describe('auditLogs', () => {
   });
 });
 
+describe('systemSettings', () => {
+  it('any signed-in user can read (mobile shows the App version row)', async () => {
+    await seed(async db => {
+      await setDoc(doc(db, 'systemSettings', 'general'), { appName: 'OfflineSMS', appVersion: '1.2.3' });
+    });
+    const db = await asUser('u-self');
+    await assertSucceeds(getDoc(doc(db, 'systemSettings', 'general')));
+  });
+
+  it('regular user cannot write system settings', async () => {
+    const db = await asUser('u-self');
+    await assertFails(setDoc(doc(db, 'systemSettings', 'general'), { appVersion: '9.9.9' }));
+  });
+});
+
 describe('gatewayHealth', () => {
   it('admin can read gateway health', async () => {
     await seed(async db => {

@@ -1,5 +1,29 @@
 import { describe, it, expect } from 'vitest';
-import { buildDefaultSmsBody, smsSkipReasonCopy } from '../src/lib/sms.helpers';
+import { buildDefaultSmsBody, smsPreviewErrorCopy, smsSkipReasonCopy } from '../src/lib/sms.helpers';
+
+describe('smsPreviewErrorCopy', () => {
+  it('explains an unsynced message (server reason message-not-found)', () => {
+    const copy = smsPreviewErrorCopy({ code: 'functions/not-found', message: 'message-not-found' });
+    expect(copy).toMatch(/hasn’t reached the server/);
+  });
+
+  it('explains a missing conversation', () => {
+    const copy = smsPreviewErrorCopy({ code: 'functions/not-found', message: 'conversation-not-found' });
+    expect(copy).toMatch(/conversation/i);
+  });
+
+  it('treats a bare not-found (undeployed callable) as service unavailable', () => {
+    const copy = smsPreviewErrorCopy({ code: 'functions/not-found', message: 'not-found' });
+    expect(copy).toMatch(/service isn’t available/);
+  });
+
+  it('falls back to the code-based copy for other errors', () => {
+    expect(smsPreviewErrorCopy({ code: 'functions/resource-exhausted', message: 'daily-cap' }))
+      .toMatch(/Daily SMS limit/);
+    expect(smsPreviewErrorCopy({ code: 'internal', message: '' }))
+      .toMatch(/try again/i);
+  });
+});
 
 describe('buildDefaultSmsBody', () => {
   it('defaults to the original message text', () => {

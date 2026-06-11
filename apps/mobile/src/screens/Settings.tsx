@@ -13,7 +13,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { signOut } from '../lib/auth';
-import { auth } from '../lib/firebase';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { auth, db } from '../lib/firebase';
 import {
   subscribeMe,
   setSmsOptOut,
@@ -61,8 +62,12 @@ const CHIP = {
   privacy:      '#4CAF50',
   devices:      '#3F51B5',
   support:      '#2196F3',
+  version:      '#607D8B',
   signOut:      '#F44336',
 } as const;
+
+// Bundled (installed) app version — fallback when the admin hasn't set one.
+const BUNDLED_VERSION: string = require('../../app.json').expo?.version ?? '0.0.0';
 
 function profileInitials(name?: string): string {
   const parts = (name ?? '').trim().split(/\s+/).filter(Boolean);
@@ -83,6 +88,20 @@ export default function Settings({ navigation }: any) {
   const [busy, setBusy]                 = useState(false);
   const [profile, setProfile]           = useState<{ displayName?: string; username?: string; phoneNumber?: string | null; photoURL?: string | null }>({});
   const [localStats, setLocalStats]     = useState<{ chats: number; messages: number } | null>(null);
+  const [appVersion, setAppVersion]     = useState<string>(BUNDLED_VERSION);
+
+  // App version: admin-managed via the dashboard (systemSettings/general);
+  // falls back to the bundled version when unset or unreadable.
+  useEffect(() => {
+    return onSnapshot(
+      doc(db, 'systemSettings', 'general'),
+      snap => {
+        const v = snap.data()?.appVersion;
+        setAppVersion(typeof v === 'string' && v.trim() ? v.trim() : BUNDLED_VERSION);
+      },
+      () => setAppVersion(BUNDLED_VERSION),
+    );
+  }, []);
 
   useEffect(() => {
     if (!me) return;
@@ -370,9 +389,20 @@ export default function Settings({ navigation }: any) {
         )}
       </View>
 
-      {/* Help & sign out */}
+      {/* Help, version & sign out */}
       <View style={s.card}>
         {navRow({ icon: 'help-circle', color: CHIP.support, label: t('settings.helpSupport'), onPress: () => navigation.navigate('SupportTicket'), first: true })}
+        <View
+          style={[s.cardRow, s.cardRowDivider]}
+          accessible={true}
+          accessibilityLabel={`${t('settings.appVersion')} ${appVersion}`}
+        >
+          {iconChip(CHIP.version, 'information-circle')}
+          <View style={{ flex: 1 }}>
+            <Text style={s.title}>{t('settings.appVersion')}</Text>
+          </View>
+          <Text style={s.sub}>{appVersion}</Text>
+        </View>
         {navRow({ icon: 'log-out', color: CHIP.signOut, label: t('settings.signOut'), onPress: () => signOut(), danger: true })}
       </View>
     </ScrollView>

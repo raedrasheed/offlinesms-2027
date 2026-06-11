@@ -784,6 +784,7 @@ export async function getSupportTicket(ticketId: string): Promise<AdminSupportTi
 export type SystemSettings = {
   appName: string;
   supportEmail: string;
+  appVersion: string;
   defaultLanguage: string;
   defaultTimezone: string;
   smsEscalationEnabled: boolean;
@@ -794,6 +795,7 @@ export type SystemSettings = {
 const SETTINGS_DEFAULTS: SystemSettings = {
   appName:              'OfflineSMS',
   supportEmail:         '',
+  appVersion:           '',
   defaultLanguage:      'en',
   defaultTimezone:      'UTC',
   smsEscalationEnabled: true,
@@ -808,6 +810,7 @@ export async function getSystemSettings(): Promise<SystemSettings> {
   return {
     appName:              (d.appName              as string  | undefined) ?? SETTINGS_DEFAULTS.appName,
     supportEmail:         (d.supportEmail         as string  | undefined) ?? SETTINGS_DEFAULTS.supportEmail,
+    appVersion:           (d.appVersion           as string  | undefined) ?? SETTINGS_DEFAULTS.appVersion,
     defaultLanguage:      (d.defaultLanguage      as string  | undefined) ?? SETTINGS_DEFAULTS.defaultLanguage,
     defaultTimezone:      (d.defaultTimezone      as string  | undefined) ?? SETTINGS_DEFAULTS.defaultTimezone,
     smsEscalationEnabled: (d.smsEscalationEnabled as boolean | undefined) ?? SETTINGS_DEFAULTS.smsEscalationEnabled,
