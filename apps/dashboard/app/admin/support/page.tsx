@@ -9,6 +9,7 @@ import { canDo } from '@/lib/adminPermissions';
 import { listSupportTickets } from '@/lib/adminData';
 import { PermissionState, EmptyState } from '@/components/state';
 import StatusBadge from '@/components/admin/StatusBadge';
+import SupportFilters from './SupportFilters';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -57,12 +58,6 @@ export default async function SupportPage({
   const canExport  = canDo(session.role, 'export:support');
   const exportHref = `/admin/support/export${statusFilter ? `?status=${statusFilter}` : ''}${categoryFilter ? `${statusFilter ? '&' : '?'}category=${categoryFilter}` : ''}`;
 
-  const selectStyle = {
-    background: 'var(--c-card)',
-    border: '1px solid var(--c-border)',
-    color: 'var(--c-text)',
-  };
-
   return (
     <div className="p-6 space-y-5" style={{ color: 'var(--c-text)' }}>
       <div className="flex items-center justify-between">
@@ -105,41 +100,7 @@ export default async function SupportPage({
             </a>
           );
         })}
-        <div className="ml-auto flex items-center gap-2">
-          <select
-            defaultValue={categoryFilter}
-            onChange={e => {
-              const url = new URL(window.location.href);
-              if (e.target.value) url.searchParams.set('category', e.target.value);
-              else url.searchParams.delete('category');
-              url.searchParams.delete('cursor');
-              window.location.href = url.toString();
-            }}
-            className="rounded-lg px-3 py-1.5 text-[11px] outline-none"
-            style={selectStyle}
-          >
-            <option value="">All categories</option>
-            <option value="billing">Billing</option>
-            <option value="technical">Technical</option>
-            <option value="account">Account</option>
-            <option value="other">Other</option>
-          </select>
-          <input
-            type="text"
-            placeholder="Assigned to (UID)"
-            defaultValue={assignedToFilter}
-            onBlur={e => {
-              const url = new URL(window.location.href);
-              const v = e.target.value.trim();
-              if (v) url.searchParams.set('assignedTo', v);
-              else url.searchParams.delete('assignedTo');
-              url.searchParams.delete('cursor');
-              window.location.href = url.toString();
-            }}
-            className="rounded-lg px-3 py-1.5 text-[11px] outline-none font-mono w-36"
-            style={selectStyle}
-          />
-        </div>
+        <SupportFilters categoryFilter={categoryFilter} assignedToFilter={assignedToFilter} />
       </div>
 
       {fetchError ? (
