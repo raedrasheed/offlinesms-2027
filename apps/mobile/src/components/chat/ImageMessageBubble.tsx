@@ -77,8 +77,10 @@ export function ImageMessageBubble({
         ) : null}
         {footer ? <View style={s.footerOverlay}>{footer}</View> : null}
       </Pressable>
+      {/* Caption sits inside the light-gray media card (for both mine and
+          theirs), so it's always dark ink — never white. */}
       {caption ? (
-        <Text style={[s.caption, mine && { color: '#fff' }]}>{caption}</Text>
+        <Text style={s.caption}>{caption}</Text>
       ) : null}
     </View>
   );

@@ -91,5 +91,5 @@ export function buildInvitePreview(args: {
 
 /** Public invite URL for a code (kept here so mobile + functions agree). */
 export function inviteUrl(code: string): string {
-  return `https://offlinesms.com/join/${code}`;
+  return `https://links.offlinesms.com/join/${code}`;
 }

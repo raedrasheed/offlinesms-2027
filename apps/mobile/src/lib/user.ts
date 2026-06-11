@@ -19,6 +19,7 @@ export type MeDoc = {
   displayName?:        string;
   username?:           string;
   usernameLower?:      string;
+  phoneNumber?:        string | null;
   photoURL?:           string | null;
   about?:              string | null;
   profileCompleted?:   boolean;

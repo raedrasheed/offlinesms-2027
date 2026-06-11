@@ -9,6 +9,7 @@ import { app } from './firebase';
 import {
   smsErrorCopy,
   smsErrorReason,
+  smsPreviewErrorCopy,
   smsSkipReasonCopy,
   buildDefaultSmsBody,
   type SmsSkipReason,
@@ -18,6 +19,7 @@ import {
 export {
   smsErrorCopy,
   smsErrorReason,
+  smsPreviewErrorCopy,
   smsSkipReasonCopy,
   buildDefaultSmsBody,
 };

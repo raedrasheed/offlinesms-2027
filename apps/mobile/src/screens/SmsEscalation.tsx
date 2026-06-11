@@ -22,6 +22,7 @@ import {
   retryFailedSmsRecipients,
   smsErrorCopy,
   smsErrorReason,
+  smsPreviewErrorCopy,
   smsSkipReasonCopy,
   EligibleRecipient,
   EscalationAudience,
@@ -78,7 +79,9 @@ export default function SmsEscalation({ route, navigation }: any) {
     });
   }, [conversationId]);
 
-  // Re-run preview whenever audience changes.
+  // Re-run preview whenever audience changes (or the user taps Retry, which
+  // bumps previewAttempt).
+  const [previewAttempt, setPreviewAttempt] = useState(0);
   useEffect(() => {
     let cancelled = false;
     setPreviewBusy(true); setPreviewErr(null);
@@ -87,11 +90,11 @@ export default function SmsEscalation({ route, navigation }: any) {
       .catch(e => {
         if (cancelled) return;
         setPreview(null);
-        setPreviewErr(smsErrorCopy((e as { code?: string })?.code ?? 'internal'));
+        setPreviewErr(smsPreviewErrorCopy(e));
       })
       .finally(() => { if (!cancelled) setPreviewBusy(false); });
     return () => { cancelled = true; };
-  }, [conversationId, messageId, audience]);
+  }, [conversationId, messageId, audience, previewAttempt]);
 
   const segments = useMemo(() => {
     if (smsBody.length === 0) return 0;
@@ -112,7 +115,7 @@ export default function SmsEscalation({ route, navigation }: any) {
       setResult(r);
       setStep('result');
     } catch (e: any) {
-      setResultErr(smsErrorCopy(e?.code ?? 'internal'));
+      setResultErr(smsPreviewErrorCopy(e));
       setStep('confirm');
     }
   }
@@ -140,6 +143,7 @@ export default function SmsEscalation({ route, navigation }: any) {
             previewBusy={previewBusy}
             previewErr={previewErr}
             onPick={a => setAudience(a)}
+            onRetryPreview={() => setPreviewAttempt(n => n + 1)}
             onContinue={() => preview && preview.eligibleCount > 0 ? setStep('recipients') : null}
           />
         ) : null}
@@ -232,13 +236,14 @@ function Stepper({ step }: { step: Step }) {
 }
 
 function AudienceStep({
-  audience, preview, previewBusy, previewErr, onPick, onContinue,
+  audience, preview, previewBusy, previewErr, onPick, onRetryPreview, onContinue,
 }: {
   audience: EscalationAudience;
   preview: EscalationPreview | null;
   previewBusy: boolean;
   previewErr: string | null;
   onPick: (a: EscalationAudience) => void;
+  onRetryPreview: () => void;
   onContinue: () => void;
 }) {
   const cards: Array<{ key: EscalationAudience; title: string; description: string }> = [
@@ -267,7 +272,12 @@ function AudienceStep({
       {previewBusy ? (
         <LoadingState compact title="Loading preview…" />
       ) : previewErr ? (
-        <ErrorState compact title="Preview failed" description={previewErr} />
+        <>
+          <ErrorState compact title="Preview failed" description={previewErr} />
+          <Pressable style={s.secondaryBtn} onPress={onRetryPreview}>
+            <Text style={s.secondaryBtnText}>Retry preview</Text>
+          </Pressable>
+        </>
       ) : preview ? (
         <View style={s.statsGrid}>
           <Stat label="Eligible" value={preview.eligibleCount} />

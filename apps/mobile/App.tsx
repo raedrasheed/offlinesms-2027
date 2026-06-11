@@ -44,6 +44,8 @@ import TransferPoints from './src/screens/TransferPoints';
 import ChatWallpaper from './src/screens/ChatWallpaper';
 import SmsBatchReport from './src/screens/SmsBatchReport';
 import Status from './src/screens/Status';
+import StatusComposer from './src/screens/StatusComposer';
+import StatusViewer from './src/screens/StatusViewer';
 import Calls from './src/screens/Calls';
 import Settings from './src/screens/Settings';
 import Points from './src/screens/Points';
@@ -186,9 +188,10 @@ export default function App() {
     });
   }, [user]);
 
-  // Invite deep links (offlinesms://join/{code} | https://offlinesms.com/join/
-  // {code}). If logged in + onboarded, open JoinGroup now; otherwise stash the
-  // code and replay it after auth (effect below).
+  // Invite deep links (offlinesms://join/{code} | https://links.offlinesms.com
+  // /join/{code}, plus legacy offlinesms.com links). If logged in + onboarded,
+  // open JoinGroup now; otherwise stash the code and replay it after auth
+  // (effect below).
   const authedRef = useRef(false);
   authedRef.current = !!user && profileCompleted === true;
   useEffect(() => {
@@ -263,6 +266,8 @@ export default function App() {
             <RootStack.Screen name="Conversation" component={Conversation} />
             <RootStack.Screen name="ImagePreview" component={ImagePreviewScreen} />
             <RootStack.Screen name="ImageViewer" component={ImageViewerScreen} options={{ presentation: 'fullScreenModal' }} />
+            <RootStack.Screen name="StatusComposer" component={StatusComposer} options={{ presentation: 'fullScreenModal' }} />
+            <RootStack.Screen name="StatusViewer" component={StatusViewer} options={{ presentation: 'fullScreenModal' }} />
             <RootStack.Screen name="GroupInfo" component={GroupInfo} />
             <RootStack.Screen name="AddMembers" component={AddMembers} />
             <RootStack.Screen name="JoinRequests" component={JoinRequests} />

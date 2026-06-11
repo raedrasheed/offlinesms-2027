@@ -10,6 +10,8 @@ export type SettingsActionState = { error?: string; success?: boolean } | null;
 
 const VALID_LANGUAGES = ['en', 'ar', 'fr', 'es', 'de', 'pt'] as const;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// Loose semver-ish: 1.2.3, 2.0, 1.0.0-beta.1… Empty = mobile shows its bundled version.
+const VERSION_RE = /^[0-9A-Za-z][0-9A-Za-z.\-+]{0,19}$/;
 
 export async function updateSystemSettings(
   _prev: SettingsActionState,
@@ -23,6 +25,7 @@ export async function updateSystemSettings(
 
   const appName             = (data.get('appName')             as string | null)?.trim() ?? '';
   const supportEmail        = (data.get('supportEmail')        as string | null)?.trim() ?? '';
+  const appVersion          = (data.get('appVersion')          as string | null)?.trim() ?? '';
   const defaultLanguage     = (data.get('defaultLanguage')     as string | null)?.trim() ?? 'en';
   const defaultTimezone     = (data.get('defaultTimezone')     as string | null)?.trim() ?? 'UTC';
   // Toggle posts a hidden "false" + a checkbox "true" under the same name;
@@ -33,6 +36,7 @@ export async function updateSystemSettings(
   if (!appName)                                           return { error: 'App name is required.' };
   if (appName.length > 60)                               return { error: 'App name must be 60 characters or less.' };
   if (supportEmail && !EMAIL_RE.test(supportEmail))      return { error: 'Invalid support email address.' };
+  if (appVersion && !VERSION_RE.test(appVersion))        return { error: 'Invalid app version (e.g. 1.2.3).' };
   if (!(VALID_LANGUAGES as readonly string[]).includes(defaultLanguage)) {
     return { error: 'Invalid default language.' };
   }
@@ -42,6 +46,7 @@ export async function updateSystemSettings(
   await adminDb.collection('systemSettings').doc('general').set({
     appName,
     supportEmail,
+    appVersion,
     defaultLanguage,
     defaultTimezone,
     smsEscalationEnabled,
@@ -60,6 +65,7 @@ export async function updateSystemSettings(
       result:     'success',
       metadata:   {
         appName,
+        appVersion,
         defaultLanguage,
         defaultTimezone,
         smsEscalationEnabled,

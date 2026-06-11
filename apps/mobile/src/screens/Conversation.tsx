@@ -46,6 +46,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import { prefetchMedia } from '../media/mediaCache';
 import { AttachmentSheet } from '../components/chat/AttachmentSheet';
+import { EmojiPicker3D } from '../components/chat/EmojiPicker3D';
 import { VoiceRecorderBar } from '../components/chat/VoiceRecorderBar';
 import { LockedVoiceRecorderBar } from '../components/chat/LockedVoiceRecorderBar';
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
@@ -348,6 +349,7 @@ export default function Conversation({ route, navigation }: any) {
 
   // Phase 23 — attachment sheet + image picking.
   const [attachOpen, setAttachOpen] = useState(false);
+  const [emojiOpen, setEmojiOpen] = useState(false);
 
   async function handleAsset(res: ImagePicker.ImagePickerResult) {
     if (res.canceled || !res.assets?.[0]) return;
@@ -384,11 +386,20 @@ export default function Conversation({ route, navigation }: any) {
 
   const openImage  = useCallback((uri: string) => navigation.navigate('ImageViewer', { uri }), [navigation]);
   const retryMedia = useCallback((msg: Message) => { void retryMediaMessage(msg.id); }, []);
-  const onSendViaSms = useCallback((msg: Message) => navigation.navigate('SmsEscalation', {
-    conversationId: id,
-    messageId:      msg.id,
-    messageText:    msg.text,
-  }), [navigation, id]);
+  const onSendViaSms = useCallback((msg: Message) => {
+    // A message that hasn't synced yet only has a LOCAL id — the escalation
+    // callables would 404 on it ("Preview failed · Not found"). Block early
+    // with a clear explanation instead.
+    if (msg.status === 'sending' || msg.status === 'failed') {
+      Alert.alert(t('sms.notSyncedTitle'), t('sms.notSyncedMessage'));
+      return;
+    }
+    navigation.navigate('SmsEscalation', {
+      conversationId: id,
+      messageId:      msg.id,
+      messageText:    msg.text,
+    });
+  }, [navigation, id, t]);
 
   function confirmClearChat() {
     Alert.alert(
@@ -826,65 +837,68 @@ export default function Conversation({ route, navigation }: any) {
                 onTogglePause={() => { void recorder.togglePause(); }}
                 onSend={() => { void (async () => { const res = await recorder.stop(); await sendVoice(res); })(); }}
               />
-            ) : recorder.mode === 'recording' ? (
-              <>
-                <VoiceRecorderBar elapsedMs={recorder.elapsedMs} bars={recorder.bars} cancelArmed={cancelArmed} />
-                <View style={s.micWrap}>
-                  <View style={s.lockPill}>
-                    <Ionicons name="lock-closed" size={16} color={colors.text.muted} />
-                    <Ionicons name="chevron-up" size={14} color={colors.text.muted} />
-                  </View>
-                  <View style={[s.sendBtn, s.micRecording]} {...micPan.panHandlers}>
-                    <Ionicons name="mic" size={26} color={colors.action.primaryFg} />
-                  </View>
-                </View>
-              </>
             ) : (
               <>
-                <View style={s.inputPill}>
-                  {!editing ? (
-                    <Pressable
-                      style={s.inlineIconLead}
-                      onPress={() => { /* emoji picker hook-in (no-op for now) */ }}
-                      accessibilityRole="button"
-                      accessibilityLabel="Emoji"
-                    >
-                      <Ionicons name="happy-outline" size={24} color={colors.text.muted} />
-                    </Pressable>
-                  ) : null}
-                  <TextInput
-                    value={draft}
-                    onChangeText={setDraft}
-                    placeholder={editing ? t('messageActions.editingMessage') : isOffline ? 'Type · saved as draft' : t('convo.composerPlaceholder')}
-                    style={s.input}
-                    multiline
-                    maxLength={4000}
-                    textAlign={isRTL ? 'right' : 'left'}
-                    accessibilityLabel={t('convo.composerPlaceholder')}
-                  />
-                  {!editing ? (
-                    <>
+                {/* Left region — swaps between the text input pill and the live
+                    recording bar. The mic button (right) is deliberately NOT
+                    part of this swap (see below). */}
+                {recorder.mode === 'recording' ? (
+                  <VoiceRecorderBar elapsedMs={recorder.elapsedMs} bars={recorder.bars} cancelArmed={cancelArmed} />
+                ) : (
+                  <View style={s.inputPill}>
+                    {!editing ? (
                       <Pressable
-                        style={s.inlineIcon}
-                        onPress={() => setAttachOpen(true)}
+                        style={s.inlineIconLead}
+                        onPress={() => setEmojiOpen(true)}
                         accessibilityRole="button"
-                        accessibilityLabel={t('media.attach')}
+                        accessibilityLabel={t('convo.emojiTitle')}
                       >
-                        <Ionicons name="attach" size={22} color={colors.text.muted} />
+                        <Ionicons name="happy-outline" size={24} color={colors.text.muted} />
                       </Pressable>
-                      {draft.trim() === '' ? (
+                    ) : null}
+                    <TextInput
+                      value={draft}
+                      onChangeText={setDraft}
+                      placeholder={editing ? t('messageActions.editingMessage') : isOffline ? 'Type · saved as draft' : t('convo.composerPlaceholder')}
+                      style={s.input}
+                      multiline
+                      maxLength={4000}
+                      textAlign={isRTL ? 'right' : 'left'}
+                      accessibilityLabel={t('convo.composerPlaceholder')}
+                    />
+                    {!editing ? (
+                      <>
                         <Pressable
                           style={s.inlineIcon}
-                          onPress={() => onAttachSelect('camera')}
+                          onPress={() => setAttachOpen(true)}
                           accessibilityRole="button"
-                          accessibilityLabel={t('media.camera')}
+                          accessibilityLabel={t('media.attach')}
                         >
-                          <Ionicons name="camera-outline" size={22} color={colors.text.muted} />
+                          <Ionicons name="attach" size={22} color={colors.text.muted} />
                         </Pressable>
-                      ) : null}
-                    </>
-                  ) : null}
-                </View>
+                        {draft.trim() === '' ? (
+                          <Pressable
+                            style={s.inlineIcon}
+                            onPress={() => onAttachSelect('camera')}
+                            accessibilityRole="button"
+                            accessibilityLabel={t('media.camera')}
+                          >
+                            <Ionicons name="camera-outline" size={22} color={colors.text.muted} />
+                          </Pressable>
+                        ) : null}
+                      </>
+                    ) : null}
+                  </View>
+                )}
+
+                {/* Right region. Send arrow while composing text; otherwise a
+                    PERSISTENT mic button. Its PanResponder must survive the
+                    idle→recording transition, so the mic node keeps a FIXED
+                    position in the tree (always `micWrap`'s 2nd child) and the
+                    lock pill above it is always mounted — merely hidden when
+                    not recording. Swapping the mic into a differently-shaped
+                    subtree mid-gesture used to terminate the active touch
+                    responder, breaking hold / slide-to-cancel / swipe-to-lock. */}
                 {(draft.trim() !== '' || editing) ? (
                   <Pressable
                     style={[s.sendBtn, busy && { opacity: 0.4 }]}
@@ -897,13 +911,22 @@ export default function Conversation({ route, navigation }: any) {
                     <Ionicons name={editing ? 'checkmark' : 'arrow-up'} size={20} color={colors.action.primaryFg} />
                   </Pressable>
                 ) : (
-                  <View
-                    style={s.sendBtn}
-                    {...micPan.panHandlers}
-                    accessibilityRole="button"
-                    accessibilityLabel={t('media.holdToRecord')}
-                  >
-                    <Ionicons name="mic" size={22} color={colors.action.primaryFg} />
+                  <View style={s.micWrap}>
+                    <View
+                      style={[s.lockPill, recorder.mode !== 'recording' && s.lockPillHidden]}
+                      pointerEvents="none"
+                    >
+                      <Ionicons name="lock-closed" size={16} color={colors.text.muted} />
+                      <Ionicons name="chevron-up" size={14} color={colors.text.muted} />
+                    </View>
+                    <View
+                      style={[s.sendBtn, recorder.mode === 'recording' && s.micRecording]}
+                      {...micPan.panHandlers}
+                      accessibilityRole="button"
+                      accessibilityLabel={t('media.holdToRecord')}
+                    >
+                      <Ionicons name="mic" size={recorder.mode === 'recording' ? 26 : 22} color={colors.action.primaryFg} />
+                    </View>
                   </View>
                 )}
               </>
@@ -916,6 +939,12 @@ export default function Conversation({ route, navigation }: any) {
         visible={attachOpen}
         onClose={() => setAttachOpen(false)}
         onSelect={onAttachSelect}
+      />
+
+      <EmojiPicker3D
+        visible={emojiOpen}
+        onClose={() => setEmojiOpen(false)}
+        onSelect={e => setDraft(d => d + e.char)}
       />
     </KeyboardAvoidingView>
   );
@@ -974,6 +1003,10 @@ function buildStyles(colors: any, rtl: boolean) {
     micWrap:  { width: 40, alignItems: 'center', justifyContent: 'center' },
     micRecording: { transform: [{ scale: 1.5 }] },
     lockPill: { position: 'absolute', bottom: 52, width: 34, paddingVertical: 8, borderRadius: 18, backgroundColor: colors.background.surface, alignItems: 'center', gap: 4, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 4, shadowOffset: { width: 0, height: 1 }, elevation: 3 },
+    // Keep the lock pill mounted at all times so the mic node below it never
+    // changes child index across the idle↔recording transition (which would
+    // drop the active gesture responder). Just hide it when not recording.
+    lockPillHidden: { opacity: 0 },
     gate:     { padding: 16, paddingBottom: 28, backgroundColor: '#EAF2FB', borderTopWidth: 1, borderColor: colors.border.subtle },
     gateText: { fontSize: 12, color: colors.text.muted, textAlign: 'center' },
   });

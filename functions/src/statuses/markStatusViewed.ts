@@ -9,27 +9,7 @@
 
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore, FieldValue, Timestamp } from 'firebase-admin/firestore';
-
-type Audience = 'all_contacts' | 'contacts_except' | 'only_share_with';
-
-function isAudienceMember(
-  data: {
-    audienceType?: Audience;
-    allowedViewerUids?: string[];
-    excludedViewerUids?: string[];
-  },
-  viewerUid: string,
-): boolean {
-  // Default semantics: missing audienceType behaves like 'all_contacts'.
-  const t = data.audienceType ?? 'all_contacts';
-  const allowed = data.allowedViewerUids ?? [];
-  const excluded = data.excludedViewerUids ?? [];
-
-  if (t === 'all_contacts')    return !excluded.includes(viewerUid);
-  if (t === 'contacts_except') return !excluded.includes(viewerUid);
-  if (t === 'only_share_with') return allowed.includes(viewerUid);
-  return false;
-}
+import { isStatusAudienceMember, type StatusAudience as Audience } from './statusLogic';
 
 export const markStatusViewed = onCall(async (request) => {
   const uid = request.auth?.uid;
@@ -64,7 +44,7 @@ export const markStatusViewed = onCall(async (request) => {
   }
 
   // Audience check (Phase 3 rules mirrored server-side).
-  if (!isAudienceMember(s, uid)) {
+  if (!isStatusAudienceMember(s, uid)) {
     throw new HttpsError('permission-denied', 'not-in-audience');
   }
 
@@ -74,12 +54,16 @@ export const markStatusViewed = onCall(async (request) => {
     return { ok: true, applied: false, reason: 'already-viewed' };
   }
 
-  await viewRef.set({
+  const batch = db.batch();
+  batch.set(viewRef, {
     statusId:  data.statusId,
     ownerUid:  s.authorId ?? null,
     viewerUid: uid,
     viewedAt:  FieldValue.serverTimestamp(),
   });
+  // First view per viewer (doc id = uid) — keep the aggregate on the parent.
+  batch.update(statusRef, { viewCount: FieldValue.increment(1) });
+  await batch.commit();
 
   return { ok: true, applied: true };
 });

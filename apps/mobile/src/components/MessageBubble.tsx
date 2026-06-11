@@ -23,6 +23,8 @@ import { ChatActionSheet, SheetAction } from './ChatActionSheet';
 import { ReactionsSheet, ReactorInfo } from './ReactionsSheet';
 import { ImageMessageBubble } from './chat/ImageMessageBubble';
 import { VoiceMessageBubble } from './chat/VoiceMessageBubble';
+import { AnimatedEmoji3D } from './chat/AnimatedEmoji3D';
+import { matchAnimatedEmoji } from '../lib/emoji3d';
 import {
   Message,
   REACTION_EMOJIS,
@@ -102,12 +104,34 @@ function MessageBubbleImpl({
   const senderName = m.senderDisplayName ?? senderProfile?.name ?? m.senderUid.slice(0, 2);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [reactionsOpen, setReactionsOpen] = useState(false);
+  const [emojiReplay, setEmojiReplay] = useState(0);
 
   // Memoise per-render allocations so a re-render (e.g. a sibling message
   // changed) doesn't re-compute time strings, re-build the reactions list, or
   // hand a fresh `{uri}` object to <Image> (which would re-mount the avatar).
   const timeText      = useMemo(() => formatTime(m.createdAt), [m.createdAt]);
+  // Single-supported-emoji text message → rendered as a big animated 3D emoji.
+  const emoji3d       = useMemo(
+    () => ((m.type ?? 'text') === 'text' ? matchAnimatedEmoji(m.text) : null),
+    [m.type, m.text],
+  );
   const senderImgSrc  = useMemo(() => (senderPhoto ? { uri: senderPhoto } : null), [senderPhoto]);
+  // Media (image/video) bubbles get a light-gray card frame; emoji bubbles
+  // are chromeless (transparent — the 3D emoji floats on the wallpaper).
+  // Chat media is images today (voice has its own player bubble); the gray
+  // card frame is keyed off the image type. Reads as "image & video" since a
+  // video message would share the same `media` shape if/when it lands.
+  const mediaMessage      = !deleted && m.type === 'image';
+  const transparentBubble = !deleted && !!emoji3d;
+  // A "mine" message is normally blue → white text. Media (light-gray card)
+  // and emoji (transparent) bubbles aren't blue, so their in-bubble content
+  // and footer need dark ink even when the message is mine.
+  const darkContent = mediaMessage || transparentBubble;
+  const footColor = darkContent
+    ? { color: colors.ink500 }
+    : (mine ? { color: 'rgba(255,255,255,.7)' } : undefined);
+  // Where we'd normally tint mine content white, only do so on the blue bubble.
+  const mineWhite = mine && !darkContent;
 
   if (pending) {
     return (
@@ -242,23 +266,30 @@ function MessageBubbleImpl({
       ) : null}
 
       <View style={[s.col, mine ? s.colMine : s.colTheirs]}>
-      <Pressable onLongPress={() => setSheetOpen(true)} delayLongPress={300} style={[s.bubble, mine ? s.sent : s.recv]}>
+      <Pressable
+        onLongPress={() => setSheetOpen(true)}
+        delayLongPress={300}
+        style={[
+          s.bubble,
+          transparentBubble ? s.bubbleEmoji : mediaMessage ? s.bubbleMedia : mine ? s.sent : s.recv,
+        ]}
+      >
         {showSender ? (
           <Text style={[s.senderLabel, { color: avatarColor(m.senderUid) }]} numberOfLines={1}>
             {senderName}
           </Text>
         ) : null}
-        {m.forwarded ? <Text style={[s.meta, mine && { color: 'rgba(255,255,255,.85)' }]}>↪︎ Forwarded</Text> : null}
+        {m.forwarded ? <Text style={[s.meta, mineWhite && { color: 'rgba(255,255,255,.85)' }]}>↪︎ Forwarded</Text> : null}
 
         {m.replyTo ? (
           <Pressable
             onPress={() => onJumpTo(m.replyTo!.messageId)}
-            style={[s.replyPreview, mine && s.replyPreviewMine]}
+            style={[s.replyPreview, mineWhite && s.replyPreviewMine]}
           >
-            <Text style={[s.replyName, mine && { color: '#fff' }]} numberOfLines={1}>
+            <Text style={[s.replyName, mineWhite && { color: '#fff' }]} numberOfLines={1}>
               {m.replyTo.senderDisplayName || m.replyTo.senderUid.slice(0, 6)}
             </Text>
-            <Text style={[s.replyText, mine && { color: 'rgba(255,255,255,.85)' }]} numberOfLines={2}>
+            <Text style={[s.replyText, mineWhite && { color: 'rgba(255,255,255,.85)' }]} numberOfLines={2}>
               {m.replyTo.preview}
             </Text>
           </Pressable>
@@ -284,6 +315,20 @@ function MessageBubbleImpl({
             onPlayed={() => onPlayedVoice?.(m)}
             onRetry={() => onRetryMedia?.(m)}
           />
+        ) : !deleted && emoji3d ? (
+          // Single-emoji message → large animated 3D emoji (WhatsApp style).
+          // Tap replays a bigger pop of the animation; long-press still opens
+          // the message action sheet.
+          <Pressable
+            style={s.emoji3dWrap}
+            onPress={() => setEmojiReplay(k => k + 1)}
+            onLongPress={() => setSheetOpen(true)}
+            delayLongPress={300}
+            accessibilityRole="button"
+            accessibilityLabel={emoji3d.char}
+          >
+            <AnimatedEmoji3D emoji={emoji3d} size={96} replayTrigger={emojiReplay} />
+          </Pressable>
         ) : (
           <View style={s.bubbleRow}>
             <Text style={[s.bubbleText, mine && { color: '#fff' }, deleted && (mine ? s.deletedTextMine : s.deletedText)]}>
@@ -293,14 +338,14 @@ function MessageBubbleImpl({
         )}
 
         {imageOverlayFooter ? null : (
-          <View style={s.bubbleFooter}>
-            {m.editedAt ? <Text style={[s.foot, mine && { color: 'rgba(255,255,255,.7)' }]}>edited</Text> : null}
+          <View style={[s.bubbleFooter, transparentBubble && s.bubbleFooterEmoji]}>
+            {m.editedAt ? <Text style={[s.foot, footColor]}>edited</Text> : null}
             {context.isStarred ? <Text style={s.star}>★</Text> : null}
             {context.isPinned ? <Text style={s.foot}>📌</Text> : null}
             {mine && !deleted ? (
-              <ReceiptIndicator message={m} isGroup={context.isGroup} memberCount={context.memberCount} />
+              <ReceiptIndicator message={m} isGroup={context.isGroup} memberCount={context.memberCount} dark={darkContent} />
             ) : null}
-            <Text style={[s.foot, mine && { color: 'rgba(255,255,255,.7)' }]}>{timeText}</Text>
+            <Text style={[s.foot, footColor]}>{timeText}</Text>
           </View>
         )}
       </Pressable>
@@ -350,31 +395,35 @@ function MessageBubbleImpl({
  * Small groups (< 20): eye + "Seen by N"
  * Larger groups: ✓✓ delivered count · eye read count
  */
-function ReceiptIndicator({ message, isGroup, memberCount }: { message: Message; isGroup: boolean; memberCount?: number }) {
+function ReceiptIndicator({ message, isGroup, memberCount, dark }: { message: Message; isGroup: boolean; memberCount?: number; dark?: boolean }) {
   const delivered = message.deliveredCount ?? 0;
   const read      = message.readCount ?? 0;
+  // On a transparent emoji bubble the footer sits on the wallpaper, so use
+  // dark ink; inside a sent (blue) bubble keep the translucent white.
+  const fg     = dark ? colors.ink500 : 'rgba(255,255,255,.85)';
+  const tickRead = dark ? colors.primary : '#9BD2EE';
 
   if (isGroup) {
     if (memberCount && memberCount < SMALL_GROUP_MAX) {
       return (
         <View style={s.receiptRow}>
-          <Ionicons name="eye-outline" size={12} color="rgba(255,255,255,.85)" />
-          <Text style={[s.foot, { color: 'rgba(255,255,255,.85)' }]}>Seen by {read}</Text>
+          <Ionicons name="eye-outline" size={12} color={fg} />
+          <Text style={[s.foot, { color: fg }]}>Seen by {read}</Text>
         </View>
       );
     }
     return (
       <View style={s.receiptRow}>
-        <Ionicons name="checkmark-done" size={13} color="rgba(255,255,255,.85)" />
-        <Text style={[s.foot, { color: 'rgba(255,255,255,.85)' }]}>{delivered}</Text>
-        <Ionicons name="eye-outline" size={12} color="rgba(255,255,255,.85)" />
-        <Text style={[s.foot, { color: 'rgba(255,255,255,.85)' }]}>{read}</Text>
+        <Ionicons name="checkmark-done" size={13} color={fg} />
+        <Text style={[s.foot, { color: fg }]}>{delivered}</Text>
+        <Ionicons name="eye-outline" size={12} color={fg} />
+        <Text style={[s.foot, { color: fg }]}>{read}</Text>
       </View>
     );
   }
-  if (read > 0)      return <Text style={[s.tick, { color: '#9BD2EE' }]}>✓✓</Text>;
-  if (delivered > 0) return <Text style={[s.tick, { color: 'rgba(255,255,255,.85)' }]}>✓✓</Text>;
-  return <Text style={[s.tick, { color: 'rgba(255,255,255,.6)' }]}>✓</Text>;
+  if (read > 0)      return <Text style={[s.tick, { color: tickRead }]}>✓✓</Text>;
+  if (delivered > 0) return <Text style={[s.tick, { color: fg }]}>✓✓</Text>;
+  return <Text style={[s.tick, { color: dark ? colors.ink400 : 'rgba(255,255,255,.6)' }]}>✓</Text>;
 }
 
 const s = StyleSheet.create({
@@ -391,7 +440,14 @@ const s = StyleSheet.create({
   bubble:         { maxWidth: '100%', paddingHorizontal: 11, paddingVertical: 7, borderRadius: 18, shadowColor: '#000', shadowOpacity: 0.10, shadowRadius: 3, shadowOffset: { width: 0, height: 1 }, elevation: 2 },
   sent:           { backgroundColor: '#1E88E5', borderTopRightRadius: 5 },
   recv:           { backgroundColor: '#fff', borderTopLeftRadius: 5 },
+  // Image/video card: light-gray fill + thin border, tight padding so the
+  // frame reads as a slim mat around the media.
+  bubbleMedia:    { backgroundColor: colors.ink100, borderWidth: 1, borderColor: colors.ink200, paddingHorizontal: 4, paddingVertical: 4 },
+  // Emoji message: no bubble chrome at all — the 3D emoji sits on the wallpaper.
+  bubbleEmoji:    { backgroundColor: 'transparent', paddingHorizontal: 0, paddingVertical: 0, shadowOpacity: 0, elevation: 0 },
+  bubbleFooterEmoji: { paddingHorizontal: 4, paddingTop: 2 },
   bubbleRow:      { flexDirection: 'row', alignItems: 'flex-end', gap: 6 },
+  emoji3dWrap:    { alignItems: 'center', justifyContent: 'center', paddingVertical: 4, paddingHorizontal: 8 },
   bubbleText:     { fontSize: 16, color: colors.ink, lineHeight: 22, flexShrink: 1 },
   deletedText:    { fontStyle: 'italic', color: colors.ink500 },
   deletedTextMine:{ fontStyle: 'italic', color: 'rgba(255,255,255,.8)' },

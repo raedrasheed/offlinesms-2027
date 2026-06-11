@@ -34,6 +34,28 @@ export function smsErrorReason(err: unknown): string | null {
   return msg.includes(':') ? msg.split(':')[0] : msg;
 }
 
+/**
+ * Reason-aware copy for the escalation flow. A bare 'functions/not-found'
+ * code is ambiguous: HttpsError('not-found', 'message-not-found') from the
+ * callable carries its reason in the message, while a missing/undeployed
+ * callable returns code not-found with no specific reason. Distinguish so
+ * the user isn't shown a useless "Not found.".
+ */
+export function smsPreviewErrorCopy(err: unknown): string {
+  const code = (err as { code?: string })?.code ?? 'internal';
+  const reason = smsErrorReason(err);
+  if (reason === 'message-not-found') {
+    return 'This message hasn’t reached the server yet. Wait a moment and try again.';
+  }
+  if (reason === 'conversation-not-found') {
+    return 'This conversation isn’t available on the server.';
+  }
+  if (code === 'functions/not-found' || code === 'not-found') {
+    return 'The OfflineSMS service isn’t available right now. Please try again later.';
+  }
+  return smsErrorCopy(code);
+}
+
 export function smsSkipReasonCopy(reason: SmsSkipReason): string {
   switch (reason) {
     case 'no-phone':                  return 'No phone number';

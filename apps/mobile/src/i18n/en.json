@@ -66,9 +66,19 @@
     "myStatus": "My status",
     "tapToAdd": "Tap to add status update",
     "recentUpdates": "Recent updates",
+    "viewedUpdates": "Viewed updates",
     "noUpdatesTitle": "No recent updates",
     "noUpdatesDesc": "When your contacts post a status, it’ll show up here.",
-    "comingSoon": "Posting a status is coming soon."
+    "typeStatus": "Type a status",
+    "postFailed": "Couldn’t post your status. Please try again.",
+    "deleteTitle": "Delete status?",
+    "deleteMessage": "It will be removed for everyone.",
+    "deleteFailed": "Couldn’t delete this status. Please try again.",
+    "views": "{{n}} views",
+    "photoVideo": "Photo & video status",
+    "addCaption": "Add a caption…",
+    "videoTooLong": "Videos can be up to 30 seconds.",
+    "mediaPermission": "Allow photo and video access to share a media status."
   },
   "calls": {
     "title": "Calls",
@@ -81,7 +91,8 @@
     "online": "Online",
     "typing": "Typing…",
     "composerPlaceholder": "Message",
-    "e2e": "Messages and calls are end-to-end encrypted"
+    "e2e": "Messages and calls are end-to-end encrypted",
+    "emojiTitle": "3D emojis"
   },
   "presence": {
     "online": "Online",
@@ -236,7 +247,9 @@
       "alreadySent": "Already received SMS for this message",
       "rateLimited": "Rate limit reached",
       "policyBlocked": "Blocked by policy"
-    }
+    },
+    "notSyncedTitle": "Message not sent yet",
+    "notSyncedMessage": "This message hasn’t been sent to the server yet. Wait until it’s delivered, then try again."
   },
   "smsReport": {
     "title": "OfflineSMS Delivery Report",
@@ -356,7 +369,8 @@
     "localChats": "Chats",
     "localMessages": "Messages",
     "localStorageEmpty": "No chats stored on this device yet.",
-    "updateFailed": "Couldn't update setting. Please try again."
+    "updateFailed": "Couldn't update setting. Please try again.",
+    "appVersion": "App version"
   },
   "media": {
     "photo": "Photos",

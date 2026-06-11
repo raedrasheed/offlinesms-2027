@@ -1,8 +1,9 @@
 // JoinGroup — invite-link preview + join/request flow.
 //
-// Opened by a deep link (offlinesms://join/{code} or https://offlinesms.com/
-// join/{code}) or programmatically. Requires connectivity: invites are
-// validated server-side, so offline shows a clear message rather than queuing.
+// Opened by a deep link (offlinesms://join/{code} or https://
+// links.offlinesms.com/join/{code}, plus legacy offlinesms.com links) or
+// programmatically. Requires connectivity: invites are validated
+// server-side, so offline shows a clear message rather than queuing.
 
 import { useCallback, useEffect, useState } from 'react';
 import { View, Text, Image, Pressable, StyleSheet, ActivityIndicator } from 'react-native';

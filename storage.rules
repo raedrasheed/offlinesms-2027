@@ -36,10 +36,18 @@ service firebase.storage {
                        request.resource.size < 30 * 1024 * 1024;
     }
 
-    // Status media — 24h auto-expiry handled by Cloud Function
+    // Status media — image/video statuses; metadata is validated again by the
+    // createStatus callable. Caps mirror functions/src/statuses/statusLogic.ts.
+    function isAllowedStatusMime(ct) {
+      return ct in [
+        'image/jpeg', 'image/png', 'image/webp',
+        'video/mp4', 'video/quicktime', 'video/webm'
+      ];
+    }
     match /statuses/{uid}/{file} {
       allow read: if isAuthed();
-      allow write: if isSelf(uid) && request.resource.size < 15 * 1024 * 1024;
+      allow write: if isSelf(uid) && request.resource.size < 15 * 1024 * 1024
+                      && isAllowedStatusMime(request.resource.contentType);
     }
   }
 }
