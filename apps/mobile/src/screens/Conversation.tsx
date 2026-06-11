@@ -838,12 +838,10 @@ export default function Conversation({ route, navigation }: any) {
               />
             ) : (
               <>
-                {/* The input pill is always mounted. Its left region swaps
-                    between the text controls and an inline recording indicator,
-                    but the trailing mic stays at a FIXED child index so its
-                    PanResponder survives the idle→recording transition (moving
-                    it mid-gesture used to terminate the active touch and break
-                    hold / slide-to-cancel / swipe-to-lock). */}
+                {/* Telegram layout: a solid white pill (emoji · Message ·
+                    attach) with the wallpaper visible around it, and a big
+                    round blue action button beside it. While recording, the
+                    pill's left region swaps to an inline indicator. */}
                 <View style={s.inputPill}>
                   <View style={s.pillLeft}>
                     {recorder.mode === 'recording' ? (
@@ -889,50 +887,43 @@ export default function Conversation({ route, navigation }: any) {
                       </>
                     )}
                   </View>
-
-                  {/* Trailing mic — lives INSIDE the field. Present only with an
-                      empty draft (and not editing); the send button outside
-                      takes over once there's text. Stays mounted across
-                      idle↔recording (both states have an empty draft). */}
-                  {!(draft.trim() !== '' || editing) ? (
-                    <View style={s.micInlineWrap}>
-                      <View
-                        style={[s.lockPill, recorder.mode !== 'recording' && s.lockPillHidden]}
-                        pointerEvents="none"
-                      >
-                        <Ionicons name="lock-closed" size={16} color={colors.text.muted} />
-                        <Ionicons name="chevron-up" size={14} color={colors.text.muted} />
-                      </View>
-                      <View
-                        style={s.micInlineBtn}
-                        {...micPan.panHandlers}
-                        accessibilityRole="button"
-                        accessibilityLabel={t('media.holdToRecord')}
-                      >
-                        <Ionicons
-                          name="mic"
-                          size={recorder.mode === 'recording' ? 26 : 24}
-                          color={recorder.mode === 'recording' ? colors.state.error : colors.action.primary}
-                        />
-                      </View>
-                    </View>
-                  ) : null}
                 </View>
 
-                {/* Send appears as a round button beside the field once the
-                    user is composing text (or editing). */}
+                {/* Round blue action circle (Telegram): send while composing
+                    text/editing, mic otherwise. The mic node keeps a FIXED
+                    tree position (micWrap's 2nd child, lock pill always
+                    mounted above it) so its PanResponder survives the
+                    idle→recording transition. */}
                 {(draft.trim() !== '' || editing) ? (
                   <Pressable
-                    style={[s.sendBtn, busy && { opacity: 0.4 }]}
+                    style={[s.actionCircle, busy && { opacity: 0.4 }]}
                     onPress={send}
                     disabled={busy}
                     accessibilityRole="button"
                     accessibilityLabel={editing ? t('common.save') : t('common.send')}
                     accessibilityState={{ disabled: busy }}
                   >
-                    <Ionicons name={editing ? 'checkmark' : 'arrow-up'} size={20} color={colors.action.primaryFg} />
+                    <Ionicons name={editing ? 'checkmark' : 'arrow-up'} size={22} color={colors.action.primaryFg} />
                   </Pressable>
-                ) : null}
+                ) : (
+                  <View style={s.micWrap}>
+                    <View
+                      style={[s.lockPill, recorder.mode !== 'recording' && s.lockPillHidden]}
+                      pointerEvents="none"
+                    >
+                      <Ionicons name="lock-closed" size={16} color={colors.text.muted} />
+                      <Ionicons name="chevron-up" size={14} color={colors.text.muted} />
+                    </View>
+                    <View
+                      style={[s.actionCircle, recorder.mode === 'recording' && s.micRecording]}
+                      {...micPan.panHandlers}
+                      accessibilityRole="button"
+                      accessibilityLabel={t('media.holdToRecord')}
+                    >
+                      <Ionicons name="mic" size={recorder.mode === 'recording' ? 28 : 24} color={colors.action.primaryFg} />
+                    </View>
+                  </View>
+                )}
               </>
             )}
           </View>
@@ -1000,8 +991,6 @@ function buildStyles(colors: any, rtl: boolean) {
     composer: { padding: 12, paddingBottom: 24, flexDirection: rtl ? 'row-reverse' : 'row', gap: 8, alignItems: 'flex-end', backgroundColor: 'transparent' },
     inputPill: { flex: 1, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', minHeight: 46, paddingHorizontal: 4, backgroundColor: colors.background.surface, borderRadius: 24, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 4, shadowOffset: { width: 0, height: 1 }, elevation: 2 },
     pillLeft:  { flex: 1, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center' },
-    micInlineWrap: { width: 40, alignItems: 'center', justifyContent: 'center' },
-    micInlineBtn:  { width: 40, height: 44, alignItems: 'center', justifyContent: 'center' },
     recordingInline: { flex: 1, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 8, paddingHorizontal: 8, height: 44 },
     recDot:    { width: 9, height: 9, borderRadius: 5, backgroundColor: colors.state.error },
     recTimer:  { fontSize: 13, fontWeight: '700', color: colors.text.primary, minWidth: 42, textAlign: rtl ? 'right' : 'left' },
@@ -1010,10 +999,12 @@ function buildStyles(colors: any, rtl: boolean) {
     input:    { flex: 1, minHeight: 38, maxHeight: 120, paddingHorizontal: 6, paddingVertical: 8, backgroundColor: 'transparent', fontSize: 15, color: colors.text.primary },
     inlineIconLead: { width: 38, height: 44, alignItems: 'center', justifyContent: 'center' },
     inlineIcon: { width: 34, height: 44, alignItems: 'center', justifyContent: 'center' },
-    sendBtn:  { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.action.primary, alignItems: 'center', justifyContent: 'center' },
-    micWrap:  { width: 40, alignItems: 'center', justifyContent: 'center' },
-    micRecording: { transform: [{ scale: 1.5 }] },
-    lockPill: { position: 'absolute', bottom: 52, width: 34, paddingVertical: 8, borderRadius: 18, backgroundColor: colors.background.surface, alignItems: 'center', gap: 4, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 4, shadowOffset: { width: 0, height: 1 }, elevation: 3 },
+    // Big round action button beside the pill (Telegram): blue circle with a
+    // white mic (or send arrow once there's text).
+    actionCircle: { width: 48, height: 48, borderRadius: 24, backgroundColor: colors.action.primary, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 4, shadowOffset: { width: 0, height: 1 }, elevation: 2 },
+    micWrap:  { width: 48, alignItems: 'center', justifyContent: 'center' },
+    micRecording: { transform: [{ scale: 1.35 }], backgroundColor: colors.state.error },
+    lockPill: { position: 'absolute', bottom: 60, width: 34, paddingVertical: 8, borderRadius: 18, backgroundColor: colors.background.surface, alignItems: 'center', gap: 4, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 4, shadowOffset: { width: 0, height: 1 }, elevation: 3 },
     // Keep the lock pill mounted at all times so the mic node below it never
     // changes child index across the idle↔recording transition (which would
     // drop the active gesture responder). Just hide it when not recording.
