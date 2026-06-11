@@ -994,14 +994,10 @@ function buildStyles(colors: any, rtl: boolean) {
     composerPreviewTitle: { fontSize: 11, fontWeight: '700', color: colors.action.primary, textAlign: rtl ? 'right' : 'left' },
     composerPreviewBody:  { fontSize: 12, color: colors.text.primary, marginTop: 2, textAlign: rtl ? 'right' : 'left' },
     composerPreviewClose: { fontSize: 18, color: colors.text.muted, fontWeight: '700', paddingHorizontal: 6, minWidth: 36, minHeight: 36, textAlignVertical: 'center', textAlign: 'center' },
-    // Telegram-style composer: a solid surface bar with a hairline top border
-    // (the wallpaper stops above it), input pill inside.
-    // Transparent bar — the wallpaper shows through behind the pill; only the
-    // pill itself is opaque (WhatsApp/Telegram style).
+    // Fully transparent composer: both the bar AND the input pill let the
+    // wallpaper show through; a thin outline keeps the field discoverable.
     composer: { padding: 12, paddingBottom: 24, flexDirection: rtl ? 'row-reverse' : 'row', gap: 8, alignItems: 'flex-end', backgroundColor: 'transparent' },
-    // WhatsApp-style input pill: emoji (leading) + text field + attach + camera.
-    // Opaque surface so the input area stays constant over any wallpaper.
-    inputPill: { flex: 1, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', minHeight: 46, paddingHorizontal: 4, backgroundColor: colors.background.subtle, borderRadius: 24 },
+    inputPill: { flex: 1, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', minHeight: 46, paddingHorizontal: 4, backgroundColor: 'transparent', borderRadius: 24, borderWidth: 1, borderColor: colors.border.default },
     pillLeft:  { flex: 1, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center' },
     micInlineWrap: { width: 40, alignItems: 'center', justifyContent: 'center' },
     micInlineBtn:  { width: 40, height: 44, alignItems: 'center', justifyContent: 'center' },
