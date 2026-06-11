@@ -49,6 +49,10 @@ export { markReceipt }       from './chats/markReceipt';
 export { onReceiptWrite }    from './chats/onReceiptWrite';
 export { markStatusViewed }  from './statuses/markStatusViewed';
 
+// Status module — text statuses with audience + 24h expiry.
+export { createStatus }      from './statuses/createStatus';
+export { getStatusFeed }     from './statuses/getStatusFeed';
+
 // Disappearing-message sweeper is implemented at
 // ./chats/sweepExpiredMessages but NOT exported here. Activation is
 // deferred to Phase 11 alongside the client-side TTL setting UI.

@@ -66,9 +66,15 @@
     "myStatus": "حالتي",
     "tapToAdd": "اضغط لإضافة تحديث للحالة",
     "recentUpdates": "التحديثات الأخيرة",
+    "viewedUpdates": "التحديثات المُشاهدة",
     "noUpdatesTitle": "لا توجد تحديثات حديثة",
     "noUpdatesDesc": "عندما ينشر جهات اتصالك حالة، ستظهر هنا.",
-    "comingSoon": "نشر الحالة قادم قريبًا."
+    "typeStatus": "اكتب حالة",
+    "postFailed": "تعذّر نشر حالتك. حاول مرة أخرى.",
+    "deleteTitle": "حذف الحالة؟",
+    "deleteMessage": "ستُحذف للجميع.",
+    "deleteFailed": "تعذّر حذف هذه الحالة. حاول مرة أخرى.",
+    "views": "{{n}} مشاهدة"
   },
   "calls": {
     "title": "المكالمات",

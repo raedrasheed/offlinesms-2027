@@ -66,9 +66,15 @@
     "myStatus": "My status",
     "tapToAdd": "Tap to add status update",
     "recentUpdates": "Recent updates",
+    "viewedUpdates": "Viewed updates",
     "noUpdatesTitle": "No recent updates",
     "noUpdatesDesc": "When your contacts post a status, it’ll show up here.",
-    "comingSoon": "Posting a status is coming soon."
+    "typeStatus": "Type a status",
+    "postFailed": "Couldn’t post your status. Please try again.",
+    "deleteTitle": "Delete status?",
+    "deleteMessage": "It will be removed for everyone.",
+    "deleteFailed": "Couldn’t delete this status. Please try again.",
+    "views": "{{n}} views"
   },
   "calls": {
     "title": "Calls",
