@@ -2,11 +2,13 @@
 // Adds language, theme, notification, and time-format preferences.
 // Accessibility labels on all interactive elements.
 // Uses useTranslation() for all user-facing strings.
+//
+// Telegram-style layout: large centered avatar + name + phone/username
+// header, then grouped cards whose rows carry colored icon chips.
 
 import { useEffect, useState } from 'react';
 import {
   View, Text, Pressable, Switch, StyleSheet, Alert, ScrollView, Image,
-  I18nManager,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
@@ -46,6 +48,22 @@ const TIME_FORMATS: { value: TimeFormat; labelKey: string }[] = [
   { value: '24h',    labelKey: 'settings.timeFormat24' },
 ];
 
+// Telegram-style icon chip colors per row.
+const CHIP = {
+  findFriends:  '#2196F3',
+  securityPin:  '#4CAF50',
+  permissions:  '#FF9800',
+  points:       '#FFB300',
+  smsReminders: '#E91E63',
+  inAppNotifs:  '#F44336',
+  wallpaper:    '#00BCD4',
+  notifs:       '#F44336',
+  privacy:      '#4CAF50',
+  devices:      '#3F51B5',
+  support:      '#2196F3',
+  signOut:      '#F44336',
+} as const;
+
 function profileInitials(name?: string): string {
   const parts = (name ?? '').trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return '?';
@@ -63,7 +81,7 @@ export default function Settings({ navigation }: any) {
   const [currentLang, setCurrentLang]   = useState<LanguageCode>((i18n.language as LanguageCode) || 'en');
   const [currentTime, setCurrentTime]   = useState<TimeFormat>('system');
   const [busy, setBusy]                 = useState(false);
-  const [profile, setProfile]           = useState<{ displayName?: string; username?: string; photoURL?: string | null }>({});
+  const [profile, setProfile]           = useState<{ displayName?: string; username?: string; phoneNumber?: string | null; photoURL?: string | null }>({});
   const [localStats, setLocalStats]     = useState<{ chats: number; messages: number } | null>(null);
 
   useEffect(() => {
@@ -98,7 +116,7 @@ export default function Settings({ navigation }: any) {
       if (m?.inAppNotifications != null) setInAppNotifs(m.inAppNotifications);
       if (m?.timeFormat) setCurrentTime(m.timeFormat);
       if (m?.preferredLanguage) setCurrentLang(m.preferredLanguage);
-      setProfile({ displayName: m?.displayName, username: m?.username, photoURL: m?.photoURL });
+      setProfile({ displayName: m?.displayName, username: m?.username, phoneNumber: m?.phoneNumber, photoURL: m?.photoURL });
     });
   }, [me]);
 
@@ -129,6 +147,42 @@ export default function Settings({ navigation }: any) {
 
   const s = buildStyles(colors, isRTL);
 
+  const phone = profile.phoneNumber || auth.currentUser?.phoneNumber || '';
+  const handle = profile.username ? `@${profile.username}` : '';
+  const headerSub = [phone, handle].filter(Boolean).join(' • ') || t('settings.editProfileHint');
+
+  function iconChip(color: string, icon: keyof typeof Ionicons.glyphMap) {
+    return (
+      <View style={[s.iconChip, { backgroundColor: color }]}>
+        <Ionicons name={icon} size={17} color="#fff" />
+      </View>
+    );
+  }
+
+  function navRow(opts: {
+    icon: keyof typeof Ionicons.glyphMap; color: string;
+    label: string; sub?: string; onPress: () => void;
+    first?: boolean; danger?: boolean; hint?: string;
+  }) {
+    return (
+      <Pressable
+        style={[s.cardRow, !opts.first && s.cardRowDivider]}
+        onPress={opts.onPress}
+        accessible={true}
+        accessibilityRole="button"
+        accessibilityLabel={opts.label}
+        accessibilityHint={opts.hint}
+      >
+        {iconChip(opts.color, opts.icon)}
+        <View style={{ flex: 1 }}>
+          <Text style={[s.title, opts.danger && { color: colors.state.error }]} numberOfLines={1}>{opts.label}</Text>
+          {opts.sub ? <Text style={s.sub} numberOfLines={1}>{opts.sub}</Text> : null}
+        </View>
+        {!opts.danger ? <Text style={s.chev} accessibilityElementsHidden>{isRTL ? '‹' : '›'}</Text> : null}
+      </Pressable>
+    );
+  }
+
   return (
     <ScrollView
       style={s.root}
@@ -136,114 +190,87 @@ export default function Settings({ navigation }: any) {
       accessibilityLabel={t('settings.title')}
     >
 
-      {/* Profile header card */}
+      {/* Centered profile header — big avatar, name, phone • username */}
       <Pressable
-        style={s.profileCard}
+        style={s.header}
         onPress={() => navigation.navigate('EditProfile')}
         accessible={true}
         accessibilityRole="button"
         accessibilityLabel={t('settings.profile')}
       >
-        <View style={s.profileAv}>
-          {profile.photoURL
-            ? <Image source={{ uri: profile.photoURL }} style={s.profileAvImg} />
-            : <Text style={s.profileAvText}>{profileInitials(profile.displayName)}</Text>}
+        <View style={s.headerAvWrap}>
+          <View style={s.headerAv}>
+            {profile.photoURL
+              ? <Image source={{ uri: profile.photoURL }} style={s.headerAvImg} />
+              : <Text style={s.headerAvText}>{profileInitials(profile.displayName)}</Text>}
+          </View>
+          <View style={s.cameraBadge}>
+            <Ionicons name="camera" size={15} color="#fff" />
+          </View>
         </View>
-        <View style={{ flex: 1 }}>
-          <Text style={s.profileName} numberOfLines={1}>{profile.displayName || t('settings.profile')}</Text>
-          <Text style={s.profileSub} numberOfLines={1}>{profile.username ? `@${profile.username}` : t('settings.editProfileHint')}</Text>
-        </View>
-        <Text style={s.chev} accessibilityElementsHidden>{isRTL ? '‹' : '›'}</Text>
+        <Text style={s.headerName} numberOfLines={1}>{profile.displayName || t('settings.profile')}</Text>
+        <Text style={s.headerSub} numberOfLines={1}>{headerSub}</Text>
       </Pressable>
 
-      {/* Find friends */}
-      <Pressable
-        style={s.row}
-        onPress={() => navigation.navigate('FindFriends')}
-        accessible={true}
-        accessibilityRole="button"
-        accessibilityLabel={t('settings.findFriends')}
-      >
-        <Text style={s.title}>{t('settings.findFriends')}</Text>
-        <Text style={s.chev} accessibilityElementsHidden>{isRTL ? '‹' : '›'}</Text>
-      </Pressable>
-
-      {/* Security PIN */}
-      <Pressable
-        style={s.row}
-        onPress={() => navigation.navigate('CreatePin')}
-        accessible={true}
-        accessibilityRole="button"
-        accessibilityLabel={t('settings.securityPin')}
-      >
-        <Text style={s.title}>{t('settings.securityPin')}</Text>
-        <Text style={s.chev} accessibilityElementsHidden>{isRTL ? '‹' : '›'}</Text>
-      </Pressable>
-
-      {/* Permissions */}
-      <Pressable
-        style={s.row}
-        onPress={() => navigation.navigate('Permissions')}
-        accessible={true}
-        accessibilityRole="button"
-        accessibilityLabel={t('settings.permissions')}
-      >
-        <Text style={s.title}>{t('settings.permissions')}</Text>
-        <Text style={s.chev} accessibilityElementsHidden>{isRTL ? '‹' : '›'}</Text>
-      </Pressable>
-
-      {/* Points */}
-      <Pressable
-        style={s.row}
-        onPress={() => navigation.navigate('Points')}
-        accessible={true}
-        accessibilityRole="button"
-        accessibilityLabel={t('settings.points')}
-        accessibilityHint={t('settings.pointsSubtitle')}
-      >
-        <View style={{ flex: 1 }}>
-          <Text style={s.title}>{t('settings.points')}</Text>
-          <Text style={s.sub}>
-            {wallet
-              ? `${wallet.balance.toLocaleString()} pts  ·  ${wallet.reserved.toLocaleString()} ${t('points.reserved').toLowerCase()}`
-              : t('settings.pointsSubtitle')}
-          </Text>
-        </View>
-        <Text style={s.chev} accessibilityElementsHidden>{isRTL ? '‹' : '›'}</Text>
-      </Pressable>
-
-      {/* SMS reminders toggle */}
-      <View style={s.toggleRow}>
-        <View style={{ flex: 1 }}>
-          <Text style={s.title}>{t('settings.smsReminders')}</Text>
-          <Text style={s.sub}>
-            {optOut === true ? t('settings.smsRemindersOff') : t('settings.smsRemindersOn')}
-          </Text>
-        </View>
-        <Switch
-          value={optOut !== true}
-          onValueChange={v => withBusy(() => setSmsOptOut(me!, !v))}
-          disabled={optOut === null || busy}
-          accessibilityLabel={t('settings.smsReminders')}
-          accessibilityRole="switch"
-          accessibilityState={{ checked: optOut !== true, disabled: optOut === null || busy }}
-        />
+      {/* Account & security */}
+      <View style={s.card}>
+        {navRow({ icon: 'person-add', color: CHIP.findFriends, label: t('settings.findFriends'), onPress: () => navigation.navigate('FindFriends'), first: true })}
+        {navRow({ icon: 'key', color: CHIP.securityPin, label: t('settings.securityPin'), onPress: () => navigation.navigate('CreatePin') })}
+        {navRow({ icon: 'shield-checkmark', color: CHIP.permissions, label: t('settings.permissions'), onPress: () => navigation.navigate('Permissions') })}
       </View>
 
-      {/* In-app notifications toggle */}
-      <View style={s.toggleRow}>
-        <View style={{ flex: 1 }}>
-          <Text style={s.title}>{t('settings.inAppNotifications')}</Text>
-          <Text style={s.sub}>{t('settings.inAppNotificationsSubtitle')}</Text>
+      {/* Points + notification toggles */}
+      <View style={s.card}>
+        {navRow({
+          icon: 'star', color: CHIP.points,
+          label: t('settings.points'),
+          sub: wallet
+            ? `${wallet.balance.toLocaleString()} pts  ·  ${wallet.reserved.toLocaleString()} ${t('points.reserved').toLowerCase()}`
+            : t('settings.pointsSubtitle'),
+          onPress: () => navigation.navigate('Points'),
+          first: true,
+          hint: t('settings.pointsSubtitle'),
+        })}
+
+        <View style={[s.cardRow, s.cardRowDivider]}>
+          {iconChip(CHIP.smsReminders, 'chatbox-ellipses')}
+          <View style={{ flex: 1 }}>
+            <Text style={s.title}>{t('settings.smsReminders')}</Text>
+            <Text style={s.sub}>
+              {optOut === true ? t('settings.smsRemindersOff') : t('settings.smsRemindersOn')}
+            </Text>
+          </View>
+          <Switch
+            value={optOut !== true}
+            onValueChange={v => withBusy(() => setSmsOptOut(me!, !v))}
+            disabled={optOut === null || busy}
+            accessibilityLabel={t('settings.smsReminders')}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: optOut !== true, disabled: optOut === null || busy }}
+          />
         </View>
-        <Switch
-          value={inAppNotifs}
-          onValueChange={v => withBusy(() => setInAppNotifications(me!, v))}
-          disabled={busy}
-          accessibilityLabel={t('settings.inAppNotifications')}
-          accessibilityRole="switch"
-          accessibilityState={{ checked: inAppNotifs, disabled: busy }}
-        />
+
+        <View style={[s.cardRow, s.cardRowDivider]}>
+          {iconChip(CHIP.inAppNotifs, 'notifications')}
+          <View style={{ flex: 1 }}>
+            <Text style={s.title}>{t('settings.inAppNotifications')}</Text>
+            <Text style={s.sub}>{t('settings.inAppNotificationsSubtitle')}</Text>
+          </View>
+          <Switch
+            value={inAppNotifs}
+            onValueChange={v => withBusy(() => setInAppNotifications(me!, v))}
+            disabled={busy}
+            accessibilityLabel={t('settings.inAppNotifications')}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: inAppNotifs, disabled: busy }}
+          />
+        </View>
+      </View>
+
+      {/* Appearance — wallpaper + notification settings */}
+      <View style={s.card}>
+        {navRow({ icon: 'image', color: CHIP.wallpaper, label: 'Chat wallpaper', onPress: () => (navigation as any).navigate('ChatWallpaper'), first: true })}
+        {navRow({ icon: 'notifications-circle', color: CHIP.notifs, label: 'Notifications', onPress: () => (navigation as any).navigate('NotificationSettings') })}
       </View>
 
       {/* Language */}
@@ -288,29 +315,6 @@ export default function Settings({ navigation }: any) {
         </View>
       </View>
 
-      {/* Appearance — chat wallpaper */}
-      <View style={s.section}>
-        <Text style={s.sectionLabel}>Appearance</Text>
-        <Pressable
-          style={s.linkRow}
-          onPress={() => (navigation as any).navigate('ChatWallpaper')}
-          accessibilityRole="button"
-          accessibilityLabel="Chat wallpaper"
-        >
-          <Text style={s.linkRowText}>Chat wallpaper</Text>
-          <Ionicons name="chevron-forward" size={18} color={colors.text.muted} />
-        </Pressable>
-        <Pressable
-          style={s.linkRow}
-          onPress={() => (navigation as any).navigate('NotificationSettings')}
-          accessibilityRole="button"
-          accessibilityLabel="Notifications"
-        >
-          <Text style={s.linkRowText}>Notifications</Text>
-          <Ionicons name="chevron-forward" size={18} color={colors.text.muted} />
-        </Pressable>
-      </View>
-
       {/* Time format */}
       <View style={s.section}>
         <Text style={s.sectionLabel}>{t('settings.timeFormat')}</Text>
@@ -332,29 +336,11 @@ export default function Settings({ navigation }: any) {
         </View>
       </View>
 
-      {/* Privacy */}
-      <Pressable
-        style={s.row}
-        onPress={() => navigation.navigate('Privacy')}
-        accessible={true}
-        accessibilityRole="button"
-        accessibilityLabel={t('settings.privacy')}
-      >
-        <Text style={s.title}>{t('settings.privacy')}</Text>
-        <Text style={s.chev} accessibilityElementsHidden>{isRTL ? '‹' : '›'}</Text>
-      </Pressable>
-
-      {/* Linked devices */}
-      <Pressable
-        style={s.row}
-        onPress={() => navigation.navigate('Devices')}
-        accessible={true}
-        accessibilityRole="button"
-        accessibilityLabel={t('settings.linkedDevices')}
-      >
-        <Text style={s.title}>{t('settings.linkedDevices')}</Text>
-        <Text style={s.chev} accessibilityElementsHidden>{isRTL ? '‹' : '›'}</Text>
-      </Pressable>
+      {/* Privacy & devices */}
+      <View style={s.card}>
+        {navRow({ icon: 'lock-closed', color: CHIP.privacy, label: t('settings.privacy'), onPress: () => navigation.navigate('Privacy'), first: true })}
+        {navRow({ icon: 'laptop', color: CHIP.devices, label: t('settings.linkedDevices'), onPress: () => navigation.navigate('Devices') })}
+      </View>
 
       {/* On-device storage */}
       <View
@@ -384,28 +370,11 @@ export default function Settings({ navigation }: any) {
         )}
       </View>
 
-      {/* Help & Support */}
-      <Pressable
-        style={s.row}
-        onPress={() => navigation.navigate('SupportTicket')}
-        accessible={true}
-        accessibilityRole="button"
-        accessibilityLabel={t('settings.helpSupport')}
-      >
-        <Text style={s.title}>{t('settings.helpSupport')}</Text>
-        <Text style={s.chev} accessibilityElementsHidden>{isRTL ? '‹' : '›'}</Text>
-      </Pressable>
-
-      {/* Sign out */}
-      <Pressable
-        style={s.row}
-        onPress={() => signOut()}
-        accessible={true}
-        accessibilityRole="button"
-        accessibilityLabel={t('settings.signOut')}
-      >
-        <Text style={[s.title, { color: colors.state.error }]}>{t('settings.signOut')}</Text>
-      </Pressable>
+      {/* Help & sign out */}
+      <View style={s.card}>
+        {navRow({ icon: 'help-circle', color: CHIP.support, label: t('settings.helpSupport'), onPress: () => navigation.navigate('SupportTicket'), first: true })}
+        {navRow({ icon: 'log-out', color: CHIP.signOut, label: t('settings.signOut'), onPress: () => signOut(), danger: true })}
+      </View>
     </ScrollView>
   );
 }
@@ -413,23 +382,31 @@ export default function Settings({ navigation }: any) {
 function buildStyles(colors: any, rtl: boolean) {
   return StyleSheet.create({
     root:         { flex: 1, backgroundColor: colors.background.app },
-    content:      { padding: 14, paddingBottom: 150, gap: 8 },
-    row:          { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', paddingVertical: 16, paddingHorizontal: 14, backgroundColor: colors.background.surface, borderRadius: radius.md, gap: 10 },
-    toggleRow:    { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', paddingVertical: 16, paddingHorizontal: 14, backgroundColor: colors.background.surface, borderRadius: radius.md, gap: 12 },
-    profileCard:  { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 14, padding: 14, backgroundColor: colors.background.surface, borderRadius: radius.md },
-    profileAv:    { width: 52, height: 52, borderRadius: 26, backgroundColor: colors.action.primary, alignItems: 'center', justifyContent: 'center' },
-    profileAvImg: { width: 52, height: 52, borderRadius: 26 },
-    profileAvText:{ color: colors.action.primaryFg, fontWeight: '800', fontSize: 16 },
-    profileName:  { fontSize: 16, fontWeight: '800', color: colors.text.primary, textAlign: rtl ? 'right' : 'left' },
-    profileSub:   { fontSize: 12, color: colors.text.muted, marginTop: 2, textAlign: rtl ? 'right' : 'left' },
-    title:        { fontSize: 14, fontWeight: '700', color: colors.text.primary, flex: 1, textAlign: rtl ? 'right' : 'left', lineHeight: 20 },
+    content:      { padding: 14, paddingBottom: 150, gap: 12 },
+
+    // Centered Telegram-style profile header.
+    header:       { alignItems: 'center', paddingTop: 36, paddingBottom: 10 },
+    headerAvWrap: { width: 112, height: 112 },
+    headerAv:     { width: 112, height: 112, borderRadius: 56, backgroundColor: colors.action.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+    headerAvImg:  { width: 112, height: 112, borderRadius: 56 },
+    headerAvText: { color: colors.action.primaryFg, fontWeight: '800', fontSize: 36 },
+    cameraBadge:  { position: 'absolute', bottom: 2, right: rtl ? undefined : 2, left: rtl ? 2 : undefined, width: 32, height: 32, borderRadius: 16, backgroundColor: colors.action.primary, alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: colors.background.app },
+    headerName:   { fontSize: 24, fontWeight: '800', color: colors.text.primary, marginTop: 14, textAlign: 'center', maxWidth: '90%' },
+    headerSub:    { fontSize: 14, color: colors.text.muted, marginTop: 4, textAlign: 'center', maxWidth: '90%' },
+
+    // Grouped cards with icon-chip rows.
+    card:         { backgroundColor: colors.background.surface, borderRadius: radius.md, overflow: 'hidden' },
+    cardRow:      { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', paddingVertical: 13, paddingHorizontal: 14, gap: 12 },
+    cardRowDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderColor: colors.border.subtle },
+    iconChip:     { width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+
+    title:        { fontSize: 15, fontWeight: '600', color: colors.text.primary, textAlign: rtl ? 'right' : 'left', lineHeight: 20 },
     sub:          { fontSize: 12, color: colors.text.muted, marginTop: 2, textAlign: rtl ? 'right' : 'left', lineHeight: 16 },
     chev:         { fontSize: 18, color: colors.text.disabled, fontWeight: '700' },
+
     section:      { backgroundColor: colors.background.surface, borderRadius: radius.md, padding: 14 },
     sectionLabel: { fontSize: 12, fontWeight: '700', color: colors.text.muted, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5, textAlign: rtl ? 'right' : 'left' },
     chipRow:      { flexDirection: rtl ? 'row-reverse' : 'row', gap: 8, flexWrap: 'wrap' },
-    linkRow:      { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12, marginTop: 8 },
-    linkRowText:  { fontSize: 15, fontWeight: '600', color: colors.text.primary },
     chip:         { paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.pill, backgroundColor: colors.background.subtle, borderWidth: 1, borderColor: colors.border.subtle, minHeight: 36, justifyContent: 'center' },
     chipActive:   { backgroundColor: colors.action.primary, borderColor: colors.action.primary },
     chipText:     { fontSize: 13, fontWeight: '600', color: colors.text.secondary },
