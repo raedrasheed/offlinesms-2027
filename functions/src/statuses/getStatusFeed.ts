@@ -19,8 +19,10 @@ export type StatusFeedItem = {
   authorId:        string;
   authorName:      string;
   authorPhotoURL:  string | null;
-  type:            'text';
+  type:            'text' | 'image' | 'video';
   body:            string;
+  mediaUrl:        string | null;
+  durationMs:      number | null;
   backgroundColor: string | null;
   createdAtMs:     number;
   expiresAtMs:     number;
@@ -68,8 +70,10 @@ export const getStatusFeed = onCall(async (request) => {
       authorId:        s.authorId ?? '',
       authorName:      s.authorName ?? s.authorId ?? '?',
       authorPhotoURL:  s.authorPhotoURL ?? null,
-      type:            'text',
+      type:            (s.type === 'image' || s.type === 'video') ? s.type : 'text',
       body:            s.body ?? '',
+      mediaUrl:        s.mediaUrl ?? null,
+      durationMs:      s.durationMs ?? null,
       backgroundColor: s.backgroundColor ?? null,
       createdAtMs:     s.createdAt?.toMillis?.() ?? 0,
       expiresAtMs:     s.expiresAt?.toMillis?.() ?? 0,

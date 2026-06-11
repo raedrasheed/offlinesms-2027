@@ -4,7 +4,7 @@ import { groupStatusFeed, type StatusFeedItem } from '../src/lib/statusModel';
 function item(over: Partial<StatusFeedItem>): StatusFeedItem {
   return {
     statusId: 's', authorId: 'a', authorName: 'A', authorPhotoURL: null,
-    type: 'text', body: 'hi', backgroundColor: '#075E54',
+    type: 'text', body: 'hi', mediaUrl: null, durationMs: null, backgroundColor: '#075E54',
     createdAtMs: 0, expiresAtMs: 9_999_999_999_999, viewedByMe: false,
     ...over,
   };

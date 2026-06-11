@@ -74,7 +74,11 @@
     "deleteTitle": "Delete status?",
     "deleteMessage": "It will be removed for everyone.",
     "deleteFailed": "Couldn’t delete this status. Please try again.",
-    "views": "{{n}} views"
+    "views": "{{n}} views",
+    "photoVideo": "Photo & video status",
+    "addCaption": "Add a caption…",
+    "videoTooLong": "Videos can be up to 30 seconds.",
+    "mediaPermission": "Allow photo and video access to share a media status."
   },
   "calls": {
     "title": "Calls",

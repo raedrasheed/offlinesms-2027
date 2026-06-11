@@ -10,11 +10,12 @@
 import {
   collection, doc, onSnapshot, orderBy, query, where, limit, deleteDoc,
 } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { getFunctions, httpsCallable } from 'firebase/functions';
-import { app, db, auth } from './firebase';
-import type { StatusFeedItem } from './statusModel';
+import { app, db, auth, storage } from './firebase';
+import type { StatusFeedItem, StatusType } from './statusModel';
 
-export type { StatusFeedItem, AuthorStatusGroup } from './statusModel';
+export type { StatusFeedItem, StatusType, AuthorStatusGroup } from './statusModel';
 export { groupStatusFeed } from './statusModel';
 
 /** Solid backgrounds for text statuses — mirrors the server palette. */
@@ -25,9 +26,16 @@ export const STATUS_BG_COLORS = [
 
 export const STATUS_BODY_MAX = 700;
 
+// Media caps — mirror functions/src/statuses/statusLogic.ts + storage.rules.
+export const STATUS_MEDIA_MAX_BYTES = 15 * 1024 * 1024;
+export const STATUS_VIDEO_MAX_MS    = 30_000;
+
 export type MyStatus = {
   statusId:        string;
+  type:            StatusType;
   body:            string;
+  mediaUrl:        string | null;
+  durationMs:      number | null;
   backgroundColor: string | null;
   viewCount:       number;
   createdAtMs:     number;
@@ -47,6 +55,44 @@ export async function createTextStatus(args: {
     { statusId: string; expiresAtMs: number }
   >('createStatus')({ type: 'text', ...args });
   return res.data.statusId;
+}
+
+/**
+ * Post an image/video status: upload the binary to the caller's own
+ * statuses/{uid}/ folder (storage.rules: owner-only, ≤15MB, image/video
+ * MIME), then register it via the createStatus callable. sizeBytes is
+ * taken from the uploaded blob — the picker's fileSize is unreliable.
+ */
+export async function createMediaStatus(args: {
+  localUri:   string;
+  type:       'image' | 'video';
+  mimeType:   string;
+  caption?:   string;
+  durationMs?: number | null;
+}): Promise<string> {
+  const uid = auth.currentUser?.uid;
+  if (!uid) throw new Error('sign-in-required');
+
+  const res = await fetch(args.localUri);
+  const blob = await res.blob();
+  if (blob.size > STATUS_MEDIA_MAX_BYTES) throw new Error('size-invalid');
+
+  const ext = args.mimeType.split('/')[1]?.replace('quicktime', 'mov') ?? 'bin';
+  const storagePath = `statuses/${uid}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const r = ref(storage, storagePath);
+  await uploadBytes(r, blob, { contentType: args.mimeType });
+  const mediaUrl = await getDownloadURL(r);
+
+  const out = await fn<Record<string, unknown>, { statusId: string; expiresAtMs: number }>('createStatus')({
+    type:        args.type,
+    body:        args.caption ?? '',
+    mediaUrl,
+    storagePath,
+    mimeType:    args.mimeType,
+    sizeBytes:   blob.size,
+    durationMs:  args.type === 'video' ? args.durationMs ?? null : null,
+  });
+  return out.data.statusId;
 }
 
 export async function fetchStatusFeed(): Promise<StatusFeedItem[]> {
@@ -82,7 +128,10 @@ export function subscribeMyStatuses(cb: (rows: MyStatus[]) => void) {
           const s = d.data() as Record<string, any>;
           return {
             statusId:        d.id,
+            type:            (s.type === 'image' || s.type === 'video') ? s.type : 'text',
             body:            s.body ?? '',
+            mediaUrl:        s.mediaUrl ?? null,
+            durationMs:      s.durationMs ?? null,
             backgroundColor: s.backgroundColor ?? null,
             viewCount:       s.viewCount ?? 0,
             createdAtMs:     s.createdAt?.toMillis?.() ?? 0,

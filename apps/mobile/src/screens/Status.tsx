@@ -7,16 +7,18 @@
 // pull-to-refresh.
 
 import { useCallback, useMemo, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, ScrollView, RefreshControl } from 'react-native';
+import { View, Text, Pressable, StyleSheet, ScrollView, RefreshControl, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { useFocusEffect } from '@react-navigation/native';
+import * as ImagePicker from 'expo-image-picker';
 import { auth } from '../lib/firebase';
 import { useTheme } from '../context/ThemeContext';
 import { isRTL } from '../i18n';
 import {
   MyStatus, StatusFeedItem, AuthorStatusGroup,
   subscribeMyStatuses, fetchStatusFeed, groupStatusFeed,
+  STATUS_VIDEO_MAX_MS,
 } from '../lib/statuses';
 
 function initials(name: string): string {
@@ -67,16 +69,44 @@ export default function Status({ navigation }: any) {
 
   function openComposer() { navigation.navigate('StatusComposer'); }
 
+  // Pick a photo or video from the library and hand it to the composer for
+  // preview + caption. Video length is checked here so the user finds out
+  // before the upload, and again server-side.
+  async function pickMedia() {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) { Alert.alert(t('status.title'), t('status.mediaPermission')); return; }
+    const mediaTypes =
+      (ImagePicker as any).MediaTypeOptions?.All ?? (ImagePicker as any).MediaType?.All ?? 'all';
+    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes, quality: 0.8 });
+    if (res.canceled || !res.assets?.[0]) return;
+    const a = res.assets[0];
+    const isVideo = a.type === 'video';
+    const durationMs = isVideo ? (a.duration ?? 0) : null;
+    if (isVideo && (durationMs ?? 0) > STATUS_VIDEO_MAX_MS) {
+      Alert.alert(t('status.title'), t('status.videoTooLong'));
+      return;
+    }
+    const mimeType = a.mimeType ?? (isVideo ? 'video/mp4' : 'image/jpeg');
+    navigation.navigate('StatusComposer', {
+      media: { uri: a.uri, type: isVideo ? 'video' : 'image', mimeType, durationMs },
+    });
+  }
+
+  function toViewerItems(items: { statusId: string; type: string; body: string; mediaUrl: string | null; durationMs: number | null; backgroundColor: string | null; createdAtMs: number }[]) {
+    return items.map(m => ({
+      statusId: m.statusId, type: m.type, body: m.body,
+      mediaUrl: m.mediaUrl, durationMs: m.durationMs,
+      backgroundColor: m.backgroundColor, createdAtMs: m.createdAtMs,
+    }));
+  }
+
   function openMine() {
     if (mine.length === 0) { openComposer(); return; }
     navigation.navigate('StatusViewer', {
       title: t('status.myStatus'),
       isMine: true,
       startIndex: 0,
-      items: mine.map(m => ({
-        statusId: m.statusId, body: m.body,
-        backgroundColor: m.backgroundColor, createdAtMs: m.createdAtMs,
-      })),
+      items: toViewerItems(mine),
     });
   }
 
@@ -85,10 +115,7 @@ export default function Status({ navigation }: any) {
       title: g.authorName,
       isMine: false,
       startIndex: g.startIndex,
-      items: g.items.map(it => ({
-        statusId: it.statusId, body: it.body,
-        backgroundColor: it.backgroundColor, createdAtMs: it.createdAtMs,
-      })),
+      items: toViewerItems(g.items),
     });
   }
 
@@ -158,6 +185,14 @@ export default function Status({ navigation }: any) {
         )}
       </ScrollView>
 
+      <Pressable
+        style={s.fabSecondary}
+        onPress={() => { void pickMedia(); }}
+        accessibilityRole="button"
+        accessibilityLabel={t('status.photoVideo')}
+      >
+        <Ionicons name="camera" size={22} color={colors.action.primary} />
+      </Pressable>
       <Pressable style={s.fab} onPress={openComposer}>
         <Ionicons name="create-outline" size={24} color={colors.action.primaryFg} />
       </Pressable>
@@ -190,5 +225,6 @@ function buildStyles(colors: any, rtl: boolean) {
     emptyDesc:  { fontSize: 13, color: colors.text.muted, textAlign: 'center', lineHeight: 19 },
 
     fab: { position: 'absolute', bottom: 104, right: rtl ? undefined : 18, left: rtl ? 18 : undefined, width: 54, height: 54, borderRadius: 27, backgroundColor: colors.action.primary, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 8 },
+    fabSecondary: { position: 'absolute', bottom: 170, right: rtl ? undefined : 22, left: rtl ? 22 : undefined, width: 46, height: 46, borderRadius: 23, backgroundColor: colors.background.surface, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 6 },
   });
 }

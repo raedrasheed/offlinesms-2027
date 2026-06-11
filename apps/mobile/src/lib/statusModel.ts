@@ -1,13 +1,17 @@
 // Pure status-feed shaping — no Firebase/React-Native imports, so it loads
 // cleanly under vitest (the wrappers in `statuses.ts` pull in firebase).
 
+export type StatusType = 'text' | 'image' | 'video';
+
 export type StatusFeedItem = {
   statusId:        string;
   authorId:        string;
   authorName:      string;
   authorPhotoURL:  string | null;
-  type:            'text';
+  type:            StatusType;
   body:            string;
+  mediaUrl:        string | null;
+  durationMs:      number | null;
   backgroundColor: string | null;
   createdAtMs:     number;
   expiresAtMs:     number;

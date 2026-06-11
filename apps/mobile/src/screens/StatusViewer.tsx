@@ -1,16 +1,18 @@
 // StatusViewer — full-screen story-style playback of one author's statuses.
 //
-// Progress bars auto-advance (5s each); tap right/left to step. Viewing
-// someone else's status records the view via markStatusViewed (server
-// dedupes per viewer). Viewing my own shows the live viewer count and a
-// delete action instead.
+// Text/image items auto-advance after 5s on an animated progress bar; video
+// items drive the bar from real playback position and advance when the clip
+// finishes. Viewing someone else's status records the view via
+// markStatusViewed (server dedupes). Viewing my own shows the live viewer
+// count and a delete action instead.
 
 import { useEffect, useRef, useState } from 'react';
 import {
-  View, Text, Pressable, StyleSheet, Animated, Alert, Easing,
+  View, Text, Pressable, StyleSheet, Animated, Alert, Easing, Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
+import { Video, ResizeMode, type AVPlaybackStatus } from 'expo-av';
 import {
   markStatusViewed, deleteStatus, subscribeStatusViewCount,
 } from '../lib/statuses';
@@ -20,7 +22,10 @@ const FALLBACK_BG = '#075E54';
 
 type ViewerItem = {
   statusId:        string;
+  type?:           'text' | 'image' | 'video';
   body:            string;
+  mediaUrl?:       string | null;
+  durationMs?:     number | null;
   backgroundColor: string | null;
   createdAtMs:     number;
 };
@@ -49,11 +54,15 @@ export default function StatusViewer({ route, navigation }: any) {
   const [busy, setBusy] = useState(false);
   const progress = useRef(new Animated.Value(0)).current;
   const current: ViewerItem | undefined = items[index];
+  const currentType = current?.type ?? 'text';
+  const isMedia = currentType === 'image' || currentType === 'video';
 
-  // Auto-advance timer.
+  // Auto-advance timer — text and images only. Videos drive the bar from
+  // playback status and advance on didJustFinish instead.
   useEffect(() => {
     if (!current) return;
     progress.setValue(0);
+    if (currentType === 'video') return;
     const anim = Animated.timing(progress, {
       toValue: 1, duration: ITEM_MS, easing: Easing.linear, useNativeDriver: false,
     });
@@ -84,6 +93,13 @@ export default function StatusViewer({ route, navigation }: any) {
     setIndex(i => Math.max(i - 1, 0));
   }
 
+  function onVideoStatus(st: AVPlaybackStatus) {
+    if (!st.isLoaded) return;
+    const dur = st.durationMillis ?? current?.durationMs ?? 0;
+    if (dur > 0) progress.setValue(Math.min((st.positionMillis ?? 0) / dur, 1));
+    if (st.didJustFinish) next();
+  }
+
   function confirmDelete() {
     if (!current) return;
     Alert.alert(t('status.deleteTitle'), t('status.deleteMessage'), [
@@ -108,8 +124,10 @@ export default function StatusViewer({ route, navigation }: any) {
 
   if (!current) return null;
 
+  const bg = isMedia ? '#000' : (current.backgroundColor ?? FALLBACK_BG);
+
   return (
-    <View style={[s.root, { backgroundColor: current.backgroundColor ?? FALLBACK_BG }]}>
+    <View style={[s.root, { backgroundColor: bg }]}>
       {/* Progress bars */}
       <View style={s.barsRow}>
         {items.map((it, i) => (
@@ -138,7 +156,25 @@ export default function StatusViewer({ route, navigation }: any) {
 
       {/* Body + tap zones */}
       <View style={s.bodyWrap}>
-        <Text style={s.body}>{current.body}</Text>
+        {currentType === 'image' && current.mediaUrl ? (
+          <Image source={{ uri: current.mediaUrl }} style={s.media} resizeMode="contain" />
+        ) : currentType === 'video' && current.mediaUrl ? (
+          <Video
+            key={current.statusId}
+            source={{ uri: current.mediaUrl }}
+            style={s.media}
+            resizeMode={ResizeMode.CONTAIN}
+            shouldPlay
+            onPlaybackStatusUpdate={onVideoStatus}
+          />
+        ) : (
+          <Text style={s.body}>{current.body}</Text>
+        )}
+        {isMedia && current.body ? (
+          <View style={s.captionWrap} pointerEvents="none">
+            <Text style={s.caption}>{current.body}</Text>
+          </View>
+        ) : null}
         <Pressable style={s.tapLeft}  onPress={prev} />
         <Pressable style={s.tapRight} onPress={next} />
       </View>
@@ -161,15 +197,18 @@ export default function StatusViewer({ route, navigation }: any) {
 
 const s = StyleSheet.create({
   root:     { flex: 1 },
-  barsRow:  { flexDirection: 'row', gap: 4, paddingTop: 52, paddingHorizontal: 10 },
+  barsRow:  { flexDirection: 'row', gap: 4, paddingTop: 52, paddingHorizontal: 10, zIndex: 2 },
   barTrack: { flex: 1, height: 3, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.35)', overflow: 'hidden' },
   barFill:  { height: 3, borderRadius: 2, backgroundColor: '#fff' },
-  header:   { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 12, gap: 12 },
+  header:   { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 12, gap: 12, zIndex: 2 },
   name:     { color: '#fff', fontSize: 16, fontWeight: '800' },
   time:     { color: 'rgba(255,255,255,0.8)', fontSize: 12, marginTop: 2 },
   closeBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(0,0,0,0.25)', alignItems: 'center', justifyContent: 'center' },
-  bodyWrap: { flex: 1, justifyContent: 'center', paddingHorizontal: 28 },
-  body:     { color: '#fff', fontSize: 28, fontWeight: '700', textAlign: 'center', lineHeight: 38 },
+  bodyWrap: { flex: 1, justifyContent: 'center' },
+  body:     { color: '#fff', fontSize: 28, fontWeight: '700', textAlign: 'center', lineHeight: 38, paddingHorizontal: 28 },
+  media:    { width: '100%', height: '100%' },
+  captionWrap: { position: 'absolute', left: 0, right: 0, bottom: 24, paddingHorizontal: 20, alignItems: 'center' },
+  caption:  { color: '#fff', fontSize: 15, textAlign: 'center', backgroundColor: 'rgba(0,0,0,0.45)', borderRadius: 14, paddingHorizontal: 14, paddingVertical: 8, overflow: 'hidden' },
   tapLeft:  { position: 'absolute', left: 0, top: 0, bottom: 0, width: '35%' },
   tapRight: { position: 'absolute', right: 0, top: 0, bottom: 0, width: '65%' },
   footer:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingBottom: 34 },

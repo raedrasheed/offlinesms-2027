@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  isStatusAudienceMember, validateTextStatusInput,
-  STATUS_BODY_MAX, STATUS_TTL_MS,
+  isStatusAudienceMember, validateTextStatusInput, validateMediaStatusInput,
+  STATUS_BODY_MAX, STATUS_TTL_MS, STATUS_MEDIA_MAX_BYTES, STATUS_VIDEO_MAX_MS,
 } from '../src/statuses/statusLogic';
 
 describe('isStatusAudienceMember', () => {
@@ -75,6 +75,66 @@ describe('validateTextStatusInput', () => {
       allowedViewerUids: ['a'], excludedViewerUids: ['c', 'c'],
     });
     expect(out).toMatchObject({ allowedViewerUids: [], excludedViewerUids: ['c'] });
+  });
+});
+
+describe('validateMediaStatusInput', () => {
+  const base = {
+    type: 'image' as const,
+    mediaUrl: 'https://firebasestorage.googleapis.com/x/y.jpg',
+    storagePath: 'statuses/u1/123-abc.jpg',
+    mimeType: 'image/jpeg',
+    sizeBytes: 1024,
+  };
+
+  it('accepts a valid image with no caption', () => {
+    const out = validateMediaStatusInput(base, 'u1');
+    expect(out).toMatchObject({
+      type: 'image', body: '', mimeType: 'image/jpeg',
+      durationMs: null, audienceType: 'all_contacts',
+    });
+  });
+
+  it('accepts a valid video with duration and caption', () => {
+    const out = validateMediaStatusInput({
+      ...base, type: 'video', mimeType: 'video/mp4',
+      storagePath: 'statuses/u1/clip.mp4', durationMs: 12_000, body: ' hi ',
+    }, 'u1');
+    expect(out).toMatchObject({ type: 'video', body: 'hi', durationMs: 12_000 });
+  });
+
+  it('rejects unknown types', () => {
+    expect(validateMediaStatusInput({ ...base, type: 'gif' }, 'u1')).toBe('type-unsupported');
+  });
+
+  it("pins storagePath to the caller's own folder", () => {
+    expect(validateMediaStatusInput({ ...base, storagePath: 'statuses/u2/x.jpg' }, 'u1')).toBe('storage-path-invalid');
+    expect(validateMediaStatusInput({ ...base, storagePath: 'statuses/u1/../u2/x.jpg' }, 'u1')).toBe('storage-path-invalid');
+    expect(validateMediaStatusInput({ ...base, storagePath: 'chatMedia/u1/x.jpg' }, 'u1')).toBe('storage-path-invalid');
+  });
+
+  it('requires an https mediaUrl', () => {
+    expect(validateMediaStatusInput({ ...base, mediaUrl: 'http://evil/x.jpg' }, 'u1')).toBe('media-url-invalid');
+  });
+
+  it('enforces the MIME allow-list per type', () => {
+    expect(validateMediaStatusInput({ ...base, mimeType: 'image/gif' }, 'u1')).toBe('mime-not-allowed');
+    expect(validateMediaStatusInput({ ...base, type: 'video', mimeType: 'image/jpeg', durationMs: 5000 }, 'u1')).toBe('mime-not-allowed');
+  });
+
+  it('enforces the size cap', () => {
+    expect(validateMediaStatusInput({ ...base, sizeBytes: 0 }, 'u1')).toBe('size-invalid');
+    expect(validateMediaStatusInput({ ...base, sizeBytes: STATUS_MEDIA_MAX_BYTES + 1 }, 'u1')).toBe('size-invalid');
+  });
+
+  it('requires and caps the video duration', () => {
+    const vid = { ...base, type: 'video' as const, mimeType: 'video/mp4' };
+    expect(validateMediaStatusInput(vid, 'u1')).toBe('duration-required');
+    expect(validateMediaStatusInput({ ...vid, durationMs: STATUS_VIDEO_MAX_MS + 1 }, 'u1')).toBe('duration-too-long');
+  });
+
+  it('caps the caption length', () => {
+    expect(validateMediaStatusInput({ ...base, body: 'x'.repeat(STATUS_BODY_MAX + 1) }, 'u1')).toBe('caption-too-long');
   });
 });
 
