@@ -994,10 +994,11 @@ function buildStyles(colors: any, rtl: boolean) {
     composerPreviewTitle: { fontSize: 11, fontWeight: '700', color: colors.action.primary, textAlign: rtl ? 'right' : 'left' },
     composerPreviewBody:  { fontSize: 12, color: colors.text.primary, marginTop: 2, textAlign: rtl ? 'right' : 'left' },
     composerPreviewClose: { fontSize: 18, color: colors.text.muted, fontWeight: '700', paddingHorizontal: 6, minWidth: 36, minHeight: 36, textAlignVertical: 'center', textAlign: 'center' },
-    // Fully transparent composer: both the bar AND the input pill let the
-    // wallpaper show through; a thin outline keeps the field discoverable.
+    // The BAR behind the composer is transparent so the chat wallpaper shows
+    // through to either side of the field (Telegram style). The input pill
+    // itself is a solid, opaque surface.
     composer: { padding: 12, paddingBottom: 24, flexDirection: rtl ? 'row-reverse' : 'row', gap: 8, alignItems: 'flex-end', backgroundColor: 'transparent' },
-    inputPill: { flex: 1, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', minHeight: 46, paddingHorizontal: 4, backgroundColor: 'transparent', borderRadius: 24, borderWidth: 1, borderColor: colors.border.default },
+    inputPill: { flex: 1, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', minHeight: 46, paddingHorizontal: 4, backgroundColor: colors.background.surface, borderRadius: 24, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 4, shadowOffset: { width: 0, height: 1 }, elevation: 2 },
     pillLeft:  { flex: 1, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center' },
     micInlineWrap: { width: 40, alignItems: 'center', justifyContent: 'center' },
     micInlineBtn:  { width: 40, height: 44, alignItems: 'center', justifyContent: 'center' },
