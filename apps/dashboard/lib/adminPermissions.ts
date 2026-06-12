@@ -44,7 +44,10 @@ export type AdminCapability =
   | 'manage:relay'
   // Phase 28 — broadcast push notifications from the dashboard
   | 'view:broadcast_notifications'
-  | 'manage:broadcast_notifications';
+  | 'manage:broadcast_notifications'
+  // Organization Messaging API (MVP) — org-scoped messaging + API key
+  | 'view:organization_messaging'
+  | 'manage:organization_messaging';
 
 type RoleKey = AdminRole | 'legacy_admin' | 'bootstrap_admin';
 
@@ -63,6 +66,7 @@ const ROLE_CAPABILITIES: Record<RoleKey, readonly AdminCapability[]> = {
     'view:notifications', 'manage:notifications',
     'view:relay', 'manage:relay',
     'view:broadcast_notifications', 'manage:broadcast_notifications',
+    'view:organization_messaging', 'manage:organization_messaging',
   ],
   organization_admin: [
     'view:overview', 'view:users',
@@ -74,6 +78,7 @@ const ROLE_CAPABILITIES: Record<RoleKey, readonly AdminCapability[]> = {
     'search:global', 'export:groups', 'export:sms', 'view:reports',
     'view:relay', 'manage:relay',
     'view:broadcast_notifications', 'manage:broadcast_notifications',
+    'view:organization_messaging', 'manage:organization_messaging',
   ],
   support_agent: [
     'view:overview', 'view:users', 'view:support',
@@ -107,6 +112,7 @@ const ROLE_CAPABILITIES: Record<RoleKey, readonly AdminCapability[]> = {
     'view:notifications', 'manage:notifications',
     'view:relay', 'manage:relay',
     'view:broadcast_notifications', 'manage:broadcast_notifications',
+    'view:organization_messaging', 'manage:organization_messaging',
   ],
   bootstrap_admin: [
     'view:overview', 'view:users', 'manage:users',
@@ -122,6 +128,7 @@ const ROLE_CAPABILITIES: Record<RoleKey, readonly AdminCapability[]> = {
     'view:notifications', 'manage:notifications',
     'view:relay', 'manage:relay',
     'view:broadcast_notifications', 'manage:broadcast_notifications',
+    'view:organization_messaging', 'manage:organization_messaging',
   ],
 };
 
