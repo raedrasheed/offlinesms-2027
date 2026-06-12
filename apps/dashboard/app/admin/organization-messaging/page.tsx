@@ -16,10 +16,11 @@ import { listOrganizations } from '@/lib/adminData';
 import {
   getOrgMessagingOverview, getOrgApiKeyStatus, listOrgMessageBatches,
 } from '@/lib/orgMessagingData';
-import { sendOrganizationMessage, generateOrgApiKey, revokeOrgApiKey } from '@/lib/orgMessagingActions';
+import { sendOrganizationMessage, generateOrgApiKey, revokeOrgApiKey, updateOrgEscalationSettings } from '@/lib/orgMessagingActions';
 import { PermissionState, EmptyState } from '@/components/state';
 import SendMessageForm from './SendMessageForm';
 import ApiKeySection from './ApiKeySection';
+import EscalationSettings from './EscalationSettings';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -122,6 +123,22 @@ export default async function OrgMessagingPage({
         </p>
       </section>
 
+      {/* 1b — SMS escalation settings */}
+      <section className="rounded-2xl p-6" style={{ background: CARD, border: `1px solid ${BORDER}` }}>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-extrabold tracking-tight">SMS escalation</h2>
+          <span className="text-[11px]" style={{ color: 'var(--c-text-3)' }}>
+            SMS wallet: <span className="font-bold" style={{ color: 'var(--c-text)' }}>
+              {overview.smsWalletBalance == null ? '—' : `${overview.smsWalletBalance.toLocaleString()} pts`}
+            </span>
+          </span>
+        </div>
+        <EscalationSettings
+          initial={overview.escalation}
+          action={updateOrgEscalationSettings.bind(null, orgId)}
+        />
+      </section>
+
       {/* 2 — API key */}
       <section className="rounded-2xl p-6" style={{ background: CARD, border: `1px solid ${BORDER}` }}>
         <h2 className="text-sm font-extrabold tracking-tight mb-3">API key</h2>
@@ -136,8 +153,10 @@ export default async function OrgMessagingPage({
       <section className="rounded-2xl p-6" style={{ background: CARD, border: `1px solid ${BORDER}` }}>
         <h2 className="text-sm font-extrabold tracking-tight mb-1">Send message</h2>
         <p className="text-[12px] mb-4" style={{ color: 'var(--c-text-3)' }}>
-          Messages are recorded against the monthly quota. Real device delivery is not part of this MVP — records are
-          kept with honest statuses (accepted / queued / failed / unsupported_recipient), never fake “sent”.
+          Delivered as real in-app messages to registered users; delivered/read come from the app’s receipts.
+          {overview.escalation.enabled
+            ? ` After ${overview.escalation.delayMinutes} min, ${escalationAudienceLabel(overview.escalation.audience)} are escalated to SMS.`
+            : ' Auto SMS escalation is currently off.'}
         </p>
         <SendMessageForm action={sendAction} />
       </section>
@@ -153,7 +172,7 @@ export default async function OrgMessagingPage({
           <table className="w-full text-[12px] border-collapse">
             <thead>
               <tr style={{ borderTop: `1px solid ${BORDER}`, borderBottom: `1px solid ${BORDER}` }}>
-                {['Batch', 'Source', 'Created by', 'Status', 'Total', 'Accepted', 'Queued', 'Failed', 'Unsupported', 'Created'].map(h => (
+                {['Batch', 'Source', 'Status', 'Total', 'Delivered', 'Read', 'Failed', 'Unsupported', 'Escalation', 'Created'].map(h => (
                   <th key={h} className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--c-text-4)' }}>{h}</th>
                 ))}
               </tr>
@@ -171,15 +190,13 @@ export default async function OrgMessagingPage({
                     </Link>
                   </td>
                   <td className="px-4 py-2.5 capitalize">{b.source}</td>
-                  <td className="px-4 py-2.5 font-mono text-[11px]" style={{ color: 'var(--c-text-3)' }}>
-                    {b.source === 'api' ? `key ${b.createdBy.slice(0, 8)}…` : `${b.createdBy.slice(0, 10)}…`}
-                  </td>
                   <td className="px-4 py-2.5 capitalize">{b.status}</td>
                   <td className="px-4 py-2.5">{b.total}</td>
-                  <td className="px-4 py-2.5">{b.accepted}</td>
-                  <td className="px-4 py-2.5">{b.queued}</td>
+                  <td className="px-4 py-2.5">{b.delivered}</td>
+                  <td className="px-4 py-2.5">{b.read}</td>
                   <td className="px-4 py-2.5">{b.failed}</td>
                   <td className="px-4 py-2.5">{b.unsupported}</td>
+                  <td className="px-4 py-2.5 capitalize" style={{ color: 'var(--c-text-3)' }}>{b.escalationStatus.replace(/_/g, ' ')}</td>
                   <td className="px-4 py-2.5 whitespace-nowrap" style={{ color: 'var(--c-text-4)' }}>{fmt(b.createdAt)}</td>
                 </tr>
               ))}
@@ -189,6 +206,12 @@ export default async function OrgMessagingPage({
       </section>
     </div>
   );
+}
+
+function escalationAudienceLabel(a: string): string {
+  if (a === 'unread_only') return 'unread users';
+  if (a === 'undelivered_only') return 'undelivered users';
+  return 'all users';
 }
 
 function Header({ isPlatformAdmin, orgName }: { isPlatformAdmin: boolean; orgName?: string }) {

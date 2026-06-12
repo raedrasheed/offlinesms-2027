@@ -44,13 +44,16 @@ export default function SendMessageForm({
       {ok && (
         <div className="rounded-lg px-4 py-3 text-sm space-y-0.5" style={{ background: 'var(--c-success-bg)', border: '1px solid var(--c-success-border)', color: '#22C55E' }}>
           <p>
-            Batch <span className="font-mono">{ok.batchId}</span> recorded — status: <span className="font-bold capitalize">{ok.status}</span>.
+            Batch <span className="font-mono">{ok.batchId}</span> — status: <span className="font-bold capitalize">{ok.status}</span>.
           </p>
           <p>
-            {ok.accepted}/{ok.total} accepted (queued)
+            {ok.accepted}/{ok.total} delivered to the app
             {ok.failed > 0 ? ` · ${ok.failed} failed` : ''}
             {ok.unsupported > 0 ? ` · ${ok.unsupported} unsupported recipient${ok.unsupported === 1 ? '' : 's'}` : ''}.
           </p>
+          {ok.escalationScheduled ? (
+            <p>SMS escalation scheduled in {ok.escalationDelayMinutes} min for {ok.escalationAudience.replace(/_/g, ' ')} users still pending.</p>
+          ) : null}
         </div>
       )}
 

@@ -697,6 +697,20 @@
           "order": "DESCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "organizationMessageBatches",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "escalationStatus",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "escalateAt",
+          "order": "ASCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": [

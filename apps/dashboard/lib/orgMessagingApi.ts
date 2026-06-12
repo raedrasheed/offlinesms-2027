@@ -21,6 +21,7 @@ export type ApiErrorCode =
   | 'organization_suspended'
   | 'invalid_payload'
   | 'too_many_recipients'
+  | 'invalid_escalation'
   | 'quota_exceeded'
   | 'internal_error';
 
@@ -33,6 +34,7 @@ export const API_ERRORS: Record<ApiErrorCode, { http: number; message: string }>
   organization_suspended: { http: 403, message: 'Organization is suspended.' },
   invalid_payload:        { http: 400, message: 'Invalid request payload.' },
   too_many_recipients:    { http: 400, message: `At most ${ORG_MSG_MAX_RECIPIENTS} recipients per request.` },
+  invalid_escalation:     { http: 400, message: 'Invalid "escalation" settings.' },
   quota_exceeded:         { http: 429, message: 'Monthly message quota exceeded.' },
   internal_error:         { http: 500, message: 'Internal error. Please try again.' },
 };
@@ -272,34 +274,40 @@ export function createdAtMs(data: Record<string, unknown>): number {
 }
 
 export type OrgBatchRow = {
-  id:             string;
-  organizationId: string;
-  source:         string;          // dashboard | api
-  createdBy:      string;          // admin uid (dashboard) or API key id (api)
-  status:         string;          // accepted | partial | failed
-  total:          number;
-  accepted:       number;
-  queued:         number;
-  failed:         number;
-  unsupported:    number;
-  createdAt:      string;
-  completedAt:    string;
+  id:               string;
+  organizationId:   string;
+  source:           string;          // dashboard | api
+  createdBy:        string;          // admin uid (dashboard) or API key id (api)
+  status:           string;          // accepted | partial | failed
+  total:            number;
+  accepted:         number;
+  queued:           number;
+  delivered:        number;          // receipt-backed
+  read:             number;          // receipt-backed
+  failed:           number;
+  unsupported:      number;
+  escalationStatus: string;          // none | scheduled | processing | completed | insufficient_points | failed
+  createdAt:        string;
+  completedAt:      string;
 };
 
 export function mapBatchRow(id: string, data: Record<string, unknown>): OrgBatchRow {
   return {
     id,
-    organizationId: (data.organizationId as string | undefined) ?? '',
-    source:         (data.source as string | undefined) ?? 'dashboard',
-    createdBy:      (data.createdBy as string | undefined) ?? '',
-    status:         (data.status as string | undefined) ?? 'accepted',
-    total:          (data.total as number | undefined) ?? 0,
-    accepted:       (data.accepted as number | undefined) ?? 0,
-    queued:         (data.queued as number | undefined) ?? 0,
-    failed:         (data.failed as number | undefined) ?? 0,
-    unsupported:    (data.unsupported as number | undefined) ?? 0,
-    createdAt:      isoDate(data.createdAt),
-    completedAt:    isoDate(data.completedAt),
+    organizationId:   (data.organizationId as string | undefined) ?? '',
+    source:           (data.source as string | undefined) ?? 'dashboard',
+    createdBy:        (data.createdBy as string | undefined) ?? '',
+    status:           (data.status as string | undefined) ?? 'accepted',
+    total:            (data.total as number | undefined) ?? 0,
+    accepted:         (data.accepted as number | undefined) ?? 0,
+    queued:           (data.queued as number | undefined) ?? 0,
+    delivered:        (data.delivered as number | undefined) ?? 0,
+    read:             (data.read as number | undefined) ?? 0,
+    failed:           (data.failed as number | undefined) ?? 0,
+    unsupported:      (data.unsupported as number | undefined) ?? 0,
+    escalationStatus: (data.escalationStatus as string | undefined) ?? 'none',
+    createdAt:        isoDate(data.createdAt),
+    completedAt:      isoDate(data.completedAt),
   };
 }
 
@@ -310,8 +318,9 @@ export type OrgMessageRow = {
   recipientValue: string;
   title:          string;
   body:           string;
-  status:         string;          // queued | failed | unsupported_recipient
+  status:         string;          // queued | delivered | read | failed | unsupported_recipient
   failureReason:  string | null;
+  smsEscalation:  string | null;   // queued | failed | skipped | null
   createdAt:      string;
 };
 
@@ -325,6 +334,7 @@ export function mapMessageRow(id: string, data: Record<string, unknown>): OrgMes
     body:           (data.body as string | undefined) ?? '',
     status:         (data.status as string | undefined) ?? '',
     failureReason:  (data.failureReason as string | null | undefined) ?? null,
+    smsEscalation:  (data.smsEscalation as string | null | undefined) ?? null,
     createdAt:      isoDate(data.createdAt),
   };
 }

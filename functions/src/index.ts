@@ -49,6 +49,9 @@ export { markReceipt }       from './chats/markReceipt';
 export { onReceiptWrite }    from './chats/onReceiptWrite';
 export { markStatusViewed }  from './statuses/markStatusViewed';
 
+// Organization Messaging — scheduled SMS escalation sweeper.
+export { escalateOrgBatches } from './orgMessaging/escalateOrgBatches';
+
 // Status module — text statuses with audience + 24h expiry.
 export { createStatus }      from './statuses/createStatus';
 export { getStatusFeed }     from './statuses/getStatusFeed';

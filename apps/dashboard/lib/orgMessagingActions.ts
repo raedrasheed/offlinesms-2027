@@ -15,7 +15,10 @@ import { adminAuth, adminDb } from './firebase-admin';
 import { verifySession } from './session';
 import { canDo } from './adminPermissions';
 import { getAdminScope, canViewOrganization } from './adminScope';
-import { validateOrgAccountInput, deriveOrgSlug, validateOrgSendInput } from './orgMessagingValidation';
+import {
+  validateOrgAccountInput, deriveOrgSlug, validateOrgSendInput,
+  validateEscalationSettings, DEFAULT_ESCALATION,
+} from './orgMessagingValidation';
 import { generateApiKey } from './orgMessagingKeys';
 import { submitOrganizationMessageBatch, type SubmitFailureCode } from './orgMessagingService';
 
@@ -77,6 +80,8 @@ export async function createOrganizationAccount(
       adminUid,
       adminEmail:          parsed.email,
       monthlyMessageLimit: parsed.monthlyMessageLimit,
+      // SMS escalation default for org messaging (org admin can change it).
+      messagingEscalation: DEFAULT_ESCALATION,
       // Keep the existing org settings shape so the rest of the dashboard reads it.
       settings: {
         smsEscalationEnabled: false,
@@ -146,6 +151,7 @@ const SEND_FAILURE_COPY: Record<SubmitFailureCode, string> = {
   organization_not_found: 'Organization not found.',
   organization_suspended: 'Organization is suspended — sending is disabled.',
   quota_exceeded:         'Monthly message quota exceeded.',
+  invalid_escalation:     'Invalid escalation settings.',
   internal_error:         'Could not submit the messages. Please try again.',
 };
 
@@ -159,6 +165,9 @@ export type OrgSendActionState =
       failed: number;
       unsupported: number;
       status: string;
+      escalationScheduled: boolean;
+      escalationDelayMinutes: number;
+      escalationAudience: string;
     }
   | null;
 
@@ -196,7 +205,7 @@ export async function sendOrganizationMessage(
     userUid:   session.user.uid,
     userEmail: session.user.email ?? null,
   });
-  if (!result.ok) return { error: SEND_FAILURE_COPY[result.code] };
+  if (!result.ok) return { error: result.message ?? SEND_FAILURE_COPY[result.code] };
 
   return {
     success:     true,
@@ -206,7 +215,60 @@ export async function sendOrganizationMessage(
     failed:      result.summary.failed,
     unsupported: result.summary.unsupported,
     status:      result.summary.batchStatus,
+    escalationScheduled:    result.escalationScheduled,
+    escalationDelayMinutes: result.escalation.delayMinutes,
+    escalationAudience:     result.escalation.audience,
   };
+}
+
+// ─── Escalation settings (org default: delay + SMS audience) ─────────────────
+// The org admin sets the check period (minutes) and which users get the SMS —
+// unread_only / undelivered_only / everyone — mirroring the app's escalation.
+
+export type OrgEscalationActionState = { error: string } | { success: true } | null;
+
+export async function updateOrgEscalationSettings(
+  organizationId: string,
+  _prev: OrgEscalationActionState,
+  data: FormData,
+): Promise<OrgEscalationActionState> {
+  const cookie = cookies().get('__session')?.value;
+  const session = await verifySession(cookie);
+  if (session.state !== 'authorized' || !canDo(session.role, 'manage:organization_messaging')) {
+    return { error: 'Permission denied.' };
+  }
+  if (!organizationId || !canViewOrganization(session, organizationId)) {
+    return { error: 'You can only manage your own organization.' };
+  }
+
+  const parsed = validateEscalationSettings({
+    enabled:      data.getAll('escalationEnabled').includes('true'),
+    delayMinutes: data.get('delayMinutes')?.toString() ?? null,
+    audience:     data.get('audience')?.toString() ?? null,
+  });
+  if ('error' in parsed) return parsed;
+
+  try {
+    await adminDb.collection('organizations').doc(organizationId)
+      .set({ messagingEscalation: parsed, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  } catch {
+    return { error: 'Could not save the escalation settings. Please try again.' };
+  }
+
+  try {
+    await adminDb.collection('auditLogs').add({
+      action:     'organization_messaging_settings_updated',
+      actorUid:   session.user.uid,
+      actorEmail: session.user.email ?? null,
+      targetType: 'organization',
+      targetId:   organizationId,
+      result:     'success',
+      metadata:   { ...parsed },
+      createdAt:  FieldValue.serverTimestamp(),
+    });
+  } catch { /* soft-fail */ }
+
+  return { success: true };
 }
 
 // ─── API key management (Phase 3) ─────────────────────────────────────────────

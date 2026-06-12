@@ -153,3 +153,58 @@ describe('validateOrgSendInput', () => {
     expect(validateOrgSendInput({ ...ok, recipientsText: many })).toEqual({ error: expect.stringMatching(/at most 500/i) });
   });
 });
+
+// ─── SMS escalation policy (delay + audience) ────────────────────────────────
+
+import {
+  validateEscalationSettings, resolveEscalationPolicy,
+  ESCALATION_DELAY_MIN, ESCALATION_DELAY_MAX, DEFAULT_ESCALATION,
+} from '../lib/orgMessagingValidation';
+
+describe('validateEscalationSettings', () => {
+  it('accepts a valid org default', () => {
+    expect(validateEscalationSettings({ enabled: true, delayMinutes: 5, audience: 'unread_only' }))
+      .toEqual({ enabled: true, delayMinutes: 5, audience: 'unread_only' });
+  });
+  it('treats the checkbox string "true" as enabled', () => {
+    expect(validateEscalationSettings({ enabled: 'true', delayMinutes: '10', audience: 'everyone' }))
+      .toEqual({ enabled: true, delayMinutes: 10, audience: 'everyone' });
+  });
+  it('rejects out-of-range / non-integer delays', () => {
+    expect(validateEscalationSettings({ enabled: true, delayMinutes: 0, audience: 'unread_only' })).toHaveProperty('error');
+    expect(validateEscalationSettings({ enabled: true, delayMinutes: ESCALATION_DELAY_MAX + 1, audience: 'unread_only' })).toHaveProperty('error');
+    expect(validateEscalationSettings({ enabled: true, delayMinutes: 1.5, audience: 'unread_only' })).toHaveProperty('error');
+  });
+  it('rejects an unknown audience', () => {
+    expect(validateEscalationSettings({ enabled: true, delayMinutes: 5, audience: 'nope' })).toHaveProperty('error');
+  });
+  it('honors the documented bounds', () => {
+    expect(ESCALATION_DELAY_MIN).toBe(1);
+    expect(ESCALATION_DELAY_MAX).toBe(1440);
+  });
+});
+
+describe('resolveEscalationPolicy (org default + per-request override)', () => {
+  const orgDefault = { enabled: true, delayMinutes: 5, audience: 'unread_only' as const };
+
+  it('returns the org default when there is no override', () => {
+    expect(resolveEscalationPolicy(orgDefault, null)).toEqual(orgDefault);
+  });
+  it('defaults to DISABLED when the org never configured escalation', () => {
+    expect(resolveEscalationPolicy(undefined, null)).toMatchObject({ enabled: false });
+  });
+  it('applies a valid override on top of the default', () => {
+    expect(resolveEscalationPolicy(orgDefault, { delayMinutes: 30, audience: 'everyone' }))
+      .toEqual({ enabled: true, delayMinutes: 30, audience: 'everyone' });
+    expect(resolveEscalationPolicy(orgDefault, { enabled: false })).toMatchObject({ enabled: false, delayMinutes: 5 });
+  });
+  it('rejects a bad override', () => {
+    expect(resolveEscalationPolicy(orgDefault, { delayMinutes: 0 })).toHaveProperty('error');
+    expect(resolveEscalationPolicy(orgDefault, { audience: 'nope' })).toHaveProperty('error');
+    expect(resolveEscalationPolicy(orgDefault, { enabled: 'yes' as never })).toHaveProperty('error');
+    expect(resolveEscalationPolicy(orgDefault, 5 as never)).toHaveProperty('error');
+  });
+  it('the shipped default is 5 minutes / unread_only / enabled', () => {
+    expect(DEFAULT_ESCALATION).toEqual({ enabled: true, delayMinutes: 5, audience: 'unread_only' });
+  });
+});

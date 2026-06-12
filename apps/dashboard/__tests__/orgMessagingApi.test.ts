@@ -141,10 +141,12 @@ describe('summarizeItems — honest statuses only', () => {
     ])).toMatchObject({ accepted: 0, batchStatus: 'failed' });
   });
 
-  it('the approved status vocabulary never includes sent/delivered', () => {
+  it('uses receipt-backed delivered/read but never the fake sent/seen', () => {
     expect(ORG_MESSAGE_STATUSES).not.toContain('sent');
-    expect(ORG_MESSAGE_STATUSES).not.toContain('delivered');
-    expect([...ORG_MESSAGE_STATUSES].sort()).toEqual(['accepted', 'failed', 'queued', 'unsupported_recipient']);
+    expect(ORG_MESSAGE_STATUSES).not.toContain('seen');
+    expect([...ORG_MESSAGE_STATUSES].sort()).toEqual(
+      ['accepted', 'delivered', 'failed', 'queued', 'read', 'unsupported_recipient'],
+    );
   });
 });
 
@@ -246,13 +248,15 @@ describe('mapBatchRow / mapMessageRow — allow-list read models', () => {
   it('maps the batch fields and IGNORES anything else (keyHash can never leak)', () => {
     const row = mapBatchRow('b1', {
       organizationId: 'org1', source: 'api', createdBy: 'key_1', status: 'partial',
-      total: 3, accepted: 1, queued: 1, failed: 1, unsupported: 1,
+      total: 3, accepted: 1, queued: 1, delivered: 1, read: 0, failed: 1, unsupported: 1,
+      escalationStatus: 'scheduled',
       createdAt: ts, completedAt: ts,
       keyHash: 'SECRET_HASH', authorization: 'Bearer offmsg_live_xyz', extra: 'junk',
     });
     expect(row).toEqual({
       id: 'b1', organizationId: 'org1', source: 'api', createdBy: 'key_1', status: 'partial',
-      total: 3, accepted: 1, queued: 1, failed: 1, unsupported: 1,
+      total: 3, accepted: 1, queued: 1, delivered: 1, read: 0, failed: 1, unsupported: 1,
+      escalationStatus: 'scheduled',
       createdAt: new Date(1700000000000).toISOString(),
       completedAt: new Date(1700000000000).toISOString(),
     });
@@ -269,10 +273,12 @@ describe('mapBatchRow / mapMessageRow — allow-list read models', () => {
     });
     expect(Object.keys(row).sort()).toEqual([
       'batchId', 'body', 'createdAt', 'failureReason', 'id',
-      'recipientType', 'recipientValue', 'status', 'title',
+      'recipientType', 'recipientValue', 'smsEscalation', 'status', 'title',
     ]);
+    // The allow-list copies no secret material (keyHash / resolvedUserId).
     expect(JSON.stringify(row)).not.toContain('SECRET');
-    expect(['queued', 'failed', 'unsupported_recipient', 'accepted']).toContain(row.status);
+    expect(JSON.stringify(row)).not.toContain('u1');
+    expect(['queued', 'delivered', 'read', 'failed', 'unsupported_recipient', 'accepted']).toContain(row.status);
   });
 });
 
@@ -316,10 +322,13 @@ describe('usage math — only accepted/queued consume quota', () => {
 // ─── Phase 7: hardening pins ─────────────────────────────────────────────────
 
 describe('status vocabulary hardening', () => {
-  it('excludes seen as well as sent/delivered', () => {
+  it('uses receipt-backed delivered/read but never the guessed sent/seen', () => {
+    // delivered/read are real receipts reported by the recipient's device.
+    expect(ORG_MESSAGE_STATUSES).toContain('delivered');
+    expect(ORG_MESSAGE_STATUSES).toContain('read');
+    // sent/seen are never written — the app reports delivered/read instead.
     expect(ORG_MESSAGE_STATUSES).not.toContain('seen');
     expect(ORG_MESSAGE_STATUSES).not.toContain('sent');
-    expect(ORG_MESSAGE_STATUSES).not.toContain('delivered');
   });
 });
 

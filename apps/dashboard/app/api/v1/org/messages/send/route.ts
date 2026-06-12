@@ -51,14 +51,18 @@ export async function POST(request: Request) {
   catch { return fail('invalid_payload', 'Body must be valid JSON.'); }
   const parsed = parseSendRequest(body);
   if ('errorCode' in parsed) return fail(parsed.errorCode, parsed.message);
+  // Optional per-request escalation override (delayMinutes / audience /
+  // enabled) — validated against the org default inside the service.
+  const escalationOverride = (body as { escalation?: unknown }).escalation;
 
-  // 4 — Shared submission path (resolution, quota transaction, batch + logs,
-  //     usage counter, audit) — identical to the dashboard form.
+  // 4 — Shared submission path (resolution, quota transaction, in-app message
+  //     delivery, logs, usage counter, escalation scheduling, audit) —
+  //     identical to the dashboard form.
   const result = await submitOrganizationMessageBatch(organizationId, parsed.items, {
     source: 'api',
     keyId,
-  });
-  if (!result.ok) return fail(result.code);
+  }, { escalationOverride });
+  if (!result.ok) return fail(result.code, result.message);
 
   // 5 — lastUsedAt (soft-fail; key id only, never the raw key).
   try {
@@ -74,5 +78,10 @@ export async function POST(request: Request) {
     failed:      result.summary.failed,
     unsupported: result.summary.unsupported,
     status:      result.summary.batchStatus,
+    escalation:  {
+      scheduled:    result.escalationScheduled,
+      delayMinutes: result.escalation.delayMinutes,
+      audience:     result.escalation.audience,
+    },
   }, { status: 200 });
 }

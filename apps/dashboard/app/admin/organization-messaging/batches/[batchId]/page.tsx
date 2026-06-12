@@ -28,7 +28,8 @@ function fmt(iso: string): string {
 
 const STATUS_COLORS: Record<string, string> = {
   accepted: '#22C55E', partial: '#F59E0B', failed: '#EF4444',
-  queued: '#22C55E', unsupported_recipient: '#F59E0B',
+  queued: '#5BB6DE', delivered: '#22C55E', read: '#1F7BA8',
+  unsupported_recipient: '#F59E0B', skipped: '#94A3B8',
 };
 
 function StatusBadge({ status }: { status: string }) {
@@ -92,17 +93,19 @@ export default async function OrgBatchDetailPage({
           <h2 className="text-sm font-extrabold tracking-tight">Summary</h2>
           <StatusBadge status={batch.status} />
         </div>
-        <div className="grid grid-cols-4 gap-4 mb-4">
+        <div className="grid grid-cols-6 gap-4 mb-4">
           <Stat label="Total" value={batch.total} />
-          <Stat label="Accepted (queued)" value={batch.accepted} />
+          <Stat label="Accepted" value={batch.accepted} />
+          <Stat label="Delivered" value={batch.delivered} />
+          <Stat label="Read" value={batch.read} />
           <Stat label="Failed" value={batch.failed} />
           <Stat label="Unsupported" value={batch.unsupported} />
         </div>
         <div className="grid grid-cols-4 gap-4 text-sm">
           <Meta label="Source" value={batch.source} />
           <Meta label="Created by" value={batch.source === 'api' ? `API key ${batch.createdBy.slice(0, 8)}…` : batch.createdBy.slice(0, 12) + '…'} mono />
+          <Meta label="SMS escalation" value={batch.escalationStatus.replace(/_/g, ' ')} />
           <Meta label="Created" value={fmt(batch.createdAt)} />
-          <Meta label="Completed" value={fmt(batch.completedAt)} />
         </div>
       </section>
 
@@ -120,7 +123,7 @@ export default async function OrgBatchDetailPage({
           <table className="w-full text-[12px] border-collapse">
             <thead>
               <tr style={{ borderTop: `1px solid ${BORDER}`, borderBottom: `1px solid ${BORDER}` }}>
-                {['Recipient', 'Type', 'Title', 'Body', 'Status', 'Failure reason', 'Created'].map(h => (
+                {['Recipient', 'Type', 'Body', 'In-app', 'SMS', 'Failure reason', 'Created'].map(h => (
                   <th key={h} className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--c-text-4)' }}>{h}</th>
                 ))}
               </tr>
@@ -130,9 +133,9 @@ export default async function OrgBatchDetailPage({
                 <tr key={m.id} style={i < messages.length - 1 ? { borderBottom: `1px solid ${BORDER}` } : {}}>
                   <td className="px-4 py-2.5 font-mono text-[11px]">{m.recipientValue}</td>
                   <td className="px-4 py-2.5 capitalize">{m.recipientType}</td>
-                  <td className="px-4 py-2.5 max-w-[160px] truncate">{m.title}</td>
                   <td className="px-4 py-2.5 max-w-[240px] truncate" style={{ color: 'var(--c-text-2)' }}>{m.body}</td>
                   <td className="px-4 py-2.5"><StatusBadge status={m.status} /></td>
+                  <td className="px-4 py-2.5">{m.smsEscalation ? <StatusBadge status={m.smsEscalation} /> : <span style={{ color: 'var(--c-text-4)' }}>—</span>}</td>
                   <td className="px-4 py-2.5" style={{ color: 'var(--c-text-4)' }}>{m.failureReason ?? '—'}</td>
                   <td className="px-4 py-2.5 whitespace-nowrap" style={{ color: 'var(--c-text-4)' }}>{fmt(m.createdAt)}</td>
                 </tr>

@@ -9,7 +9,9 @@
 //   organizationUsageCounters/{orgId_YYYY-MM} — monthly quota usage (Phase 6)
 
 import { adminDb } from './firebase-admin';
-import { usageMonthKey } from './orgMessagingValidation';
+import {
+  usageMonthKey, resolveEscalationPolicy, type EscalationPolicy,
+} from './orgMessagingValidation';
 import { pickApiKeyStatusRow } from './orgMessagingKeys';
 import {
   createdAtMs, mapBatchRow, mapMessageRow, percentUsed,
@@ -30,6 +32,8 @@ export type OrgMessagingOverview = {
   remainingThisMonth:  number;
   percentUsed:         number;            // 0–100
   monthKey:            string;            // 'YYYY-MM'
+  escalation:          EscalationPolicy;  // org default (delay + SMS audience)
+  smsWalletBalance:    number | null;     // org sender points wallet (escalation billing)
 };
 
 export async function getOrgMessagingOverview(orgId: string): Promise<OrgMessagingOverview | null> {
@@ -45,6 +49,17 @@ export async function getOrgMessagingOverview(orgId: string): Promise<OrgMessagi
   } catch { /* counter not created yet */ }
 
   const limit = (org.monthlyMessageLimit as number | undefined) ?? 0;
+
+  // Escalation default + the org sender's points wallet (SMS billing).
+  const escalation = resolveEscalationPolicy(
+    org.messagingEscalation as Partial<EscalationPolicy> | undefined, null,
+  ) as EscalationPolicy;
+  let smsWalletBalance: number | null = null;
+  try {
+    const w = await adminDb.collection('wallets').doc(`orgsender_${orgId}`).get();
+    smsWalletBalance = w.exists ? ((w.data()?.balance as number | undefined) ?? 0) : null;
+  } catch { /* soft-fail */ }
+
   return {
     organizationId:      orgId,
     name:                (org.name as string | undefined) ?? orgId,
@@ -54,6 +69,8 @@ export async function getOrgMessagingOverview(orgId: string): Promise<OrgMessagi
     remainingThisMonth:  Math.max(0, limit - used),
     percentUsed:         percentUsed(limit, used),
     monthKey:            month,
+    escalation,
+    smsWalletBalance,
   };
 }
 

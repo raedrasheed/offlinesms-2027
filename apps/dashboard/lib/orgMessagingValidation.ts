@@ -85,13 +85,98 @@ export const ORG_MSG_BODY_MAX       = 500;
 export const ORG_MSG_MAX_RECIPIENTS = 500;
 
 /**
- * Honest delivery statuses. The MVP has NO backend-only delivery primitive
- * (push needs app users with device tokens; SMS is conversation+points
- * coupled), so messages are never marked `sent`/`delivered` — they are
- * recorded and counted, real delivery is deferred.
+ * Honest delivery statuses. Org messages are delivered as REAL in-app
+ * conversation messages, so `delivered` and `read` are receipt-backed truths
+ * reported by the recipient's device (never guessed):
+ *   queued    → message created in the app pipeline; receipt still pending
+ *   delivered → the recipient's app acknowledged delivery (receipt)
+ *   read      → the recipient read it in the app (receipt)
+ * `sent`/`seen` remain unused.
  */
-export const ORG_MESSAGE_STATUSES = ['accepted', 'queued', 'failed', 'unsupported_recipient'] as const;
+export const ORG_MESSAGE_STATUSES = ['accepted', 'queued', 'delivered', 'read', 'failed', 'unsupported_recipient'] as const;
 export type OrgMessageStatus = (typeof ORG_MESSAGE_STATUSES)[number];
+
+// ─── SMS escalation policy (org default + per-request override) ─────────────
+// Mirrors the OfflineSMS app's escalation audiences. After `delayMinutes`,
+// recipients still matching the audience are escalated to SMS (billed to the
+// organization's points wallet by the scheduled sweeper in functions/).
+
+export const ESCALATION_AUDIENCES = ['unread_only', 'undelivered_only', 'everyone'] as const;
+export type EscalationAudience = (typeof ESCALATION_AUDIENCES)[number];
+
+export const ESCALATION_DELAY_MIN = 1;        // minutes
+export const ESCALATION_DELAY_MAX = 1440;     // 24h
+
+export interface EscalationPolicy {
+  enabled:      boolean;
+  delayMinutes: number;
+  audience:     EscalationAudience;
+}
+
+export const DEFAULT_ESCALATION: EscalationPolicy = {
+  enabled: true, delayMinutes: 5, audience: 'unread_only',
+};
+
+/** Validate dashboard escalation settings (org default). */
+export function validateEscalationSettings(raw: {
+  enabled?:      unknown;
+  delayMinutes?: unknown;
+  audience?:     unknown;
+}): EscalationPolicy | { error: string } {
+  const enabled = raw.enabled === true || raw.enabled === 'true';
+  const delayNum = typeof raw.delayMinutes === 'number'
+    ? raw.delayMinutes
+    : Number((raw.delayMinutes ?? '').toString().trim());
+  if (!Number.isFinite(delayNum) || !Number.isInteger(delayNum)
+      || delayNum < ESCALATION_DELAY_MIN || delayNum > ESCALATION_DELAY_MAX) {
+    return { error: `Check period must be a whole number of minutes (${ESCALATION_DELAY_MIN}–${ESCALATION_DELAY_MAX}).` };
+  }
+  const audience = (raw.audience ?? '').toString();
+  if (!(ESCALATION_AUDIENCES as readonly string[]).includes(audience)) {
+    return { error: 'SMS audience must be unread_only, undelivered_only, or everyone.' };
+  }
+  return { enabled, delayMinutes: delayNum, audience: audience as EscalationAudience };
+}
+
+/**
+ * Resolve the effective policy for one send: the org default, then the
+ * optional per-request override. Returns an error string for a bad override.
+ */
+export function resolveEscalationPolicy(
+  orgDefault: Partial<EscalationPolicy> | null | undefined,
+  override:   { enabled?: unknown; delayMinutes?: unknown; audience?: unknown } | null | undefined,
+): EscalationPolicy | { error: string } {
+  // Orgs that never configured escalation default to DISABLED (no surprise
+  // SMS billing); new orgs are created with DEFAULT_ESCALATION.
+  const base: EscalationPolicy = {
+    enabled:      orgDefault?.enabled === true,
+    delayMinutes: typeof orgDefault?.delayMinutes === 'number' ? orgDefault.delayMinutes : DEFAULT_ESCALATION.delayMinutes,
+    audience:     (ESCALATION_AUDIENCES as readonly string[]).includes(orgDefault?.audience as string)
+      ? (orgDefault!.audience as EscalationAudience) : DEFAULT_ESCALATION.audience,
+  };
+  if (override == null) return base;
+  if (typeof override !== 'object') return { error: '"escalation" must be an object.' };
+
+  const out = { ...base };
+  if (override.enabled !== undefined) {
+    if (typeof override.enabled !== 'boolean') return { error: '"escalation.enabled" must be a boolean.' };
+    out.enabled = override.enabled;
+  }
+  if (override.delayMinutes !== undefined) {
+    if (typeof override.delayMinutes !== 'number' || !Number.isInteger(override.delayMinutes)
+        || override.delayMinutes < ESCALATION_DELAY_MIN || override.delayMinutes > ESCALATION_DELAY_MAX) {
+      return { error: `"escalation.delayMinutes" must be an integer ${ESCALATION_DELAY_MIN}–${ESCALATION_DELAY_MAX}.` };
+    }
+    out.delayMinutes = override.delayMinutes;
+  }
+  if (override.audience !== undefined) {
+    if (!(ESCALATION_AUDIENCES as readonly string[]).includes(override.audience as string)) {
+      return { error: '"escalation.audience" must be unread_only, undelivered_only, or everyone.' };
+    }
+    out.audience = override.audience as EscalationAudience;
+  }
+  return out;
+}
 
 export type OrgBatchStatus = 'accepted' | 'partial' | 'failed';
 
