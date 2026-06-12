@@ -182,3 +182,75 @@ export function summarizeItems(items: Array<Pick<ResolvedItem, 'status'>>): Batc
     : queued > 0 ? 'partial' : 'failed';
   return { total: items.length, accepted: queued, queued, failed, unsupported, batchStatus };
 }
+
+// ─── Shared submission context + doc shaping (pure) ──────────────────────────
+// Used by the shared submitOrganizationMessageBatch service so the API route
+// and the dashboard server action write byte-identical records, differing only
+// in source/createdBy/actor.
+
+export type SubmitContext =
+  | { source: 'api'; keyId: string }
+  | { source: 'dashboard'; userUid: string; userEmail: string | null };
+
+export function actorForContext(ctx: SubmitContext): { actorUid: string; actorEmail: string | null } {
+  return ctx.source === 'api'
+    ? { actorUid: `apikey:${ctx.keyId}`, actorEmail: null }
+    : { actorUid: ctx.userUid, actorEmail: ctx.userEmail };
+}
+
+export function createdByForContext(ctx: SubmitContext): string {
+  return ctx.source === 'api' ? ctx.keyId : ctx.userUid;
+}
+
+/**
+ * Honest classification of one recipient given the backend-only lookups:
+ *  • userId  → exists ? queued : failed(user_not_found)
+ *  • phone   → linked user ? queued(resolvedUserId) : unsupported_recipient
+ * Never returns sent/delivered — no delivery happens in this MVP.
+ */
+export function classifyRecipientResolution(
+  recipient: OrgRecipient,
+  lookups: { userExists: (uid: string) => boolean; phoneToUid: (phone: string) => string | null },
+): Pick<ResolvedItem, 'status' | 'failureReason' | 'resolvedUserId'> {
+  const r = recipient as { userId?: string; phone?: string };
+  if (typeof r.userId === 'string') {
+    return lookups.userExists(r.userId)
+      ? { status: 'queued', failureReason: null, resolvedUserId: r.userId }
+      : { status: 'failed', failureReason: 'user_not_found', resolvedUserId: null };
+  }
+  const uid = lookups.phoneToUid(r.phone ?? '');
+  return uid !== null
+    ? { status: 'queued', failureReason: null, resolvedUserId: uid }
+    : { status: 'unsupported_recipient', failureReason: 'phone_not_linked_to_user', resolvedUserId: null };
+}
+
+/** Batch doc fields minus server timestamps (the service adds those). */
+export function batchDocFields(organizationId: string, summary: BatchSummary, ctx: SubmitContext) {
+  return {
+    organizationId,
+    source:      ctx.source,
+    createdBy:   createdByForContext(ctx),
+    status:      summary.batchStatus,
+    total:       summary.total,
+    accepted:    summary.accepted,
+    queued:      summary.queued,
+    failed:      summary.failed,
+    unsupported: summary.unsupported,
+  };
+}
+
+/** Per-recipient message log fields minus server timestamps. */
+export function messageDocFields(organizationId: string, batchId: string, item: ResolvedItem) {
+  const r = item.recipient as { userId?: string; phone?: string };
+  return {
+    organizationId,
+    batchId,
+    recipientType:  typeof r.userId === 'string' ? 'userId' : 'phone',
+    recipientValue: typeof r.userId === 'string' ? r.userId : (r.phone ?? ''),
+    resolvedUserId: item.resolvedUserId,
+    title:          item.title,
+    body:           item.body,
+    status:         item.status,
+    failureReason:  item.failureReason,
+  };
+}

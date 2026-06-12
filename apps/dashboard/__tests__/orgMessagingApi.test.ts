@@ -155,3 +155,81 @@ describe('no raw API key leakage in error/response shapes', () => {
     }
   });
 });
+
+// ─── Phase 5: shared submission helpers (used by API route + dashboard) ──────
+
+import {
+  actorForContext, createdByForContext, classifyRecipientResolution,
+  batchDocFields, messageDocFields, summarizeItems as _sum,
+  type SubmitContext, type ResolvedItem,
+} from '../lib/orgMessagingApi';
+
+const apiCtx: SubmitContext  = { source: 'api', keyId: 'key_123' };
+const dashCtx: SubmitContext = { source: 'dashboard', userUid: 'admin_uid_1', userEmail: 'admin@acme.edu' };
+
+describe('submit context (actor / createdBy / source)', () => {
+  it('dashboard sends are attributed to the signed-in admin with source dashboard', () => {
+    expect(actorForContext(dashCtx)).toEqual({ actorUid: 'admin_uid_1', actorEmail: 'admin@acme.edu' });
+    expect(createdByForContext(dashCtx)).toBe('admin_uid_1');
+    const fields = batchDocFields('org1', _sum([{ status: 'queued' }]), dashCtx);
+    expect(fields).toMatchObject({ organizationId: 'org1', source: 'dashboard', createdBy: 'admin_uid_1' });
+  });
+  it('api sends are attributed to the key id (never the raw key)', () => {
+    expect(actorForContext(apiCtx)).toEqual({ actorUid: 'apikey:key_123', actorEmail: null });
+    const fields = batchDocFields('org1', _sum([{ status: 'queued' }]), apiCtx);
+    expect(fields).toMatchObject({ source: 'api', createdBy: 'key_123' });
+    expect(JSON.stringify(fields)).not.toContain('offmsg_live_');
+  });
+});
+
+describe('classifyRecipientResolution — honest statuses', () => {
+  const lookups = {
+    userExists: (uid: string) => uid === 'existing_user',
+    phoneToUid: (phone: string) => (phone === '+970591111111' ? 'linked_uid' : null),
+  };
+
+  it('existing userId → queued', () => {
+    expect(classifyRecipientResolution({ userId: 'existing_user' }, lookups))
+      .toEqual({ status: 'queued', failureReason: null, resolvedUserId: 'existing_user' });
+  });
+  it('unknown userId → failed(user_not_found)', () => {
+    expect(classifyRecipientResolution({ userId: 'ghost_user' }, lookups))
+      .toEqual({ status: 'failed', failureReason: 'user_not_found', resolvedUserId: null });
+  });
+  it('phone linked to a user → queued with resolvedUserId', () => {
+    expect(classifyRecipientResolution({ phone: '+970591111111' }, lookups))
+      .toEqual({ status: 'queued', failureReason: null, resolvedUserId: 'linked_uid' });
+  });
+  it('unlinked phone → unsupported_recipient(phone_not_linked_to_user)', () => {
+    expect(classifyRecipientResolution({ phone: '+970599999999' }, lookups))
+      .toEqual({ status: 'unsupported_recipient', failureReason: 'phone_not_linked_to_user', resolvedUserId: null });
+  });
+  it('never produces sent/delivered/seen', () => {
+    const all = [
+      classifyRecipientResolution({ userId: 'existing_user' }, lookups),
+      classifyRecipientResolution({ userId: 'ghost' }, lookups),
+      classifyRecipientResolution({ phone: '+970591111111' }, lookups),
+      classifyRecipientResolution({ phone: '+1234567890' }, lookups),
+    ];
+    for (const r of all) expect(['queued', 'failed', 'unsupported_recipient']).toContain(r.status);
+  });
+});
+
+describe('messageDocFields (per-recipient log shape)', () => {
+  const base = { title: 'T', body: 'B' };
+  it('records phone recipients with type/value and honest status', () => {
+    const item: ResolvedItem = { ...base, recipient: { phone: '+970591111111' }, status: 'unsupported_recipient', failureReason: 'phone_not_linked_to_user', resolvedUserId: null };
+    expect(messageDocFields('org1', 'batch1', item)).toEqual({
+      organizationId: 'org1', batchId: 'batch1',
+      recipientType: 'phone', recipientValue: '+970591111111',
+      resolvedUserId: null, title: 'T', body: 'B',
+      status: 'unsupported_recipient', failureReason: 'phone_not_linked_to_user',
+    });
+  });
+  it('records userId recipients', () => {
+    const item: ResolvedItem = { ...base, recipient: { userId: 'user_abc123' }, status: 'queued', failureReason: null, resolvedUserId: 'user_abc123' };
+    expect(messageDocFields('org1', 'batch1', item)).toMatchObject({
+      recipientType: 'userId', recipientValue: 'user_abc123', status: 'queued',
+    });
+  });
+});

@@ -17,6 +17,7 @@ import { canDo } from './adminPermissions';
 import { getAdminScope, canViewOrganization } from './adminScope';
 import { validateOrgAccountInput, deriveOrgSlug, validateOrgSendInput } from './orgMessagingValidation';
 import { generateApiKey } from './orgMessagingKeys';
+import { submitOrganizationMessageBatch, type SubmitFailureCode } from './orgMessagingService';
 
 export type OrgAccountActionState =
   | { error: string }
@@ -130,14 +131,35 @@ export async function createOrganizationAccount(
 }
 
 // ─── Send message (dashboard form) ────────────────────────────────────────────
-// Phase 2 wires the form + scoping + validation; the actual batch/log creation
-// (shared with the API endpoint) lands with the messaging backend phase. Until
-// then this returns an honest "not enabled" error — nothing is recorded and
-// nothing is ever marked sent/delivered.
+// Uses the SAME shared submission path as the public API endpoint
+// (submitOrganizationMessageBatch): recipient resolution, org status check,
+// transaction-safe quota, batch + per-recipient logs, usage counter, audit —
+// with honest statuses only (queued/failed/unsupported_recipient; never
+// sent/delivered). Source is 'dashboard' and createdBy is the signed-in admin.
+//
+// SECURITY: the Admin SDK bypasses Firestore rules, so authorization stays
+// explicit here — capability + canViewOrganization are re-checked server-side
+// regardless of what the page already verified, and the client-provided
+// organizationId is never trusted on its own.
+
+const SEND_FAILURE_COPY: Record<SubmitFailureCode, string> = {
+  organization_not_found: 'Organization not found.',
+  organization_suspended: 'Organization is suspended — sending is disabled.',
+  quota_exceeded:         'Monthly message quota exceeded.',
+  internal_error:         'Could not submit the messages. Please try again.',
+};
 
 export type OrgSendActionState =
   | { error: string }
-  | { success: true; batchId: string; total: number; accepted: number; failed: number }
+  | {
+      success: true;
+      batchId: string;
+      total: number;
+      accepted: number;
+      failed: number;
+      unsupported: number;
+      status: string;
+    }
   | null;
 
 export async function sendOrganizationMessage(
@@ -150,7 +172,8 @@ export async function sendOrganizationMessage(
   if (session.state !== 'authorized' || !canDo(session.role, 'manage:organization_messaging')) {
     return { error: 'Permission denied.' };
   }
-  // organization_admin may only send for their own organization.
+  // organization_admin may only send for their own organization; super_admin
+  // (unrestricted scope) may send for any selected organization.
   if (!organizationId || !canViewOrganization(session, organizationId)) {
     return { error: 'You can only send messages for your own organization.' };
   }
@@ -162,7 +185,28 @@ export async function sendOrganizationMessage(
   });
   if ('error' in parsed) return parsed;
 
-  return { error: 'Message sending is not enabled yet — the messaging backend is added in an upcoming update.' };
+  const items = parsed.recipients.map(recipient => ({
+    recipient,
+    title: parsed.title,
+    body:  parsed.body,
+  }));
+
+  const result = await submitOrganizationMessageBatch(organizationId, items, {
+    source:    'dashboard',
+    userUid:   session.user.uid,
+    userEmail: session.user.email ?? null,
+  });
+  if (!result.ok) return { error: SEND_FAILURE_COPY[result.code] };
+
+  return {
+    success:     true,
+    batchId:     result.batchId,
+    total:       result.summary.total,
+    accepted:    result.summary.accepted,
+    failed:      result.summary.failed,
+    unsupported: result.summary.unsupported,
+    status:      result.summary.batchStatus,
+  };
 }
 
 // ─── API key management (Phase 3) ─────────────────────────────────────────────

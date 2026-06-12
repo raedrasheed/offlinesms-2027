@@ -42,8 +42,15 @@ export default function SendMessageForm({
         </div>
       )}
       {ok && (
-        <div className="rounded-lg px-4 py-3 text-sm" style={{ background: 'var(--c-success-bg)', border: '1px solid var(--c-success-border)', color: '#22C55E' }}>
-          Batch <span className="font-mono">{ok.batchId}</span> created — {ok.accepted}/{ok.total} accepted{ok.failed > 0 ? `, ${ok.failed} failed` : ''}.
+        <div className="rounded-lg px-4 py-3 text-sm space-y-0.5" style={{ background: 'var(--c-success-bg)', border: '1px solid var(--c-success-border)', color: '#22C55E' }}>
+          <p>
+            Batch <span className="font-mono">{ok.batchId}</span> recorded — status: <span className="font-bold capitalize">{ok.status}</span>.
+          </p>
+          <p>
+            {ok.accepted}/{ok.total} accepted (queued)
+            {ok.failed > 0 ? ` · ${ok.failed} failed` : ''}
+            {ok.unsupported > 0 ? ` · ${ok.unsupported} unsupported recipient${ok.unsupported === 1 ? '' : 's'}` : ''}.
+          </p>
         </div>
       )}
 
