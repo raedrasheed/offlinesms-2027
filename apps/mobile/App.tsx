@@ -3,7 +3,7 @@ import { NavigationContainer, createNavigationContainerRef } from '@react-naviga
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import * as Linking from 'expo-linking';
 import { createBottomTabNavigator, BottomTabBar } from '@react-navigation/bottom-tabs';
-import { SafeAreaProvider, useSafeAreaInsets, SafeAreaInsetsContext } from 'react-native-safe-area-context';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
@@ -116,13 +116,12 @@ function MainTabs() {
   return (
     <Tabs.Navigator
       // The floating pill is positioned manually with `bottom: insets.bottom + 10`,
-      // so the BottomTabBar must NOT add its own bottom safe-area inset on top —
-      // on Android 15 (edge-to-edge) that inset (~48px) pushed the icons out of
-      // the fixed-height pill, leaving it blank. Zero the inset it sees.
+      // so BottomTabBar must NOT also add its own bottom safe-area padding — on
+      // Android 15 (edge-to-edge) that ~48px padding, subtracted from the fixed
+      // 72px height, collapsed the content area and hid the icons. BottomTabBar
+      // takes `insets` as a PROP (not from context), so override it here.
       tabBar={(props) => (
-        <SafeAreaInsetsContext.Provider value={{ top: 0, left: 0, right: 0, bottom: 0 }}>
-          <BottomTabBar {...props} />
-        </SafeAreaInsetsContext.Provider>
+        <BottomTabBar {...props} insets={{ ...props.insets, bottom: 0 }} />
       )}
       // Telegram-style floating pill bar: detached from the screen edges,
       // fully rounded, with a soft-blue pill behind the active tab.
