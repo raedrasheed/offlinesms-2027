@@ -3,6 +3,7 @@ import {
   FlatList, View, Text, TextInput, Pressable, StyleSheet, Alert,
   KeyboardAvoidingView, Platform, PanResponder, Image,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
@@ -84,6 +85,7 @@ function buildPreview(text: string): string {
 export default function Conversation({ route, navigation }: any) {
   const { t } = useTranslation();
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const { id } = route.params as { id: string };
   const me = auth.currentUser?.uid ?? '';
   const { isOffline, enqueue, queuedFor, deliveredFor, deliveredNonce } = useOffline();
@@ -792,7 +794,7 @@ export default function Conversation({ route, navigation }: any) {
       {err ? <ErrorState compact title="Couldn't send" description={err} /> : null}
 
       {gate.kind === 'blocked' && !editing ? (
-        <View style={s.gate}>
+        <View style={[s.gate, { paddingBottom: insets.bottom + 16 }]}>
           <Text style={s.gateText}>{gate.reason}</Text>
         </View>
       ) : (
@@ -826,7 +828,7 @@ export default function Conversation({ route, navigation }: any) {
               </Pressable>
             </View>
           ) : null}
-          <View style={s.composer}>
+          <View style={[s.composer, { paddingBottom: insets.bottom + 12 }]}>
             {recorder.mode === 'locked' ? (
               <LockedVoiceRecorderBar
                 elapsedMs={recorder.elapsedMs}
