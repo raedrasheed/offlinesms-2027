@@ -798,7 +798,7 @@ export default function Conversation({ route, navigation }: any) {
           <Text style={s.gateText}>{gate.reason}</Text>
         </View>
       ) : (
-        <View>
+        <View style={{ backgroundColor: 'transparent' }}>
           {editing ? (
             <View style={s.composerPreview}>
               <View style={{ flex: 1 }}>
@@ -949,11 +949,12 @@ export default function Conversation({ route, navigation }: any) {
 
 function buildStyles(colors: any, rtl: boolean) {
   return StyleSheet.create({
-    root:     { flex: 1, backgroundColor: '#FFFFFF' },
-    // Transparent so the ChatWallpaperBackground layer (or theme fallback)
-    // shows through. The previous solid #EAF2FB now lives in the wallpaper
-    // component's fallback so there's no visual regression when no wallpaper
-    // is set.
+    // Transparent root: the ChatWallpaperBackground (absolute-fill, always
+    // rendered — custom wallpaper or the bundled default) is the ONLY screen
+    // background, so no white surface can show through the transparent
+    // composer band around the input pill.
+    root:     { flex: 1, backgroundColor: 'transparent' },
+    // Transparent so the ChatWallpaperBackground layer shows through.
     msgList:  { flex: 1, backgroundColor: 'transparent' },
     emptyConvo:    { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40, gap: 6 },
     emptyAvatar:   { width: 96, height: 96, borderRadius: 48, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
