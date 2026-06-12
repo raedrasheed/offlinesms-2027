@@ -482,6 +482,31 @@ service cloud.firestore {
     }
 
     // ════════════════════════════════════════════════════════════
+    // ORGANIZATION MESSAGING (MVP)
+    //
+    // All writes flow through the dashboard server actions / public API
+    // route (Admin SDK, with explicit server-side authorization) — clients
+    // can NEVER write these collections. API key docs are fully server-side:
+    // they carry keyHash, so no client may read them under any role.
+    // Org-scoped reads reuse the existing isOrgAdminOf claim helper.
+    // ════════════════════════════════════════════════════════════
+    match /organizationApiKeys/{keyId} {
+      allow read, write: if false;
+    }
+    match /organizationMessageBatches/{batchId} {
+      allow read:  if isAdmin() || isOrgAdminOf(resource.data.organizationId);
+      allow write: if false;
+    }
+    match /organizationMessages/{messageId} {
+      allow read:  if isAdmin() || isOrgAdminOf(resource.data.organizationId);
+      allow write: if false;
+    }
+    match /organizationUsageCounters/{counterId} {
+      allow read:  if isAdmin() || isOrgAdminOf(resource.data.organizationId);
+      allow write: if false;
+    }
+
+    // ════════════════════════════════════════════════════════════
     // ROLES (catalogue; live permission checks read from custom claims)
     // ════════════════════════════════════════════════════════════
     match /roles/{roleId} {

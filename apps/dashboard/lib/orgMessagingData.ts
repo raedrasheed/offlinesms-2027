@@ -78,9 +78,17 @@ export async function getOrgApiKeyStatus(orgId: string) {
 // mapMessageRow), so secrets such as keyHash can never appear in a read model.
 
 export async function listOrgMessageBatches(orgId: string, max = 20): Promise<OrgBatchRow[]> {
+  // Indexed query (organizationId ASC, createdAt DESC — firestore.indexes.json).
+  // Falls back to an equality-only query + in-memory sort until the index is
+  // deployed, so the page degrades gracefully instead of showing nothing.
   try {
-    // Equality-only query + in-memory sort: avoids a composite index until the
-    // Phase 7 index lands; volumes here are small (recent logs only).
+    const snap = await adminDb.collection('organizationMessageBatches')
+      .where('organizationId', '==', orgId)
+      .orderBy('createdAt', 'desc')
+      .limit(max).get();
+    return snap.docs.map(d => mapBatchRow(d.id, d.data() as Record<string, unknown>));
+  } catch { /* index not deployed yet → fallback */ }
+  try {
     const snap = await adminDb.collection('organizationMessageBatches')
       .where('organizationId', '==', orgId).limit(200).get();
     return snap.docs
@@ -103,6 +111,14 @@ export async function getOrgMessageBatch(batchId: string): Promise<OrgBatchRow |
 export const MESSAGE_ROWS_MAX = 500;
 
 export async function listBatchMessages(batchId: string, max = MESSAGE_ROWS_MAX): Promise<OrgMessageRow[]> {
+  // Indexed query (batchId ASC, createdAt DESC); same graceful fallback as above.
+  try {
+    const snap = await adminDb.collection('organizationMessages')
+      .where('batchId', '==', batchId)
+      .orderBy('createdAt', 'desc')
+      .limit(max).get();
+    return snap.docs.map(d => mapMessageRow(d.id, d.data() as Record<string, unknown>));
+  } catch { /* index not deployed yet → fallback */ }
   try {
     const snap = await adminDb.collection('organizationMessages')
       .where('batchId', '==', batchId).limit(max).get();

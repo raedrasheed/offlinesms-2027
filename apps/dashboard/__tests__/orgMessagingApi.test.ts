@@ -312,3 +312,34 @@ describe('usage math — only accepted/queued consume quota', () => {
     expect(mixed.accepted).toBe(1);   // exactly the queued one
   });
 });
+
+// ─── Phase 7: hardening pins ─────────────────────────────────────────────────
+
+describe('status vocabulary hardening', () => {
+  it('excludes seen as well as sent/delivered', () => {
+    expect(ORG_MESSAGE_STATUSES).not.toContain('seen');
+    expect(ORG_MESSAGE_STATUSES).not.toContain('sent');
+    expect(ORG_MESSAGE_STATUSES).not.toContain('delivered');
+  });
+});
+
+describe('audit/actor metadata can never carry a raw bearer token', () => {
+  it('every context-derived shape stays free of the key material', () => {
+    const rawKey = generateApiKey().raw;
+    // Even if a caller (wrongly) embedded the raw key in the key id field,
+    // the documented context shape only ever receives the Firestore keyId —
+    // assert the standard shapes built from a real keyId are clean.
+    const ctx = { source: 'api' as const, keyId: 'k_abc12345' };
+    const shapes = [
+      actorForContext(ctx),
+      batchDocFields('org1', _sum([{ status: 'queued' }]), ctx),
+      { createdBy: createdByForContext(ctx) },
+    ];
+    for (const s of shapes) {
+      const json = JSON.stringify(s);
+      expect(json).not.toContain(rawKey);
+      expect(json).not.toContain('offmsg_live_');
+      expect(json).not.toContain('Bearer ');
+    }
+  });
+});
