@@ -1,4 +1,5 @@
-import { View, Text, Image, Pressable, StyleSheet, SafeAreaView } from 'react-native';
+import { View, Text, Image, Pressable, StyleSheet } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { colors, radius } from '../theme';
 

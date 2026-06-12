@@ -5,7 +5,8 @@
 // the global default and "Use default" clears it to the theme background.
 
 import { useEffect, useMemo, useState } from 'react';
-import { View, Text, Pressable, Image, StyleSheet, SafeAreaView, ActivityIndicator } from 'react-native';
+import { View, Text, Pressable, Image, StyleSheet, ActivityIndicator } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
 import {
