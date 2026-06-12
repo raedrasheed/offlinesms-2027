@@ -3,6 +3,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { colors, radius } from '../theme';
 
+// Email sign-in is hidden for now (kept for later — flip to true to show it).
+const SHOW_EMAIL_LOGIN = false;
+
 export default function Welcome({ navigation }: any) {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -26,9 +29,11 @@ export default function Welcome({ navigation }: any) {
         <Pressable style={s.primaryBtn} onPress={() => navigation.navigate('PhoneEntry')}>
           <Text style={s.primaryBtnText}>{t('welcome.continuePhone')}</Text>
         </Pressable>
-        <Pressable style={s.secondaryBtn} onPress={() => navigation.navigate('EmailLogin')}>
-          <Text style={s.secondaryBtnText}>{t('welcome.continueEmail')}</Text>
-        </Pressable>
+        {SHOW_EMAIL_LOGIN ? (
+          <Pressable style={s.secondaryBtn} onPress={() => navigation.navigate('EmailLogin')}>
+            <Text style={s.secondaryBtnText}>{t('welcome.continueEmail')}</Text>
+          </Pressable>
+        ) : null}
         <Text style={s.terms}>
           By continuing you agree to our <Text style={s.termsLink}>Terms</Text> & <Text style={s.termsLink}>Privacy</Text>.
         </Text>
