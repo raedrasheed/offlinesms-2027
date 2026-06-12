@@ -828,7 +828,7 @@ export default function Conversation({ route, navigation }: any) {
               </Pressable>
             </View>
           ) : null}
-          <View style={[s.composer, { paddingBottom: insets.bottom + 12 }]}>
+          <View style={[s.composer, { marginBottom: insets.bottom + 10 }]}>
             {recorder.mode === 'locked' ? (
               <LockedVoiceRecorderBar
                 elapsedMs={recorder.elapsedMs}
@@ -984,15 +984,16 @@ function buildStyles(colors: any, rtl: boolean) {
     pinTitle:  { fontSize: 11, fontWeight: '700', color: '#A16207', textAlign: rtl ? 'right' : 'left' },
     pinPreview:{ fontSize: 12, color: colors.text.primary, marginTop: 2, textAlign: rtl ? 'right' : 'left' },
     pinClose:  { fontSize: 18, color: '#A16207', fontWeight: '700', paddingHorizontal: 4, minWidth: 32, minHeight: 32, textAlignVertical: 'center', textAlign: 'center' },
-    composerPreview: { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 10, padding: 10, backgroundColor: colors.background.surface, borderTopWidth: 1, borderColor: colors.border.subtle },
+    composerPreview: { marginHorizontal: 12, marginBottom: 6, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 10, padding: 12, backgroundColor: colors.background.surface, borderRadius: 18, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 3 },
     composerPreviewTitle: { fontSize: 11, fontWeight: '700', color: colors.action.primary, textAlign: rtl ? 'right' : 'left' },
     composerPreviewBody:  { fontSize: 12, color: colors.text.primary, marginTop: 2, textAlign: rtl ? 'right' : 'left' },
     composerPreviewClose: { fontSize: 18, color: colors.text.muted, fontWeight: '700', paddingHorizontal: 6, minWidth: 36, minHeight: 36, textAlignVertical: 'center', textAlign: 'center' },
-    // The BAR behind the composer is transparent so the chat wallpaper shows
-    // through to either side of the field (Telegram style). The input pill
-    // itself is a solid, opaque surface.
-    composer: { padding: 12, paddingBottom: 24, flexDirection: rtl ? 'row-reverse' : 'row', gap: 8, alignItems: 'flex-end', backgroundColor: 'transparent' },
-    inputPill: { flex: 1, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', minHeight: 46, paddingHorizontal: 4, backgroundColor: colors.background.surface, borderRadius: 24, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 4, shadowOffset: { width: 0, height: 1 }, elevation: 2 },
+    // The composer is a single floating rounded pill (matching the chat-list
+    // bottom tab bar): side margins, a bottom gap, full white surface and a
+    // soft shadow. The wallpaper shows through to either side of the pill.
+    composer: { marginHorizontal: 12, paddingHorizontal: 6, paddingVertical: 6, flexDirection: rtl ? 'row-reverse' : 'row', gap: 6, alignItems: 'flex-end', backgroundColor: colors.background.surface, borderRadius: 30, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 6 },
+    // The input region sits transparently inside the floating composer pill.
+    inputPill: { flex: 1, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', minHeight: 46, paddingHorizontal: 4, backgroundColor: 'transparent' },
     pillLeft:  { flex: 1, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center' },
     recordingInline: { flex: 1, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 8, paddingHorizontal: 8, height: 44 },
     recDot:    { width: 9, height: 9, borderRadius: 5, backgroundColor: colors.state.error },
