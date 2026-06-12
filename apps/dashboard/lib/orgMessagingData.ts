@@ -10,6 +10,7 @@
 
 import { adminDb } from './firebase-admin';
 import { usageMonthKey, type OrgBatchStatus } from './orgMessagingValidation';
+import { pickApiKeyStatusRow } from './orgMessagingKeys';
 
 function safeDate(v: unknown): string {
   try {
@@ -56,34 +57,17 @@ export async function getOrgMessagingOverview(orgId: string): Promise<OrgMessagi
 
 // ─── API key status (status only — never the hash) ───────────────────────────
 
-export type OrgApiKeyStatus = {
-  keyId:      string;
-  status:     string;        // active | revoked
-  createdAt:  string;
-  revokedAt:  string;
-  lastUsedAt: string;
-};
+export type { ApiKeyStatusRow as OrgApiKeyStatus } from './orgMessagingKeys';
 
-export async function getOrgApiKeyStatus(orgId: string): Promise<OrgApiKeyStatus | null> {
+export async function getOrgApiKeyStatus(orgId: string) {
   try {
-    // Equality-only query (no composite index needed); newest picked in memory.
+    // Equality-only query (no composite index needed); selection + the
+    // hash-free mapping live in the pure, unit-tested pickApiKeyStatusRow.
     const snap = await adminDb.collection('organizationApiKeys')
       .where('organizationId', '==', orgId).limit(20).get();
-    if (snap.empty) return null;
-    const rows: Array<{ id: string; data: Record<string, unknown> }> =
-      snap.docs.map(d => ({ id: d.id, data: d.data() as Record<string, unknown> }));
-    // Prefer the active key; otherwise the most recently created.
-    const active = rows.find(r => r.data.status === 'active');
-    const pick = active ?? rows.sort((a, b) =>
-      ((b.data.createdAt as { toMillis?: () => number })?.toMillis?.() ?? 0)
-      - ((a.data.createdAt as { toMillis?: () => number })?.toMillis?.() ?? 0))[0];
-    return {
-      keyId:      pick.id,
-      status:     (pick.data.status as string | undefined) ?? 'revoked',
-      createdAt:  safeDate(pick.data.createdAt),
-      revokedAt:  safeDate(pick.data.revokedAt),
-      lastUsedAt: safeDate(pick.data.lastUsedAt),
-    };
+    return pickApiKeyStatusRow(
+      snap.docs.map(d => ({ id: d.id, data: d.data() as Record<string, unknown> })),
+    );
   } catch { return null; }
 }
 

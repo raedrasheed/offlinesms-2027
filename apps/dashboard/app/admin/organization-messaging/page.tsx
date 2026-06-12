@@ -16,9 +16,10 @@ import { listOrganizations } from '@/lib/adminData';
 import {
   getOrgMessagingOverview, getOrgApiKeyStatus, listOrgMessageBatches,
 } from '@/lib/orgMessagingData';
-import { sendOrganizationMessage } from '@/lib/orgMessagingActions';
+import { sendOrganizationMessage, generateOrgApiKey, revokeOrgApiKey } from '@/lib/orgMessagingActions';
 import { PermissionState, EmptyState } from '@/components/state';
 import SendMessageForm from './SendMessageForm';
+import ApiKeySection from './ApiKeySection';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -122,18 +123,11 @@ export default async function OrgMessagingPage({
       {/* 2 — API key */}
       <section className="rounded-2xl p-6" style={{ background: CARD, border: `1px solid ${BORDER}` }}>
         <h2 className="text-sm font-extrabold tracking-tight mb-3">API key</h2>
-        {apiKey ? (
-          <div className="grid grid-cols-4 gap-4 text-sm">
-            <Stat label="Status" value={apiKey.status} />
-            <Stat label="Created" value={fmt(apiKey.createdAt)} />
-            <Stat label="Last used" value={fmt(apiKey.lastUsedAt)} />
-            <Stat label="Revoked" value={fmt(apiKey.revokedAt)} />
-          </div>
-        ) : (
-          <p className="text-sm" style={{ color: 'var(--c-text-3)' }}>
-            No API key yet. Key generation is enabled in an upcoming update; the key secret will be shown exactly once after creation.
-          </p>
-        )}
+        <ApiKeySection
+          status={apiKey}
+          generateAction={generateOrgApiKey.bind(null, orgId)}
+          revokeAction={revokeOrgApiKey.bind(null, orgId)}
+        />
       </section>
 
       {/* 3 — Send message */}

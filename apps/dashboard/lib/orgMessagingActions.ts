@@ -16,6 +16,7 @@ import { verifySession } from './session';
 import { canDo } from './adminPermissions';
 import { getAdminScope, canViewOrganization } from './adminScope';
 import { validateOrgAccountInput, deriveOrgSlug, validateOrgSendInput } from './orgMessagingValidation';
+import { generateApiKey } from './orgMessagingKeys';
 
 export type OrgAccountActionState =
   | { error: string }
@@ -162,4 +163,139 @@ export async function sendOrganizationMessage(
   if ('error' in parsed) return parsed;
 
   return { error: 'Message sending is not enabled yet — the messaging backend is added in an upcoming update.' };
+}
+
+// ─── API key management (Phase 3) ─────────────────────────────────────────────
+// One active key per organization. Only the SHA-256 hash is persisted; the raw
+// key exists solely in this action's return value (client state) and is gone
+// after a refresh. Generating a new key revokes any previously active one;
+// revoked rows are kept as history.
+
+export type OrgApiKeyActionState =
+  | { error: string }
+  | { success: true; rawKey?: string }
+  | null;
+
+type OrgMessagingGate =
+  | { error: string }
+  | { error?: undefined; session: Awaited<ReturnType<typeof verifySession>> & { state: 'authorized' } };
+
+async function requireOrgMessagingManager(organizationId: string): Promise<OrgMessagingGate> {
+  const cookie = cookies().get('__session')?.value;
+  const session = await verifySession(cookie);
+  if (session.state !== 'authorized' || !canDo(session.role, 'manage:organization_messaging')) {
+    return { error: 'Permission denied.' };
+  }
+  if (!organizationId || !canViewOrganization(session, organizationId)) {
+    return { error: 'You can only manage the API key of your own organization.' };
+  }
+  const org = await adminDb.collection('organizations').doc(organizationId).get();
+  if (!org.exists) return { error: 'Organization not found.' };
+  return { session };
+}
+
+async function writeApiKeyAudit(
+  action: 'organization_api_key_created' | 'organization_api_key_revoked',
+  actorUid: string,
+  actorEmail: string | undefined,
+  organizationId: string,
+  meta: Record<string, unknown>,
+) {
+  try {
+    await adminDb.collection('auditLogs').add({
+      action,
+      actorUid,
+      actorEmail: actorEmail ?? null,
+      targetType: 'organization',
+      targetId:   organizationId,
+      result:     'success',
+      metadata:   meta,
+      createdAt:  FieldValue.serverTimestamp(),
+    });
+  } catch { /* soft-fail */ }
+}
+
+export async function generateOrgApiKey(
+  organizationId: string,
+  _prev: OrgApiKeyActionState,
+  _data: FormData,
+): Promise<OrgApiKeyActionState> {
+  const gate = await requireOrgMessagingManager(organizationId);
+  if (gate.error !== undefined) return { error: gate.error };
+  const { session } = gate;
+
+  const { raw, hash } = generateApiKey();
+  const keysCol = adminDb.collection('organizationApiKeys');
+  const newRef = keysCol.doc();
+
+  // Revoke any active key and create the new one atomically, so there is
+  // never a moment with two usable keys (or none recorded).
+  try {
+    await adminDb.runTransaction(async tx => {
+      const active = await tx.get(
+        keysCol.where('organizationId', '==', organizationId).where('status', '==', 'active'),
+      );
+      for (const docSnap of active.docs) {
+        tx.update(docSnap.ref, {
+          status:    'revoked',
+          revokedAt: FieldValue.serverTimestamp(),
+          revokedBy: session.user.uid,
+        });
+      }
+      tx.set(newRef, {
+        organizationId,
+        keyHash:    hash,
+        status:     'active',
+        createdAt:  FieldValue.serverTimestamp(),
+        createdBy:  session.user.uid,
+        revokedAt:  null,
+        revokedBy:  null,
+        lastUsedAt: null,
+      });
+    });
+  } catch {
+    return { error: 'Could not generate the API key. Please try again.' };
+  }
+
+  await writeApiKeyAudit('organization_api_key_created', session.user.uid, session.user.email,
+    organizationId, { keyId: newRef.id });
+
+  // The ONLY place the raw key ever leaves the server.
+  return { success: true, rawKey: raw };
+}
+
+export async function revokeOrgApiKey(
+  organizationId: string,
+  _prev: OrgApiKeyActionState,
+  _data: FormData,
+): Promise<OrgApiKeyActionState> {
+  const gate = await requireOrgMessagingManager(organizationId);
+  if (gate.error !== undefined) return { error: gate.error };
+  const { session } = gate;
+
+  let revokedIds: string[] = [];
+  try {
+    const keysCol = adminDb.collection('organizationApiKeys');
+    await adminDb.runTransaction(async tx => {
+      const active = await tx.get(
+        keysCol.where('organizationId', '==', organizationId).where('status', '==', 'active'),
+      );
+      revokedIds = active.docs.map(d => d.id);
+      for (const docSnap of active.docs) {
+        tx.update(docSnap.ref, {
+          status:    'revoked',
+          revokedAt: FieldValue.serverTimestamp(),
+          revokedBy: session.user.uid,
+        });
+      }
+    });
+  } catch {
+    return { error: 'Could not revoke the API key. Please try again.' };
+  }
+  if (revokedIds.length === 0) return { error: 'There is no active API key to revoke.' };
+
+  await writeApiKeyAudit('organization_api_key_revoked', session.user.uid, session.user.email,
+    organizationId, { keyIds: revokedIds });
+
+  return { success: true };
 }
