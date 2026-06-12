@@ -6,7 +6,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { View, Text, Pressable, Image, StyleSheet, ActivityIndicator } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
 import {
@@ -21,6 +21,7 @@ import { ChatWallpaperBackground } from '../components/ChatWallpaperBackground';
 type Params = { conversationId?: string };
 
 export default function ChatWallpaperScreen({ route, navigation }: any) {
+  const insets = useSafeAreaInsets();
   const { conversationId } = (route?.params ?? {}) as Params;
   const isPerChat = !!conversationId;
   const { colors } = useTheme();
@@ -64,7 +65,7 @@ export default function ChatWallpaperScreen({ route, navigation }: any) {
   }
 
   return (
-    <SafeAreaView style={s.root}>
+    <View style={[s.root, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
       <View style={s.header}>
         <Pressable onPress={() => navigation.goBack()} hitSlop={12} accessibilityRole="button">
           <Ionicons name="chevron-back" size={24} color={colors.text.primary} />
@@ -108,7 +109,7 @@ export default function ChatWallpaperScreen({ route, navigation }: any) {
         ) : null}
         {busy ? <ActivityIndicator style={{ marginTop: 12 }} color={colors.action.primary} /> : null}
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { View, Text, Pressable, StyleSheet, FlatList, ActivityIndicator, Alert } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius } from '../theme';
 import { request as requestPermission } from '../lib/permissions';
@@ -16,6 +16,7 @@ function initials(name: string): string {
 }
 
 export default function FindFriends({ navigation }: any) {
+  const insets = useSafeAreaInsets();
   const [phase, setPhase]       = useState<'idle' | 'syncing' | 'done'>('idle');
   const [progress, setProgress] = useState<SyncProgress>({ scanned: 0, total: 0, matched: 0 });
   const [matches, setMatches]   = useState<ContactMatch[]>([]);
@@ -42,7 +43,7 @@ export default function FindFriends({ navigation }: any) {
   const pct = progress.total > 0 ? Math.round((progress.scanned / progress.total) * 100) : 0;
 
   return (
-    <SafeAreaView style={s.root}>
+    <View style={[s.root, { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 16 }]}>
       <Pressable style={s.back} onPress={() => navigation.goBack()} hitSlop={12}>
         <Ionicons name="chevron-back" size={24} color={colors.ink} />
       </Pressable>
@@ -104,7 +105,7 @@ export default function FindFriends({ navigation }: any) {
           )}
         </>
       )}
-    </SafeAreaView>
+    </View>
   );
 }
 

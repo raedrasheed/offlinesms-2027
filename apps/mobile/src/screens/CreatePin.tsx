@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { View, Text, Pressable, StyleSheet, Alert } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius } from '../theme';
 import NumberPad from '../components/NumberPad';
@@ -9,6 +9,7 @@ import { setPin } from '../lib/pin';
 const LENGTH = 6;
 
 export default function CreatePin({ navigation }: any) {
+  const insets = useSafeAreaInsets();
   const [phase, setPhase]   = useState<'create' | 'confirm'>('create');
   const [first, setFirst]   = useState('');
   const [second, setSecond] = useState('');
@@ -55,7 +56,7 @@ export default function CreatePin({ navigation }: any) {
   }
 
   return (
-    <SafeAreaView style={s.root}>
+    <View style={[s.root, { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 16 }]}>
       <Pressable style={s.back} onPress={() => navigation.goBack()} hitSlop={12}>
         <Ionicons name="chevron-back" size={24} color={colors.ink} />
       </Pressable>
@@ -82,12 +83,12 @@ export default function CreatePin({ navigation }: any) {
 
       <NumberPad onDigit={pressDigit} onDelete={pressDelete} />
       {busy ? <Text style={s.busy}>Saving…</Text> : null}
-    </SafeAreaView>
+    </View>
   );
 }
 
 const s = StyleSheet.create({
-  root:   { flex: 1, backgroundColor: '#fff', paddingHorizontal: 24, paddingBottom: 24 },
+  root:   { flex: 1, backgroundColor: '#fff', paddingHorizontal: 24 },
   back:   { marginTop: 8, alignSelf: 'flex-start' },
   header: { alignItems: 'center', marginTop: 24, gap: 12 },
   shield: { width: 56, height: 56, borderRadius: 18, backgroundColor: colors.primaryLight, alignItems: 'center', justifyContent: 'center' },

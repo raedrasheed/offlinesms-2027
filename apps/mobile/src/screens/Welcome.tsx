@@ -1,12 +1,13 @@
 import { View, Text, Image, Pressable, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { colors, radius } from '../theme';
 
 export default function Welcome({ navigation }: any) {
   const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
   return (
-    <SafeAreaView style={s.root}>
+    <View style={[s.root, { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 16 }]}>
       <View style={s.brandRow}>
         <Image source={require('../../assets/adaptive-icon.png')} style={s.logo} />
         <Text style={s.brand}>OfflineSMS</Text>
@@ -32,7 +33,7 @@ export default function Welcome({ navigation }: any) {
           By continuing you agree to our <Text style={s.termsLink}>Terms</Text> & <Text style={s.termsLink}>Privacy</Text>.
         </Text>
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 

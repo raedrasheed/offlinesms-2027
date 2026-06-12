@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { View, Text, TextInput, Pressable, StyleSheet, Alert, Modal, FlatList } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius } from '../theme';
 import { requestPhoneOtp, otpErrorCopy } from '../lib/auth';
@@ -22,6 +22,7 @@ function formatPhone(digits: string): string {
 }
 
 export default function PhoneEntry({ navigation }: any) {
+  const insets = useSafeAreaInsets();
   const [country, setCountry] = useState<Country>(DEFAULT_COUNTRY);
   const [digits, setDigits]   = useState('');
   const [picker, setPicker]   = useState(false);
@@ -59,7 +60,7 @@ export default function PhoneEntry({ navigation }: any) {
   }
 
   return (
-    <SafeAreaView style={s.root}>
+    <View style={[s.root, { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 16 }]}>
       <Pressable style={s.back} onPress={() => navigation.goBack()} hitSlop={12}>
         <Ionicons name="chevron-back" size={24} color={colors.ink} />
       </Pressable>
@@ -130,12 +131,12 @@ export default function PhoneEntry({ navigation }: any) {
           />
         </SafeAreaView>
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 }
 
 const s = StyleSheet.create({
-  root:  { flex: 1, backgroundColor: '#fff', paddingHorizontal: 24, paddingBottom: 24 },
+  root:  { flex: 1, backgroundColor: '#fff', paddingHorizontal: 24 },
   back:  { marginTop: 8, marginBottom: 24, alignSelf: 'flex-start' },
   h1:    { fontSize: 26, fontWeight: '800', color: colors.ink, letterSpacing: -0.4 },
   sub:   { fontSize: 13, color: colors.ink500, marginTop: 8, lineHeight: 20 },

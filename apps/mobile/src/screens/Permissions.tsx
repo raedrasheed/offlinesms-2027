@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { View, Text, Pressable, StyleSheet, Switch, ScrollView, Linking, Alert } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius } from '../theme';
 import { getStatus, request, type PermissionKey, type PermissionStatus } from '../lib/permissions';
@@ -15,6 +15,7 @@ const ROWS: Row[] = [
 ];
 
 export default function Permissions({ navigation }: any) {
+  const insets = useSafeAreaInsets();
   const [status, setStatus] = useState<Record<PermissionKey, PermissionStatus>>({
     contacts: 'undetermined', notifications: 'undetermined', camera: 'undetermined', microphone: 'undetermined',
   });
@@ -52,7 +53,7 @@ export default function Permissions({ navigation }: any) {
   }
 
   return (
-    <SafeAreaView style={s.root}>
+    <View style={[s.root, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
       <ScrollView contentContainerStyle={s.content}>
         <Pressable style={s.back} onPress={() => navigation.goBack()} hitSlop={12}>
           <Ionicons name="chevron-back" size={24} color={colors.ink} />
@@ -89,7 +90,7 @@ export default function Permissions({ navigation }: any) {
           <Text style={s.btnText}>Continue</Text>
         </Pressable>
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 
