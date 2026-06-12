@@ -42,7 +42,7 @@ export default function CreateOrgAccountForm({
         <div className="rounded-lg px-4 py-3 text-sm space-y-1" style={{ background: 'var(--c-success-bg)', border: '1px solid var(--c-success-border)', color: '#22C55E' }}>
           <p className="font-bold">Organization account created.</p>
           <p>The admin can now sign in with the email and password you set.</p>
-          <Link href={`/admin/organization-messaging/${ok.organizationId}` as any} className="underline font-semibold">
+          <Link href={`/admin/organization-messaging?org=${ok.organizationId}` as any} className="underline font-semibold">
             Open organization messaging →
           </Link>
         </div>

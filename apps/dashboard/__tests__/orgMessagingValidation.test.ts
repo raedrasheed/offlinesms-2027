@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   validateOrgAccountInput, deriveOrgSlug, ORG_PASSWORD_MIN,
+  parseRecipientLine, parseRecipientsText, validateOrgSendInput,
+  usageMonthKey, ORG_MSG_MAX_RECIPIENTS, ORG_MSG_TITLE_MAX, ORG_MSG_BODY_MAX,
 } from '../lib/orgMessagingValidation';
 import { canDo } from '../lib/adminPermissions';
 
@@ -87,5 +89,67 @@ describe('organization_messaging capability matrix', () => {
       expect(canDo(role, 'view:organization_messaging')).toBe(false);
       expect(canDo(role, 'manage:organization_messaging')).toBe(false);
     }
+  });
+});
+
+// ─── Phase 2: send-form parsing/validation ───────────────────────────────────
+
+describe('usageMonthKey', () => {
+  it('formats as YYYY-MM in UTC', () => {
+    expect(usageMonthKey(new Date(Date.UTC(2026, 0, 15)))).toBe('2026-01');
+    expect(usageMonthKey(new Date(Date.UTC(2026, 11, 31, 23, 59)))).toBe('2026-12');
+  });
+});
+
+describe('parseRecipientLine', () => {
+  it('accepts E.164 phones (with separators stripped)', () => {
+    expect(parseRecipientLine('+970591234567')).toEqual({ phone: '+970591234567' });
+    expect(parseRecipientLine(' +970 59-123-4567 ')).toEqual({ phone: '+970591234567' });
+  });
+  it('accepts user ids', () => {
+    expect(parseRecipientLine('AbC123_xyz-9')).toEqual({ userId: 'AbC123_xyz-9' });
+  });
+  it('rejects malformed lines', () => {
+    expect(parseRecipientLine('+12')).toBeNull();           // too short
+    expect(parseRecipientLine('+abc')).toBeNull();          // not digits
+    expect(parseRecipientLine('0591234567')).toBeNull();    // phone without +
+    expect(parseRecipientLine('ab')).toBeNull();            // userId too short
+    expect(parseRecipientLine('has spaces here')).toBeNull();
+    expect(parseRecipientLine('')).toBeNull();
+  });
+});
+
+describe('parseRecipientsText', () => {
+  it('splits lines, skips blanks, dedupes, reports invalid', () => {
+    const out = parseRecipientsText('+970591234567\n\nuser_123456\n+970591234567\nbad line\n');
+    expect(out.recipients).toEqual([{ phone: '+970591234567' }, { userId: 'user_123456' }]);
+    expect(out.invalid).toEqual(['bad line']);
+  });
+});
+
+describe('validateOrgSendInput', () => {
+  const ok = { title: 'Hello', body: 'World', recipientsText: '+970591234567\nuser_123456' };
+
+  it('accepts a valid payload', () => {
+    expect(validateOrgSendInput(ok)).toEqual({
+      title: 'Hello', body: 'World',
+      recipients: [{ phone: '+970591234567' }, { userId: 'user_123456' }],
+    });
+  });
+  it('requires title and caps its length', () => {
+    expect(validateOrgSendInput({ ...ok, title: ' ' })).toEqual({ error: expect.stringMatching(/title is required/i) });
+    expect(validateOrgSendInput({ ...ok, title: 'x'.repeat(ORG_MSG_TITLE_MAX + 1) })).toEqual({ error: expect.stringMatching(/80 characters/i) });
+  });
+  it('requires body and caps its length', () => {
+    expect(validateOrgSendInput({ ...ok, body: '' })).toEqual({ error: expect.stringMatching(/body is required/i) });
+    expect(validateOrgSendInput({ ...ok, body: 'x'.repeat(ORG_MSG_BODY_MAX + 1) })).toEqual({ error: expect.stringMatching(/500 characters/i) });
+  });
+  it('rejects empty and invalid recipients', () => {
+    expect(validateOrgSendInput({ ...ok, recipientsText: '\n \n' })).toEqual({ error: expect.stringMatching(/at least one recipient/i) });
+    expect(validateOrgSendInput({ ...ok, recipientsText: 'not valid!' })).toEqual({ error: expect.stringMatching(/invalid recipient/i) });
+  });
+  it('enforces the per-send recipient cap', () => {
+    const many = Array.from({ length: ORG_MSG_MAX_RECIPIENTS + 1 }, (_, i) => `user_${String(100000 + i)}`).join('\n');
+    expect(validateOrgSendInput({ ...ok, recipientsText: many })).toEqual({ error: expect.stringMatching(/at most 500/i) });
   });
 });

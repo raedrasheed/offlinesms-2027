@@ -31,4 +31,5 @@ export const NAV_ITEMS: NavItem[] = [
   { href: '/admin/audit',         label: 'Audit Log',     icon: ScrollText,   capability: 'view:audit' },
   { href: '/admin/moderation',    label: 'Moderation',    icon: Flag,         capability: 'view:moderation' },
   { href: '/admin/notifications', label: 'Notifications', icon: Bell,         capability: 'view:notifications' },
+  { href: '/admin/organization-messaging', label: 'Org Messaging', icon: Send, capability: 'view:organization_messaging' },
 ];

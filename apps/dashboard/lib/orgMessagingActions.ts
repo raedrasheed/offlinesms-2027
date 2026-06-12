@@ -14,8 +14,8 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { adminAuth, adminDb } from './firebase-admin';
 import { verifySession } from './session';
 import { canDo } from './adminPermissions';
-import { getAdminScope } from './adminScope';
-import { validateOrgAccountInput, deriveOrgSlug } from './orgMessagingValidation';
+import { getAdminScope, canViewOrganization } from './adminScope';
+import { validateOrgAccountInput, deriveOrgSlug, validateOrgSendInput } from './orgMessagingValidation';
 
 export type OrgAccountActionState =
   | { error: string }
@@ -126,4 +126,40 @@ export async function createOrganizationAccount(
   } catch { /* soft-fail */ }
 
   return { success: true, organizationId: orgRef.id, adminUid };
+}
+
+// ─── Send message (dashboard form) ────────────────────────────────────────────
+// Phase 2 wires the form + scoping + validation; the actual batch/log creation
+// (shared with the API endpoint) lands with the messaging backend phase. Until
+// then this returns an honest "not enabled" error — nothing is recorded and
+// nothing is ever marked sent/delivered.
+
+export type OrgSendActionState =
+  | { error: string }
+  | { success: true; batchId: string; total: number; accepted: number; failed: number }
+  | null;
+
+export async function sendOrganizationMessage(
+  organizationId: string,
+  _prev: OrgSendActionState,
+  data: FormData,
+): Promise<OrgSendActionState> {
+  const cookie = cookies().get('__session')?.value;
+  const session = await verifySession(cookie);
+  if (session.state !== 'authorized' || !canDo(session.role, 'manage:organization_messaging')) {
+    return { error: 'Permission denied.' };
+  }
+  // organization_admin may only send for their own organization.
+  if (!organizationId || !canViewOrganization(session, organizationId)) {
+    return { error: 'You can only send messages for your own organization.' };
+  }
+
+  const parsed = validateOrgSendInput({
+    title:          data.get('title')?.toString() ?? null,
+    body:           data.get('body')?.toString() ?? null,
+    recipientsText: data.get('recipients')?.toString() ?? null,
+  });
+  if ('error' in parsed) return parsed;
+
+  return { error: 'Message sending is not enabled yet — the messaging backend is added in an upcoming update.' };
 }

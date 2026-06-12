@@ -61,6 +61,7 @@ const NAV_GROUPS: NavGroup[] = [
       { href: '/admin/chats', label: 'Conversations', icon: Inbox,  capability: 'view:groups' },
       { href: '/admin/calls', label: 'Messages',      icon: Phone,  capability: 'view:calls' },
       { href: '/admin/sms',   label: 'SMS escalation', icon: Send,  capability: 'view:sms', badge: 'NEW' },
+      { href: '/admin/organization-messaging', label: 'Org Messaging', icon: Building2, capability: 'view:organization_messaging' },
     ],
   },
   {
