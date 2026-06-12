@@ -233,3 +233,82 @@ describe('messageDocFields (per-recipient log shape)', () => {
     });
   });
 });
+
+// ─── Phase 6: read models, scoping rule, usage math ──────────────────────────
+
+import {
+  mapBatchRow, mapMessageRow, canAccessBatch, percentUsed,
+} from '../lib/orgMessagingApi';
+
+describe('mapBatchRow / mapMessageRow — allow-list read models', () => {
+  const ts = { toDate: () => new Date(1700000000000), toMillis: () => 1700000000000 };
+
+  it('maps the batch fields and IGNORES anything else (keyHash can never leak)', () => {
+    const row = mapBatchRow('b1', {
+      organizationId: 'org1', source: 'api', createdBy: 'key_1', status: 'partial',
+      total: 3, accepted: 1, queued: 1, failed: 1, unsupported: 1,
+      createdAt: ts, completedAt: ts,
+      keyHash: 'SECRET_HASH', authorization: 'Bearer offmsg_live_xyz', extra: 'junk',
+    });
+    expect(row).toEqual({
+      id: 'b1', organizationId: 'org1', source: 'api', createdBy: 'key_1', status: 'partial',
+      total: 3, accepted: 1, queued: 1, failed: 1, unsupported: 1,
+      createdAt: new Date(1700000000000).toISOString(),
+      completedAt: new Date(1700000000000).toISOString(),
+    });
+    expect(JSON.stringify(row)).not.toContain('SECRET_HASH');
+    expect(JSON.stringify(row)).not.toContain('offmsg_live_');
+  });
+
+  it('maps message rows without secrets and with honest statuses', () => {
+    const row = mapMessageRow('m1', {
+      batchId: 'b1', recipientType: 'phone', recipientValue: '+970591111111',
+      title: 'T', body: 'B', status: 'unsupported_recipient',
+      failureReason: 'phone_not_linked_to_user', createdAt: ts,
+      keyHash: 'SECRET', resolvedUserId: 'u1',
+    });
+    expect(Object.keys(row).sort()).toEqual([
+      'batchId', 'body', 'createdAt', 'failureReason', 'id',
+      'recipientType', 'recipientValue', 'status', 'title',
+    ]);
+    expect(JSON.stringify(row)).not.toContain('SECRET');
+    expect(['queued', 'failed', 'unsupported_recipient', 'accepted']).toContain(row.status);
+  });
+});
+
+describe('canAccessBatch — org scoping for batch/message reads', () => {
+  it('org-scoped admins can only read their own organization batches', () => {
+    expect(canAccessBatch('org1', 'org1')).toBe(true);    // organization_admin, own batch
+    expect(canAccessBatch('org1', 'org2')).toBe(false);   // cross-org → rejected
+  });
+  it('unrestricted (super) admins can read any organization batch', () => {
+    expect(canAccessBatch(undefined, 'org1')).toBe(true);
+    expect(canAccessBatch(undefined, 'org2')).toBe(true);
+  });
+  it('a batch without an organization is never accessible', () => {
+    expect(canAccessBatch(undefined, '')).toBe(false);
+    expect(canAccessBatch('org1', '')).toBe(false);
+  });
+});
+
+describe('usage math — only accepted/queued consume quota', () => {
+  it('percentUsed clamps and handles no-limit orgs', () => {
+    expect(percentUsed(1000, 250)).toBe(25);
+    expect(percentUsed(100, 250)).toBe(100);
+    expect(percentUsed(0, 50)).toBe(0);
+    expect(percentUsed(3, 1)).toBe(33);
+  });
+
+  it('failed and unsupported recipients contribute 0 to the used counter', () => {
+    // The service increments `used` by summary.accepted — which only counts queued.
+    const summary = summarizeItems([
+      { status: 'failed' }, { status: 'unsupported_recipient' }, { status: 'failed' },
+    ]);
+    expect(summary.accepted).toBe(0);
+
+    const mixed = summarizeItems([
+      { status: 'queued' }, { status: 'failed' }, { status: 'unsupported_recipient' },
+    ]);
+    expect(mixed.accepted).toBe(1);   // exactly the queued one
+  });
+});

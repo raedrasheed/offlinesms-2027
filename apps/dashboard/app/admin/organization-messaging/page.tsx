@@ -89,9 +89,7 @@ export default async function OrgMessagingPage({
   ]);
 
   const sendAction = sendOrganizationMessage.bind(null, orgId);
-  const pct = overview.monthlyMessageLimit > 0
-    ? Math.min(100, Math.round((overview.usedThisMonth / overview.monthlyMessageLimit) * 100))
-    : 0;
+  const pct = overview.percentUsed;
 
   return (
     <div className="p-6 max-w-4xl space-y-5" style={{ color: 'var(--c-text)' }}>
@@ -110,14 +108,18 @@ export default async function OrgMessagingPage({
             {overview.status}
           </span>
         </div>
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-4 gap-4">
           <Stat label="Monthly limit" value={overview.monthlyMessageLimit.toLocaleString()} />
           <Stat label="Used this month" value={overview.usedThisMonth.toLocaleString()} />
           <Stat label="Remaining" value={overview.remainingThisMonth.toLocaleString()} />
+          <Stat label="Used %" value={`${pct}%`} />
         </div>
         <div className="mt-4 h-2 rounded-full overflow-hidden" style={{ background: 'var(--c-bg)' }}>
           <div className="h-2 rounded-full" style={{ width: `${pct}%`, background: pct >= 100 ? '#EF4444' : '#1F7BA8' }} />
         </div>
+        <p className="text-[11px] mt-2" style={{ color: 'var(--c-text-3)' }}>
+          Only accepted (queued) messages count against the quota — failed and unsupported recipients don’t.
+        </p>
       </section>
 
       {/* 2 — API key */}
@@ -151,20 +153,33 @@ export default async function OrgMessagingPage({
           <table className="w-full text-[12px] border-collapse">
             <thead>
               <tr style={{ borderTop: `1px solid ${BORDER}`, borderBottom: `1px solid ${BORDER}` }}>
-                {['Batch', 'Source', 'Status', 'Total', 'Accepted', 'Failed', 'Created'].map(h => (
+                {['Batch', 'Source', 'Created by', 'Status', 'Total', 'Accepted', 'Queued', 'Failed', 'Unsupported', 'Created'].map(h => (
                   <th key={h} className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--c-text-4)' }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {batches.map((b, i) => (
-                <tr key={b.id} style={i < batches.length - 1 ? { borderBottom: `1px solid ${BORDER}` } : {}}>
-                  <td className="px-4 py-2.5 font-mono text-[11px]">{b.id.slice(0, 12)}…</td>
+                <tr key={b.id} className="transition hover:bg-white/[0.03]" style={i < batches.length - 1 ? { borderBottom: `1px solid ${BORDER}` } : {}}>
+                  <td className="px-4 py-2.5">
+                    <Link
+                      href={`/admin/organization-messaging/batches/${b.id}` as any}
+                      className="font-mono text-[11px] hover:underline"
+                      style={{ color: '#5BB6DE' }}
+                    >
+                      {b.id.slice(0, 12)}…
+                    </Link>
+                  </td>
                   <td className="px-4 py-2.5 capitalize">{b.source}</td>
+                  <td className="px-4 py-2.5 font-mono text-[11px]" style={{ color: 'var(--c-text-3)' }}>
+                    {b.source === 'api' ? `key ${b.createdBy.slice(0, 8)}…` : `${b.createdBy.slice(0, 10)}…`}
+                  </td>
                   <td className="px-4 py-2.5 capitalize">{b.status}</td>
                   <td className="px-4 py-2.5">{b.total}</td>
                   <td className="px-4 py-2.5">{b.accepted}</td>
+                  <td className="px-4 py-2.5">{b.queued}</td>
                   <td className="px-4 py-2.5">{b.failed}</td>
+                  <td className="px-4 py-2.5">{b.unsupported}</td>
                   <td className="px-4 py-2.5 whitespace-nowrap" style={{ color: 'var(--c-text-4)' }}>{fmt(b.createdAt)}</td>
                 </tr>
               ))}

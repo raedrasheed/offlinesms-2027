@@ -254,3 +254,92 @@ export function messageDocFields(organizationId: string, batchId: string, item: 
     failureReason:  item.failureReason,
   };
 }
+
+// ─── Read models (pure) — the ONLY shapes log reads may expose ───────────────
+// Mappers take raw Firestore doc data (which may contain anything) and copy a
+// fixed allow-list of fields, so secrets like keyHash can never leak through a
+// log/read helper even if a doc carried one.
+
+function isoDate(v: unknown): string {
+  try {
+    const d = (v as { toDate?: () => Date })?.toDate?.();
+    return d ? d.toISOString() : '';
+  } catch { return ''; }
+}
+
+export function createdAtMs(data: Record<string, unknown>): number {
+  return (data.createdAt as { toMillis?: () => number })?.toMillis?.() ?? 0;
+}
+
+export type OrgBatchRow = {
+  id:             string;
+  organizationId: string;
+  source:         string;          // dashboard | api
+  createdBy:      string;          // admin uid (dashboard) or API key id (api)
+  status:         string;          // accepted | partial | failed
+  total:          number;
+  accepted:       number;
+  queued:         number;
+  failed:         number;
+  unsupported:    number;
+  createdAt:      string;
+  completedAt:    string;
+};
+
+export function mapBatchRow(id: string, data: Record<string, unknown>): OrgBatchRow {
+  return {
+    id,
+    organizationId: (data.organizationId as string | undefined) ?? '',
+    source:         (data.source as string | undefined) ?? 'dashboard',
+    createdBy:      (data.createdBy as string | undefined) ?? '',
+    status:         (data.status as string | undefined) ?? 'accepted',
+    total:          (data.total as number | undefined) ?? 0,
+    accepted:       (data.accepted as number | undefined) ?? 0,
+    queued:         (data.queued as number | undefined) ?? 0,
+    failed:         (data.failed as number | undefined) ?? 0,
+    unsupported:    (data.unsupported as number | undefined) ?? 0,
+    createdAt:      isoDate(data.createdAt),
+    completedAt:    isoDate(data.completedAt),
+  };
+}
+
+export type OrgMessageRow = {
+  id:             string;
+  batchId:        string;
+  recipientType:  string;          // phone | userId
+  recipientValue: string;
+  title:          string;
+  body:           string;
+  status:         string;          // queued | failed | unsupported_recipient
+  failureReason:  string | null;
+  createdAt:      string;
+};
+
+export function mapMessageRow(id: string, data: Record<string, unknown>): OrgMessageRow {
+  return {
+    id,
+    batchId:        (data.batchId as string | undefined) ?? '',
+    recipientType:  (data.recipientType as string | undefined) ?? '',
+    recipientValue: (data.recipientValue as string | undefined) ?? '',
+    title:          (data.title as string | undefined) ?? '',
+    body:           (data.body as string | undefined) ?? '',
+    status:         (data.status as string | undefined) ?? '',
+    failureReason:  (data.failureReason as string | null | undefined) ?? null,
+    createdAt:      isoDate(data.createdAt),
+  };
+}
+
+/**
+ * Scope rule for batch/message reads: an unrestricted admin (scope undefined)
+ * may access any organization's batch; an org-scoped admin only their own.
+ */
+export function canAccessBatch(scopeOrgId: string | undefined, batchOrgId: string): boolean {
+  if (!batchOrgId) return false;
+  return scopeOrgId === undefined || scopeOrgId === batchOrgId;
+}
+
+/** Percentage of the monthly quota consumed (0–100, clamped; 0 when no limit). */
+export function percentUsed(limit: number, used: number): number {
+  if (limit <= 0) return 0;
+  return Math.min(100, Math.round((used / limit) * 100));
+}

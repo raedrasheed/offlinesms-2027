@@ -9,15 +9,14 @@
 //   organizationUsageCounters/{orgId_YYYY-MM} — monthly quota usage (Phase 6)
 
 import { adminDb } from './firebase-admin';
-import { usageMonthKey, type OrgBatchStatus } from './orgMessagingValidation';
+import { usageMonthKey } from './orgMessagingValidation';
 import { pickApiKeyStatusRow } from './orgMessagingKeys';
+import {
+  createdAtMs, mapBatchRow, mapMessageRow, percentUsed,
+  type OrgBatchRow, type OrgMessageRow,
+} from './orgMessagingApi';
 
-function safeDate(v: unknown): string {
-  try {
-    const d = (v as { toDate?: () => Date })?.toDate?.();
-    return d ? d.toISOString() : '';
-  } catch { return ''; }
-}
+export type { OrgBatchRow, OrgMessageRow };
 
 // ─── Usage summary ────────────────────────────────────────────────────────────
 
@@ -26,8 +25,10 @@ export type OrgMessagingOverview = {
   name:                string;
   status:              string;            // active | suspended | disabled
   monthlyMessageLimit: number;            // 0 = not configured
-  usedThisMonth:       number;
+  usedThisMonth:       number;            // accepted/queued only — failed and
+                                          // unsupported recipients never count
   remainingThisMonth:  number;
+  percentUsed:         number;            // 0–100
   monthKey:            string;            // 'YYYY-MM'
 };
 
@@ -51,6 +52,7 @@ export async function getOrgMessagingOverview(orgId: string): Promise<OrgMessagi
     monthlyMessageLimit: limit,
     usedThisMonth:       used,
     remainingThisMonth:  Math.max(0, limit - used),
+    percentUsed:         percentUsed(limit, used),
     monthKey:            month,
   };
 }
@@ -72,16 +74,8 @@ export async function getOrgApiKeyStatus(orgId: string) {
 }
 
 // ─── Message batch logs ───────────────────────────────────────────────────────
-
-export type OrgBatchRow = {
-  id:        string;
-  source:    string;          // dashboard | api
-  status:    OrgBatchStatus | string;
-  total:     number;
-  accepted:  number;
-  failed:    number;
-  createdAt: string;
-};
+// All rows flow through the pure allow-list mappers (mapBatchRow /
+// mapMessageRow), so secrets such as keyHash can never appear in a read model.
 
 export async function listOrgMessageBatches(orgId: string, max = 20): Promise<OrgBatchRow[]> {
   try {
@@ -89,20 +83,31 @@ export async function listOrgMessageBatches(orgId: string, max = 20): Promise<Or
     // Phase 7 index lands; volumes here are small (recent logs only).
     const snap = await adminDb.collection('organizationMessageBatches')
       .where('organizationId', '==', orgId).limit(200).get();
-    const rows = snap.docs.map(d => {
-      const x = d.data() as Record<string, unknown>;
-      return {
-        id:        d.id,
-        source:    (x.source as string | undefined) ?? 'dashboard',
-        status:    (x.status as string | undefined) ?? 'accepted',
-        total:     (x.total as number | undefined) ?? 0,
-        accepted:  (x.accepted as number | undefined) ?? 0,
-        failed:    (x.failed as number | undefined) ?? 0,
-        createdAt: safeDate(x.createdAt),
-        _ms:       ((x.createdAt as { toMillis?: () => number })?.toMillis?.() ?? 0),
-      };
-    });
-    rows.sort((a, b) => b._ms - a._ms);
-    return rows.slice(0, max).map(({ _ms, ...row }) => row);
+    return snap.docs
+      .sort((a, b) => createdAtMs(b.data()) - createdAtMs(a.data()))
+      .slice(0, max)
+      .map(d => mapBatchRow(d.id, d.data() as Record<string, unknown>));
+  } catch { return []; }
+}
+
+/** One batch by id. Callers MUST scope-check `organizationId` on the result. */
+export async function getOrgMessageBatch(batchId: string): Promise<OrgBatchRow | null> {
+  try {
+    const snap = await adminDb.collection('organizationMessageBatches').doc(batchId).get();
+    if (!snap.exists) return null;
+    return mapBatchRow(snap.id, snap.data() as Record<string, unknown>);
+  } catch { return null; }
+}
+
+/** Per-recipient logs for a batch — latest MESSAGE_ROWS_MAX rows (no pagination in the MVP). */
+export const MESSAGE_ROWS_MAX = 500;
+
+export async function listBatchMessages(batchId: string, max = MESSAGE_ROWS_MAX): Promise<OrgMessageRow[]> {
+  try {
+    const snap = await adminDb.collection('organizationMessages')
+      .where('batchId', '==', batchId).limit(max).get();
+    return snap.docs
+      .sort((a, b) => createdAtMs(b.data()) - createdAtMs(a.data()))
+      .map(d => mapMessageRow(d.id, d.data() as Record<string, unknown>));
   } catch { return []; }
 }
