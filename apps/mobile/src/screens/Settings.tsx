@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
-import { signOut } from '../lib/auth';
+import { signOut, deleteMyAccount } from '../lib/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import {
@@ -64,6 +64,7 @@ const CHIP = {
   support:      '#2196F3',
   version:      '#607D8B',
   signOut:      '#F44336',
+  deleteAcct:   '#B71C1C',
 } as const;
 
 // Bundled (installed) app version — fallback when the admin hasn't set one.
@@ -199,6 +200,28 @@ export default function Settings({ navigation }: any) {
         </View>
         {!opts.danger ? <Text style={s.chev} accessibilityElementsHidden>{isRTL ? '‹' : '›'}</Text> : null}
       </Pressable>
+    );
+  }
+
+  async function doDeleteAccount() {
+    setBusy(true);
+    try {
+      await deleteMyAccount();
+      // onAuthStateChanged clears the session and routes back to Welcome.
+    } catch {
+      setBusy(false);
+      Alert.alert(t('settings.deleteAccount'), t('settings.deleteAccountError'));
+    }
+  }
+  function confirmDeleteAccount() {
+    if (busy) return;
+    Alert.alert(
+      t('settings.deleteAccountConfirmTitle'),
+      t('settings.deleteAccountConfirmMessage'),
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        { text: t('settings.deleteAccountConfirmButton'), style: 'destructive', onPress: () => { void doDeleteAccount(); } },
+      ],
     );
   }
 
@@ -404,6 +427,19 @@ export default function Settings({ navigation }: any) {
           <Text style={s.sub}>{appVersion}</Text>
         </View>
         {navRow({ icon: 'log-out', color: CHIP.signOut, label: t('settings.signOut'), onPress: () => signOut(), danger: true })}
+      </View>
+
+      {/* Danger zone — permanent account deletion */}
+      <View style={s.card}>
+        {navRow({
+          icon: 'trash',
+          color: CHIP.deleteAcct,
+          label: t('settings.deleteAccount'),
+          sub: t('settings.deleteAccountSubtitle'),
+          onPress: confirmDeleteAccount,
+          first: true,
+          danger: true,
+        })}
       </View>
     </ScrollView>
   );
