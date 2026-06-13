@@ -19,6 +19,7 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { writeAuditLog } from '../lib/auditLog';
+import { assertDirectNotBlocked } from './blockGuard';
 
 const TEXT_MAX = 4000;
 
@@ -95,6 +96,8 @@ export const sendTextMessage = onCall(async (request) => {
   if (convo.status === 'disabled') {
     throw new HttpsError('failed-precondition', 'conversation-disabled');
   }
+  // Direct chats: reject if either side has blocked the other.
+  await assertDirectNotBlocked(db, convo, uid);
 
   const isGroup = convo.type === 'group';
   let senderDisplayName: string | null = null;

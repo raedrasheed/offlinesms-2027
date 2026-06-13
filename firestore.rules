@@ -220,6 +220,13 @@ service cloud.firestore {
         allow read:  if isSelf(uid) || isAdmin();
         allow write: if isAdmin();
       }
+
+      // Blocked users — private to the owner (the parent user doc is public, so
+      // the block list must live here, not as a field). Direct-chat sends are
+      // rejected server-side when either party has blocked the other.
+      match /blockedUsers/{blockedUid} {
+        allow read, write: if isSelf(uid) || isAdmin();
+      }
     }
 
     // ════════════════════════════════════════════════════════════

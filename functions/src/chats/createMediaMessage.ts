@@ -10,6 +10,7 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { writeAuditLog } from '../lib/auditLog';
+import { assertDirectNotBlocked } from './blockGuard';
 
 const MAX_MEDIA_BYTES = 10 * 1024 * 1024;
 const VOICE_MAX_MS = 5 * 60 * 1000;
@@ -94,6 +95,8 @@ export const createMediaMessage = onCall(async (request) => {
   const participants = convo.participantUids ?? convo.memberIds ?? [];
   if (!participants.includes(uid)) throw new HttpsError('permission-denied', 'not-a-participant');
   if (convo.status === 'disabled') throw new HttpsError('failed-precondition', 'conversation-disabled');
+  // Direct chats: reject if either side has blocked the other.
+  await assertDirectNotBlocked(db, convo, uid);
 
   const isGroup = convo.type === 'group';
   let senderDisplayName: string | null = null;

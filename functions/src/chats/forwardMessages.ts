@@ -8,6 +8,7 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { writeAuditLog } from '../lib/auditLog';
+import { assertDirectNotBlocked } from './blockGuard';
 
 const MAX_SOURCE = 10;
 const MAX_TARGETS = 10;
@@ -106,6 +107,8 @@ export const forwardMessages = onCall(async (request) => {
     if (t.status === 'disabled') {
       throw new HttpsError('failed-precondition', `target-disabled:${tid}`);
     }
+    // Direct targets: reject if either side has blocked the other.
+    await assertDirectNotBlocked(db, t, uid);
     let role: string | null = null;
     let senderDisplayName: string | null = null;
     let senderPhotoURL: string | null = null;

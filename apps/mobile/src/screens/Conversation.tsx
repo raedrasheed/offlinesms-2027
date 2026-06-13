@@ -26,6 +26,7 @@ import {
 } from '../lib/conversations';
 import type { ReactorInfo } from '../components/ReactionsSheet';
 import { useUserProfiles } from '../lib/userProfiles';
+import { blockUser, unblockUser, subscribeIsBlocked } from '../lib/blocks';
 import { useChatPresence, formatPresenceSubtitle } from '../hooks/useChatPresence';
 import { useTypingPresence } from '../hooks/useTypingPresence';
 import { useRecordingPresence } from '../hooks/useRecordingPresence';
@@ -55,7 +56,7 @@ import { validateMediaMessage, formatDuration, type AttachmentKey } from '../med
 
 type ComposerGate =
   | { kind: 'allowed' }
-  | { kind: 'blocked'; reason: string };
+  | { kind: 'blocked'; reason: string; canUnblock?: boolean };
 
 // Stable no-op callbacks reused for pending-bubble props (which can never
 // actually fire). Sharing one reference each lets MessageBubble's memo
@@ -67,9 +68,12 @@ function gateFor(
   convo: ConversationDoc | null | undefined,
   myRole: GroupRole | null,
   isMember: boolean,
+  iBlockedPeer: boolean,
 ): ComposerGate {
   if (!convo) return { kind: 'allowed' };
   if (convo.status === 'disabled') return { kind: 'blocked', reason: 'This conversation is disabled.' };
+  // Direct chat I've blocked: composer is replaced by an unblock prompt.
+  if (convo.type !== 'group' && iBlockedPeer) return { kind: 'blocked', reason: '', canUnblock: true };
   if (convo.type !== 'group')      return { kind: 'allowed' };
   if (!isMember)                   return { kind: 'blocked', reason: "You aren't a member of this group." };
   const isPriv = myRole === 'owner' || myRole === 'admin';
@@ -121,6 +125,7 @@ export default function Conversation({ route, navigation }: any) {
   const [peerName, setPeerName] = useState<string>('Chat');
   const [peerUsername, setPeerUsername] = useState<string | null>(null);
   const [peerUid, setPeerUid] = useState<string | null>(null);
+  const [iBlockedPeer, setIBlockedPeer] = useState(false);
   const [myRole, setMyRole] = useState<GroupRole | null>(null);
   const [memberStatus, setMemberStatus] = useState<'active' | 'removed' | 'left' | 'unknown'>('unknown');
   const [userState, setUserState] = useState<UserState | null>(null);
@@ -199,6 +204,14 @@ export default function Conversation({ route, navigation }: any) {
     });
   }, [convo, me]);
 
+  // Whether I've blocked this direct-chat peer (drives the composer gate +
+  // header menu). Private to me (users/{me}/blockedUsers/{peer}).
+  useEffect(() => {
+    const direct = convo?.type !== 'group';
+    if (direct && peerUid) return subscribeIsBlocked(me, peerUid, setIBlockedPeer);
+    setIBlockedPeer(false);
+  }, [convo?.type, peerUid, me]);
+
   // Membership for groups (drives role + composer gate).
   useEffect(() => {
     if (!id || !me) return;
@@ -269,8 +282,8 @@ export default function Conversation({ route, navigation }: any) {
   }, [deliveredNonce]);
 
   const gate = useMemo(
-    () => gateFor(convo, myRole, memberStatus === 'active' || memberStatus === 'unknown'),
-    [convo, myRole, memberStatus],
+    () => gateFor(convo, myRole, memberStatus === 'active' || memberStatus === 'unknown', iBlockedPeer),
+    [convo, myRole, memberStatus, iBlockedPeer],
   );
 
   const isGroup = convo?.type === 'group';
@@ -412,6 +425,48 @@ export default function Conversation({ route, navigation }: any) {
         { text: t('chats.clearChat'), style: 'destructive', onPress: () => { void local.clear(); setMsgs([]); } },
       ],
     );
+  }
+
+  function confirmBlock() {
+    if (!peerUid || !me) return;
+    Alert.alert(
+      t('block.blockTitle', { name: peerName }),
+      t('block.blockMessage'),
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: t('block.blockUser'), style: 'destructive',
+          onPress: () => { blockUser(me, peerUid).catch(() => Alert.alert(t('block.blockUser'), t('block.blockFailed'))); },
+        },
+      ],
+    );
+  }
+  function confirmUnblock() {
+    if (!peerUid || !me) return;
+    Alert.alert(
+      t('block.unblockTitle', { name: peerName }),
+      t('block.unblockMessage'),
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: t('block.unblockUser'),
+          onPress: () => { unblockUser(me, peerUid).catch(() => Alert.alert(t('block.unblockUser'), t('block.unblockFailed'))); },
+        },
+      ],
+    );
+  }
+  // Header overflow menu: clear chat, plus block/unblock for direct chats.
+  function openChatMenu() {
+    const buttons: any[] = [
+      { text: t('chats.clearChat'), onPress: confirmClearChat },
+    ];
+    if (convo?.type !== 'group' && peerUid) {
+      buttons.push(iBlockedPeer
+        ? { text: t('block.unblockUser'), onPress: confirmUnblock }
+        : { text: t('block.blockUser'), style: 'destructive', onPress: confirmBlock });
+    }
+    buttons.push({ text: t('common.cancel'), style: 'cancel' });
+    Alert.alert(peerName, undefined, buttons);
   }
   const onPlayedVoice = useCallback((msg: Message) => {
     if (msg.senderUid !== me) void queueMarkReceipt({ conversationId: id, messageId: msg.id, status: 'played' });
@@ -564,7 +619,10 @@ export default function Conversation({ route, navigation }: any) {
         stopTyping(id);
       }
     } catch (e: any) {
-      setErr(e?.message ?? 'send-failed');
+      const code = e?.message ?? 'send-failed';
+      if (code === 'blocked-by-recipient') setErr(t('block.cannotSendBlockedBy'));
+      else if (code === 'recipient-blocked') setErr(t('block.cannotSendBlocked'));
+      else setErr(code);
     } finally {
       setBusy(false);
     }
@@ -752,11 +810,11 @@ export default function Conversation({ route, navigation }: any) {
           <Ionicons name="image-outline" size={20} color={colors.text.muted} />
         </Pressable>
         <Pressable
-          onPress={confirmClearChat}
+          onPress={openChatMenu}
           hitSlop={10}
           style={s.headerMenuBtn}
           accessibilityRole="button"
-          accessibilityLabel={t('chats.clearChat')}
+          accessibilityLabel={t('common.more', { defaultValue: 'More' })}
         >
           <Ionicons name="ellipsis-vertical" size={20} color={colors.text.muted} />
         </Pressable>
@@ -796,7 +854,21 @@ export default function Conversation({ route, navigation }: any) {
 
       {gate.kind === 'blocked' && !editing ? (
         <View style={[s.gate, { paddingBottom: insets.bottom + 16 }]}>
-          <Text style={s.gateText}>{gate.reason}</Text>
+          {gate.canUnblock ? (
+            <>
+              <Text style={s.gateText}>{t('block.youBlockedThis')}</Text>
+              <Pressable
+                onPress={confirmUnblock}
+                style={s.gateAction}
+                accessibilityRole="button"
+                accessibilityLabel={t('block.unblockUser')}
+              >
+                <Text style={s.gateActionText}>{t('block.unblockUser')}</Text>
+              </Pressable>
+            </>
+          ) : (
+            <Text style={s.gateText}>{gate.reason}</Text>
+          )}
         </View>
       ) : (
         <View style={{ backgroundColor: 'transparent' }}>
@@ -1016,5 +1088,7 @@ function buildStyles(colors: any, rtl: boolean) {
     lockPillHidden: { opacity: 0 },
     gate:     { padding: 16, paddingBottom: 28, backgroundColor: '#EAF2FB', borderTopWidth: 1, borderColor: colors.border.subtle },
     gateText: { fontSize: 12, color: colors.text.muted, textAlign: 'center' },
+    gateAction: { marginTop: 10, alignSelf: 'center', paddingHorizontal: 20, paddingVertical: 9, borderRadius: 999, backgroundColor: colors.action.primary },
+    gateActionText: { fontSize: 13, fontWeight: '800', color: colors.action.primaryFg },
   });
 }
