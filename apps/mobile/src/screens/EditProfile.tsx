@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  View, Text, TextInput, Pressable, StyleSheet, KeyboardAvoidingView, Platform, ScrollView, Alert, Image, SafeAreaView,
+  View, Text, TextInput, Pressable, StyleSheet, KeyboardAvoidingView, Platform, ScrollView, Alert, Image,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
@@ -21,6 +22,7 @@ function initials(name: string): string {
 }
 
 export default function EditProfile({ navigation }: any) {
+  const insets = useSafeAreaInsets();
   const me = auth.currentUser?.uid;
   const [displayName, setDisplayName] = useState('');
   const [usernameRaw, setUsernameRaw] = useState('');
@@ -108,9 +110,12 @@ export default function EditProfile({ navigation }: any) {
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
+    <View style={{ flex: 1, backgroundColor: '#fff' }}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView contentContainerStyle={s.root} keyboardShouldPersistTaps="handled">
+        <ScrollView
+          contentContainerStyle={[s.root, { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 24 }]}
+          keyboardShouldPersistTaps="handled"
+        >
           <Pressable style={s.back} onPress={() => navigation.goBack()} hitSlop={12}>
             <Ionicons name="chevron-back" size={24} color={colors.ink} />
           </Pressable>
@@ -167,12 +172,12 @@ export default function EditProfile({ navigation }: any) {
           </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </View>
   );
 }
 
 const s = StyleSheet.create({
-  root:    { padding: 24, flexGrow: 1, backgroundColor: '#fff' },
+  root:    { paddingHorizontal: 24, flexGrow: 1, backgroundColor: '#fff' },
   back:    { marginBottom: 8, alignSelf: 'flex-start' },
   h1:      { fontSize: 26, fontWeight: '800', color: colors.ink, letterSpacing: -0.4 },
   sub:     { fontSize: 13, color: colors.ink500, marginTop: 6 },
