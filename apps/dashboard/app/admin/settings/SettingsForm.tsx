@@ -115,21 +115,6 @@ export default function SettingsForm({ action, initial }: Props) {
           />
         </div>
 
-        <div>
-          <label className="block text-xs font-bold mb-1" style={{ color: 'var(--c-text-2)' }}>App version</label>
-          <input
-            name="appVersion"
-            defaultValue={initial.appVersion}
-            maxLength={20}
-            className={inputCls}
-            style={inputStyle}
-            placeholder="1.0.0"
-          />
-          <p className="text-[11px] mt-1" style={{ color: 'var(--c-text-3)' }}>
-            Shown in the mobile app’s Settings screen. Leave empty to show the app’s bundled version.
-          </p>
-        </div>
-
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-xs font-bold mb-1" style={{ color: 'var(--c-text-2)' }}>Default language</label>
