@@ -60,6 +60,7 @@ export type Conversation = {
   updatedAt?:       any;
   // group-only (Phase 5)
   name?:            string;
+  description?:     string | null;
   avatarUrl?:       string | null;
   ownerUid?:        string;
   memberCount?:     number;
@@ -575,6 +576,17 @@ export async function lockGroup(conversationId: string, locked: boolean): Promis
   await fn<{ conversationId: string; locked: boolean }, { ok: true; status: string }>(
     'lockGroup',
   )({ conversationId, locked });
+}
+
+/** Update group name/description/avatar (owner/admin only). Only provided
+ *  fields change; pass null to clear description/avatar. */
+export async function updateGroupInfo(
+  conversationId: string,
+  patch: { name?: string; description?: string | null; avatarUrl?: string | null },
+): Promise<void> {
+  await fn<{ conversationId: string } & typeof patch, { ok: true }>(
+    'updateGroupInfo',
+  )({ conversationId, ...patch });
 }
 
 export function subscribeMembers(

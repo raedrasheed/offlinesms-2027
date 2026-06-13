@@ -34,6 +34,7 @@ export {
   joinGroupByInviteLink, approveGroupJoinRequest, rejectGroupJoinRequest, cancelMyJoinRequest,
 } from './chats/groupInvites';
 export { lockGroup }     from './chats/lockGroup';
+export { updateGroupInfo } from './chats/updateGroupInfo';
 
 // Phase 6 — message actions.
 export { editMessage }     from './chats/editMessage';

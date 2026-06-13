@@ -35,6 +35,7 @@ import NewChatMenu from './src/screens/NewChatMenu';
 import NewGroup from './src/screens/NewGroup';
 import GroupCreateInfo from './src/screens/GroupCreateInfo';
 import GroupInfo from './src/screens/GroupInfo';
+import EditGroup from './src/screens/EditGroup';
 import AddMembers from './src/screens/AddMembers';
 import JoinRequests from './src/screens/JoinRequests';
 import ForwardPicker from './src/screens/ForwardPicker';
@@ -279,6 +280,7 @@ export default function App() {
             <RootStack.Screen name="StatusComposer" component={StatusComposer} options={{ presentation: 'fullScreenModal' }} />
             <RootStack.Screen name="StatusViewer" component={StatusViewer} options={{ presentation: 'fullScreenModal' }} />
             <RootStack.Screen name="GroupInfo" component={GroupInfo} />
+            <RootStack.Screen name="EditGroup" component={EditGroup} />
             <RootStack.Screen name="AddMembers" component={AddMembers} />
             <RootStack.Screen name="JoinRequests" component={JoinRequests} />
             <RootStack.Screen name="JoinGroup" component={JoinGroup} options={{ presentation: 'modal' }} />

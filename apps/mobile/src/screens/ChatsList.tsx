@@ -110,7 +110,7 @@ export default function ChatsList({ navigation }: any) {
         ...c,
         state:         states[c.id],
         peerName:      displayName,
-        photoURL:      isGroup ? null : (peers[c.id]?.photoURL ?? null),
+        photoURL:      isGroup ? (c.avatarUrl ?? null) : (peers[c.id]?.photoURL ?? null),
         someoneTyping: false,
       };
     });

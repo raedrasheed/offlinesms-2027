@@ -238,6 +238,8 @@ export default function Conversation({ route, navigation }: any) {
   const isDirect = convo?.type !== 'group';
   const peerProfiles = useUserProfiles(isDirect && peerUid ? [peerUid] : []);
   const peerPhoto = isDirect && peerUid ? (peerProfiles[peerUid]?.photoURL ?? null) : null;
+  // Header avatar: direct peer photo, or the group's avatar for groups.
+  const headerPhoto = isDirect ? peerPhoto : (convo?.avatarUrl ?? null);
   const reactorNames = useMemo<Record<string, ReactorInfo>>(() => {
     const map: Record<string, ReactorInfo> = {};
     for (const m of members) {
@@ -786,8 +788,8 @@ export default function Conversation({ route, navigation }: any) {
           accessibilityLabel={isGroup ? `${peerName}, ${t('group.info')}` : peerName}
         >
           <View style={s.headerAvatarWrap}>
-            {peerPhoto ? (
-              <Image source={{ uri: peerPhoto }} style={s.headerAvatar} />
+            {headerPhoto ? (
+              <Image source={{ uri: headerPhoto }} style={s.headerAvatar} />
             ) : (
               <View style={[s.headerAvatar, { backgroundColor: avatarColor(peerUid ?? peerName) }]}>
                 <Text style={s.headerAvatarText}>{initials(peerName)}</Text>
