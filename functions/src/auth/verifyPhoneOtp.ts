@@ -8,6 +8,7 @@ import { getAuth } from 'firebase-admin/auth';
 import { writeAuditLog } from '../lib/auditLog';
 import {
   normalizeE164, phoneKey, verifyOtpHash, isOtpExpired, OTP_MAX_ATTEMPTS, OTP_CODE_LENGTH,
+  isTestPhone, TEST_PHONE_OTP,
 } from './otpLogic';
 
 const REGION = 'us-central1';
@@ -26,24 +27,30 @@ export const verifyPhoneOtp = onCall({ region: REGION }, async (request) => {
   const ref = db.collection('otpChallenges').doc(key);
   const now = Date.now();
 
-  // Atomically validate + consume an attempt to prevent brute-force races.
-  const ok = await db.runTransaction(async tx => {
-    const snap = await tx.get(ref);
-    if (!snap.exists) throw new HttpsError('failed-precondition', 'otp-not-requested');
-    const c = snap.data()!;
-    if (isOtpExpired(c.expiresAt?.toMillis?.() ?? 0, now)) { tx.delete(ref); throw new HttpsError('deadline-exceeded', 'otp-expired'); }
-    const attempts = (c.attempts as number) ?? 0;
-    if (attempts >= OTP_MAX_ATTEMPTS) { tx.delete(ref); throw new HttpsError('resource-exhausted', 'otp-too-many-attempts'); }
+  // App-review test account: accept only the fixed code, skip the challenge
+  // store entirely (no SMS was ever sent for this number).
+  if (isTestPhone(phone)) {
+    if (code !== TEST_PHONE_OTP) throw new HttpsError('permission-denied', 'otp-incorrect');
+  } else {
+    // Atomically validate + consume an attempt to prevent brute-force races.
+    const ok = await db.runTransaction(async tx => {
+      const snap = await tx.get(ref);
+      if (!snap.exists) throw new HttpsError('failed-precondition', 'otp-not-requested');
+      const c = snap.data()!;
+      if (isOtpExpired(c.expiresAt?.toMillis?.() ?? 0, now)) { tx.delete(ref); throw new HttpsError('deadline-exceeded', 'otp-expired'); }
+      const attempts = (c.attempts as number) ?? 0;
+      if (attempts >= OTP_MAX_ATTEMPTS) { tx.delete(ref); throw new HttpsError('resource-exhausted', 'otp-too-many-attempts'); }
 
-    if (!verifyOtpHash(code, c.salt as string, c.codeHash as string)) {
-      tx.update(ref, { attempts: attempts + 1, updatedAt: FieldValue.serverTimestamp() });
-      return false;
-    }
-    tx.delete(ref); // one-time use
-    return true;
-  });
+      if (!verifyOtpHash(code, c.salt as string, c.codeHash as string)) {
+        tx.update(ref, { attempts: attempts + 1, updatedAt: FieldValue.serverTimestamp() });
+        return false;
+      }
+      tx.delete(ref); // one-time use
+      return true;
+    });
 
-  if (!ok) throw new HttpsError('permission-denied', 'otp-incorrect');
+    if (!ok) throw new HttpsError('permission-denied', 'otp-incorrect');
+  }
 
   // Find-or-create the phone user, mark verified, mint a custom token.
   const adminAuth = getAuth();

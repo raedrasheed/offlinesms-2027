@@ -9,7 +9,7 @@ import { getMessaging } from 'firebase-admin/messaging';
 import { writeAuditLog } from '../lib/auditLog';
 import {
   normalizeE164, phoneKey, generateOtp, newSalt, hashOtp,
-  canResend, nextSendWindow, OTP_TTL_MS,
+  canResend, nextSendWindow, OTP_TTL_MS, isTestPhone,
 } from './otpLogic';
 
 const REGION = 'us-central1';
@@ -24,6 +24,10 @@ export const requestPhoneOtp = onCall({ region: REGION }, async (request) => {
   // TODO(security): enforce App Check once the mobile app attests.
   const phone = normalizeE164((request.data ?? {}).phoneE164);
   if (!phone) throw new HttpsError('invalid-argument', 'phone-invalid');
+
+  // App-review test account: no SMS, fixed code (handled in verifyPhoneOtp).
+  // Returns success without touching the relay or rate-limit state.
+  if (isTestPhone(phone)) return { ok: true };
 
   const db = getFirestore();
   const businessId = await otpBusinessId(db);

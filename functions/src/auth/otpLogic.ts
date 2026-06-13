@@ -9,6 +9,17 @@ export const OTP_RESEND_COOLDOWN_MS = 60 * 1000;  // min gap between sends
 export const OTP_MAX_PER_HOUR = 5;                // sends per phone per hour
 export const OTP_CODE_LENGTH = 6;
 
+// App-review test account (Apple App Store / Google Play reviewers can't
+// receive a real SMS). For this exact number no SMS is sent and verifyPhoneOtp
+// accepts only TEST_PHONE_OTP. Keep this in sync with store review notes.
+export const TEST_PHONE_E164 = '+970599999999';
+export const TEST_PHONE_OTP = '123456';
+
+/** True for the fixed App-review test phone number (compared in E.164 form). */
+export function isTestPhone(e164: string): boolean {
+  return e164 === TEST_PHONE_E164;
+}
+
 /** Normalize to E.164 (or null if implausible). */
 export function normalizeE164(input: unknown): string | null {
   if (typeof input !== 'string') return null;
