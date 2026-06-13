@@ -7,7 +7,7 @@ import Link from 'next/link';
 import { getAuth } from 'firebase-admin/auth';
 import { verifySession } from '@/lib/session';
 import { canDo } from '@/lib/adminPermissions';
-import { getUser } from '@/lib/adminData';
+import { getUser, listOrganizations } from '@/lib/adminData';
 import { maskEmail } from '@/lib/redaction';
 import { PermissionState } from '@/components/state';
 import DetailCard from '@/components/admin/DetailCard';
@@ -36,8 +36,14 @@ export default async function RoleDetailPage({ params }: { params: { uid: string
 
   const claims = (authUser.customClaims ?? {}) as Record<string, unknown>;
   const currentRole = typeof claims.role === 'string' ? claims.role : null;
+  const currentOrgId = typeof claims.organizationId === 'string' ? claims.organizationId : null;
   const isLegacyAdmin = claims.admin === true;
   const canManage = canDo(session.role, 'manage:roles') && params.uid !== session.user.uid;
+
+  // Org list drives the "Org Admin" dropdown (only needed when assigning roles).
+  const organizations = canManage
+    ? (await listOrganizations().catch(() => [])).map(o => ({ id: o.id, name: o.name, slug: o.slug }))
+    : [];
 
   const CARD = 'var(--c-card)';
   const BORDER = 'var(--c-border)';
@@ -73,9 +79,14 @@ export default async function RoleDetailPage({ params }: { params: { uid: string
 
         {canManage ? (
           <DetailCard title="Assign role" subtitle="Changes are audit-logged. You cannot modify your own role.">
-            <RoleAssignAction targetUid={params.uid} currentRole={currentRole} />
+            <RoleAssignAction
+              targetUid={params.uid}
+              currentRole={currentRole}
+              currentOrgId={currentOrgId}
+              organizations={organizations}
+            />
             <p className="text-xs mt-3" style={{ color: 'var(--c-text-4)' }}>
-              Removing the last super_admin is blocked. Legacy admin claim is not affected by this form.
+              Org Admin must be scoped to an organization. Removing the last super_admin is blocked. Legacy admin claim is not affected by this form.
             </p>
           </DetailCard>
         ) : (
