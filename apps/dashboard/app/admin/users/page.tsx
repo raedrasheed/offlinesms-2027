@@ -9,7 +9,8 @@ import { Suspense } from 'react';
 import { verifySession } from '@/lib/session';
 import { canDo } from '@/lib/adminPermissions';
 import { listUsers } from '@/lib/adminData';
-import { maskPhone, maskEmail } from '@/lib/redaction';
+import { maskEmail, displayPhone } from '@/lib/redaction';
+import { phoneCountry } from '@/lib/phoneCountry';
 import { PermissionState } from '@/components/state';
 import StatusBadge from '@/components/admin/StatusBadge';
 import FilterBar from '@/components/admin/FilterBar';
@@ -129,7 +130,15 @@ export default async function UsersAdminPage({
                       </div>
                     </Link>
                   </td>
-                  <td className="px-4 py-3 font-mono text-[11px]" style={{ color: 'var(--c-text-2)' }}>{maskPhone(u.phoneNumber)}</td>
+                  <td className="px-4 py-3 text-[11px]" style={{ color: 'var(--c-text-2)' }}>
+                    <div className="font-mono whitespace-nowrap">{displayPhone(u.phoneNumber, session.role)}</div>
+                    {(() => {
+                      const c = phoneCountry(u.phoneNumber);
+                      return c ? (
+                        <div className="text-[10px] mt-0.5" style={{ color: 'var(--c-text-4)' }}>{c.flag} {c.name}</div>
+                      ) : null;
+                    })()}
+                  </td>
                   <td className="px-4 py-3 text-[11px] max-w-[160px] truncate" style={{ color: 'var(--c-text-2)' }}>{maskEmail(u.email, session.role)}</td>
                   <td className="px-4 py-3"><StatusBadge status={u.status} /></td>
                   <td className="px-4 py-3">

@@ -1,8 +1,11 @@
 import type { AdminRole } from './session';
+import { formatE164 } from './phoneCountry';
 
 type RoleKey = AdminRole | 'legacy_admin' | 'bootstrap_admin';
 
 const EMAIL_FULL_ROLES = new Set<RoleKey>(['super_admin', 'legacy_admin', 'bootstrap_admin', 'support_agent']);
+// Roles allowed to see full phone numbers (same privileged set as email).
+const PHONE_FULL_ROLES = EMAIL_FULL_ROLES;
 
 export function maskPhone(phone?: string | null): string {
   if (!phone) return '—';
@@ -10,6 +13,13 @@ export function maskPhone(phone?: string | null): string {
   if (digits.length < 4) return '•••';
   const last4 = digits.slice(-4);
   return `+${'•'.repeat(Math.max(digits.length - 4, 3))} ${last4}`;
+}
+
+/** Full (formatted) phone for privileged roles; masked otherwise. */
+export function displayPhone(phone?: string | null, role?: RoleKey): string {
+  if (!phone) return '—';
+  if (role && PHONE_FULL_ROLES.has(role)) return formatE164(phone);
+  return maskPhone(phone);
 }
 
 export function maskEmail(email?: string | null, role?: RoleKey): string {

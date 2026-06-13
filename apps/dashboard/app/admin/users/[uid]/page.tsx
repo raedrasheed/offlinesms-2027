@@ -11,7 +11,8 @@ import { canDo } from '@/lib/adminPermissions';
 import {
   getUser, getUserWalletBalance, getUserGroupMemberships, getUserRecentAudit,
 } from '@/lib/adminData';
-import { maskPhone, maskEmail } from '@/lib/redaction';
+import { maskEmail, displayPhone } from '@/lib/redaction';
+import { phoneCountry } from '@/lib/phoneCountry';
 import { PermissionState } from '@/components/state';
 import DetailCard from '@/components/admin/DetailCard';
 import MetadataList from '@/components/admin/MetadataList';
@@ -69,7 +70,8 @@ export default async function UserDetailPage({ params }: { params: { uid: string
             </div>
           </div>
           <MetadataList columns={2} items={[
-            { label: 'Phone',            value: maskPhone(user.phoneNumber) },
+            { label: 'Phone',            value: displayPhone(user.phoneNumber, session.role) },
+            { label: 'Country',          value: (() => { const c = phoneCountry(user.phoneNumber); return c ? `${c.flag} ${c.name}` : '—'; })() },
             { label: 'Email',            value: maskEmail(user.email, session.role) },
             { label: 'Profile complete', value: user.profileCompleted ? 'Yes' : 'Pending' },
             { label: 'SMS opt-out',      value: user.smsOptOut ? 'Yes' : 'No' },
