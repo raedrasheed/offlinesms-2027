@@ -4,6 +4,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import * as Linking from 'expo-linking';
 import { createBottomTabNavigator, BottomTabBar } from '@react-navigation/bottom-tabs';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { Ionicons } from '@expo/vector-icons';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
@@ -258,6 +259,7 @@ export default function App() {
     <ThemeProvider userPreference={userTheme}>
     <OfflineProvider>
     <SafeAreaProvider>
+    <KeyboardProvider>
       <ErrorBoundary>
       <NavigationContainer ref={navRef}>
         {!user ? (
@@ -302,6 +304,7 @@ export default function App() {
         )}
       </NavigationContainer>
       </ErrorBoundary>
+    </KeyboardProvider>
     </SafeAreaProvider>
     </OfflineProvider>
     </ThemeProvider>

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList, View, Text, TextInput, Pressable, StyleSheet, Alert,
-  KeyboardAvoidingView, Platform, PanResponder, Image,
+  Platform, PanResponder, Image,
 } from 'react-native';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { doc, onSnapshot } from 'firebase/firestore';
@@ -706,7 +707,7 @@ export default function Conversation({ route, navigation }: any) {
   }, [data, visibleMsgs, queuedItems, me, isGroup, id, myRoleIsAdmin, starred, convo?.pinnedMessage, convo?.memberCount, reactorNames, useLocal, startReply, startEdit, startForward, jumpTo, openInfo, openImage, retryMedia, onPlayedVoice, onSendViaSms]);
 
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.root}>
+    <KeyboardAvoidingView behavior="padding" style={s.root}>
       {/* Wallpaper layer — absolute-fill, behind everything; theme bg is the
           fallback when no wallpaper is set. Memoised on the URI. */}
       <ChatWallpaperBackground uri={wallpaperUri} />
