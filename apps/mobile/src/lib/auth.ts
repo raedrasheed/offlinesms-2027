@@ -58,6 +58,52 @@ export function otpErrorCopy(reason?: string): string {
   }
 }
 
+// ── Email OTP (custom-token passwordless email sign-in) ──────────────────────
+
+// Conservative client-side email shape check (the server re-validates).
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** True for a plausibly-valid email address (trimmed). */
+export function isValidEmail(email: string): boolean {
+  const trimmed = email.trim();
+  return trimmed.length > 0 && trimmed.length <= 254 && EMAIL_RE.test(trimmed);
+}
+
+/** Request a sign-in OTP, emailed to the address. */
+export async function requestEmailOtp(email: string): Promise<void> {
+  await httpsCallable<{ email: string }, { ok: boolean }>(fns(), 'requestEmailOtp')({ email: email.trim() });
+}
+
+/** Resend a sign-in OTP (same call as request; the server enforces cooldown). */
+export async function resendEmailOtp(email: string): Promise<void> {
+  await requestEmailOtp(email);
+}
+
+/** Verify the emailed OTP and sign in with the returned custom token. */
+export async function verifyEmailOtpAndSignIn(email: string, code: string): Promise<void> {
+  const res = await httpsCallable<{ email: string; code: string }, { customToken: string }>(
+    fns(), 'verifyEmailOtp',
+  )({ email: email.trim(), code });
+  await signInWithCustomToken(auth, res.data.customToken);
+}
+
+/** Map an email-OTP callable error (message or code) to user-facing copy. */
+export function emailOtpErrorCopy(reason?: string): string {
+  switch (reason) {
+    case 'email-invalid':          return 'Enter a valid email address.';
+    case 'email-signin-disabled':  return 'Email sign-in isn’t available right now.';
+    case 'email-send-failed':      return 'We couldn’t send the email. Please try again.';
+    case 'otp-cooldown':           return 'Please wait a moment before requesting another code.';
+    case 'otp-rate-limited':       return 'Too many codes requested. Try again later.';
+    case 'otp-not-requested':      return 'Request a code first.';
+    case 'otp-expired':            return 'That code expired — request a new one.';
+    case 'otp-too-many-attempts':  return 'Too many attempts — request a new code.';
+    case 'otp-incorrect':
+    case 'code-invalid':           return 'Incorrect code. Try again.';
+    default:                       return 'Something went wrong. Please try again.';
+  }
+}
+
 let confirmation: ConfirmationResult | null = null;
 let nativeVerifier: ApplicationVerifier | null = null;
 

@@ -19,6 +19,8 @@ import Welcome from './src/screens/Welcome';
 import PhoneEntry from './src/screens/PhoneEntry';
 import Otp from './src/screens/Otp';
 import EmailLogin from './src/screens/EmailLogin';
+import EmailEntry from './src/screens/EmailEntry';
+import EmailOtp from './src/screens/EmailOtp';
 import ProfileCompletion from './src/screens/ProfileCompletion';
 import CreatePin from './src/screens/CreatePin';
 import Permissions from './src/screens/Permissions';
@@ -93,6 +95,8 @@ function AuthFlow() {
       <AuthStack.Screen name="PhoneEntry" component={PhoneEntry} />
       <AuthStack.Screen name="Otp" component={Otp} />
       <AuthStack.Screen name="EmailLogin" component={EmailLogin} />
+      <AuthStack.Screen name="EmailEntry" component={EmailEntry} />
+      <AuthStack.Screen name="EmailOtp" component={EmailOtp} />
     </AuthStack.Navigator>
   );
 }

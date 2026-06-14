@@ -3,8 +3,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { colors, radius } from '../theme';
 
-// Email sign-in is hidden for now (kept for later — flip to true to show it).
-const SHOW_EMAIL_LOGIN = false;
+// Email sign-in (passwordless OTP). The backend gates it on the admin
+// "Email sign-in" flag; if disabled, requestEmailOtp returns a clear error.
+const SHOW_EMAIL_LOGIN = true;
 
 export default function Welcome({ navigation }: any) {
   const { t } = useTranslation();
@@ -30,7 +31,7 @@ export default function Welcome({ navigation }: any) {
           <Text style={s.primaryBtnText}>{t('welcome.continuePhone')}</Text>
         </Pressable>
         {SHOW_EMAIL_LOGIN ? (
-          <Pressable style={s.secondaryBtn} onPress={() => navigation.navigate('EmailLogin')}>
+          <Pressable style={s.secondaryBtn} onPress={() => navigation.navigate('EmailEntry')}>
             <Text style={s.secondaryBtnText}>{t('welcome.continueEmail')}</Text>
           </Pressable>
         ) : null}
