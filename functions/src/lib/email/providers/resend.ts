@@ -32,8 +32,12 @@ export async function sendViaResend(message: EmailMessage): Promise<void> {
   });
 
   if (!res.ok) {
-    // Surface the status only — the response may echo request details, and the
-    // request carried the OTP, so we do not log the body.
-    throw new Error(`Resend send failed with status ${res.status}`);
+    // The Resend *response* body is an error object ({statusCode,message,name})
+    // — it does NOT echo our request html/text, so it never contains the OTP.
+    // Including it makes failures (unverified domain, test-mode recipient, bad
+    // key) diagnosable in the function logs.
+    let detail = '';
+    try { detail = (await res.text()).slice(0, 500); } catch { /* ignore */ }
+    throw new Error(`Resend send failed (status ${res.status}): ${detail}`);
   }
 }

@@ -55,8 +55,11 @@ export const requestEmailOtp = onCall({ region: REGION }, async (request) => {
   const { subject, html, text } = renderOtpEmail({ code, ttlMinutes: TTL_MINUTES, supportEmail });
   try {
     await sendEmail({ to: email, subject, html, text });
-  } catch {
-    // Never include the provider error detail (the request carried the code).
+  } catch (err) {
+    // Log the provider failure reason (status + provider error body) for ops —
+    // this never contains the OTP (the code is only in the request we sent).
+    // The client still gets a generic error.
+    console.error('[requestEmailOtp] email delivery failed:', (err as Error)?.message);
     throw new HttpsError('unavailable', 'email-send-failed');
   }
 
