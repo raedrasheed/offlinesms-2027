@@ -9,6 +9,61 @@
 
 ---
 
+## 0. Status — DONE (upgrade executed on branch `claude/laughing-knuth-lx1kr9`)
+
+The upgrade in sections 1–9 has been **implemented**. Summary of what changed and
+how it was verified:
+
+**Versions:** `expo@53.0.27`, `react-native@0.79.6`, `react@19.0.0`,
+`react-dom@19.0.0`, `@types/react@~19.0.10`, `typescript@~5.8.3`, plus all
+`expo-*` / `react-native-*` deps realigned to SDK 53 via `expo install --fix`.
+New Architecture is **disabled** (`newArchEnabled=false` in both `app.json` and
+`android/gradle.properties`).
+
+**Monorepo / React-major isolation (the key decision):** the dashboard is on
+React 18 (Next 14) and mobile is now on React 19. npm's single-root hoisting
+cannot host two React majors without cross-contaminating one app's hoisted deps
+(e.g. `recharts` binding to the wrong React types, or `@expo/cli` failing to
+resolve `expo`). To resolve this cleanly **`apps/mobile` was removed from the npm
+workspaces and is installed standalone** (it has its own `package-lock.json`), so
+its Expo/React 19 tree is fully self-contained. The dashboard and the rest of the
+monorepo keep React 18 and were not modified. Consequences:
+- `apps/mobile/package.json` references `@offlinesms/design-tokens` via
+  `file:../../packages/design-tokens` (it can no longer be a workspace symlink).
+- `metro.config.js` adds `packages/design-tokens` to `watchFolders` and pins
+  `resolver.nodeModulesPaths` to the app's own `node_modules`.
+- CI installs and typechecks the mobile app in a separate step.
+
+**Code fixes for RN 0.79 / React 19 / SDK 53:**
+- `@expo/vector-icons`, `expo-font`, `expo-asset` added as direct deps (they were
+  previously relied on transitively; the standalone tree needs them declared —
+  `expo-av` has an undeclared `expo-asset` import).
+- `src/lib/notifications.ts`: `setNotificationHandler` migrated from the removed
+  `shouldShowAlert` to `shouldShowBanner` / `shouldShowList`.
+
+**Native project:** `android/` was regenerated with `expo prebuild` for SDK 53
+(Gradle 8.13, NDK r27, `com.android.tools.build:gradle` 8.8.2, `expo.useLegacyPackaging=false`).
+The production keystore signing block (`keystore.properties` with debug fallback)
+and `keystore.properties.example` were re-applied after the regenerate.
+
+**Verification performed locally:**
+- `apps/mobile` typecheck: **pass** · `apps/dashboard` typecheck: **pass**
+- `expo-doctor`: 17/18 (only the expected "committed native folders + app.json"
+  advisory, inherent to this non-CNG project).
+- **Production AAB built** (`./gradlew :app:bundleRelease`, arm64-v8a) → `BUILD SUCCESSFUL`.
+- **16 KB alignment verified**: every 64-bit `.so` (arm64-v8a + x86_64; 36 libs
+  incl. `libhermes`, `libreactnative`, `libreanimated`, `libworklets`,
+  `libexpo-modules-core`, `librnscreens`) has LOAD-segment alignment `0x4000`
+  (16384), checked with the NDK's `llvm-readelf -l` (the same check
+  `check_elf_alignment.sh` performs).
+
+**Still required to fully close the Play error (cannot be done from this repo):**
+build the production AAB on EAS with the real keystore + `google-services.json`,
+upload to the Play Console internal track, and confirm the 16 KB error is gone
+before promoting (requirement: do not merge to `main` until Play accepts it).
+
+---
+
 ## 1. Why this is required
 
 Since **1 November 2025**, every app/update on Google Play that targets Android
