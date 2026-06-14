@@ -2,13 +2,14 @@
   "name": "offlinesms",
   "version": "0.1.0",
   "private": true,
+  "//workspaces": "apps/mobile is intentionally NOT a workspace: it is on Expo SDK 53 / React 19 while the dashboard is on React 18, and npm's single-root hoisting cannot host two React majors without cross-contaminating the dashboard's hoisted deps. Mobile is installed standalone (its own package-lock.json) so its Expo/React 19 tree is self-contained. See docs/OFFLINESMS_16KB_PAGE_SIZE_UPGRADE.md.",
   "workspaces": [
-    "apps/*",
+    "apps/dashboard",
     "packages/*",
     "functions"
   ],
   "scripts": {
-    "dev:mobile": "npm --workspace apps/mobile run web",
+    "dev:mobile": "npm --prefix apps/mobile run web",
     "dev:dashboard": "npm --workspace apps/dashboard run dev",
     "dev:functions": "npm --workspace functions run serve",
     "build": "npm run build --workspaces --if-present",

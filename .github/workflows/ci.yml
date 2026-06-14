@@ -31,8 +31,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # apps/mobile is intentionally NOT an npm workspace (Expo SDK 53 / React 19
+      # vs the dashboard's React 18 — npm's single-root hoisting can't host both).
+      # It installs standalone, so it must be installed and checked separately.
+      - name: Install mobile app (standalone)
+        run: npm --prefix apps/mobile ci
+
       - name: Typecheck (all workspaces)
         run: npm run typecheck --workspaces --if-present
+
+      - name: Typecheck mobile app
+        run: npm --prefix apps/mobile run typecheck
 
       - name: Lint (all workspaces)
         run: npm run lint --workspaces --if-present

@@ -40,8 +40,11 @@ export function installForegroundHandler() {
     handleNotification: async (notification) => {
       const data = (notification.request.content.data ?? {}) as { conversationId?: string };
       const suppress = !!data.conversationId && data.conversationId === getActiveConversationId();
+      // SDK 53 (expo-notifications 0.31) replaced `shouldShowAlert` with the
+      // split `shouldShowBanner` / `shouldShowList` flags.
       return {
-        shouldShowAlert: !suppress,
+        shouldShowBanner: !suppress,
+        shouldShowList: !suppress,
         shouldPlaySound: !suppress,
         shouldSetBadge: false,
       };

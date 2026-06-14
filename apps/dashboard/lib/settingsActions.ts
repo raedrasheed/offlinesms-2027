@@ -29,6 +29,7 @@ export async function updateSystemSettings(
   // read all values so a checked box (present "true") registers correctly.
   const smsEscalationEnabled = data.getAll('smsEscalationEnabled').includes('true');
   const pointsEnabled        = data.getAll('pointsEnabled').includes('true');
+  const emailSignInEnabled   = data.getAll('emailSignInEnabled').includes('true');
 
   if (!appName)                                           return { error: 'App name is required.' };
   if (appName.length > 60)                               return { error: 'App name must be 60 characters or less.' };
@@ -46,6 +47,7 @@ export async function updateSystemSettings(
     defaultTimezone,
     smsEscalationEnabled,
     pointsEnabled,
+    emailSignInEnabled,
     updatedAt: FieldValue.serverTimestamp(),
     updatedBy: session.user.uid,
   }, { merge: true });
@@ -64,6 +66,7 @@ export async function updateSystemSettings(
         defaultTimezone,
         smsEscalationEnabled,
         pointsEnabled,
+        emailSignInEnabled,
       },
       createdAt: FieldValue.serverTimestamp(),
     });
