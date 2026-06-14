@@ -116,4 +116,6 @@ export { relayReaper } from './sms/relayReaper';
 // Phase 24 — OTP over relay (custom-token phone sign-in; no Firebase phone auth).
 export { requestPhoneOtp } from './auth/requestPhoneOtp';
 export { verifyPhoneOtp } from './auth/verifyPhoneOtp';
+export { requestEmailOtp } from './auth/requestEmailOtp';
+export { verifyEmailOtp } from './auth/verifyEmailOtp';
 export { deleteMyAccount } from './auth/deleteAccount';

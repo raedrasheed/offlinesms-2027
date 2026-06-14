@@ -428,6 +428,12 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
 
+    // Email sign-in OTP challenges — backend-only (hashed codes). Clients can
+    // never read or write these; only trusted Cloud Functions (admin) touch them.
+    match /emailOtpChallenges/{emailKey} {
+      allow read, write: if isAdmin();
+    }
+
     // ════════════════════════════════════════════════════════════
     // STATUSES — Phase 3 audience + expiry enforcement
     // ════════════════════════════════════════════════════════════
