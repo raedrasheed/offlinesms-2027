@@ -331,7 +331,21 @@
     "send": "إرسال",
     "back": "رجوع",
     "retry": "إعادة المحاولة",
-    "delete": "حذف"
+    "delete": "حذف",
+    "more": "المزيد"
+  },
+  "block": {
+    "blockUser": "حظر المستخدم",
+    "unblockUser": "إلغاء الحظر",
+    "blockTitle": "حظر {{name}}؟",
+    "blockMessage": "لن يتمكن جهات الاتصال المحظورة من مراسلتك، ولن تتمكن من مراسلتهم حتى تلغي الحظر.",
+    "unblockTitle": "إلغاء حظر {{name}}؟",
+    "unblockMessage": "ستتمكنان من مراسلة بعضكما مجددًا.",
+    "youBlockedThis": "لقد حظرت جهة الاتصال هذه.",
+    "blockFailed": "تعذّر حظر جهة الاتصال. حاول مرة أخرى.",
+    "unblockFailed": "تعذّر إلغاء الحظر. حاول مرة أخرى.",
+    "cannotSendBlocked": "لقد حظرت جهة الاتصال هذه. ألغِ الحظر لإرسال رسالة.",
+    "cannotSendBlockedBy": "لا يمكنك إرسال رسائل إلى جهة الاتصال هذه."
   },
   "settings": {
     "title": "الإعدادات",
@@ -349,6 +363,12 @@
     "linkedDevices": "الأجهزة المرتبطة",
     "helpSupport": "المساعدة والدعم",
     "signOut": "تسجيل الخروج",
+    "deleteAccount": "حذف الحساب",
+    "deleteAccountSubtitle": "إزالة حسابك وبياناتك نهائيًا",
+    "deleteAccountConfirmTitle": "حذف الحساب؟",
+    "deleteAccountConfirmMessage": "سيؤدي هذا إلى حذف حسابك وملفك الشخصي واسم المستخدم ونقاطك نهائيًا. لا يمكن التراجع عن هذا الإجراء.",
+    "deleteAccountConfirmButton": "حذف نهائيًا",
+    "deleteAccountError": "تعذّر حذف حسابك. حاول مرة أخرى.",
     "language": "اللغة",
     "languageSubtitle": "لغة عرض التطبيق",
     "theme": "المظهر",

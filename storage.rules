@@ -29,6 +29,16 @@ service firebase.storage {
       allow write: if isSelf(uid) && request.resource.size < 5 * 1024 * 1024;
     }
 
+    // Group avatars — uploaded by a member to their own subpath (uid in the
+    // path authorizes the write, like chatMedia). The image only becomes the
+    // group's avatar when an owner/admin's updateGroupInfo callable stores the
+    // URL on the conversation doc, so a non-admin upload has no effect.
+    match /groupAvatars/{conversationId}/{uid}/{file} {
+      allow read:  if isAuthed();
+      allow write: if isSelf(uid) && request.resource.size < 5 * 1024 * 1024
+                      && isAllowedMediaMime(request.resource.contentType);
+    }
+
     // Conversation media — uploader must be authed; size < 30MB
     match /conversations/{convoId}/{senderId}/{file} {
       allow read: if isAuthed();

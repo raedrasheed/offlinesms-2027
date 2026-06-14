@@ -45,7 +45,6 @@ export default async function SettingsPage() {
     settings = {
       appName: 'OfflineSMS',
       supportEmail: '',
-      appVersion: '',
       defaultLanguage: 'en',
       defaultTimezone: 'UTC',
       smsEscalationEnabled: true,
@@ -75,7 +74,6 @@ export default async function SettingsPage() {
         <div className="rounded-2xl p-6 space-y-4" style={{ background: CARD, border: `1px solid ${BORDER}` }}>
           <Row label="App name"          value={settings.appName} />
           <Row label="Support email"     value={settings.supportEmail || '—'} />
-          <Row label="App version"       value={settings.appVersion || '—'} />
           <Row label="Default language"  value={settings.defaultLanguage} />
           <Row label="Default timezone"  value={settings.defaultTimezone} />
           <Row label="SMS escalation"    value={settings.smsEscalationEnabled ? 'Enabled' : 'Disabled'} />

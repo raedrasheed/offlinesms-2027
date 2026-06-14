@@ -331,7 +331,21 @@
     "send": "Send",
     "back": "Back",
     "retry": "Retry",
-    "delete": "Delete"
+    "delete": "Delete",
+    "more": "More"
+  },
+  "block": {
+    "blockUser": "Block user",
+    "unblockUser": "Unblock user",
+    "blockTitle": "Block {{name}}?",
+    "blockMessage": "Blocked contacts can't message you, and you can't message them until you unblock.",
+    "unblockTitle": "Unblock {{name}}?",
+    "unblockMessage": "You'll be able to message each other again.",
+    "youBlockedThis": "You blocked this contact.",
+    "blockFailed": "Couldn't block this contact. Please try again.",
+    "unblockFailed": "Couldn't unblock this contact. Please try again.",
+    "cannotSendBlocked": "You blocked this contact. Unblock to send a message.",
+    "cannotSendBlockedBy": "You can't send messages to this contact."
   },
   "settings": {
     "title": "Settings",
@@ -349,6 +363,12 @@
     "linkedDevices": "Linked devices",
     "helpSupport": "Help & Support",
     "signOut": "Sign out",
+    "deleteAccount": "Delete account",
+    "deleteAccountSubtitle": "Permanently remove your account and data",
+    "deleteAccountConfirmTitle": "Delete account?",
+    "deleteAccountConfirmMessage": "This permanently deletes your account, profile, username and points. This can't be undone.",
+    "deleteAccountConfirmButton": "Delete permanently",
+    "deleteAccountError": "Couldn't delete your account. Please try again.",
     "language": "Language",
     "languageSubtitle": "App display language",
     "theme": "Theme",

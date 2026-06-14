@@ -1,8 +1,10 @@
 import { useEffect } from 'react';
 import { View, Text, Image, StyleSheet } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 export default function Splash({ navigation }: any) {
+  const insets = useSafeAreaInsets();
   useEffect(() => {
     const t = setTimeout(() => navigation.replace('Welcome'), 2000);
     return () => clearTimeout(t);
@@ -14,7 +16,7 @@ export default function Splash({ navigation }: any) {
         <Image source={require('../../assets/icon.png')} style={s.logo} />
         <Text style={s.brand}>OfflineSMS</Text>
       </View>
-      <View style={s.footer}>
+      <View style={[s.footer, { bottom: insets.bottom + 24 }]}>
         <Ionicons name="lock-closed" size={12} color="#FFFFFF99" />
         <Text style={s.footerText}>End-to-end encrypted</Text>
       </View>

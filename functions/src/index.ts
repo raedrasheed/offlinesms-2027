@@ -34,6 +34,7 @@ export {
   joinGroupByInviteLink, approveGroupJoinRequest, rejectGroupJoinRequest, cancelMyJoinRequest,
 } from './chats/groupInvites';
 export { lockGroup }     from './chats/lockGroup';
+export { updateGroupInfo } from './chats/updateGroupInfo';
 
 // Phase 6 — message actions.
 export { editMessage }     from './chats/editMessage';
@@ -48,6 +49,9 @@ export { getMessageInfo }  from './chats/getMessageInfo';
 export { markReceipt }       from './chats/markReceipt';
 export { onReceiptWrite }    from './chats/onReceiptWrite';
 export { markStatusViewed }  from './statuses/markStatusViewed';
+
+// Organization Messaging — scheduled SMS escalation sweeper.
+export { escalateOrgBatches } from './orgMessaging/escalateOrgBatches';
 
 // Status module — text statuses with audience + 24h expiry.
 export { createStatus }      from './statuses/createStatus';
@@ -112,3 +116,4 @@ export { relayReaper } from './sms/relayReaper';
 // Phase 24 — OTP over relay (custom-token phone sign-in; no Firebase phone auth).
 export { requestPhoneOtp } from './auth/requestPhoneOtp';
 export { verifyPhoneOtp } from './auth/verifyPhoneOtp';
+export { deleteMyAccount } from './auth/deleteAccount';

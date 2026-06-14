@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList, View, Text, TextInput, Pressable, StyleSheet, Alert,
-  KeyboardAvoidingView, Platform, PanResponder, Image,
+  Platform, PanResponder, Image,
 } from 'react-native';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
@@ -24,6 +26,7 @@ import {
 } from '../lib/conversations';
 import type { ReactorInfo } from '../components/ReactionsSheet';
 import { useUserProfiles } from '../lib/userProfiles';
+import { blockUser, unblockUser, subscribeIsBlocked } from '../lib/blocks';
 import { useChatPresence, formatPresenceSubtitle } from '../hooks/useChatPresence';
 import { useTypingPresence } from '../hooks/useTypingPresence';
 import { useRecordingPresence } from '../hooks/useRecordingPresence';
@@ -47,14 +50,13 @@ import * as FileSystem from 'expo-file-system';
 import { prefetchMedia } from '../media/mediaCache';
 import { AttachmentSheet } from '../components/chat/AttachmentSheet';
 import { EmojiPicker3D } from '../components/chat/EmojiPicker3D';
-import { VoiceRecorderBar } from '../components/chat/VoiceRecorderBar';
 import { LockedVoiceRecorderBar } from '../components/chat/LockedVoiceRecorderBar';
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
-import { validateMediaMessage, type AttachmentKey } from '../media/mediaValidation';
+import { validateMediaMessage, formatDuration, type AttachmentKey } from '../media/mediaValidation';
 
 type ComposerGate =
   | { kind: 'allowed' }
-  | { kind: 'blocked'; reason: string };
+  | { kind: 'blocked'; reason: string; canUnblock?: boolean };
 
 // Stable no-op callbacks reused for pending-bubble props (which can never
 // actually fire). Sharing one reference each lets MessageBubble's memo
@@ -66,9 +68,12 @@ function gateFor(
   convo: ConversationDoc | null | undefined,
   myRole: GroupRole | null,
   isMember: boolean,
+  iBlockedPeer: boolean,
 ): ComposerGate {
   if (!convo) return { kind: 'allowed' };
   if (convo.status === 'disabled') return { kind: 'blocked', reason: 'This conversation is disabled.' };
+  // Direct chat I've blocked: composer is replaced by an unblock prompt.
+  if (convo.type !== 'group' && iBlockedPeer) return { kind: 'blocked', reason: '', canUnblock: true };
   if (convo.type !== 'group')      return { kind: 'allowed' };
   if (!isMember)                   return { kind: 'blocked', reason: "You aren't a member of this group." };
   const isPriv = myRole === 'owner' || myRole === 'admin';
@@ -85,6 +90,7 @@ function buildPreview(text: string): string {
 export default function Conversation({ route, navigation }: any) {
   const { t } = useTranslation();
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const { id } = route.params as { id: string };
   const me = auth.currentUser?.uid ?? '';
   const { isOffline, enqueue, queuedFor, deliveredFor, deliveredNonce } = useOffline();
@@ -119,6 +125,7 @@ export default function Conversation({ route, navigation }: any) {
   const [peerName, setPeerName] = useState<string>('Chat');
   const [peerUsername, setPeerUsername] = useState<string | null>(null);
   const [peerUid, setPeerUid] = useState<string | null>(null);
+  const [iBlockedPeer, setIBlockedPeer] = useState(false);
   const [myRole, setMyRole] = useState<GroupRole | null>(null);
   const [memberStatus, setMemberStatus] = useState<'active' | 'removed' | 'left' | 'unknown'>('unknown');
   const [userState, setUserState] = useState<UserState | null>(null);
@@ -197,6 +204,14 @@ export default function Conversation({ route, navigation }: any) {
     });
   }, [convo, me]);
 
+  // Whether I've blocked this direct-chat peer (drives the composer gate +
+  // header menu). Private to me (users/{me}/blockedUsers/{peer}).
+  useEffect(() => {
+    const direct = convo?.type !== 'group';
+    if (direct && peerUid) return subscribeIsBlocked(me, peerUid, setIBlockedPeer);
+    setIBlockedPeer(false);
+  }, [convo?.type, peerUid, me]);
+
   // Membership for groups (drives role + composer gate).
   useEffect(() => {
     if (!id || !me) return;
@@ -223,6 +238,8 @@ export default function Conversation({ route, navigation }: any) {
   const isDirect = convo?.type !== 'group';
   const peerProfiles = useUserProfiles(isDirect && peerUid ? [peerUid] : []);
   const peerPhoto = isDirect && peerUid ? (peerProfiles[peerUid]?.photoURL ?? null) : null;
+  // Header avatar: direct peer photo, or the group's avatar for groups.
+  const headerPhoto = isDirect ? peerPhoto : (convo?.avatarUrl ?? null);
   const reactorNames = useMemo<Record<string, ReactorInfo>>(() => {
     const map: Record<string, ReactorInfo> = {};
     for (const m of members) {
@@ -267,8 +284,8 @@ export default function Conversation({ route, navigation }: any) {
   }, [deliveredNonce]);
 
   const gate = useMemo(
-    () => gateFor(convo, myRole, memberStatus === 'active' || memberStatus === 'unknown'),
-    [convo, myRole, memberStatus],
+    () => gateFor(convo, myRole, memberStatus === 'active' || memberStatus === 'unknown', iBlockedPeer),
+    [convo, myRole, memberStatus, iBlockedPeer],
   );
 
   const isGroup = convo?.type === 'group';
@@ -410,6 +427,48 @@ export default function Conversation({ route, navigation }: any) {
         { text: t('chats.clearChat'), style: 'destructive', onPress: () => { void local.clear(); setMsgs([]); } },
       ],
     );
+  }
+
+  function confirmBlock() {
+    if (!peerUid || !me) return;
+    Alert.alert(
+      t('block.blockTitle', { name: peerName }),
+      t('block.blockMessage'),
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: t('block.blockUser'), style: 'destructive',
+          onPress: () => { blockUser(me, peerUid).catch(() => Alert.alert(t('block.blockUser'), t('block.blockFailed'))); },
+        },
+      ],
+    );
+  }
+  function confirmUnblock() {
+    if (!peerUid || !me) return;
+    Alert.alert(
+      t('block.unblockTitle', { name: peerName }),
+      t('block.unblockMessage'),
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: t('block.unblockUser'),
+          onPress: () => { unblockUser(me, peerUid).catch(() => Alert.alert(t('block.unblockUser'), t('block.unblockFailed'))); },
+        },
+      ],
+    );
+  }
+  // Header overflow menu: clear chat, plus block/unblock for direct chats.
+  function openChatMenu() {
+    const buttons: any[] = [
+      { text: t('chats.clearChat'), onPress: confirmClearChat },
+    ];
+    if (convo?.type !== 'group' && peerUid) {
+      buttons.push(iBlockedPeer
+        ? { text: t('block.unblockUser'), onPress: confirmUnblock }
+        : { text: t('block.blockUser'), style: 'destructive', onPress: confirmBlock });
+    }
+    buttons.push({ text: t('common.cancel'), style: 'cancel' });
+    Alert.alert(peerName, undefined, buttons);
   }
   const onPlayedVoice = useCallback((msg: Message) => {
     if (msg.senderUid !== me) void queueMarkReceipt({ conversationId: id, messageId: msg.id, status: 'played' });
@@ -562,7 +621,10 @@ export default function Conversation({ route, navigation }: any) {
         stopTyping(id);
       }
     } catch (e: any) {
-      setErr(e?.message ?? 'send-failed');
+      const code = e?.message ?? 'send-failed';
+      if (code === 'blocked-by-recipient') setErr(t('block.cannotSendBlockedBy'));
+      else if (code === 'recipient-blocked') setErr(t('block.cannotSendBlocked'));
+      else setErr(code);
     } finally {
       setBusy(false);
     }
@@ -705,7 +767,7 @@ export default function Conversation({ route, navigation }: any) {
   }, [data, visibleMsgs, queuedItems, me, isGroup, id, myRoleIsAdmin, starred, convo?.pinnedMessage, convo?.memberCount, reactorNames, useLocal, startReply, startEdit, startForward, jumpTo, openInfo, openImage, retryMedia, onPlayedVoice, onSendViaSms]);
 
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.root}>
+    <KeyboardAvoidingView behavior="padding" style={s.root}>
       {/* Wallpaper layer — absolute-fill, behind everything; theme bg is the
           fallback when no wallpaper is set. Memoised on the URI. */}
       <ChatWallpaperBackground uri={wallpaperUri} />
@@ -726,8 +788,8 @@ export default function Conversation({ route, navigation }: any) {
           accessibilityLabel={isGroup ? `${peerName}, ${t('group.info')}` : peerName}
         >
           <View style={s.headerAvatarWrap}>
-            {peerPhoto ? (
-              <Image source={{ uri: peerPhoto }} style={s.headerAvatar} />
+            {headerPhoto ? (
+              <Image source={{ uri: headerPhoto }} style={s.headerAvatar} />
             ) : (
               <View style={[s.headerAvatar, { backgroundColor: avatarColor(peerUid ?? peerName) }]}>
                 <Text style={s.headerAvatarText}>{initials(peerName)}</Text>
@@ -750,11 +812,11 @@ export default function Conversation({ route, navigation }: any) {
           <Ionicons name="image-outline" size={20} color={colors.text.muted} />
         </Pressable>
         <Pressable
-          onPress={confirmClearChat}
+          onPress={openChatMenu}
           hitSlop={10}
           style={s.headerMenuBtn}
           accessibilityRole="button"
-          accessibilityLabel={t('chats.clearChat')}
+          accessibilityLabel={t('common.more', { defaultValue: 'More' })}
         >
           <Ionicons name="ellipsis-vertical" size={20} color={colors.text.muted} />
         </Pressable>
@@ -793,11 +855,25 @@ export default function Conversation({ route, navigation }: any) {
       {err ? <ErrorState compact title="Couldn't send" description={err} /> : null}
 
       {gate.kind === 'blocked' && !editing ? (
-        <View style={s.gate}>
-          <Text style={s.gateText}>{gate.reason}</Text>
+        <View style={[s.gate, { paddingBottom: insets.bottom + 16 }]}>
+          {gate.canUnblock ? (
+            <>
+              <Text style={s.gateText}>{t('block.youBlockedThis')}</Text>
+              <Pressable
+                onPress={confirmUnblock}
+                style={s.gateAction}
+                accessibilityRole="button"
+                accessibilityLabel={t('block.unblockUser')}
+              >
+                <Text style={s.gateActionText}>{t('block.unblockUser')}</Text>
+              </Pressable>
+            </>
+          ) : (
+            <Text style={s.gateText}>{gate.reason}</Text>
+          )}
         </View>
       ) : (
-        <View>
+        <View style={{ backgroundColor: 'transparent' }}>
           {editing ? (
             <View style={s.composerPreview}>
               <View style={{ flex: 1 }}>
@@ -827,7 +903,7 @@ export default function Conversation({ route, navigation }: any) {
               </Pressable>
             </View>
           ) : null}
-          <View style={s.composer}>
+          <View style={[s.composer, { marginBottom: insets.bottom + 10 }]}>
             {recorder.mode === 'locked' ? (
               <LockedVoiceRecorderBar
                 elapsedMs={recorder.elapsedMs}
@@ -839,76 +915,72 @@ export default function Conversation({ route, navigation }: any) {
               />
             ) : (
               <>
-                {/* Left region — swaps between the text input pill and the live
-                    recording bar. The mic button (right) is deliberately NOT
-                    part of this swap (see below). */}
-                {recorder.mode === 'recording' ? (
-                  <VoiceRecorderBar elapsedMs={recorder.elapsedMs} bars={recorder.bars} cancelArmed={cancelArmed} />
-                ) : (
-                  <View style={s.inputPill}>
-                    {!editing ? (
-                      <Pressable
-                        style={s.inlineIconLead}
-                        onPress={() => setEmojiOpen(true)}
-                        accessibilityRole="button"
-                        accessibilityLabel={t('convo.emojiTitle')}
-                      >
-                        <Ionicons name="happy-outline" size={24} color={colors.text.muted} />
-                      </Pressable>
-                    ) : null}
-                    <TextInput
-                      value={draft}
-                      onChangeText={setDraft}
-                      placeholder={editing ? t('messageActions.editingMessage') : isOffline ? 'Type · saved as draft' : t('convo.composerPlaceholder')}
-                      style={s.input}
-                      multiline
-                      maxLength={4000}
-                      textAlign={isRTL ? 'right' : 'left'}
-                      accessibilityLabel={t('convo.composerPlaceholder')}
-                    />
-                    {!editing ? (
+                {/* Telegram layout: a solid white pill (emoji · Message ·
+                    attach) with the wallpaper visible around it, and a big
+                    round blue action button beside it. While recording, the
+                    pill's left region swaps to an inline indicator. */}
+                <View style={s.inputPill}>
+                  <View style={s.pillLeft}>
+                    {recorder.mode === 'recording' ? (
+                      <View style={s.recordingInline}>
+                        <View style={s.recDot} />
+                        <Text style={s.recTimer}>{formatDuration(recorder.elapsedMs)}</Text>
+                        <Text style={[s.recHint, cancelArmed && s.recHintArmed]} numberOfLines={1}>
+                          {cancelArmed ? t('media.slideToCancel') : `‹ ${t('media.slideToCancel')}`}
+                        </Text>
+                      </View>
+                    ) : (
                       <>
-                        <Pressable
-                          style={s.inlineIcon}
-                          onPress={() => setAttachOpen(true)}
-                          accessibilityRole="button"
-                          accessibilityLabel={t('media.attach')}
-                        >
-                          <Ionicons name="attach" size={22} color={colors.text.muted} />
-                        </Pressable>
-                        {draft.trim() === '' ? (
+                        {!editing ? (
+                          <Pressable
+                            style={s.inlineIconLead}
+                            onPress={() => setEmojiOpen(true)}
+                            accessibilityRole="button"
+                            accessibilityLabel={t('convo.emojiTitle')}
+                          >
+                            <Ionicons name="happy-outline" size={24} color={colors.text.muted} />
+                          </Pressable>
+                        ) : null}
+                        <TextInput
+                          value={draft}
+                          onChangeText={setDraft}
+                          placeholder={editing ? t('messageActions.editingMessage') : isOffline ? 'Type · saved as draft' : t('convo.composerPlaceholder')}
+                          style={s.input}
+                          multiline
+                          maxLength={4000}
+                          textAlign={isRTL ? 'right' : 'left'}
+                          accessibilityLabel={t('convo.composerPlaceholder')}
+                        />
+                        {!editing ? (
                           <Pressable
                             style={s.inlineIcon}
-                            onPress={() => onAttachSelect('camera')}
+                            onPress={() => setAttachOpen(true)}
                             accessibilityRole="button"
-                            accessibilityLabel={t('media.camera')}
+                            accessibilityLabel={t('media.attach')}
                           >
-                            <Ionicons name="camera-outline" size={22} color={colors.text.muted} />
+                            <Ionicons name="attach" size={22} color={colors.text.muted} />
                           </Pressable>
                         ) : null}
                       </>
-                    ) : null}
+                    )}
                   </View>
-                )}
+                </View>
 
-                {/* Right region. Send arrow while composing text; otherwise a
-                    PERSISTENT mic button. Its PanResponder must survive the
-                    idle→recording transition, so the mic node keeps a FIXED
-                    position in the tree (always `micWrap`'s 2nd child) and the
-                    lock pill above it is always mounted — merely hidden when
-                    not recording. Swapping the mic into a differently-shaped
-                    subtree mid-gesture used to terminate the active touch
-                    responder, breaking hold / slide-to-cancel / swipe-to-lock. */}
+                {/* Round blue action circle (Telegram): send while composing
+                    text/editing, mic otherwise. The mic node keeps a FIXED
+                    tree position (micWrap's 2nd child, lock pill always
+                    mounted above it) so its PanResponder survives the
+                    idle→recording transition. */}
                 {(draft.trim() !== '' || editing) ? (
                   <Pressable
-                    style={[s.sendBtn, busy && { opacity: 0.4 }]}
+                    style={[s.actionCircle, busy && { opacity: 0.4 }]}
                     onPress={send}
                     disabled={busy}
                     accessibilityRole="button"
                     accessibilityLabel={editing ? t('common.save') : t('common.send')}
                     accessibilityState={{ disabled: busy }}
                   >
-                    <Ionicons name={editing ? 'checkmark' : 'arrow-up'} size={20} color={colors.action.primaryFg} />
+                    <Ionicons name={editing ? 'checkmark' : 'arrow-up'} size={22} color={colors.action.primaryFg} />
                   </Pressable>
                 ) : (
                   <View style={s.micWrap}>
@@ -920,12 +992,12 @@ export default function Conversation({ route, navigation }: any) {
                       <Ionicons name="chevron-up" size={14} color={colors.text.muted} />
                     </View>
                     <View
-                      style={[s.sendBtn, recorder.mode === 'recording' && s.micRecording]}
+                      style={[s.actionCircle, recorder.mode === 'recording' && s.micRecording]}
                       {...micPan.panHandlers}
                       accessibilityRole="button"
                       accessibilityLabel={t('media.holdToRecord')}
                     >
-                      <Ionicons name="mic" size={recorder.mode === 'recording' ? 26 : 22} color={colors.action.primaryFg} />
+                      <Ionicons name="mic" size={recorder.mode === 'recording' ? 28 : 24} color={colors.action.primaryFg} />
                     </View>
                   </View>
                 )}
@@ -952,11 +1024,12 @@ export default function Conversation({ route, navigation }: any) {
 
 function buildStyles(colors: any, rtl: boolean) {
   return StyleSheet.create({
-    root:     { flex: 1, backgroundColor: '#FFFFFF' },
-    // Transparent so the ChatWallpaperBackground layer (or theme fallback)
-    // shows through. The previous solid #EAF2FB now lives in the wallpaper
-    // component's fallback so there's no visual regression when no wallpaper
-    // is set.
+    // Transparent root: the ChatWallpaperBackground (absolute-fill, always
+    // rendered — custom wallpaper or the bundled default) is the ONLY screen
+    // background, so no white surface can show through the transparent
+    // composer band around the input pill.
+    root:     { flex: 1, backgroundColor: 'transparent' },
+    // Transparent so the ChatWallpaperBackground layer shows through.
     msgList:  { flex: 1, backgroundColor: 'transparent' },
     emptyConvo:    { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40, gap: 6 },
     emptyAvatar:   { width: 96, height: 96, borderRadius: 48, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
@@ -966,14 +1039,14 @@ function buildStyles(colors: any, rtl: boolean) {
     e2eNotice:     { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FBEFD0', paddingHorizontal: 14, paddingVertical: 9, borderRadius: 14, marginTop: 16 },
     e2eText:       { fontSize: 12, color: '#92400E' },
     emptyNudge:    { fontSize: 13, color: colors.text.muted, textAlign: 'center', marginTop: 14, lineHeight: 19 },
-    header:   { paddingTop: 50, paddingBottom: 12, paddingHorizontal: 14, backgroundColor: '#E6F1F7', flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 10, zIndex: 2, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 4 },
+    header:   { paddingTop: 50, paddingBottom: 12, paddingHorizontal: 14, backgroundColor: colors.background.surface, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 10, zIndex: 2, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 4 },
     back:     { fontSize: 24, color: colors.action.primary, minWidth: 28, textAlign: 'center' },
     headerInfo: { flex: 1, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 10 },
     headerMenuBtn: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
     headerAvatarWrap: { width: 40, height: 40 },
     headerAvatar:  { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
     headerAvatarText: { color: '#fff', fontSize: 15, fontWeight: '800' },
-    onlineDot: { position: 'absolute', bottom: -1, right: rtl ? undefined : -1, left: rtl ? -1 : undefined, width: 13, height: 13, borderRadius: 7, backgroundColor: '#22C55E', borderWidth: 2, borderColor: '#E6F1F7' },
+    onlineDot: { position: 'absolute', bottom: -1, right: rtl ? undefined : -1, left: rtl ? -1 : undefined, width: 13, height: 13, borderRadius: 7, backgroundColor: '#22C55E', borderWidth: 2, borderColor: colors.background.surface },
     title:    { fontSize: 16, fontWeight: '800', color: colors.text.primary, textAlign: rtl ? 'right' : 'left' },
     subtitle: { fontSize: 12, color: colors.action.primary, marginTop: 1, textAlign: rtl ? 'right' : 'left' },
     listHeader: { alignItems: 'center', gap: 10, paddingTop: 6, paddingBottom: 8 },
@@ -986,28 +1059,38 @@ function buildStyles(colors: any, rtl: boolean) {
     pinTitle:  { fontSize: 11, fontWeight: '700', color: '#A16207', textAlign: rtl ? 'right' : 'left' },
     pinPreview:{ fontSize: 12, color: colors.text.primary, marginTop: 2, textAlign: rtl ? 'right' : 'left' },
     pinClose:  { fontSize: 18, color: '#A16207', fontWeight: '700', paddingHorizontal: 4, minWidth: 32, minHeight: 32, textAlignVertical: 'center', textAlign: 'center' },
-    composerPreview: { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 10, padding: 10, backgroundColor: colors.background.surface, borderTopWidth: 1, borderColor: colors.border.subtle },
+    composerPreview: { marginHorizontal: 12, marginBottom: 6, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 10, padding: 12, backgroundColor: colors.background.surface, borderRadius: 18, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 3 },
     composerPreviewTitle: { fontSize: 11, fontWeight: '700', color: colors.action.primary, textAlign: rtl ? 'right' : 'left' },
     composerPreviewBody:  { fontSize: 12, color: colors.text.primary, marginTop: 2, textAlign: rtl ? 'right' : 'left' },
     composerPreviewClose: { fontSize: 18, color: colors.text.muted, fontWeight: '700', paddingHorizontal: 6, minWidth: 36, minHeight: 36, textAlignVertical: 'center', textAlign: 'center' },
-    // Composer bar is transparent — the wallpaper shows through to either side
-    // of the input pill, matching WhatsApp. Only the pill itself is opaque.
-    composer: { padding: 12, paddingBottom: 24, flexDirection: rtl ? 'row-reverse' : 'row', gap: 8, alignItems: 'flex-end', backgroundColor: 'transparent' },
-    // WhatsApp-style input pill: emoji (leading) + text field + attach + camera.
-    // Opaque surface so the input area stays constant over any wallpaper.
-    inputPill: { flex: 1, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', minHeight: 46, paddingHorizontal: 4, backgroundColor: colors.background.surface, borderRadius: 24, borderWidth: 1, borderColor: colors.border.subtle },
+    // The composer is a single floating rounded pill (matching the chat-list
+    // bottom tab bar): side margins, a bottom gap, full white surface and a
+    // soft shadow. The wallpaper shows through to either side of the pill.
+    composer: { marginHorizontal: 12, paddingHorizontal: 6, paddingVertical: 6, flexDirection: rtl ? 'row-reverse' : 'row', gap: 6, alignItems: 'flex-end', backgroundColor: colors.background.surface, borderRadius: 30, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 6 },
+    // The input region sits transparently inside the floating composer pill.
+    inputPill: { flex: 1, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', minHeight: 46, paddingHorizontal: 4, backgroundColor: 'transparent' },
+    pillLeft:  { flex: 1, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center' },
+    recordingInline: { flex: 1, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 8, paddingHorizontal: 8, height: 44 },
+    recDot:    { width: 9, height: 9, borderRadius: 5, backgroundColor: colors.state.error },
+    recTimer:  { fontSize: 13, fontWeight: '700', color: colors.text.primary, minWidth: 42, textAlign: rtl ? 'right' : 'left' },
+    recHint:   { flex: 1, fontSize: 12, color: colors.text.muted, textAlign: rtl ? 'left' : 'right' },
+    recHintArmed: { color: colors.state.error, fontWeight: '700' },
     input:    { flex: 1, minHeight: 38, maxHeight: 120, paddingHorizontal: 6, paddingVertical: 8, backgroundColor: 'transparent', fontSize: 15, color: colors.text.primary },
     inlineIconLead: { width: 38, height: 44, alignItems: 'center', justifyContent: 'center' },
     inlineIcon: { width: 34, height: 44, alignItems: 'center', justifyContent: 'center' },
-    sendBtn:  { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.action.primary, alignItems: 'center', justifyContent: 'center' },
-    micWrap:  { width: 40, alignItems: 'center', justifyContent: 'center' },
-    micRecording: { transform: [{ scale: 1.5 }] },
-    lockPill: { position: 'absolute', bottom: 52, width: 34, paddingVertical: 8, borderRadius: 18, backgroundColor: colors.background.surface, alignItems: 'center', gap: 4, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 4, shadowOffset: { width: 0, height: 1 }, elevation: 3 },
+    // Big round action button beside the pill (Telegram): blue circle with a
+    // white mic (or send arrow once there's text).
+    actionCircle: { width: 48, height: 48, borderRadius: 24, backgroundColor: colors.action.primary, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 4, shadowOffset: { width: 0, height: 1 }, elevation: 2 },
+    micWrap:  { width: 48, alignItems: 'center', justifyContent: 'center' },
+    micRecording: { transform: [{ scale: 1.35 }], backgroundColor: colors.state.error },
+    lockPill: { position: 'absolute', bottom: 60, width: 34, paddingVertical: 8, borderRadius: 18, backgroundColor: colors.background.surface, alignItems: 'center', gap: 4, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 4, shadowOffset: { width: 0, height: 1 }, elevation: 3 },
     // Keep the lock pill mounted at all times so the mic node below it never
     // changes child index across the idle↔recording transition (which would
     // drop the active gesture responder). Just hide it when not recording.
     lockPillHidden: { opacity: 0 },
     gate:     { padding: 16, paddingBottom: 28, backgroundColor: '#EAF2FB', borderTopWidth: 1, borderColor: colors.border.subtle },
     gateText: { fontSize: 12, color: colors.text.muted, textAlign: 'center' },
+    gateAction: { marginTop: 10, alignSelf: 'center', paddingHorizontal: 20, paddingVertical: 9, borderRadius: 999, backgroundColor: colors.action.primary },
+    gateActionText: { fontSize: 13, fontWeight: '800', color: colors.action.primaryFg },
   });
 }

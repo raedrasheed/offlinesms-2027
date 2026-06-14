@@ -7,7 +7,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
-  View, Text, FlatList, Pressable, StyleSheet, Alert, ScrollView, Share, Clipboard, Modal,
+  View, Text, FlatList, Pressable, StyleSheet, Alert, ScrollView, Share, Clipboard, Modal, Image,
 } from 'react-native';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
@@ -236,15 +236,22 @@ export default function GroupInfo({ route, navigation }: any) {
 
       <ScrollView contentContainerStyle={{ paddingBottom: 32 }}>
         <View style={s.hero}>
-          <View style={s.avatar}><Text style={s.avatarText}>{(convo.name ?? '?').slice(0, 1).toUpperCase()}</Text></View>
+          {convo.avatarUrl
+            ? <Image source={{ uri: convo.avatarUrl }} style={s.avatar} />
+            : <View style={s.avatar}><Text style={s.avatarText}>{(convo.name ?? '?').slice(0, 1).toUpperCase()}</Text></View>}
           <Text style={s.name}>{convo.name ?? 'Group'}</Text>
           <Text style={s.sub}>{members.length + externals.length} member{(members.length + externals.length) === 1 ? '' : 's'}{locked ? ' · locked' : disabled ? ' · disabled' : ''}</Text>
+          {convo.description ? <Text style={s.desc}>{convo.description}</Text> : null}
         </View>
 
         <View style={s.section}>
           <Text style={s.sectionLabel}>Actions</Text>
           {isAdmin ? (
             <>
+              <Pressable style={s.actionRow} onPress={() => navigation.navigate('EditGroup', { id })}>
+                <Text style={s.actionText}>Edit group info</Text>
+                <Text style={s.actionChevron}>›</Text>
+              </Pressable>
               <Pressable style={s.actionRow} onPress={() => navigation.navigate('AddMembers', { id })}>
                 <Text style={s.actionText}>Add members</Text>
                 <Text style={s.actionChevron}>›</Text>
@@ -429,6 +436,7 @@ const s = StyleSheet.create({
   avatarText:{ fontSize: 32, fontWeight: '800', color: '#fff' },
   name:      { fontSize: 20, fontWeight: '800', color: colors.ink, marginTop: 12, textAlign: 'center' },
   sub:       { fontSize: 12, color: colors.ink500, marginTop: 4, textAlign: 'center' },
+  desc:      { fontSize: 13, color: colors.ink, marginTop: 10, textAlign: 'center', lineHeight: 19 },
   section:   { marginTop: 16, backgroundColor: colors.surface, borderTopWidth: 1, borderBottomWidth: 1, borderColor: colors.ink100 },
   sectionLabel: { fontSize: 11, fontWeight: '700', color: colors.ink500, letterSpacing: 0.6, paddingHorizontal: 16, paddingVertical: 8 },
   actionRow: { flexDirection: 'row', alignItems: 'center', padding: 14, borderTopWidth: 1, borderColor: colors.ink100 },

@@ -220,6 +220,13 @@ service cloud.firestore {
         allow read:  if isSelf(uid) || isAdmin();
         allow write: if isAdmin();
       }
+
+      // Blocked users — private to the owner (the parent user doc is public, so
+      // the block list must live here, not as a field). Direct-chat sends are
+      // rejected server-side when either party has blocked the other.
+      match /blockedUsers/{blockedUid} {
+        allow read, write: if isSelf(uid) || isAdmin();
+      }
     }
 
     // ════════════════════════════════════════════════════════════
@@ -479,6 +486,31 @@ service cloud.firestore {
         allow read:  if isAdmin() || isSelf(uid);
         allow write: if isAdmin();
       }
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // ORGANIZATION MESSAGING (MVP)
+    //
+    // All writes flow through the dashboard server actions / public API
+    // route (Admin SDK, with explicit server-side authorization) — clients
+    // can NEVER write these collections. API key docs are fully server-side:
+    // they carry keyHash, so no client may read them under any role.
+    // Org-scoped reads reuse the existing isOrgAdminOf claim helper.
+    // ════════════════════════════════════════════════════════════
+    match /organizationApiKeys/{keyId} {
+      allow read, write: if false;
+    }
+    match /organizationMessageBatches/{batchId} {
+      allow read:  if isAdmin() || isOrgAdminOf(resource.data.organizationId);
+      allow write: if false;
+    }
+    match /organizationMessages/{messageId} {
+      allow read:  if isAdmin() || isOrgAdminOf(resource.data.organizationId);
+      allow write: if false;
+    }
+    match /organizationUsageCounters/{counterId} {
+      allow read:  if isAdmin() || isOrgAdminOf(resource.data.organizationId);
+      allow write: if false;
     }
 
     // ════════════════════════════════════════════════════════════

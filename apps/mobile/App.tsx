@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import * as Linking from 'expo-linking';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { createBottomTabNavigator, BottomTabBar } from '@react-navigation/bottom-tabs';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { Ionicons } from '@expo/vector-icons';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
@@ -34,6 +35,7 @@ import NewChatMenu from './src/screens/NewChatMenu';
 import NewGroup from './src/screens/NewGroup';
 import GroupCreateInfo from './src/screens/GroupCreateInfo';
 import GroupInfo from './src/screens/GroupInfo';
+import EditGroup from './src/screens/EditGroup';
 import AddMembers from './src/screens/AddMembers';
 import JoinRequests from './src/screens/JoinRequests';
 import ForwardPicker from './src/screens/ForwardPicker';
@@ -115,6 +117,14 @@ function MainTabs() {
   const unread = useUnreadTotal();
   return (
     <Tabs.Navigator
+      // The floating pill is positioned manually with `bottom: insets.bottom + 10`,
+      // so BottomTabBar must NOT also add its own bottom safe-area padding — on
+      // Android 15 (edge-to-edge) that ~48px padding, subtracted from the fixed
+      // 72px height, collapsed the content area and hid the icons. BottomTabBar
+      // takes `insets` as a PROP (not from context), so override it here.
+      tabBar={(props) => (
+        <BottomTabBar {...props} insets={{ ...props.insets, bottom: 0 }} />
+      )}
       // Telegram-style floating pill bar: detached from the screen edges,
       // fully rounded, with a soft-blue pill behind the active tab.
       screenOptions={({ route }) => ({
@@ -250,6 +260,7 @@ export default function App() {
     <ThemeProvider userPreference={userTheme}>
     <OfflineProvider>
     <SafeAreaProvider>
+    <KeyboardProvider>
       <ErrorBoundary>
       <NavigationContainer ref={navRef}>
         {!user ? (
@@ -269,6 +280,7 @@ export default function App() {
             <RootStack.Screen name="StatusComposer" component={StatusComposer} options={{ presentation: 'fullScreenModal' }} />
             <RootStack.Screen name="StatusViewer" component={StatusViewer} options={{ presentation: 'fullScreenModal' }} />
             <RootStack.Screen name="GroupInfo" component={GroupInfo} />
+            <RootStack.Screen name="EditGroup" component={EditGroup} />
             <RootStack.Screen name="AddMembers" component={AddMembers} />
             <RootStack.Screen name="JoinRequests" component={JoinRequests} />
             <RootStack.Screen name="JoinGroup" component={JoinGroup} options={{ presentation: 'modal' }} />
@@ -294,6 +306,7 @@ export default function App() {
         )}
       </NavigationContainer>
       </ErrorBoundary>
+    </KeyboardProvider>
     </SafeAreaProvider>
     </OfflineProvider>
     </ThemeProvider>

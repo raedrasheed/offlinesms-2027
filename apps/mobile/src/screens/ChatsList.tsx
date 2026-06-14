@@ -110,7 +110,7 @@ export default function ChatsList({ navigation }: any) {
         ...c,
         state:         states[c.id],
         peerName:      displayName,
-        photoURL:      isGroup ? null : (peers[c.id]?.photoURL ?? null),
+        photoURL:      isGroup ? (c.avatarUrl ?? null) : (peers[c.id]?.photoURL ?? null),
         someoneTyping: false,
       };
     });
@@ -315,7 +315,7 @@ export default function ChatsList({ navigation }: any) {
       )}
 
       <Pressable
-        style={[s.fab, isRTL && { right: undefined, left: 18 }]}
+        style={[s.fab, { bottom: insets.bottom + 94 }, isRTL && { right: undefined, left: 18 }]}
         onPress={() => navigation.navigate('NewChatMenu')}
         accessible={true}
         accessibilityRole="button"

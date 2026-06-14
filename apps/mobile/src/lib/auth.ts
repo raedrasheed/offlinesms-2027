@@ -154,6 +154,19 @@ export function cancelOtp(): void {
   confirmation = null;
 }
 
+/**
+ * Permanently delete the current user's account. Stops push/presence while
+ * still authenticated, asks the server to erase the account + free the
+ * username, then clears local auth (which routes back to Welcome).
+ */
+export async function deleteMyAccount(): Promise<void> {
+  const uid = auth.currentUser?.uid;
+  try { await setOffline(); } catch { /* best-effort */ }
+  try { if (uid) await unregisterForPush(uid); } catch { /* best-effort */ }
+  await httpsCallable<Record<string, never>, { ok: boolean }>(fns(), 'deleteMyAccount')({});
+  try { await auth.signOut(); } catch { /* the server already deleted the user */ }
+}
+
 export async function signOut() {
   // Stamp a final lastSeen (and stop the heartbeat) while still authenticated,
   // so peers see the user go offline rather than "stuck online".

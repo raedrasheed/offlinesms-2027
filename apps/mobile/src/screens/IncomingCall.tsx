@@ -1,4 +1,5 @@
-import { View, Text, Pressable, StyleSheet, SafeAreaView, useWindowDimensions } from 'react-native';
+import { View, Text, Pressable, StyleSheet, useWindowDimensions } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Defs, LinearGradient as SvgGradient, Stop, Rect } from 'react-native-svg';
 
@@ -10,6 +11,7 @@ function initials(name: string): string {
 }
 
 export default function IncomingCall({ navigation, route }: any) {
+  const insets = useSafeAreaInsets();
   const name: string = route?.params?.name ?? 'Renison Hathway';
   const close = () => navigation.goBack();
   const { width, height } = useWindowDimensions();
@@ -26,7 +28,7 @@ export default function IncomingCall({ navigation, route }: any) {
         </Defs>
         <Rect x="0" y="0" width={width} height={height} fill="url(#callBg)" />
       </Svg>
-      <SafeAreaView style={s.safe}>
+      <View style={[s.safe, { paddingTop: insets.top + 48, paddingBottom: insets.bottom + 48 }]}>
       <View style={s.top}>
         <Text style={s.kicker}>OFFLINESMS VIDEO</Text>
         <Text style={s.status}>Incoming call…</Text>
@@ -67,7 +69,7 @@ export default function IncomingCall({ navigation, route }: any) {
           <Text style={s.actionLabel}>Accept</Text>
         </View>
       </View>
-      </SafeAreaView>
+      </View>
     </View>
   );
 }

@@ -11,6 +11,7 @@ import { View, Text, Pressable, StyleSheet, ScrollView, RefreshControl, Alert } 
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { auth } from '../lib/firebase';
 import { useTheme } from '../context/ThemeContext';
@@ -42,6 +43,7 @@ function formatTime(ms: number): string {
 export default function Status({ navigation }: any) {
   const { t } = useTranslation();
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const myName = auth.currentUser?.displayName ?? 'You';
   const s = buildStyles(colors, isRTL);
 
@@ -186,14 +188,14 @@ export default function Status({ navigation }: any) {
       </ScrollView>
 
       <Pressable
-        style={s.fabSecondary}
+        style={[s.fabSecondary, { bottom: insets.bottom + 160 }]}
         onPress={() => { void pickMedia(); }}
         accessibilityRole="button"
         accessibilityLabel={t('status.photoVideo')}
       >
         <Ionicons name="camera" size={22} color={colors.action.primary} />
       </Pressable>
-      <Pressable style={s.fab} onPress={openComposer}>
+      <Pressable style={[s.fab, { bottom: insets.bottom + 94 }]} onPress={openComposer}>
         <Ionicons name="create-outline" size={24} color={colors.action.primaryFg} />
       </Pressable>
     </View>
