@@ -49,6 +49,7 @@ export default async function SettingsPage() {
       defaultTimezone: 'UTC',
       smsEscalationEnabled: true,
       pointsEnabled: true,
+      emailSignInEnabled: false,
       maintenanceMode: false,
     };
   }

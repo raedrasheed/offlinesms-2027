@@ -160,6 +160,13 @@ export default function SettingsForm({ action, initial }: Props) {
           initialValue={initial.pointsEnabled}
         />
 
+        <Toggle
+          label="Email sign-in"
+          description="Allow users to sign in with email and password."
+          name="emailSignInEnabled"
+          initialValue={initial.emailSignInEnabled}
+        />
+
         {initial.maintenanceMode && (
           <div className="rounded-lg px-3 py-2 text-xs" style={{ background: 'var(--c-warning-bg)', border: '1px solid var(--c-warning-border)', color: '#F59E0B' }}>
             Maintenance mode is currently <strong>on</strong>. Toggle is read-only here; change via server config.

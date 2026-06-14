@@ -788,6 +788,7 @@ export type SystemSettings = {
   defaultTimezone: string;
   smsEscalationEnabled: boolean;
   pointsEnabled: boolean;
+  emailSignInEnabled: boolean;
   maintenanceMode: boolean;
 };
 
@@ -798,6 +799,7 @@ const SETTINGS_DEFAULTS: SystemSettings = {
   defaultTimezone:      'UTC',
   smsEscalationEnabled: true,
   pointsEnabled:        true,
+  emailSignInEnabled:   false,
   maintenanceMode:      false,
 };
 
@@ -812,6 +814,7 @@ export async function getSystemSettings(): Promise<SystemSettings> {
     defaultTimezone:      (d.defaultTimezone      as string  | undefined) ?? SETTINGS_DEFAULTS.defaultTimezone,
     smsEscalationEnabled: (d.smsEscalationEnabled as boolean | undefined) ?? SETTINGS_DEFAULTS.smsEscalationEnabled,
     pointsEnabled:        (d.pointsEnabled        as boolean | undefined) ?? SETTINGS_DEFAULTS.pointsEnabled,
+    emailSignInEnabled:   (d.emailSignInEnabled   as boolean | undefined) ?? SETTINGS_DEFAULTS.emailSignInEnabled,
     maintenanceMode:      (d.maintenanceMode      as boolean | undefined) ?? SETTINGS_DEFAULTS.maintenanceMode,
   };
 }
