@@ -5,6 +5,8 @@
 // longest matching calling code wins (e.g. +1242 Bahamas before +1). Calling
 // codes shared by several countries resolve to the canonical primary country.
 
+import { parsePhoneNumberFromString, type CountryCode } from "libphonenumber-js";
+
 export type PhoneCountry = { iso: string; name: string; flag: string };
 
 // Sorted longest dial first for greedy prefix matching.
@@ -215,6 +217,37 @@ export function phoneCountry(phone?: string | null): PhoneCountry | null {
     }
   }
   return null;
+}
+
+// ── Country-based relay routing: normalize + detect ISO country ──────────────
+// Mirror of packages/shared/phoneCountry.ts (the dashboard org-messaging API
+// does the country check synchronously, so it needs this in its own runtime).
+
+export type NormalizedPhone = {
+  e164: string;
+  countryCode: string | null;
+  isValid: boolean;
+  reason?: string;
+};
+
+/** Normalize a phone number and detect its ISO alpha-2 country (libphonenumber-js). */
+export function normalizePhoneAndCountry(inputPhone: string, defaultCountry?: string): NormalizedPhone {
+  if (typeof inputPhone !== "string" || inputPhone.trim() === "") {
+    return { e164: "", countryCode: null, isValid: false, reason: "empty" };
+  }
+  let parsed;
+  try {
+    parsed = parsePhoneNumberFromString(inputPhone.trim(), defaultCountry as CountryCode | undefined);
+  } catch {
+    return { e164: "", countryCode: null, isValid: false, reason: "parse-error" };
+  }
+  if (!parsed) {
+    return { e164: "", countryCode: null, isValid: false, reason: "unparseable" };
+  }
+  if (!parsed.isValid()) {
+    return { e164: parsed.number ?? "", countryCode: parsed.country ?? null, isValid: false, reason: "invalid" };
+  }
+  return { e164: parsed.number, countryCode: parsed.country ?? null, isValid: true };
 }
 
 /** Format an E.164 number for display: +<code> <rest>. */
