@@ -2,6 +2,7 @@
 // recipients.ts pattern). No firebase-admin imports here.
 
 import { ADMIN_ROLES } from '../lib/roles';
+import { isSupportedCountry } from 'libphonenumber-js';
 
 export type RelayJobStatus =
   | 'queued' | 'claimed' | 'sending' | 'sent' | 'delivered' | 'failed' | 'expired';
@@ -201,6 +202,40 @@ export function isDeviceRoutable(
 
 export interface RouteDevice { deviceId: string; remaining: number }
 export interface RouteResult { assignments: Array<{ uid: string; deviceId: string }>; unrouted: string[] }
+
+// ── Country-based relay routing ─────────────────────────────────────────────
+
+/** Validate/normalize a list of ISO alpha-2 country codes (uppercased, deduped,
+ *  sorted; only codes libphonenumber recognizes are kept). */
+export function normalizeCountryCodes(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  const out = new Set<string>();
+  for (const c of input) {
+    if (typeof c !== 'string') continue;
+    const code = c.trim().toUpperCase();
+    if (/^[A-Z]{2}$/.test(code) && isSupportedCountry(code as any)) out.add(code);
+  }
+  return [...out].sort();
+}
+
+/** A relay is eligible for country routing only when explicitly enabled AND it
+ *  has at least one allowed country. Missing/empty config (e.g. relays enrolled
+ *  before this feature) means BLOCKED — never "all countries". */
+export function isRelayConfiguredForRouting(
+  d: { countryRoutingEnabled?: boolean | null; allowedCountryCodes?: string[] | null },
+): boolean {
+  return d.countryRoutingEnabled === true
+    && Array.isArray(d.allowedCountryCodes)
+    && d.allowedCountryCodes.length > 0;
+}
+
+/** Does this relay explicitly cover the given ISO alpha-2 country? */
+export function deviceServesCountry(
+  d: { allowedCountryCodes?: string[] | null },
+  countryCode: string,
+): boolean {
+  return Array.isArray(d.allowedCountryCodes) && d.allowedCountryCodes.includes(countryCode);
+}
 
 /**
  * A relay batch is finalizable exactly once: only when it's still 'sending'
