@@ -14,8 +14,21 @@ import { adminDb, adminAuth } from './firebase-admin';
 import { verifySession, type SessionResult } from './session';
 import { canDo } from './adminPermissions';
 import { getAdminScope, canViewOrganization } from './adminScope';
+import { isSupportedCountry } from 'libphonenumber-js';
 
 export type RelayActionState = { error?: string; success?: boolean; code?: string; expiresAt?: number };
+
+/** Validate/normalize ISO alpha-2 country codes (mirror of relayLogic). */
+function normalizeCountryCodes(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  const out = new Set<string>();
+  for (const c of input) {
+    if (typeof c !== 'string') continue;
+    const code = c.trim().toUpperCase();
+    if (/^[A-Z]{2}$/.test(code) && isSupportedCountry(code as never)) out.add(code);
+  }
+  return [...out].sort();
+}
 
 const PAIRING_TTL_MS = 15 * 60 * 1000;
 const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -132,25 +145,69 @@ export async function sendRelayTestAction(phoneE164: string, body: string, targe
   return { success: true };
 }
 
-export async function createRelayPairingCodeAction(targetBusiness?: string): Promise<RelayActionState> {
+export async function createRelayPairingCodeAction(
+  targetBusiness?: string,
+  allowedCountryCodes?: string[],
+): Promise<RelayActionState> {
   const session = await authorize();
   if ('error' in session) return session;
   const businessId = targetBusinessId(session, targetBusiness);
   if (!businessId) return { error: 'Select an organization first.' };
 
+  // Country-based routing: the admin must pick ≥1 country at activation.
+  const countries = normalizeCountryCodes(allowedCountryCodes);
+  if (countries.length === 0) return { error: 'Select at least one country this relay may send to.' };
+
   const code = genCode();
   const expiresAt = Timestamp.fromMillis(Date.now() + PAIRING_TTL_MS);
   try {
     await adminDb.collection('relayPairingCodes').doc(code).set({
-      code, businessId, createdByUid: session.user.uid, label: null, used: false,
+      code, businessId, createdByUid: session.user.uid, label: null,
+      allowedCountryCodes: countries, used: false,
       expiresAt, createdAt: FieldValue.serverTimestamp(),
     });
   } catch {
     return { error: 'Could not create a pairing code. Try again.' };
   }
-  await audit('relay.pairing.created', session, businessId, { businessId });
+  await audit('relay.pairing.created', session, businessId, { businessId, allowedCountryCodes: countries });
   revalidatePath('/admin/relay');
   return { success: true, code, expiresAt: expiresAt.toMillis() };
+}
+
+/** Edit the countries a relay may send to (admin-only; scope-checked). */
+export async function setRelayCountriesAction(
+  deviceId: string,
+  allowedCountryCodes: string[],
+  countryRoutingEnabled?: boolean,
+): Promise<RelayActionState> {
+  const session = await authorize();
+  if ('error' in session) return session;
+  const loaded = await loadDeviceScoped(session, deviceId);
+  if ('error' in loaded) return { error: loaded.error };
+
+  const next = normalizeCountryCodes(allowedCountryCodes);
+  const snap = await loaded.ref.get();
+  const previous = (snap.get('allowedCountryCodes') as string[] | undefined) ?? [];
+  const prevEnabled = snap.get('countryRoutingEnabled') === true;
+  const nextEnabled = typeof countryRoutingEnabled === 'boolean' ? countryRoutingEnabled : next.length > 0;
+
+  await loaded.ref.update({
+    allowedCountryCodes: next,
+    countryRoutingEnabled: nextEnabled,
+    updatedAt: FieldValue.serverTimestamp(),
+    updatedBy: session.user.uid,
+  });
+
+  await audit('relay.allowed_countries.updated', session, deviceId, {
+    relayId: deviceId, organizationId: loaded.businessId,
+    previousCountryCodes: previous, nextCountryCodes: next,
+  });
+  if (nextEnabled !== prevEnabled) {
+    await audit(nextEnabled ? 'relay.country_routing.enabled' : 'relay.country_routing.disabled',
+      session, deviceId, { relayId: deviceId, organizationId: loaded.businessId });
+  }
+  revalidatePath('/admin/relay');
+  return { success: true };
 }
 
 async function loadDeviceScoped(session: AuthorizedSession, deviceId: string) {

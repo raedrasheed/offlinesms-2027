@@ -198,6 +198,11 @@ const DIAL_COUNTRIES: { dial: string; iso: string; name: string }[] = [
   { dial: "7", iso: "RU", name: "Russia" },
 ];
 
+/** All selectable countries (ISO + name), sorted by name — for relay country pickers. */
+export const COUNTRY_OPTIONS: { iso: string; name: string }[] =
+  DIAL_COUNTRIES.map(c => ({ iso: c.iso, name: c.name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
 /** Regional-indicator flag emoji for a 2-letter ISO code, e.g. PS -> 🇵🇸. */
 export function flagEmoji(iso: string): string {
   return iso

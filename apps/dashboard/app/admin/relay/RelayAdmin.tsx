@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useState, useTransition } from 'react';
+import { useEffect, useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { ADMIN_LABELS as L } from '@/lib/i18n';
+import { COUNTRY_OPTIONS, flagEmoji } from '@/lib/phoneCountry';
 import {
   createRelayPairingCodeAction, setRelayDeviceStatusAction, revokeRelayDeviceAction,
-  setRelayModeAction, sendRelayTestAction,
+  setRelayModeAction, sendRelayTestAction, setRelayCountriesAction,
 } from '@/lib/relayActions';
 
 export type RelayDeviceView = {
@@ -22,16 +23,16 @@ export type RelayDeviceView = {
   failedToday: number;
   deliveredToday: number;
   lastError: string | null;
+  allowedCountryCodes: string[];
+  countryRoutingEnabled: boolean;
 };
 export type RelayOrgStatus = { mode: 'http' | 'relay' | 'hybrid'; relayEnabled: boolean };
+export type CoverageRow = { country: string; active: number; offline: number; available: boolean };
 
 const ONLINE_WINDOW_MS = 90_000;
 const CARD = 'var(--c-card)';
 const BORDER = 'var(--c-border)';
 
-// `now` is null during SSR and the first client render, then set after mount.
-// Time-relative output must be deterministic across both to avoid React
-// hydration mismatches, so we render a stable placeholder until `now` exists.
 function relativeTime(ms: number | null, now: number | null): string {
   if (!ms) return L.relay.never;
   if (now == null) return '…';
@@ -42,15 +43,44 @@ function relativeTime(ms: number | null, now: number | null): string {
   return new Date(ms).toLocaleDateString();
 }
 
-function liveStatus(d: RelayDeviceView, now: number | null): { text: string; color: string } {
-  if (d.status === 'revoked') return { text: L.relay.revoked, color: '#991B1B' };
-  if (d.status === 'paused') return { text: L.relay.paused, color: '#92400E' };
+type Live = { key: 'online' | 'offline' | 'revoked' | 'paused'; text: string; color: string };
+function liveStatus(d: RelayDeviceView, now: number | null): Live {
+  if (d.status === 'revoked') return { key: 'revoked', text: L.relay.revoked, color: '#991B1B' };
+  if (d.status === 'paused') return { key: 'paused', text: L.relay.paused, color: '#92400E' };
   const online = now != null && d.lastHeartbeatAt != null && now - d.lastHeartbeatAt < ONLINE_WINDOW_MS;
-  return online ? { text: L.relay.online, color: '#166534' } : { text: L.relay.offline, color: '#6B7280' };
+  return online
+    ? { key: 'online', text: L.relay.online, color: '#166534' }
+    : { key: 'offline', text: L.relay.offline, color: '#6B7280' };
+}
+
+/** Compact country selector: removable chips + an add dropdown. */
+function CountryPicker({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
+  const selected = new Set(value);
+  const remaining = COUNTRY_OPTIONS.filter(c => !selected.has(c.iso));
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {value.length === 0 && <span className="text-xs" style={{ color: '#92400E' }}>No countries selected</span>}
+      {value.map(iso => (
+        <span key={iso} className="text-xs px-2 py-1 rounded-full inline-flex items-center gap-1" style={{ background: '#0000000d' }}>
+          {flagEmoji(iso)} {iso}
+          <button onClick={() => onChange(value.filter(v => v !== iso))} style={{ color: '#991B1B' }} aria-label={`remove ${iso}`}>✕</button>
+        </span>
+      ))}
+      <select
+        value=""
+        onChange={e => { if (e.target.value) onChange([...value, e.target.value].sort()); }}
+        className="px-2 py-1 rounded-md text-xs"
+        style={{ border: `1px solid ${BORDER}`, background: 'transparent', color: 'inherit' }}
+      >
+        <option value="">+ add country</option>
+        {remaining.map(c => <option key={c.iso} value={c.iso}>{c.iso} — {c.name}</option>)}
+      </select>
+    </div>
+  );
 }
 
 export default function RelayAdmin({
-  devices, orgStatus, businessId, canManage, fetchError, queueHealth, healthyDevices, orgOptions,
+  devices, orgStatus, businessId, canManage, fetchError, queueHealth, healthyDevices, orgOptions, coverage,
 }: {
   devices: RelayDeviceView[];
   orgStatus: RelayOrgStatus;
@@ -60,6 +90,7 @@ export default function RelayAdmin({
   queueHealth: Record<string, number>;
   healthyDevices: number;
   orgOptions: { id: string; name: string }[];
+  coverage: CoverageRow[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -71,6 +102,14 @@ export default function RelayAdmin({
   const [sendMsg, setSendMsg] = useState<string | null>(null);
   const [sendErr, setSendErr] = useState<string | null>(null);
   const [now, setNow] = useState<number | null>(null);
+
+  // Country UI state.
+  const [pairCountries, setPairCountries] = useState<string[]>([]);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editCodes, setEditCodes] = useState<string[]>([]);
+  const [fStatus, setFStatus] = useState<'all' | 'online' | 'offline' | 'revoked'>('all');
+  const [fCountry, setFCountry] = useState('');
+  const [fNoCountries, setFNoCountries] = useState(false);
 
   useEffect(() => {
     setNow(Date.now());
@@ -92,8 +131,9 @@ export default function RelayAdmin({
 
   function createCode() {
     setErr(null); setCode(null); setCopied(false);
+    if (pairCountries.length === 0) { setErr('Select at least one country for this relay before creating a code.'); return; }
     startTransition(async () => {
-      const res = await createRelayPairingCodeAction(businessId ?? undefined);
+      const res = await createRelayPairingCodeAction(businessId ?? undefined, pairCountries);
       if (res.error) setErr(res.error); else if (res.code) setCode(res.code);
     });
   }
@@ -110,6 +150,20 @@ export default function RelayAdmin({
     startTransition(async () => {
       const res = await revokeRelayDeviceAction(deviceId);
       if (res.error) setErr(res.error); else router.refresh();
+    });
+  }
+  function startEdit(d: RelayDeviceView) { setEditingId(d.deviceId); setEditCodes(d.allowedCountryCodes); setErr(null); }
+  function saveCountries(d: RelayDeviceView) {
+    const removing = d.allowedCountryCodes.filter(c => !editCodes.includes(c));
+    const live = liveStatus(d, now);
+    if (removing.length > 0 && live.key === 'online' &&
+        !window.confirm(`Remove ${removing.join(', ')} from this active relay? In-flight routing to ${removing.join(', ')} will stop.`)) {
+      return;
+    }
+    setErr(null);
+    startTransition(async () => {
+      const res = await setRelayCountriesAction(d.deviceId, editCodes);
+      if (res.error) setErr(res.error); else { setEditingId(null); router.refresh(); }
     });
   }
   function copy() {
@@ -132,6 +186,25 @@ export default function RelayAdmin({
     ['qSent', queueHealth.sent], ['qDelivered', queueHealth.delivered], ['qFailed', queueHealth.failed],
     ['qExpired', queueHealth.expired],
   ] as const;
+
+  const noCountryCount = devices.filter(d => !d.countryRoutingEnabled || d.allowedCountryCodes.length === 0).length;
+  const countriesWithoutCoverage = coverage.filter(c => !c.available).map(c => c.country);
+
+  // Apply filters.
+  const filtered = useMemo(() => devices.filter(d => {
+    const live = liveStatus(d, now);
+    if (fStatus === 'online' && live.key !== 'online') return false;
+    if (fStatus === 'offline' && live.key !== 'offline' && live.key !== 'paused') return false;
+    if (fStatus === 'revoked' && live.key !== 'revoked') return false;
+    if (fNoCountries && d.countryRoutingEnabled && d.allowedCountryCodes.length > 0) return false;
+    if (fCountry && !d.allowedCountryCodes.includes(fCountry)) return false;
+    return true;
+  }), [devices, now, fStatus, fCountry, fNoCountries]);
+
+  const allCountries = useMemo(
+    () => [...new Set(devices.flatMap(d => d.allowedCountryCodes))].sort(),
+    [devices],
+  );
 
   return (
     <div className="space-y-4">
@@ -158,16 +231,23 @@ export default function RelayAdmin({
             {orgStatus.relayEnabled ? L.relay.enabled : L.relay.disabled} · {L.relay.mode}: {modeLabel}
           </div>
         </div>
-        {canManage && (
-          <div className="flex items-center gap-2">
-            <button onClick={createCode} disabled={pending}
-              className="px-3 py-2 rounded-md text-sm font-medium"
-              style={{ background: 'var(--c-accent, #1D6E92)', color: '#fff', opacity: pending ? 0.6 : 1 }}>
-              {L.relay.createCode}
-            </button>
-          </div>
-        )}
       </div>
+
+      {/* Create pairing code — requires selecting the relay's countries. */}
+      {canManage && businessId && (
+        <div style={box} className="space-y-2">
+          <div className="font-medium">{L.relay.createCode}</div>
+          <div className="text-xs" style={{ color: 'var(--c-text-muted)' }}>
+            Choose the countries this relay is allowed to send to (required). It can be edited later.
+          </div>
+          <CountryPicker value={pairCountries} onChange={setPairCountries} />
+          <button onClick={createCode} disabled={pending || pairCountries.length === 0}
+            className="px-3 py-2 rounded-md text-sm font-medium"
+            style={{ background: 'var(--c-accent, #1D6E92)', color: '#fff', opacity: (pending || pairCountries.length === 0) ? 0.6 : 1 }}>
+            {L.relay.createCode}
+          </button>
+        </div>
+      )}
 
       {!businessId && canManage && (
         <p className="text-xs" style={{ color: 'var(--c-text-muted)' }}>{L.relay.selectOrgHint}</p>
@@ -188,6 +268,48 @@ export default function RelayAdmin({
 
       {showNoDevicesWarning && (
         <div style={{ ...box, borderColor: '#FCD34D', background: '#FEF3C7', color: '#92400E' }}>{L.relay.noHealthyDevices}</div>
+      )}
+
+      {/* Migration warning: relays without configured countries are blocked. */}
+      {noCountryCount > 0 && (
+        <div style={{ ...box, borderColor: '#FCD34D', background: '#FEF3C7', color: '#92400E' }}>
+          {noCountryCount} relay(s) have no enabled countries and will not be used for sending until countries are configured.
+          <span dir="rtl" className="block mt-1">يوجد relay بدون دول مفعلة. لن يتم استخدامه للإرسال حتى يتم تحديد الدول.</span>
+        </div>
+      )}
+
+      {/* Coverage view */}
+      {businessId && coverage.length > 0 && (
+        <div style={box}>
+          <div className="text-sm font-medium mb-2">Relay coverage by country</div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr style={{ color: 'var(--c-text-muted)' }} className="text-left">
+                  <th className="py-1 pr-4">Country</th><th className="py-1 pr-4 text-right">Active</th>
+                  <th className="py-1 pr-4 text-right">Offline</th><th className="py-1">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {coverage.map(c => (
+                  <tr key={c.country} style={{ borderTop: `1px solid ${BORDER}` }}>
+                    <td className="py-1 pr-4">{flagEmoji(c.country)} {c.country}</td>
+                    <td className="py-1 pr-4 text-right">{c.active}</td>
+                    <td className="py-1 pr-4 text-right">{c.offline}</td>
+                    <td className="py-1" style={{ color: c.available ? '#166534' : '#991B1B' }}>
+                      {c.available ? 'Available' : 'No relay'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {countriesWithoutCoverage.length > 0 && (
+            <div className="mt-3 text-sm" style={{ color: '#991B1B' }}>
+              Countries without active relay coverage: {countriesWithoutCoverage.map(c => `${flagEmoji(c)} ${c}`).join(', ')}
+            </div>
+          )}
+        </div>
       )}
 
       {businessId && (
@@ -213,27 +335,12 @@ export default function RelayAdmin({
             <div className="text-xs" style={{ color: 'var(--c-text-muted)' }}>{L.relay.sendHint}</div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <input
-              value={sendPhone}
-              onChange={(e) => setSendPhone(e.target.value)}
-              placeholder={L.relay.sendPhonePlaceholder}
-              className="px-3 py-2 rounded-md text-sm"
-              style={{ border: `1px solid ${BORDER}`, background: 'transparent', color: 'inherit', minWidth: 200 }}
-            />
-            <input
-              value={sendBody}
-              onChange={(e) => setSendBody(e.target.value)}
-              placeholder={L.relay.sendBodyPlaceholder}
-              maxLength={300}
-              className="px-3 py-2 rounded-md text-sm flex-1"
-              style={{ border: `1px solid ${BORDER}`, background: 'transparent', color: 'inherit', minWidth: 240 }}
-            />
-            <button
-              onClick={sendTest}
-              disabled={pending || !sendPhone.trim() || !sendBody.trim()}
-              className="px-3 py-2 rounded-md text-sm font-medium"
-              style={{ background: 'var(--c-accent, #1D6E92)', color: '#fff', opacity: pending ? 0.6 : 1 }}
-            >
+            <input value={sendPhone} onChange={(e) => setSendPhone(e.target.value)} placeholder={L.relay.sendPhonePlaceholder}
+              className="px-3 py-2 rounded-md text-sm" style={{ border: `1px solid ${BORDER}`, background: 'transparent', color: 'inherit', minWidth: 200 }} />
+            <input value={sendBody} onChange={(e) => setSendBody(e.target.value)} placeholder={L.relay.sendBodyPlaceholder} maxLength={300}
+              className="px-3 py-2 rounded-md text-sm flex-1" style={{ border: `1px solid ${BORDER}`, background: 'transparent', color: 'inherit', minWidth: 240 }} />
+            <button onClick={sendTest} disabled={pending || !sendPhone.trim() || !sendBody.trim()}
+              className="px-3 py-2 rounded-md text-sm font-medium" style={{ background: 'var(--c-accent, #1D6E92)', color: '#fff', opacity: pending ? 0.6 : 1 }}>
               {L.relay.sendBtn}
             </button>
           </div>
@@ -258,19 +365,42 @@ export default function RelayAdmin({
         <div style={{ ...box, borderColor: '#FCA5A5', background: '#FEF2F2', color: '#991B1B' }}>{err || fetchError}</div>
       )}
 
-      {devices.length === 0 ? (
-        <div style={box} className="text-sm" >{L.relay.noDevices}</div>
+      {/* Filters */}
+      {devices.length > 0 && (
+        <div style={box} className="flex flex-wrap items-center gap-2 text-sm">
+          <span style={{ color: 'var(--c-text-muted)' }}>Filter:</span>
+          <select value={fStatus} onChange={e => setFStatus(e.target.value as typeof fStatus)}
+            className="px-2 py-1 rounded-md" style={{ border: `1px solid ${BORDER}`, background: 'transparent', color: 'inherit' }}>
+            <option value="all">All statuses</option>
+            <option value="online">Active (online)</option>
+            <option value="offline">Offline / paused</option>
+            <option value="revoked">Revoked</option>
+          </select>
+          <select value={fCountry} onChange={e => setFCountry(e.target.value)}
+            className="px-2 py-1 rounded-md" style={{ border: `1px solid ${BORDER}`, background: 'transparent', color: 'inherit' }}>
+            <option value="">Any country</option>
+            {allCountries.map(c => <option key={c} value={c}>{flagEmoji(c)} {c}</option>)}
+          </select>
+          <label className="inline-flex items-center gap-1">
+            <input type="checkbox" checked={fNoCountries} onChange={e => setFNoCountries(e.target.checked)} />
+            No countries assigned
+          </label>
+        </div>
+      )}
+
+      {filtered.length === 0 ? (
+        <div style={box} className="text-sm">{devices.length === 0 ? L.relay.noDevices : 'No relays match the filters.'}</div>
       ) : (
         <div className="space-y-3">
-          {devices.map(d => {
+          {filtered.map(d => {
             const s = liveStatus(d, now);
+            const noCountries = !d.countryRoutingEnabled || d.allowedCountryCodes.length === 0;
+            const editing = editingId === d.deviceId;
             return (
               <div key={d.deviceId} style={box} className="space-y-2">
                 <div className="flex items-center justify-between gap-3">
                   <div className="font-medium">{d.label}</div>
-                  <span className="text-xs px-2 py-1 rounded-full" style={{ background: '#0000000d', color: s.color }}>
-                    ● {s.text}
-                  </span>
+                  <span className="text-xs px-2 py-1 rounded-full" style={{ background: '#0000000d', color: s.color }}>● {s.text}</span>
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-1 text-sm" style={{ color: 'var(--c-text-muted)' }}>
                   <div>{L.relay.lastSeen}: {relativeTime(d.lastHeartbeatAt, now)}</div>
@@ -280,6 +410,37 @@ export default function RelayAdmin({
                   <div>{L.relay.today}: {d.sentToday} / {d.failedToday} / {d.deliveredToday}</div>
                   {d.lastError && <div className="text-red-600">{L.relay.lastError}: {d.lastError}</div>}
                 </div>
+
+                {/* Countries */}
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <span className="text-sm" style={{ color: 'var(--c-text-muted)' }}>Countries:</span>
+                  {editing ? (
+                    <>
+                      <CountryPicker value={editCodes} onChange={setEditCodes} />
+                      <button onClick={() => saveCountries(d)} disabled={pending}
+                        className="px-3 py-1.5 rounded-md text-sm font-medium" style={{ background: 'var(--c-accent, #1D6E92)', color: '#fff' }}>Save</button>
+                      <button onClick={() => setEditingId(null)} disabled={pending}
+                        className="px-3 py-1.5 rounded-md text-sm" style={{ border: `1px solid ${BORDER}` }}>Cancel</button>
+                    </>
+                  ) : (
+                    <>
+                      {noCountries ? (
+                        <span className="text-xs px-2 py-1 rounded-full" style={{ background: '#FEF3C7', color: '#92400E' }}>
+                          ⚠ No countries — not used for sending
+                        </span>
+                      ) : (
+                        d.allowedCountryCodes.map(c => (
+                          <span key={c} className="text-xs px-2 py-1 rounded-full" style={{ background: '#0000000d' }}>{flagEmoji(c)} {c}</span>
+                        ))
+                      )}
+                      {canManage && d.status !== 'revoked' && (
+                        <button onClick={() => startEdit(d)} disabled={pending}
+                          className="px-2 py-1 rounded-md text-xs" style={{ border: `1px solid ${BORDER}` }}>Edit countries</button>
+                      )}
+                    </>
+                  )}
+                </div>
+
                 {canManage && d.status !== 'revoked' && (
                   <div className="flex gap-2 pt-1">
                     {d.status === 'paused' ? (
