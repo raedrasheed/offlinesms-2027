@@ -274,6 +274,27 @@ export function hasRelayCoverageForCountry(
 
 export type SkipReasonCode = 'invalid_phone' | 'unsupported_country' | 'no_relay_for_country';
 
+/**
+ * The single coverage decision applied to EVERY send (1:1, group, org, OTP,
+ * admin test) regardless of provider mode (relay AND http). Given a recipient
+ * whose phone has already been parsed, returns null when the message may be
+ * sent, or the skip reason when it must NOT be:
+ *   • invalid_phone       — number didn't parse
+ *   • unsupported_country — parsed but no ISO country detected
+ *   • no_relay_for_country — country detected but no live relay serves it
+ * Capacity-agnostic: an at-capacity but otherwise-covered country is NOT a gap
+ * (it queues), so this returns null for it.
+ */
+export function coverageSkipReason(
+  devices: RouteDeviceCountry[],
+  parsed: { valid: boolean; countryCode: string | null },
+  nowMs: number,
+): SkipReasonCode | null {
+  if (!parsed.valid) return 'invalid_phone';
+  if (!parsed.countryCode) return 'unsupported_country';
+  return hasRelayCoverageForCountry(devices, parsed.countryCode, nowMs) ? null : 'no_relay_for_country';
+}
+
 export interface RecipientOutcome { countryCode: string | null; queued: boolean; reason?: string }
 
 export interface DispatchSummary {
