@@ -47,6 +47,7 @@ export function otpErrorCopy(reason?: string): string {
   switch (reason) {
     case 'phone-invalid':          return 'Enter a valid phone number.';
     case 'otp-not-configured':     return 'Phone sign-in isn’t available yet. Please use email.';
+    case 'no-relay-for-country':   return 'Sign-in isn’t available in your country yet (no relay).';
     case 'otp-cooldown':           return 'Please wait a moment before requesting another code.';
     case 'otp-rate-limited':       return 'Too many codes requested. Try again later.';
     case 'otp-not-requested':      return 'Request a code first.';
