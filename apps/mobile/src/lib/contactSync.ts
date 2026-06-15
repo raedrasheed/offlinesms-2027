@@ -54,6 +54,7 @@ function chunk<T>(arr: T[], n: number): T[][] {
 export async function matchContactsOnServer(
   phones: string[],
   onProgress?: (p: SyncProgress) => void,
+  onMatches?: (matches: ContactMatch[]) => void,
 ): Promise<ContactMatch[]> {
   const fn = httpsCallable<{ phones: string[] }, { matches: ContactMatch[] }>(
     getFunctions(app, 'us-central1'),
@@ -64,14 +65,20 @@ export async function matchContactsOnServer(
   onProgress?.({ scanned: 0, total, matched: 0 });
 
   // Call the server in batches so big contact lists don't exceed the per-call
-  // cap; dedupe matches by uid (a person may appear under several numbers).
+  // cap; dedupe matches by uid (a person may appear under several numbers) and
+  // stream the cumulative list out after each batch so found friends appear
+  // progressively instead of all at the end.
   const byUid = new Map<string, ContactMatch>();
   let scanned = 0;
   for (const batch of chunk(phones, PHONES_PER_CALL)) {
     const res = await fn({ phones: batch });
-    for (const m of res.data.matches ?? []) byUid.set(m.uid, m);
+    let added = false;
+    for (const m of res.data.matches ?? []) {
+      if (!byUid.has(m.uid)) { byUid.set(m.uid, m); added = true; }
+    }
     scanned += batch.length;
     onProgress?.({ scanned, total, matched: byUid.size });
+    if (added) onMatches?.([...byUid.values()]);
   }
 
   return [...byUid.values()];
