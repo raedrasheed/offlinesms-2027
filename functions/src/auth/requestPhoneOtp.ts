@@ -11,6 +11,9 @@ import {
   normalizeE164, phoneKey, generateOtp, newSalt, hashOtp,
   canResend, nextSendWindow, OTP_TTL_MS, isTestPhone,
 } from './otpLogic';
+import { normalizePhoneAndCountry } from '../lib/phoneCountry';
+import { loadActiveRelayDevices } from '../sms/countryRouting';
+import { hasRelayCoverageForCountry } from '../sms/relayLogic';
 
 const REGION = 'us-central1';
 
@@ -32,6 +35,16 @@ export const requestPhoneOtp = onCall({ region: REGION }, async (request) => {
   const db = getFirestore();
   const businessId = await otpBusinessId(db);
   if (!businessId) throw new HttpsError('failed-precondition', 'otp-not-configured');
+
+  // Country-based relay routing: the OTP is sent via relay, so it must respect
+  // country coverage like every other send. If no live relay of the OTP business
+  // covers this number's country, don't send (sign-in isn't possible there).
+  const { countryCode } = normalizePhoneAndCountry(phone);
+  if (!countryCode) throw new HttpsError('failed-precondition', 'no-relay-for-country');
+  const otpRelays = await loadActiveRelayDevices(businessId);
+  if (!hasRelayCoverageForCountry(otpRelays, countryCode, Date.now())) {
+    throw new HttpsError('failed-precondition', 'no-relay-for-country');
+  }
 
   const key = phoneKey(phone);
   const ref = db.collection('otpChallenges').doc(key);
@@ -64,7 +77,7 @@ export const requestPhoneOtp = onCall({ region: REGION }, async (request) => {
   await db.collection('relayJobs').doc(jobId).create({
     jobId, businessId, kind: 'otp',
     batchId: null, recipientUid: null,
-    phoneE164: phone,
+    phoneE164: phone, recipientCountryCode: countryCode,
     messageBody: `Your OfflineSMS verification code is ${code}. It expires in 5 minutes.`,
     assignedDeviceId: null, assignedSimSubscriptionId: null,
     status: 'queued', attempts: 0, maxAttempts: 1,   // never resend an OTP
