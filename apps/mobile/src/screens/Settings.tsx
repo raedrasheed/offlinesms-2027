@@ -410,20 +410,9 @@ export default function Settings({ navigation }: any) {
         )}
       </View>
 
-      {/* Help, version & sign out */}
+      {/* Help & Support */}
       <View style={s.card}>
         {navRow({ icon: 'help-circle', color: CHIP.support, label: t('settings.helpSupport'), onPress: () => navigation.navigate('SupportTicket'), first: true })}
-        <View
-          style={[s.cardRow, s.cardRowDivider]}
-          accessible={true}
-          accessibilityLabel={`${t('settings.appVersion')} ${APP_VERSION}`}
-        >
-          {iconChip(CHIP.version, 'information-circle')}
-          <View style={{ flex: 1 }}>
-            <Text style={s.title}>{t('settings.appVersion')}</Text>
-          </View>
-          <Text style={s.sub}>{APP_VERSION}</Text>
-        </View>
       </View>
 
       {/* Legal — public privacy policy & terms of service (open in browser) */}
@@ -456,9 +445,20 @@ export default function Settings({ navigation }: any) {
         })}
       </View>
 
-      {/* Sign out — bottom of the list */}
+      {/* App version + sign out — bottom of the list */}
       <View style={s.card}>
-        {navRow({ icon: 'log-out', color: CHIP.signOut, label: t('settings.signOut'), onPress: () => signOut(), first: true, danger: true })}
+        <View
+          style={s.cardRow}
+          accessible={true}
+          accessibilityLabel={`${t('settings.appVersion')} ${APP_VERSION}`}
+        >
+          {iconChip(CHIP.version, 'information-circle')}
+          <View style={{ flex: 1 }}>
+            <Text style={s.title}>{t('settings.appVersion')}</Text>
+          </View>
+          <Text style={s.sub}>{APP_VERSION}</Text>
+        </View>
+        {navRow({ icon: 'log-out', color: CHIP.signOut, label: t('settings.signOut'), onPress: () => signOut(), danger: true })}
       </View>
     </ScrollView>
   );
