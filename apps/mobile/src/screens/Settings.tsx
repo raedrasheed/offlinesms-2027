@@ -58,7 +58,6 @@ const CHIP = {
   inAppNotifs:  '#F44336',
   wallpaper:    '#00BCD4',
   notifs:       '#F44336',
-  privacy:      '#4CAF50',
   devices:      '#3F51B5',
   support:      '#2196F3',
   privacyPolicy:'#4CAF50',
@@ -378,10 +377,9 @@ export default function Settings({ navigation }: any) {
         </View>
       </View>
 
-      {/* Privacy & devices */}
+      {/* Linked devices */}
       <View style={s.card}>
-        {navRow({ icon: 'lock-closed', color: CHIP.privacy, label: t('settings.privacy'), onPress: () => navigation.navigate('Privacy'), first: true })}
-        {navRow({ icon: 'laptop', color: CHIP.devices, label: t('settings.linkedDevices'), onPress: () => navigation.navigate('Devices') })}
+        {navRow({ icon: 'laptop', color: CHIP.devices, label: t('settings.linkedDevices'), onPress: () => navigation.navigate('Devices'), first: true })}
       </View>
 
       {/* On-device storage */}
@@ -426,7 +424,6 @@ export default function Settings({ navigation }: any) {
           </View>
           <Text style={s.sub}>{APP_VERSION}</Text>
         </View>
-        {navRow({ icon: 'log-out', color: CHIP.signOut, label: t('settings.signOut'), onPress: () => signOut(), danger: true })}
       </View>
 
       {/* Legal — public privacy policy & terms of service (open in browser) */}
@@ -457,6 +454,11 @@ export default function Settings({ navigation }: any) {
           first: true,
           danger: true,
         })}
+      </View>
+
+      {/* Sign out — bottom of the list */}
+      <View style={s.card}>
+        {navRow({ icon: 'log-out', color: CHIP.signOut, label: t('settings.signOut'), onPress: () => signOut(), first: true, danger: true })}
       </View>
     </ScrollView>
   );
