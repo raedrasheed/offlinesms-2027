@@ -31,7 +31,8 @@ export default function FindFriends({ navigation }: any) {
     try {
       const phones = await loadDeviceContactsAsE164();
       setProgress({ scanned: 0, total: phones.length, matched: 0 });
-      const found = await matchContactsOnServer(phones, setProgress);
+      // Stream found friends in as each batch completes.
+      const found = await matchContactsOnServer(phones, setProgress, setMatches);
       setMatches(found);
       setPhase('done');
     } catch (e: any) {
