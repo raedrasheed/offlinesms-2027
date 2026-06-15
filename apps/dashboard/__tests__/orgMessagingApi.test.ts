@@ -226,6 +226,7 @@ describe('messageDocFields (per-recipient log shape)', () => {
       recipientType: 'phone', recipientValue: '+970591111111',
       resolvedUserId: null, title: 'T', body: 'B',
       status: 'unsupported_recipient', failureReason: 'phone_not_linked_to_user',
+      recipientCountryCode: null, smsRelayCoverage: 'unknown',
     });
   });
   it('records userId recipients', () => {
