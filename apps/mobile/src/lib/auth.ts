@@ -34,6 +34,18 @@ export async function requestPhoneOtp(phoneE164: string): Promise<void> {
   await httpsCallable<{ phoneE164: string }, { ok: boolean }>(fns(), 'requestPhoneOtp')({ phoneE164 });
 }
 
+/**
+ * The ISO alpha-2 countries phone sign-in is currently possible for (the OTP
+ * org has a live relay serving them). The sign-in country picker shows ONLY
+ * these — empty means no country is available right now.
+ */
+export async function getSupportedPhoneCountries(): Promise<string[]> {
+  const res = await httpsCallable<Record<string, never>, { countries: string[] }>(
+    fns(), 'getSupportedPhoneCountries',
+  )({});
+  return Array.isArray(res.data?.countries) ? res.data.countries : [];
+}
+
 /** Verify the OTP and sign in with the returned custom token. */
 export async function verifyPhoneOtpAndSignIn(phoneE164: string, code: string): Promise<void> {
   const res = await httpsCallable<{ phoneE164: string; code: string }, { customToken: string }>(

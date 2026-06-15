@@ -220,13 +220,15 @@ async function resolveItems(items: SendItem[]): Promise<ResolvedItem[]> {
 }
 
 /**
- * Country-based relay routing (synchronous, annotation-only). For each recipient,
- * detect their country and whether the org has a live relay covering it for the
- * SMS-fallback step. Does NOT block in-app delivery (which needs no relay); the
- * SMS escalation itself is enforced by the dispatcher. Mutates each item's
- * smsRelayCoverage/recipientCountryCode and returns the batch coverage summary.
+ * Country-based relay routing (synchronous, ENFORCING). For each recipient,
+ * detect their country and whether the org has a live relay covering it. A
+ * recipient whose country has no eligible relay is HARD-BLOCKED: the item's
+ * status is set to 'no_relay_for_country' so it is delivered neither in-app nor
+ * by SMS (and is excluded from quota). 'covered' and 'unknown' (no phone /
+ * undetectable country) pass through unchanged. Mutates each item's
+ * smsRelayCoverage/recipientCountryCode/status and returns the coverage summary.
  */
-async function annotateSmsCoverage(organizationId: string, resolved: ResolvedItem[]): Promise<CoverageSummary> {
+async function applySmsCoverage(organizationId: string, resolved: ResolvedItem[]): Promise<CoverageSummary> {
   const cov = await loadOrgRelayCoverage(organizationId);
   const uids = [...new Set(resolved.map(r => r.resolvedUserId).filter((v): v is string => !!v))];
   const uidPhone = new Map<string, string>();
@@ -252,6 +254,13 @@ async function annotateSmsCoverage(organizationId: string, resolved: ResolvedIte
     }
     item.recipientCountryCode = countryCode;
     item.smsRelayCoverage = status;
+    // Hard country block: only downgrade items that would otherwise deliver
+    // (queued). failed/unsupported items keep their original reason.
+    if (status === 'no_relay_for_country' && item.status === 'queued') {
+      item.status = 'no_relay_for_country';
+      item.failureReason = 'no_relay_for_country';
+      item.resolvedUserId = null;   // do not create an in-app conversation/message
+    }
     statuses.push(status);
   }
   return summarizeCoverage(statuses);
@@ -308,13 +317,16 @@ export async function submitOrganizationMessageBatch(
   let resolved: ResolvedItem[];
   try { resolved = await resolveItems(items); }
   catch { return { ok: false, code: 'internal_error' }; }
-  const summary = summarizeItems(resolved);
 
-  // Country-based relay routing (synchronous, annotation-only — never blocks
-  // in-app delivery). Surfaces per-recipient SMS coverage + a batch summary.
+  // Country-based relay routing (synchronous, ENFORCING). Recipients whose
+  // country has no eligible relay are hard-blocked here (status →
+  // no_relay_for_country) BEFORE the summary/quota, so they are neither
+  // delivered in-app nor counted against the org's quota.
   let smsCoverage: CoverageSummary = { covered: 0, noRelay: 0, unknown: 0 };
-  try { smsCoverage = await annotateSmsCoverage(organizationId, resolved); }
-  catch { /* coverage is annotation-only; never fail the send on it */ }
+  try { smsCoverage = await applySmsCoverage(organizationId, resolved); }
+  catch { /* if coverage can't be loaded, fall back to in-app delivery (SMS step stays dispatcher-gated) */ }
+
+  const summary = summarizeItems(resolved);
 
   const escalationScheduled = policy.enabled && summary.accepted > 0;
   const escalateAt = escalationScheduled

@@ -139,10 +139,10 @@ export const escalateSms = onCall({ region: 'us-central1' }, async (request) => 
 
   if (eligible.length === 0) throw new HttpsError('failed-precondition', 'no-eligible-recipients');
 
-  // ── Country-based relay routing (relay path only) ──
-  // Resolve the relay org + provider mode up-front. When relay is engaged, drop
-  // recipients whose detected country has no live relay BEFORE reserving points,
-  // so billing matches exactly what gets sent. HTTP mode is unaffected.
+  // ── Country-based relay routing (enforced for EVERY send — relay AND HTTP) ──
+  // Product rule: if a recipient's detected country has no eligible relay, the
+  // message is NOT sent to them, regardless of provider mode. Filter BEFORE
+  // reserving points so billing matches what's sent.
   const orgId = (request.auth?.token?.organizationId as string | undefined)
     ?? (await resolveDefaultRelayBusiness());
   const providerMode = await resolveProvider(orgId);
@@ -150,10 +150,12 @@ export const escalateSms = onCall({ region: 'us-central1' }, async (request) => 
 
   let uncoveredCountry: { uid: string; reason: string; countryCode: string | null }[] = [];
   let countrySummary: ReturnType<typeof summarizeOutcomes> | null = null;
-  if (relayMode) {
-    const { covered, uncovered } = await partitionRecipientsByCoverage(
-      orgId as string, eligible.map(e => ({ id: e.uid, phoneE164: e.phone })),
-    );
+  {
+    const recipients = eligible.map(e => ({ id: e.uid, phoneE164: e.phone }));
+    // No relay business resolved ⇒ no coverage anywhere ⇒ nothing may be sent.
+    const { covered, uncovered } = orgId
+      ? await partitionRecipientsByCoverage(orgId, recipients)
+      : { covered: [], uncovered: recipients.map(r => ({ id: r.id, e164: r.phoneE164, countryCode: null, reason: 'no_relay_for_country' as const })) };
     countrySummary = summarizeOutcomes([
       ...covered.map(c => ({ countryCode: c.countryCode, queued: true })),
       ...uncovered.map(u => ({ countryCode: u.countryCode, queued: false, reason: u.reason })),
@@ -439,7 +441,9 @@ export const escalateSms = onCall({ region: 'us-central1' }, async (request) => 
     offlineSmsBatchId: result.gatewayBatchId,
     sent:              result.acceptedRecipientIds.length,
     failed:            failedCount,
-    skipped:           excluded.length,
+    skipped:           excluded.length + uncoveredCountry.length,
+    noRelayForCountry: uncoveredCountry.length,
+    countrySummary,
     pointsCost:        cost,
     status:            finalStatus,
   };

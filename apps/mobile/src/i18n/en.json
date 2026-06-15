@@ -23,7 +23,16 @@
     "usernameHint": "3–20 characters · lowercase letters, numbers, dot, underscore.",
     "createProfileBtn": "Create profile",
     "useDifferentNumber": "Use a different number",
-    "saving": "Saving…"
+    "saving": "Saving…",
+    "phoneSubtitle": "We'll text you a 6-digit code. Carrier rates may apply.",
+    "phonePrivacyHint": "Your number isn't shared with contacts.",
+    "chooseCountry": "Choose country",
+    "searchCountry": "Search country or code",
+    "noCountryMatch": "No countries match “{{query}}”.",
+    "loadingCountries": "Loading available countries…",
+    "noCountriesAvailable": "No countries are currently available for phone sign-in",
+    "countriesLoadError": "Couldn't load available countries. Tap to retry.",
+    "couldntSendCode": "Couldn't send code"
   },
   "profileErrors": {
     "usernameTaken": "That username is taken. Try another.",
@@ -362,6 +371,10 @@
     "privacy": "Privacy",
     "linkedDevices": "Linked devices",
     "helpSupport": "Help & Support",
+    "privacyPolicy": "Privacy Policy",
+    "termsOfService": "Terms of Service",
+    "opensInBrowser": "Opens in your browser",
+    "linkOpenFailed": "Couldn't open the link",
     "signOut": "Sign out",
     "deleteAccount": "Delete account",
     "deleteAccountSubtitle": "Permanently remove your account and data",

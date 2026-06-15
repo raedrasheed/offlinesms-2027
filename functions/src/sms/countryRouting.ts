@@ -9,7 +9,7 @@
 import { getFirestore } from 'firebase-admin/firestore';
 import { normalizePhoneAndCountry } from '../lib/phoneCountry';
 import {
-  deviceRemaining, pickRelayForCountry, hasRelayCoverageForCountry,
+  deviceRemaining, pickRelayForCountry, coverageSkipReason,
   type RouteDeviceCountry, type SkipReasonCode,
 } from './relayLogic';
 
@@ -56,14 +56,12 @@ export async function partitionRecipientsByCoverage(
   const uncovered: UncoveredRecipient[] = [];
   for (const r of recipients) {
     const norm = normalizePhoneAndCountry(r.phoneE164 ?? '', opts.defaultCountry);
-    if (!norm.isValid || !norm.e164) {
-      uncovered.push({ id: r.id, e164: norm.e164 || null, countryCode: null, reason: 'invalid_phone' });
-    } else if (!norm.countryCode) {
-      uncovered.push({ id: r.id, e164: norm.e164, countryCode: null, reason: 'unsupported_country' });
-    } else if (hasRelayCoverageForCountry(devices, norm.countryCode, nowMs)) {
-      covered.push({ id: r.id, e164: norm.e164, countryCode: norm.countryCode });
+    const reason = coverageSkipReason(devices, { valid: norm.isValid && !!norm.e164, countryCode: norm.countryCode }, nowMs);
+    if (reason === null) {
+      // coverageSkipReason returns null only when valid + countryCode + covered.
+      covered.push({ id: r.id, e164: norm.e164 as string, countryCode: norm.countryCode as string });
     } else {
-      uncovered.push({ id: r.id, e164: norm.e164, countryCode: norm.countryCode, reason: 'no_relay_for_country' });
+      uncovered.push({ id: r.id, e164: norm.e164 || null, countryCode: norm.countryCode ?? null, reason });
     }
   }
   return { covered, uncovered };

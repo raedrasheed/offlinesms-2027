@@ -23,7 +23,16 @@
     "usernameHint": "٣–٢٠ حرفًا · أحرف لاتينية صغيرة، أرقام، نقطة، شرطة سفلية.",
     "createProfileBtn": "إنشاء الملف",
     "useDifferentNumber": "استخدم رقمًا آخر",
-    "saving": "جارٍ الحفظ…"
+    "saving": "جارٍ الحفظ…",
+    "phoneSubtitle": "سنرسل لك رمزًا من 6 أرقام. قد تُطبّق رسوم المشغّل.",
+    "phonePrivacyHint": "لا تتم مشاركة رقمك مع جهات الاتصال.",
+    "chooseCountry": "اختر الدولة",
+    "searchCountry": "ابحث عن الدولة أو الرمز",
+    "noCountryMatch": "لا توجد دول مطابقة لـ ”{{query}}“.",
+    "loadingCountries": "جارٍ تحميل الدول المتاحة…",
+    "noCountriesAvailable": "لا توجد دول متاحة للتسجيل حاليا",
+    "countriesLoadError": "تعذّر تحميل الدول المتاحة. اضغط لإعادة المحاولة.",
+    "couldntSendCode": "تعذّر إرسال الرمز"
   },
   "profileErrors": {
     "usernameTaken": "اسم المستخدم مأخوذ. جرّب اسمًا آخر.",
@@ -362,6 +371,10 @@
     "privacy": "الخصوصية",
     "linkedDevices": "الأجهزة المرتبطة",
     "helpSupport": "المساعدة والدعم",
+    "privacyPolicy": "سياسة الخصوصية",
+    "termsOfService": "شروط الخدمة",
+    "opensInBrowser": "يُفتح في المتصفح",
+    "linkOpenFailed": "تعذّر فتح الرابط",
     "signOut": "تسجيل الخروج",
     "deleteAccount": "حذف الحساب",
     "deleteAccountSubtitle": "إزالة حسابك وبياناتك نهائيًا",

@@ -12,7 +12,7 @@ import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore, FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { writeAuditLog } from '../lib/auditLog';
 import {
-  leaseExpiryMs, capacityRemaining, isClaimable,
+  leaseExpiryMs, capacityRemaining, isClaimable, canDeviceClaimJobCountry,
   normalizeReportStatus, recipientStatusFor, shouldApplyReport,
   classifyFailure, failureOutcome, backoffMs, utcDayKey,
   type RelayJobStatus,
@@ -57,7 +57,7 @@ export const claimRelayJobs = onCall({ region: REGION }, async (request) => {
   // (e.g. sign-in OTP) keep their existing behavior.
   const allowedCountryCodes = (devSnap.get('allowedCountryCodes') as string[] | undefined) ?? [];
   const servesJobCountry = (jobCountry: unknown): boolean =>
-    typeof jobCountry !== 'string' || jobCountry === '' || allowedCountryCodes.includes(jobCountry);
+    canDeviceClaimJobCountry(allowedCountryCodes, jobCountry);
 
   // Candidate queued jobs for THIS business (assigned to this device or unassigned).
   const candSnap = await db.collection('relayJobs')

@@ -130,22 +130,32 @@ describe('summarizeItems — honest statuses only', () => {
   it('counts queued as accepted and derives the batch status', () => {
     expect(summarizeItems([
       { status: 'queued' }, { status: 'queued' },
-    ])).toEqual({ total: 2, accepted: 2, queued: 2, failed: 0, unsupported: 0, batchStatus: 'accepted' });
+    ])).toEqual({ total: 2, accepted: 2, queued: 2, failed: 0, unsupported: 0, noRelayForCountry: 0, batchStatus: 'accepted' });
 
     expect(summarizeItems([
       { status: 'queued' }, { status: 'failed' }, { status: 'unsupported_recipient' },
-    ])).toEqual({ total: 3, accepted: 1, queued: 1, failed: 1, unsupported: 1, batchStatus: 'partial' });
+    ])).toEqual({ total: 3, accepted: 1, queued: 1, failed: 1, unsupported: 1, noRelayForCountry: 0, batchStatus: 'partial' });
 
     expect(summarizeItems([
       { status: 'failed' }, { status: 'unsupported_recipient' },
     ])).toMatchObject({ accepted: 0, batchStatus: 'failed' });
   });
 
+  it('counts hard country-blocks (no_relay_for_country) as non-accepted', () => {
+    expect(summarizeItems([
+      { status: 'queued' }, { status: 'no_relay_for_country' }, { status: 'no_relay_for_country' },
+    ])).toEqual({ total: 3, accepted: 1, queued: 1, failed: 0, unsupported: 0, noRelayForCountry: 2, batchStatus: 'partial' });
+
+    expect(summarizeItems([
+      { status: 'no_relay_for_country' }, { status: 'no_relay_for_country' },
+    ])).toMatchObject({ accepted: 0, noRelayForCountry: 2, batchStatus: 'failed' });
+  });
+
   it('uses receipt-backed delivered/read but never the fake sent/seen', () => {
     expect(ORG_MESSAGE_STATUSES).not.toContain('sent');
     expect(ORG_MESSAGE_STATUSES).not.toContain('seen');
     expect([...ORG_MESSAGE_STATUSES].sort()).toEqual(
-      ['accepted', 'delivered', 'failed', 'queued', 'read', 'unsupported_recipient'],
+      ['accepted', 'delivered', 'failed', 'no_relay_for_country', 'queued', 'read', 'unsupported_recipient'],
     );
   });
 });

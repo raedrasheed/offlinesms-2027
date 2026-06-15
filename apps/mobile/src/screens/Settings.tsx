@@ -8,7 +8,7 @@
 
 import { useEffect, useState } from 'react';
 import {
-  View, Text, Pressable, Switch, StyleSheet, Alert, ScrollView, Image,
+  View, Text, Pressable, Switch, StyleSheet, Alert, ScrollView, Image, Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
@@ -61,10 +61,16 @@ const CHIP = {
   privacy:      '#4CAF50',
   devices:      '#3F51B5',
   support:      '#2196F3',
+  privacyPolicy:'#4CAF50',
+  terms:        '#795548',
   version:      '#607D8B',
   signOut:      '#F44336',
   deleteAcct:   '#B71C1C',
 } as const;
+
+// Public legal pages (opened in the system browser).
+const PRIVACY_POLICY_URL = 'https://offlinesms.com/offlinesms-privacy-policy.html';
+const TERMS_OF_SERVICE_URL = 'https://offlinesms.com/offlinesms-terms-of-service.html';
 
 // App version shown in Settings. Sourced from the .env file
 // (EXPO_PUBLIC_APP_VERSION); falls back to the bundled app.json version.
@@ -149,6 +155,14 @@ export default function Settings({ navigation }: any) {
   async function handleThemeChange(theme: ThemePreference) {
     setThemePref(theme);
     await withBusy(() => setPreferredTheme(me!, theme));
+  }
+
+  async function openUrl(url: string) {
+    try {
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert(t('settings.linkOpenFailed'), url);
+    }
   }
 
   const s = buildStyles(colors, isRTL);
@@ -413,6 +427,23 @@ export default function Settings({ navigation }: any) {
           <Text style={s.sub}>{APP_VERSION}</Text>
         </View>
         {navRow({ icon: 'log-out', color: CHIP.signOut, label: t('settings.signOut'), onPress: () => signOut(), danger: true })}
+      </View>
+
+      {/* Legal — public privacy policy & terms of service (open in browser) */}
+      <View style={s.card}>
+        {navRow({
+          icon: 'shield-checkmark', color: CHIP.privacyPolicy,
+          label: t('settings.privacyPolicy'),
+          onPress: () => openUrl(PRIVACY_POLICY_URL),
+          first: true,
+          hint: t('settings.opensInBrowser'),
+        })}
+        {navRow({
+          icon: 'document-text', color: CHIP.terms,
+          label: t('settings.termsOfService'),
+          onPress: () => openUrl(TERMS_OF_SERVICE_URL),
+          hint: t('settings.opensInBrowser'),
+        })}
       </View>
 
       {/* Danger zone — permanent account deletion */}

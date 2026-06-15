@@ -91,9 +91,11 @@ export const ORG_MSG_MAX_RECIPIENTS = 500;
  *   queued    → message created in the app pipeline; receipt still pending
  *   delivered → the recipient's app acknowledged delivery (receipt)
  *   read      → the recipient read it in the app (receipt)
+ *   no_relay_for_country → recipient's country has no eligible relay, so the
+ *     message is NOT delivered at all (in-app or SMS). Hard country block.
  * `sent`/`seen` remain unused.
  */
-export const ORG_MESSAGE_STATUSES = ['accepted', 'queued', 'delivered', 'read', 'failed', 'unsupported_recipient'] as const;
+export const ORG_MESSAGE_STATUSES = ['accepted', 'queued', 'delivered', 'read', 'failed', 'unsupported_recipient', 'no_relay_for_country'] as const;
 export type OrgMessageStatus = (typeof ORG_MESSAGE_STATUSES)[number];
 
 // ─── SMS escalation policy (org default + per-request override) ─────────────

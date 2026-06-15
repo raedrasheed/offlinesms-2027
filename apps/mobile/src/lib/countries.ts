@@ -219,3 +219,18 @@ export const COUNTRIES: Country[] = [
   { code: 'ZM', dial: '+260',  name: 'Zambia' },
   { code: 'ZW', dial: '+263',  name: 'Zimbabwe' },
 ];
+
+/** Priority-ordered country list (region-relevant entries first, then the rest
+ *  alphabetically by name) — the full picker order. */
+export const ORDERED_COUNTRIES: Country[] = [
+  ...PRIORITY_CODES.map(code => COUNTRIES.find(c => c.code === code)).filter((c): c is Country => !!c),
+  ...COUNTRIES.filter(c => !PRIORITY_CODES.includes(c.code)),
+];
+
+/** Intersect the full ordered list with the ISO alpha-2 codes a relay currently
+ *  serves — the only countries the phone sign-in picker may offer. Preserves
+ *  the priority ordering and silently drops codes we don't have metadata for. */
+export function availableCountries(supportedCodes: Iterable<string>): Country[] {
+  const set = new Set([...supportedCodes].map(c => c.toUpperCase()));
+  return ORDERED_COUNTRIES.filter(c => set.has(c.code));
+}
