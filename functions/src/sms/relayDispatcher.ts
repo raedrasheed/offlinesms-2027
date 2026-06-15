@@ -1,49 +1,68 @@
-// Relay dispatcher (Phase 5 — multi-device routing).
+// Relay dispatcher — country-aware multi-device routing.
 //
-// Turns the relay-eligible recipients of an accepted batch into per-recipient
-// relayJobs, distributing them across the business's healthy devices by spare
-// capacity (least-loaded). Stable jobId → idempotent (duplicate dispatch never
-// duplicates jobs). Devices that are paused/revoked/offline/stale or
-// cap-exhausted receive nothing. Cross-business is impossible: only devices and
-// jobs for the given businessId are touched.
+// Turns a batch's relay-eligible recipients into per-recipient relayJobs,
+// routing each recipient ONLY to a relay that explicitly covers its detected
+// country (active + fresh + countryRoutingEnabled + allowedCountryCodes ∋ cc),
+// least-loaded first. This is the defensive backend chokepoint: NO relayJob is
+// created without an eligible relay for the recipient's country. Recipients whose
+// country has no live relay are skipped (no_relay_for_country) — never sent via
+// another country's relay, never HTTP-fallen-back. Cross-business is impossible:
+// only the given businessId's devices/jobs are touched. Stable jobId → idempotent.
 
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { getMessaging } from 'firebase-admin/messaging';
+import { normalizePhoneAndCountry } from '../lib/phoneCountry';
 import {
-  makeJobId, deviceRemaining, isDeviceRoutable, routeLeastLoaded,
-  DEFAULT_MAX_ATTEMPTS, type RouteDevice,
+  makeJobId, pickRelayForCountry, hasRelayCoverageForCountry, summarizeOutcomes,
+  DEFAULT_MAX_ATTEMPTS, type RecipientOutcome, type DispatchSummary, type RouteDeviceCountry,
 } from './relayLogic';
+import { loadActiveRelayDevices } from './countryRouting';
 
 export interface DispatchResult {
-  routed: number;          // recipients given a relay job
-  unrouted: string[];      // recipientUids with no relay job (caller may HTTP-fallback)
+  routed: number;            // recipients given a relay job
+  unrouted: string[];        // COVERED recipients with no spare capacity (hybrid → HTTP fallback)
   assignedDeviceIds: string[];
+  summary: DispatchSummary;  // per-country counts + skippedByReason
 }
 
-async function routableDevices(businessId: string, nowMs: number): Promise<RouteDevice[]> {
-  const db = getFirestore();
-  const snap = await db.collection('relayDevices')
-    .where('businessId', '==', businessId)
-    .where('status', '==', 'active')
-    .limit(50)
-    .get();
-  const out: RouteDevice[] = [];
-  for (const d of snap.docs) {
-    const caps = (d.get('caps') ?? { maxPerDay: 0 }) as { maxPerDay: number };
-    const counters = (d.get('counters') ?? {}) as { sentToday?: number };
-    const remaining = deviceRemaining(caps, counters);
-    const lastHb = (d.get('lastHeartbeatAt') as any)?.toMillis?.() ?? null;
-    if (isDeviceRoutable({ status: 'active', lastHeartbeatMs: lastHb, remaining }, nowMs)) {
-      out.push({ deviceId: d.id, remaining });
-    }
+interface CreateJobParams {
+  batchId: string; businessId: string; recipientUid: string;
+  phoneE164: string; country: string; smsBody: string; assignedDeviceId: string | null;
+}
+
+async function createRelayJob(db: FirebaseFirestore.Firestore, p: CreateJobParams): Promise<boolean> {
+  const jobId = makeJobId(p.batchId, p.recipientUid);
+  try {
+    await db.collection('relayJobs').doc(jobId).create({
+      jobId, businessId: p.businessId, batchId: p.batchId, recipientUid: p.recipientUid,
+      phoneE164: p.phoneE164, recipientCountryCode: p.country, messageBody: p.smsBody,
+      assignedDeviceId: p.assignedDeviceId, assignedSimSubscriptionId: null,
+      status: 'queued', attempts: 0, maxAttempts: DEFAULT_MAX_ATTEMPTS,
+      leaseOwnerDeviceId: null, leaseExpiresAt: null, nextAttemptAt: null,
+      traceId: jobId,
+      createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
+    });
+    return true;
+  } catch {
+    return false; // stable jobId already exists → idempotent no-op
   }
-  return out;
+}
+
+async function markRecipientSkipped(
+  batchRef: FirebaseFirestore.DocumentReference, recipientUid: string, reason: string,
+): Promise<void> {
+  await batchRef.collection('recipients').doc(recipientUid).set(
+    { smsStatus: 'skipped', skipReason: reason, reason, updatedAt: FieldValue.serverTimestamp() },
+    { merge: true },
+  );
 }
 
 /**
- * @param allowUnassignedQueue relay-only mode: recipients with no spare device
- *   capacity are still queued (assignedDeviceId=null) to be claimed later.
- *   Hybrid mode passes false so unrouted recipients are returned for HTTP fallback.
+ * @param allowUnassignedQueue relay-only mode: covered recipients with no spare
+ *   device capacity are still queued (assignedDeviceId=null) to be claimed later
+ *   by a country-serving device. Hybrid mode passes false so covered-overflow
+ *   recipients are returned in `unrouted` for HTTP fallback. Uncovered countries
+ *   are NEVER returned for fallback — they are skipped (no_relay_for_country).
  */
 export async function dispatchBatchToRelay(
   batchId: string,
@@ -61,51 +80,68 @@ export async function dispatchBatchToRelay(
 
   const recips = await batchRef.collection('recipients').where('smsStatus', '==', 'queued').get();
   const recipientUids = recips.docs.map(d => d.id);
-  // External (phone-only) recipients carry their number on the recipient doc —
-  // there is no users/{uid} to look up. Registered recipients fall back to the
-  // user profile, unchanged.
   const phoneOnDoc = new Map<string, string | null>(
     recips.docs.map(d => [d.id, (d.get('phoneE164') as string | null) ?? null]),
   );
 
-  const devices = await routableDevices(businessId, now);
-  const { assignments, unrouted } = routeLeastLoaded(recipientUids, devices);
-  const assignedDevice = new Map(assignments.map(a => [a.uid, a.deviceId]));
+  // In-memory device pool (capacity decremented as we assign → least-loaded).
+  const pool: RouteDeviceCountry[] = await loadActiveRelayDevices(businessId);
 
   const assignedDeviceIds = new Set<string>();
-  let routed = 0;
+  const outcomes: RecipientOutcome[] = [];
   const trulyUnrouted: string[] = [];
+  let routed = 0;
 
   for (const recipientUid of recipientUids) {
-    const deviceId = assignedDevice.get(recipientUid) ?? null;
-    if (!deviceId && !allowUnassignedQueue) { trulyUnrouted.push(recipientUid); continue; }
-
     let phoneE164 = phoneOnDoc.get(recipientUid) ?? null;
     if (!phoneE164) {
       const userSnap = await db.collection('users').doc(recipientUid).get();
       phoneE164 = (userSnap.get('phoneNumber') as string | null) ?? null;
     }
-    if (!phoneE164) { if (!deviceId) trulyUnrouted.push(recipientUid); continue; }
 
-    const jobId = makeJobId(batchId, recipientUid);
-    try {
-      await db.collection('relayJobs').doc(jobId).create({
-        jobId, businessId, batchId, recipientUid, phoneE164, messageBody: smsBody,
-        assignedDeviceId: deviceId,
-        assignedSimSubscriptionId: null,
-        status: 'queued', attempts: 0, maxAttempts: DEFAULT_MAX_ATTEMPTS,
-        leaseOwnerDeviceId: null, leaseExpiresAt: null, nextAttemptAt: null,
-        traceId: jobId,
-        createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
-      });
-      routed++;
-      if (deviceId) assignedDeviceIds.add(deviceId);
-    } catch {
-      // Stable jobId already exists → idempotent no-op (duplicate dispatch).
+    const norm = normalizePhoneAndCountry(phoneE164 ?? '');
+    if (!norm.isValid || !norm.e164 || !norm.countryCode) {
+      const reason = (!norm.isValid || !norm.e164) ? 'invalid_phone' : 'unsupported_country';
+      await markRecipientSkipped(batchRef, recipientUid, reason);
+      outcomes.push({ countryCode: norm.countryCode ?? null, queued: false, reason });
+      continue;
     }
+    const country = norm.countryCode;
+
+    // Assign to a country-eligible relay with spare capacity (least-loaded).
+    const picked = pickRelayForCountry(pool, country, now);
+    if (picked) {
+      const ok = await createRelayJob(db, {
+        batchId, businessId, recipientUid, phoneE164: norm.e164, country, smsBody,
+        assignedDeviceId: picked.deviceId,
+      });
+      if (ok) { picked.remaining -= 1; assignedDeviceIds.add(picked.deviceId); routed++; }
+      outcomes.push({ countryCode: country, queued: true });
+      continue;
+    }
+
+    // No spare capacity now — but is the country covered by a live relay?
+    if (hasRelayCoverageForCountry(pool, country, now)) {
+      if (allowUnassignedQueue) {
+        const ok = await createRelayJob(db, {
+          batchId, businessId, recipientUid, phoneE164: norm.e164, country, smsBody,
+          assignedDeviceId: null,   // claimed later by a country-serving device
+        });
+        if (ok) routed++;
+        outcomes.push({ countryCode: country, queued: true });
+      } else {
+        trulyUnrouted.push(recipientUid);       // hybrid: HTTP-fallback (country IS covered)
+        outcomes.push({ countryCode: country, queued: true });
+      }
+      continue;
+    }
+
+    // No relay covers this country → do NOT send (no cross-country, no HTTP).
+    await markRecipientSkipped(batchRef, recipientUid, 'no_relay_for_country');
+    outcomes.push({ countryCode: country, queued: false, reason: 'no_relay_for_country' });
   }
 
-  // Wake the devices that received work.
+  // Wake the devices that received assigned work.
   for (const deviceId of assignedDeviceIds) {
     const dev = await db.collection('relayDevices').doc(deviceId).get();
     const token = dev.get('fcmToken') as string | null;
@@ -116,5 +152,8 @@ export async function dispatchBatchToRelay(
     }
   }
 
-  return { routed, unrouted: trulyUnrouted, assignedDeviceIds: [...assignedDeviceIds] };
+  return {
+    routed, unrouted: trulyUnrouted, assignedDeviceIds: [...assignedDeviceIds],
+    summary: summarizeOutcomes(outcomes),
+  };
 }

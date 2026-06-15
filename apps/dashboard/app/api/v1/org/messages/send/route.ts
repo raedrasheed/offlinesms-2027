@@ -83,5 +83,9 @@ export async function POST(request: Request) {
       delayMinutes: result.escalation.delayMinutes,
       audience:     result.escalation.audience,
     },
+    // Country-based relay routing: SMS-fallback coverage for this batch.
+    // covered = a live relay serves the recipient's country; no_relay_for_country
+    // = will not be SMS-escalated ("No relay is available for this country").
+    smsCoverage: result.smsCoverage,
   }, { status: 200 });
 }

@@ -52,6 +52,13 @@ export const claimRelayJobs = onCall({ region: REGION }, async (request) => {
   const budget = capacityRemaining(caps, counters, want);
   if (budget === 0) return { jobs: [] };
 
+  // Country enforcement: a device may only claim jobs for countries it serves.
+  // Country-tagged jobs (recipientCountryCode set) are gated; untagged jobs
+  // (e.g. sign-in OTP) keep their existing behavior.
+  const allowedCountryCodes = (devSnap.get('allowedCountryCodes') as string[] | undefined) ?? [];
+  const servesJobCountry = (jobCountry: unknown): boolean =>
+    typeof jobCountry !== 'string' || jobCountry === '' || allowedCountryCodes.includes(jobCountry);
+
   // Candidate queued jobs for THIS business (assigned to this device or unassigned).
   const candSnap = await db.collection('relayJobs')
     .where('businessId', '==', ctx.businessId)
@@ -66,6 +73,7 @@ export const claimRelayJobs = onCall({ region: REGION }, async (request) => {
     if (claimed.length >= budget) break;
     const assigned = doc.get('assignedDeviceId') as string | undefined;
     if (assigned && assigned !== ctx.deviceId) continue;
+    if (!servesJobCountry(doc.get('recipientCountryCode'))) continue; // unsupported country
 
     // Per-job transaction so two devices never claim the same job.
     const ok = await db.runTransaction(async tx => {
@@ -74,6 +82,7 @@ export const claimRelayJobs = onCall({ region: REGION }, async (request) => {
       if (fresh.get('status') !== 'queued') return null;
       const a = fresh.get('assignedDeviceId') as string | undefined;
       if (a && a !== ctx.deviceId) return null;
+      if (!servesJobCountry(fresh.get('recipientCountryCode'))) return null; // re-check under txn
       // Respect exponential-backoff window for requeued jobs.
       const nextAt = (fresh.get('nextAttemptAt') as Timestamp | undefined)?.toMillis?.() ?? null;
       if (!isClaimable(nextAt, now)) return null;

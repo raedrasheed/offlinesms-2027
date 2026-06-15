@@ -3,5 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "main": "relayTypes.ts",
-  "types": "relayTypes.ts"
+  "types": "relayTypes.ts",
+  "dependencies": {
+    "libphonenumber-js": "^1.11.4"
+  }
 }

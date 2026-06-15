@@ -107,7 +107,7 @@ export { adminSetOrgRole } from './admin/adminSetOrgRole';
 // Phase 24 — OfflineSMS-Business relay (private, business-only SMS gateway).
 // Additive only: the HTTP provider path (escalateSms/gateway) is unchanged and
 // relay is gated by smsConfig/providers (default 'http').
-export { createRelayPairingCode, enrollRelayDevice, relayHeartbeat, revokeRelayDevice } from './sms/relayDevices';
+export { createRelayPairingCode, enrollRelayDevice, relayHeartbeat, revokeRelayDevice, setRelayCountries } from './sms/relayDevices';
 export { claimRelayJobs, reportRelayDelivery } from './sms/relayJobs';
 // Relay-only reaper (Phase 3): lease expiry/requeue + stale-device offline +
 // metrics. Touches relay* collections only; no production SMS impact.

@@ -77,6 +77,8 @@ export default async function RelayAdminPage({ searchParams }: { searchParams?: 
           failedToday: (x.counters?.failedToday as number) ?? 0,
           deliveredToday: (x.counters?.deliveredToday as number) ?? 0,
           lastError: (x.lastError as string) ?? null,
+          allowedCountryCodes: Array.isArray(x.allowedCountryCodes) ? (x.allowedCountryCodes as string[]) : [],
+          countryRoutingEnabled: x.countryRoutingEnabled === true,
         };
       })
       .sort((a, b) => (b.lastHeartbeatAt ?? 0) - (a.lastHeartbeatAt ?? 0));
@@ -90,6 +92,22 @@ export default async function RelayAdminPage({ searchParams }: { searchParams?: 
   const healthyDevices = devices.filter(
     d => d.status === 'active' && d.lastHeartbeatAt != null && now - d.lastHeartbeatAt < 90_000,
   ).length;
+
+  // Country coverage view: for each country a configured relay serves, how many
+  // are currently active (online) vs offline. "Available" iff ≥1 active relay.
+  const coverageMap = new Map<string, { active: number; offline: number }>();
+  for (const d of devices) {
+    if (d.status === 'revoked' || !d.countryRoutingEnabled || d.allowedCountryCodes.length === 0) continue;
+    const online = d.status === 'active' && d.lastHeartbeatAt != null && now - d.lastHeartbeatAt < 90_000;
+    for (const cc of d.allowedCountryCodes) {
+      const e = coverageMap.get(cc) ?? { active: 0, offline: 0 };
+      if (online) e.active++; else e.offline++;
+      coverageMap.set(cc, e);
+    }
+  }
+  const coverage = [...coverageMap.entries()]
+    .map(([country, c]) => ({ country, active: c.active, offline: c.offline, available: c.active > 0 }))
+    .sort((a, b) => a.country.localeCompare(b.country));
 
   // Relay queue health for this organization (counts by status).
   const STATUSES = ['queued', 'claimed', 'sending', 'sent', 'delivered', 'failed', 'expired'] as const;
@@ -119,6 +137,7 @@ export default async function RelayAdminPage({ searchParams }: { searchParams?: 
         queueHealth={queueHealth}
         healthyDevices={healthyDevices}
         orgOptions={orgOptions}
+        coverage={coverage}
       />
     </div>
   );
