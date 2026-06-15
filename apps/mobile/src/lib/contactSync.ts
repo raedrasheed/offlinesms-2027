@@ -41,6 +41,16 @@ export async function loadDeviceContactsAsE164(defaultCountry = '+1'): Promise<s
   return [...out];
 }
 
+// Server caps each call at 500 phones (matchContacts → 'too-many-phones').
+// Stay safely under it and walk large address books in batches.
+const PHONES_PER_CALL = 300;
+
+function chunk<T>(arr: T[], n: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
+  return out;
+}
+
 export async function matchContactsOnServer(
   phones: string[],
   onProgress?: (p: SyncProgress) => void,
@@ -49,10 +59,20 @@ export async function matchContactsOnServer(
     getFunctions(app, 'us-central1'),
     'matchContacts',
   );
-  // Server processes in batches; report optimistic progress while we wait.
-  onProgress?.({ scanned: 0, total: phones.length, matched: 0 });
-  const res = await fn({ phones });
-  const matches = res.data.matches ?? [];
-  onProgress?.({ scanned: phones.length, total: phones.length, matched: matches.length });
-  return matches;
+
+  const total = phones.length;
+  onProgress?.({ scanned: 0, total, matched: 0 });
+
+  // Call the server in batches so big contact lists don't exceed the per-call
+  // cap; dedupe matches by uid (a person may appear under several numbers).
+  const byUid = new Map<string, ContactMatch>();
+  let scanned = 0;
+  for (const batch of chunk(phones, PHONES_PER_CALL)) {
+    const res = await fn({ phones: batch });
+    for (const m of res.data.matches ?? []) byUid.set(m.uid, m);
+    scanned += batch.length;
+    onProgress?.({ scanned, total, matched: byUid.size });
+  }
+
+  return [...byUid.values()];
 }
