@@ -8,7 +8,66 @@
 
 import { getFirestore } from 'firebase-admin/firestore';
 import { normalizePhoneAndCountry } from '../lib/phoneCountry';
-import { deviceRemaining, pickRelayForCountry, type RouteDeviceCountry } from './relayLogic';
+import {
+  deviceRemaining, pickRelayForCountry, hasRelayCoverageForCountry,
+  type RouteDeviceCountry, type SkipReasonCode,
+} from './relayLogic';
+
+/** Load a business's active relays as routing candidates (one query). */
+export async function loadActiveRelayDevices(businessId: string): Promise<RouteDeviceCountry[]> {
+  const db = getFirestore();
+  const snap = await db.collection('relayDevices')
+    .where('businessId', '==', businessId)
+    .where('status', '==', 'active')
+    .limit(50)
+    .get();
+  return snap.docs.map(d => {
+    const caps = (d.get('caps') ?? { maxPerDay: 0 }) as { maxPerDay: number };
+    const counters = (d.get('counters') ?? {}) as { sentToday?: number };
+    return {
+      deviceId: d.id,
+      remaining: deviceRemaining(caps, counters),
+      status: (d.get('status') as string) ?? 'offline',
+      lastHeartbeatMs: (d.get('lastHeartbeatAt') as { toMillis?: () => number } | null)?.toMillis?.() ?? null,
+      countryRoutingEnabled: d.get('countryRoutingEnabled') === true,
+      allowedCountryCodes: (d.get('allowedCountryCodes') as string[] | undefined) ?? [],
+    };
+  });
+}
+
+export interface CoverageRecipient { id: string; phoneE164: string | null }
+export interface CoveredRecipient { id: string; e164: string; countryCode: string }
+export interface UncoveredRecipient { id: string; e164: string | null; countryCode: string | null; reason: SkipReasonCode }
+
+/**
+ * Partition recipients into covered (a live relay serves their country) and
+ * uncovered (invalid phone / undetectable country / no relay for country). Used
+ * by every send flow BEFORE reserving points so billing matches what's sent.
+ * Capacity-agnostic: capacity overflow is queued, not a coverage gap.
+ */
+export async function partitionRecipientsByCoverage(
+  businessId: string,
+  recipients: CoverageRecipient[],
+  opts: { defaultCountry?: string; nowMs?: number } = {},
+): Promise<{ covered: CoveredRecipient[]; uncovered: UncoveredRecipient[] }> {
+  const nowMs = opts.nowMs ?? Date.now();
+  const devices = await loadActiveRelayDevices(businessId);
+  const covered: CoveredRecipient[] = [];
+  const uncovered: UncoveredRecipient[] = [];
+  for (const r of recipients) {
+    const norm = normalizePhoneAndCountry(r.phoneE164 ?? '', opts.defaultCountry);
+    if (!norm.isValid || !norm.e164) {
+      uncovered.push({ id: r.id, e164: norm.e164 || null, countryCode: null, reason: 'invalid_phone' });
+    } else if (!norm.countryCode) {
+      uncovered.push({ id: r.id, e164: norm.e164, countryCode: null, reason: 'unsupported_country' });
+    } else if (hasRelayCoverageForCountry(devices, norm.countryCode, nowMs)) {
+      covered.push({ id: r.id, e164: norm.e164, countryCode: norm.countryCode });
+    } else {
+      uncovered.push({ id: r.id, e164: norm.e164, countryCode: norm.countryCode, reason: 'no_relay_for_country' });
+    }
+  }
+  return { covered, uncovered };
+}
 
 /** User-facing message for an uncovered country (AR + EN per spec). */
 export const NO_RELAY_FOR_COUNTRY = {

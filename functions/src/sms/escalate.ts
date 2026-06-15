@@ -17,7 +17,8 @@ import {
   todayKey,
 } from './recipients';
 import { resolveProvider, resolveDefaultRelayBusiness } from './provider';
-import { relayModeEngaged, isHybrid } from './relayLogic';
+import { relayModeEngaged, isHybrid, summarizeOutcomes } from './relayLogic';
+import { partitionRecipientsByCoverage } from './countryRouting';
 import { dispatchBatchToRelay } from './relayDispatcher';
 import { maybeFinalizeRelayBatch } from './relaySettlement';
 import { writeAuditLog } from '../lib/auditLog';
@@ -137,6 +138,38 @@ export const escalateSms = onCall({ region: 'us-central1' }, async (request) => 
   }
 
   if (eligible.length === 0) throw new HttpsError('failed-precondition', 'no-eligible-recipients');
+
+  // ── Country-based relay routing (relay path only) ──
+  // Resolve the relay org + provider mode up-front. When relay is engaged, drop
+  // recipients whose detected country has no live relay BEFORE reserving points,
+  // so billing matches exactly what gets sent. HTTP mode is unaffected.
+  const orgId = (request.auth?.token?.organizationId as string | undefined)
+    ?? (await resolveDefaultRelayBusiness());
+  const providerMode = await resolveProvider(orgId);
+  const relayMode = relayModeEngaged(providerMode) && !!orgId;
+
+  let uncoveredCountry: { uid: string; reason: string; countryCode: string | null }[] = [];
+  let countrySummary: ReturnType<typeof summarizeOutcomes> | null = null;
+  if (relayMode) {
+    const { covered, uncovered } = await partitionRecipientsByCoverage(
+      orgId as string, eligible.map(e => ({ id: e.uid, phoneE164: e.phone })),
+    );
+    countrySummary = summarizeOutcomes([
+      ...covered.map(c => ({ countryCode: c.countryCode, queued: true })),
+      ...uncovered.map(u => ({ countryCode: u.countryCode, queued: false, reason: u.reason })),
+    ]);
+    const uncoveredIds = new Set(uncovered.map(u => u.id));
+    for (let i = eligible.length - 1; i >= 0; i--) {
+      if (uncoveredIds.has(eligible[i].uid)) eligible.splice(i, 1);
+    }
+    uncoveredCountry = uncovered.map(u => ({ uid: u.id, reason: u.reason, countryCode: u.countryCode }));
+  }
+
+  if (eligible.length === 0) {
+    // Nothing to send. If everyone was dropped for lack of relay coverage, say so.
+    throw new HttpsError('failed-precondition',
+      uncoveredCountry.length > 0 ? 'no_relay_for_country' : 'no-eligible-recipients');
+  }
   if (eligible.length > MAX_RECIPIENTS_PER_BATCH) {
     throw new HttpsError('failed-precondition', 'audience-too-large');
   }
@@ -166,7 +199,7 @@ export const escalateSms = onCall({ region: 'us-central1' }, async (request) => 
     smsBody,
     recipientCount:    eligible.length,
     eligibleCount:     eligible.length,
-    excludedCount:     excluded.length,
+    excludedCount:     excluded.length + uncoveredCountry.length,
     // Aggregate counters surfaced by the admin Gateway list.
     totalCount:        eligible.length,
     queuedCount:       eligible.length,
@@ -232,19 +265,29 @@ export const escalateSms = onCall({ region: 'us-central1' }, async (request) => 
     await skipBatch.commit();
   }
 
-  // ── Phase 5: relay path (feature-flagged + organization-scoped) ──
-  // Default is HTTP. Relay engages only when the SENDER's organization is
-  // configured for 'relay' / hybrid. Billing is identical to HTTP: eligible
-  // recipients are 'queued' and the batch is set 'accepted', so the existing
-  // onSmsBatchAccepted settles unchanged (Points/refund logic untouched).
-  // Relay org: the sender's own org (org admins) or, for regular users with no
-  // org claim, the configured default relay business so escalations still route
-  // to the relay device.
-  const orgId = (request.auth?.token?.organizationId as string | undefined)
-    ?? (await resolveDefaultRelayBusiness());
-  const providerMode = await resolveProvider(orgId);
+  // Write country-uncovered recipients as skipped (no_relay_for_country) so the
+  // UI and summary show exactly who wasn't sent and why.
+  if (uncoveredCountry.length > 0) {
+    const noRelayBatch = db.batch();
+    for (const u of uncoveredCountry) {
+      noRelayBatch.set(batchRef.collection('recipients').doc(u.uid), {
+        userId:     u.uid,
+        maskedPhone: null,
+        smsStatus:  'skipped',
+        skipReason: u.reason,
+        reason:     u.reason,
+        recipientCountryCode: u.countryCode,
+        updatedAt:  FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
+    await noRelayBatch.commit();
+  }
 
-  if (relayModeEngaged(providerMode) && orgId) {
+  // ── Phase 5: relay path (feature-flagged + organization-scoped) ──
+  // Relay engages only when the sender's org is configured for relay/hybrid
+  // (resolved as orgId/providerMode above). Country coverage was already applied
+  // to `eligible`; the dispatcher re-checks defensively before creating any job.
+  if (relayMode) {
     const hybrid = isHybrid(providerMode);
 
     // Mark eligible recipients queued (relay pending).
@@ -312,7 +355,10 @@ export const escalateSms = onCall({ region: 'us-central1' }, async (request) => 
 
     return {
       batchId: batchRef.id, offlineSmsBatchId: null,
-      sent: eligible.length, failed: 0, skipped: excluded.length,
+      sent: eligible.length, failed: 0,
+      skipped: excluded.length + uncoveredCountry.length,
+      noRelayForCountry: uncoveredCountry.length,
+      countrySummary,
       pointsCost: cost, status: finalStatus, provider: providerMode,
     };
   }

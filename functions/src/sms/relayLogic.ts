@@ -259,6 +259,50 @@ export function eligibleRelaysForCountry(
   );
 }
 
+/** Coverage check (capacity-agnostic): is there a live, configured relay that
+ *  serves this country? Used to decide eligibility/billing — capacity is a
+ *  transient pacing limit handled by queueing, not a coverage gap. */
+export function hasRelayCoverageForCountry(
+  devices: RouteDeviceCountry[], countryCode: string, nowMs: number,
+): boolean {
+  return devices.some(d =>
+    d.status === 'active'
+    && !isHeartbeatStale(d.lastHeartbeatMs, nowMs)
+    && isRelayConfiguredForRouting(d)
+    && deviceServesCountry(d, countryCode));
+}
+
+export type SkipReasonCode = 'invalid_phone' | 'unsupported_country' | 'no_relay_for_country';
+
+export interface RecipientOutcome { countryCode: string | null; queued: boolean; reason?: string }
+
+export interface DispatchSummary {
+  totalRecipients: number;
+  eligibleRecipients: number;
+  skippedRecipients: number;
+  skippedByReason: Record<string, number>;
+  countries: Record<string, { eligible: number; skipped: number }>;
+}
+
+/** Build the send summary (per spec) from per-recipient outcomes. */
+export function summarizeOutcomes(outcomes: RecipientOutcome[]): DispatchSummary {
+  const s: DispatchSummary = {
+    totalRecipients: outcomes.length, eligibleRecipients: 0, skippedRecipients: 0,
+    skippedByReason: {}, countries: {},
+  };
+  for (const o of outcomes) {
+    const cc = o.countryCode ?? 'unknown';
+    s.countries[cc] ??= { eligible: 0, skipped: 0 };
+    if (o.queued) { s.eligibleRecipients++; s.countries[cc].eligible++; }
+    else {
+      s.skippedRecipients++; s.countries[cc].skipped++;
+      const r = o.reason ?? 'unknown';
+      s.skippedByReason[r] = (s.skippedByReason[r] ?? 0) + 1;
+    }
+  }
+  return s;
+}
+
 /** Pick the best eligible relay for a country. Priority: least-loaded (most
  *  remaining capacity) → most recent heartbeat → deterministic by deviceId. */
 export function pickRelayForCountry(
