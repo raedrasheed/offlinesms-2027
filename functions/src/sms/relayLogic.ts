@@ -237,6 +237,25 @@ export function deviceServesCountry(
   return Array.isArray(d.allowedCountryCodes) && d.allowedCountryCodes.includes(countryCode);
 }
 
+/**
+ * Claim-time safety check (defense-in-depth at the relay app boundary): may a
+ * device whose served countries are `allowedCountryCodes` claim a job tagged
+ * with `jobCountry`?
+ *   • Country-tagged job (recipientCountryCode set) → only if the device serves
+ *     that country. An unconfigured device (empty list) can claim NO tagged job.
+ *   • Untagged job (no recipientCountryCode — e.g. legacy/sign-in OTP) → any
+ *     device may claim it (those jobs are gated at creation, not at claim).
+ * A device can therefore NEVER pull a job for a country it doesn't serve, even
+ * if a job were created/mistagged incorrectly upstream.
+ */
+export function canDeviceClaimJobCountry(
+  allowedCountryCodes: string[] | null | undefined,
+  jobCountry: unknown,
+): boolean {
+  if (typeof jobCountry !== 'string' || jobCountry === '') return true; // untagged
+  return Array.isArray(allowedCountryCodes) && allowedCountryCodes.includes(jobCountry);
+}
+
 export interface RouteDeviceCountry {
   deviceId: string;
   remaining: number;
