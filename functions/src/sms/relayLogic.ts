@@ -2,6 +2,7 @@
 // recipients.ts pattern). No firebase-admin imports here.
 
 import { ADMIN_ROLES } from '../lib/roles';
+import { isSupportedCountry } from 'libphonenumber-js';
 
 export type RelayJobStatus =
   | 'queued' | 'claimed' | 'sending' | 'sent' | 'delivered' | 'failed' | 'expired';
@@ -201,6 +202,123 @@ export function isDeviceRoutable(
 
 export interface RouteDevice { deviceId: string; remaining: number }
 export interface RouteResult { assignments: Array<{ uid: string; deviceId: string }>; unrouted: string[] }
+
+// ── Country-based relay routing ─────────────────────────────────────────────
+
+/** Validate/normalize a list of ISO alpha-2 country codes (uppercased, deduped,
+ *  sorted; only codes libphonenumber recognizes are kept). */
+export function normalizeCountryCodes(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  const out = new Set<string>();
+  for (const c of input) {
+    if (typeof c !== 'string') continue;
+    const code = c.trim().toUpperCase();
+    if (/^[A-Z]{2}$/.test(code) && isSupportedCountry(code as any)) out.add(code);
+  }
+  return [...out].sort();
+}
+
+/** A relay is eligible for country routing only when explicitly enabled AND it
+ *  has at least one allowed country. Missing/empty config (e.g. relays enrolled
+ *  before this feature) means BLOCKED — never "all countries". */
+export function isRelayConfiguredForRouting(
+  d: { countryRoutingEnabled?: boolean | null; allowedCountryCodes?: string[] | null },
+): boolean {
+  return d.countryRoutingEnabled === true
+    && Array.isArray(d.allowedCountryCodes)
+    && d.allowedCountryCodes.length > 0;
+}
+
+/** Does this relay explicitly cover the given ISO alpha-2 country? */
+export function deviceServesCountry(
+  d: { allowedCountryCodes?: string[] | null },
+  countryCode: string,
+): boolean {
+  return Array.isArray(d.allowedCountryCodes) && d.allowedCountryCodes.includes(countryCode);
+}
+
+export interface RouteDeviceCountry {
+  deviceId: string;
+  remaining: number;
+  status: string;
+  lastHeartbeatMs: number | null;
+  countryRoutingEnabled?: boolean | null;
+  allowedCountryCodes?: string[] | null;
+}
+
+/** Relays eligible to send to `countryCode`: active + heartbeat-fresh + has
+ *  capacity + country routing configured + explicitly covers the country.
+ *  No cross-country fallback, no "all countries" default. */
+export function eligibleRelaysForCountry(
+  devices: RouteDeviceCountry[], countryCode: string, nowMs: number,
+): RouteDeviceCountry[] {
+  return devices.filter(d =>
+    isDeviceRoutable({ status: d.status, lastHeartbeatMs: d.lastHeartbeatMs, remaining: d.remaining }, nowMs)
+    && isRelayConfiguredForRouting(d)
+    && deviceServesCountry(d, countryCode),
+  );
+}
+
+/** Coverage check (capacity-agnostic): is there a live, configured relay that
+ *  serves this country? Used to decide eligibility/billing — capacity is a
+ *  transient pacing limit handled by queueing, not a coverage gap. */
+export function hasRelayCoverageForCountry(
+  devices: RouteDeviceCountry[], countryCode: string, nowMs: number,
+): boolean {
+  return devices.some(d =>
+    d.status === 'active'
+    && !isHeartbeatStale(d.lastHeartbeatMs, nowMs)
+    && isRelayConfiguredForRouting(d)
+    && deviceServesCountry(d, countryCode));
+}
+
+export type SkipReasonCode = 'invalid_phone' | 'unsupported_country' | 'no_relay_for_country';
+
+export interface RecipientOutcome { countryCode: string | null; queued: boolean; reason?: string }
+
+export interface DispatchSummary {
+  totalRecipients: number;
+  eligibleRecipients: number;
+  skippedRecipients: number;
+  skippedByReason: Record<string, number>;
+  countries: Record<string, { eligible: number; skipped: number }>;
+}
+
+/** Build the send summary (per spec) from per-recipient outcomes. */
+export function summarizeOutcomes(outcomes: RecipientOutcome[]): DispatchSummary {
+  const s: DispatchSummary = {
+    totalRecipients: outcomes.length, eligibleRecipients: 0, skippedRecipients: 0,
+    skippedByReason: {}, countries: {},
+  };
+  for (const o of outcomes) {
+    const cc = o.countryCode ?? 'unknown';
+    s.countries[cc] ??= { eligible: 0, skipped: 0 };
+    if (o.queued) { s.eligibleRecipients++; s.countries[cc].eligible++; }
+    else {
+      s.skippedRecipients++; s.countries[cc].skipped++;
+      const r = o.reason ?? 'unknown';
+      s.skippedByReason[r] = (s.skippedByReason[r] ?? 0) + 1;
+    }
+  }
+  return s;
+}
+
+/** Pick the best eligible relay for a country. Priority: least-loaded (most
+ *  remaining capacity) → most recent heartbeat → deterministic by deviceId. */
+export function pickRelayForCountry(
+  devices: RouteDeviceCountry[], countryCode: string, nowMs: number, excludeRelayIds: string[] = [],
+): RouteDeviceCountry | null {
+  const exclude = new Set(excludeRelayIds);
+  const eligible = eligibleRelaysForCountry(devices, countryCode, nowMs).filter(d => !exclude.has(d.deviceId));
+  if (eligible.length === 0) return null;
+  eligible.sort((a, b) => {
+    if (b.remaining !== a.remaining) return b.remaining - a.remaining;       // least-loaded
+    const ah = a.lastHeartbeatMs ?? 0, bh = b.lastHeartbeatMs ?? 0;
+    if (bh !== ah) return bh - ah;                                           // freshest heartbeat
+    return a.deviceId < b.deviceId ? -1 : a.deviceId > b.deviceId ? 1 : 0;   // deterministic
+  });
+  return eligible[0];
+}
 
 /**
  * A relay batch is finalizable exactly once: only when it's still 'sending'

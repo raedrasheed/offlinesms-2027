@@ -19,6 +19,8 @@
 
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { adminDb } from './firebase-admin';
+import { loadOrgRelayCoverage, summarizeCoverage, type CoverageSummary, type SmsCoverageStatus } from './relayCoverage';
+import { normalizePhoneAndCountry } from './phoneCountry';
 import {
   usageMonthKey, resolveEscalationPolicy, type EscalationPolicy,
 } from './orgMessagingValidation';
@@ -34,7 +36,7 @@ export type SubmitFailureCode = Extract<
 >;
 
 export type SubmitResult =
-  | { ok: true; batchId: string; summary: BatchSummary; escalation: EscalationPolicy; escalationScheduled: boolean }
+  | { ok: true; batchId: string; summary: BatchSummary; escalation: EscalationPolicy; escalationScheduled: boolean; smsCoverage: CoverageSummary }
   | { ok: false; code: SubmitFailureCode; message?: string };
 
 function chunk<T>(arr: T[], size: number): T[][] {
@@ -217,6 +219,44 @@ async function resolveItems(items: SendItem[]): Promise<ResolvedItem[]> {
   }));
 }
 
+/**
+ * Country-based relay routing (synchronous, annotation-only). For each recipient,
+ * detect their country and whether the org has a live relay covering it for the
+ * SMS-fallback step. Does NOT block in-app delivery (which needs no relay); the
+ * SMS escalation itself is enforced by the dispatcher. Mutates each item's
+ * smsRelayCoverage/recipientCountryCode and returns the batch coverage summary.
+ */
+async function annotateSmsCoverage(organizationId: string, resolved: ResolvedItem[]): Promise<CoverageSummary> {
+  const cov = await loadOrgRelayCoverage(organizationId);
+  const uids = [...new Set(resolved.map(r => r.resolvedUserId).filter((v): v is string => !!v))];
+  const uidPhone = new Map<string, string>();
+  for (const ids of chunk(uids, 100)) {
+    const snaps = await adminDb.getAll(...ids.map(id => adminDb.collection('users').doc(id)));
+    for (const s of snaps) {
+      const p = s.get('phoneNumber') as string | undefined;
+      if (p) uidPhone.set(s.id, p);
+    }
+  }
+  const statuses: SmsCoverageStatus[] = [];
+  for (const item of resolved) {
+    const r = item.recipient as { phone?: string };
+    const phone = r.phone ?? (item.resolvedUserId ? uidPhone.get(item.resolvedUserId) ?? null : null);
+    let status: SmsCoverageStatus = 'unknown';
+    let countryCode: string | null = null;
+    if (phone) {
+      const norm = normalizePhoneAndCountry(phone);
+      if (norm.countryCode) {
+        countryCode = norm.countryCode;
+        status = cov.has(norm.countryCode) ? 'covered' : 'no_relay_for_country';
+      }
+    }
+    item.recipientCountryCode = countryCode;
+    item.smsRelayCoverage = status;
+    statuses.push(status);
+  }
+  return summarizeCoverage(statuses);
+}
+
 async function writeBatchAudit(
   action: 'organization_message_batch_created' | 'organization_message_batch_failed',
   organizationId: string,
@@ -269,6 +309,12 @@ export async function submitOrganizationMessageBatch(
   try { resolved = await resolveItems(items); }
   catch { return { ok: false, code: 'internal_error' }; }
   const summary = summarizeItems(resolved);
+
+  // Country-based relay routing (synchronous, annotation-only — never blocks
+  // in-app delivery). Surfaces per-recipient SMS coverage + a batch summary.
+  let smsCoverage: CoverageSummary = { covered: 0, noRelay: 0, unknown: 0 };
+  try { smsCoverage = await annotateSmsCoverage(organizationId, resolved); }
+  catch { /* coverage is annotation-only; never fail the send on it */ }
 
   const escalationScheduled = policy.enabled && summary.accepted > 0;
   const escalateAt = escalationScheduled
@@ -420,5 +466,6 @@ export async function submitOrganizationMessageBatch(
     summary: finalSummary,
     escalation: policy,
     escalationScheduled: escalationScheduled && finalSummary.accepted > 0,
+    smsCoverage,
   };
 }

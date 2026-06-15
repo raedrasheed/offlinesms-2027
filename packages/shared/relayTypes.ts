@@ -6,6 +6,14 @@
 
 export type RelayDeviceStatus = 'active' | 'paused' | 'offline' | 'revoked';
 
+/** Country-based relay routing fields stored on relayDevices/{id}. */
+export interface RelayCountryRouting {
+  /** ISO alpha-2 codes this relay may send to. Empty = ineligible for sending. */
+  allowedCountryCodes: string[];
+  /** Master switch; false/missing excludes the relay from country routing. */
+  countryRoutingEnabled: boolean;
+}
+
 export type RelayJobStatus =
   | 'queued'    // created, not yet assigned/claimed
   | 'claimed'   // leased by a device

@@ -164,6 +164,11 @@ export type ResolvedItem = SendItem & {
   status:         OrgMessageStatus;     // queued | failed | unsupported_recipient (never sent/delivered)
   failureReason:  string | null;
   resolvedUserId: string | null;
+  // Country-based relay routing (annotation only — in-app delivery is unaffected;
+  // SMS escalation itself is gated by the dispatcher). Whether the recipient's
+  // country has a live relay for the SMS-fallback step.
+  recipientCountryCode?: string | null;
+  smsRelayCoverage?: 'covered' | 'no_relay_for_country' | 'unknown';
 };
 
 export type BatchSummary = {
@@ -254,6 +259,8 @@ export function messageDocFields(organizationId: string, batchId: string, item: 
     body:           item.body,
     status:         item.status,
     failureReason:  item.failureReason,
+    recipientCountryCode: item.recipientCountryCode ?? null,
+    smsRelayCoverage:     item.smsRelayCoverage ?? 'unknown',
   };
 }
 
