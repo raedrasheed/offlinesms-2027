@@ -237,6 +237,45 @@ export function deviceServesCountry(
   return Array.isArray(d.allowedCountryCodes) && d.allowedCountryCodes.includes(countryCode);
 }
 
+export interface RouteDeviceCountry {
+  deviceId: string;
+  remaining: number;
+  status: string;
+  lastHeartbeatMs: number | null;
+  countryRoutingEnabled?: boolean | null;
+  allowedCountryCodes?: string[] | null;
+}
+
+/** Relays eligible to send to `countryCode`: active + heartbeat-fresh + has
+ *  capacity + country routing configured + explicitly covers the country.
+ *  No cross-country fallback, no "all countries" default. */
+export function eligibleRelaysForCountry(
+  devices: RouteDeviceCountry[], countryCode: string, nowMs: number,
+): RouteDeviceCountry[] {
+  return devices.filter(d =>
+    isDeviceRoutable({ status: d.status, lastHeartbeatMs: d.lastHeartbeatMs, remaining: d.remaining }, nowMs)
+    && isRelayConfiguredForRouting(d)
+    && deviceServesCountry(d, countryCode),
+  );
+}
+
+/** Pick the best eligible relay for a country. Priority: least-loaded (most
+ *  remaining capacity) → most recent heartbeat → deterministic by deviceId. */
+export function pickRelayForCountry(
+  devices: RouteDeviceCountry[], countryCode: string, nowMs: number, excludeRelayIds: string[] = [],
+): RouteDeviceCountry | null {
+  const exclude = new Set(excludeRelayIds);
+  const eligible = eligibleRelaysForCountry(devices, countryCode, nowMs).filter(d => !exclude.has(d.deviceId));
+  if (eligible.length === 0) return null;
+  eligible.sort((a, b) => {
+    if (b.remaining !== a.remaining) return b.remaining - a.remaining;       // least-loaded
+    const ah = a.lastHeartbeatMs ?? 0, bh = b.lastHeartbeatMs ?? 0;
+    if (bh !== ah) return bh - ah;                                           // freshest heartbeat
+    return a.deviceId < b.deviceId ? -1 : a.deviceId > b.deviceId ? 1 : 0;   // deterministic
+  });
+  return eligible[0];
+}
+
 /**
  * A relay batch is finalizable exactly once: only when it's still 'sending'
  * (relay batches are NOT set 'accepted' at dispatch, so the existing settlement
