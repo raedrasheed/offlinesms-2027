@@ -291,6 +291,22 @@ export function hasRelayCoverageForCountry(
     && deviceServesCountry(d, countryCode));
 }
 
+/** Union of all ISO alpha-2 countries served by at least one live, configured
+ *  relay (sorted, deduped). The set of countries a send/sign-in is possible to.
+ *  Capacity-agnostic — an at-capacity country still counts as supported. */
+export function supportedCountriesForDevices(
+  devices: RouteDeviceCountry[], nowMs: number,
+): string[] {
+  const out = new Set<string>();
+  for (const d of devices) {
+    if (d.status !== 'active') continue;
+    if (isHeartbeatStale(d.lastHeartbeatMs, nowMs)) continue;
+    if (!isRelayConfiguredForRouting(d)) continue;
+    for (const c of d.allowedCountryCodes ?? []) out.add(c);
+  }
+  return [...out].sort();
+}
+
 export type SkipReasonCode = 'invalid_phone' | 'unsupported_country' | 'no_relay_for_country';
 
 /**
