@@ -15,6 +15,8 @@ import { verifySession, type SessionResult } from './session';
 import { canDo } from './adminPermissions';
 import { getAdminScope, canViewOrganization } from './adminScope';
 import { isSupportedCountry } from 'libphonenumber-js';
+import { normalizePhoneAndCountry } from './phoneCountry';
+import { loadOrgRelayCoverage } from './relayCoverage';
 
 export type RelayActionState = { error?: string; success?: boolean; code?: string; expiresAt?: number };
 
@@ -124,12 +126,21 @@ export async function sendRelayTestAction(phoneE164: string, body: string, targe
   if (text.length === 0) return { error: 'Message is required.' };
   if (text.length > 300) return { error: 'Message must be 300 characters or less.' };
 
+  // Country-based relay routing: an admin test send is still a relay send and
+  // must respect coverage — don't send to a country no relay serves.
+  const { countryCode } = normalizePhoneAndCountry(to);
+  if (!countryCode) return { error: 'Could not detect the country for this number.' };
+  const coverage = await loadOrgRelayCoverage(businessId);
+  if (!coverage.has(countryCode)) {
+    return { error: 'No relay is available for this country (لا يوجد relay لهذه البلد).' };
+  }
+
   const jobId = `test_${businessId}_${Date.now()}`;
   try {
     await adminDb.collection('relayJobs').doc(jobId).create({
       jobId, businessId,
       batchId: null, recipientUid: null,   // no billing batch → no Points/settlement
-      phoneE164: to, messageBody: text,
+      phoneE164: to, recipientCountryCode: countryCode, messageBody: text,
       assignedDeviceId: null, assignedSimSubscriptionId: null,
       status: 'queued', attempts: 0, maxAttempts: 3,
       leaseOwnerDeviceId: null, leaseExpiresAt: null, nextAttemptAt: null,
