@@ -16,6 +16,7 @@ import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { getFirestore, FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { classifyRecipients, COST_PER_SMS, MAX_RECIPIENTS_PER_BATCH } from '../sms/recipients';
 import { sendBatch } from '../sms/gateway';
+import { partitionRecipientsByCoverage } from '../sms/countryRouting';
 import { resolveProvider } from '../sms/provider';
 import { relayModeEngaged, isHybrid } from '../sms/relayLogic';
 import { dispatchBatchToRelay } from '../sms/relayDispatcher';
@@ -162,10 +163,31 @@ async function processBatch(
   }
   if (excluded.length > 0) await skippedWrites.commit();
 
+  // Country-based relay routing — enforced for EVERY provider mode (relay AND
+  // HTTP). A recipient whose detected country has no eligible relay is NOT sent
+  // to (the relay dispatcher re-checks too, but this also gates the HTTP path
+  // and avoids reserving points for recipients we won't send to).
+  const { uncovered } = await partitionRecipientsByCoverage(
+    organizationId, eligible.map(e => ({ id: e.uid, phoneE164: e.phone })));
+  let noRelaySkipped = 0;
+  if (uncovered.length > 0) {
+    const uncoveredIds = new Set(uncovered.map(u => u.id));
+    const covWrites = db.batch();
+    for (const u of uncovered) {
+      const row = rowByUid.get(u.id);
+      if (row) covWrites.update(row.ref, { smsEscalation: 'skipped', smsSkipReason: u.reason, updatedAt: FieldValue.serverTimestamp() });
+    }
+    await covWrites.commit();
+    for (let i = eligible.length - 1; i >= 0; i--) {
+      if (uncoveredIds.has(eligible[i].uid)) eligible.splice(i, 1);
+    }
+    noRelaySkipped = uncovered.length;
+  }
+
   if (eligible.length === 0) {
     await batchRef.update({
       escalationStatus: 'completed', escalatedAt: FieldValue.serverTimestamp(),
-      smsQueued: 0, smsFailed: 0, smsSkipped: excluded.length,
+      smsQueued: 0, smsFailed: 0, smsSkipped: excluded.length + noRelaySkipped,
     });
     return;
   }
@@ -185,7 +207,7 @@ async function processBatch(
   } catch {
     await batchRef.update({
       escalationStatus: 'insufficient_points', escalatedAt: FieldValue.serverTimestamp(),
-      smsQueued: 0, smsFailed: 0, smsSkipped: excluded.length, smsCostNeeded: cost,
+      smsQueued: 0, smsFailed: 0, smsSkipped: excluded.length + noRelaySkipped, smsCostNeeded: cost,
     });
     await writeAuditLog({
       action: 'organization_message_batch_failed',
@@ -340,7 +362,7 @@ async function processBatch(
   await batchRef.update({
     escalationStatus: 'completed',
     escalatedAt: FieldValue.serverTimestamp(),
-    smsQueued, smsFailed, smsSkipped: excluded.length,
+    smsQueued, smsFailed, smsSkipped: excluded.length + noRelaySkipped,
     smsPointsReserved: cost,
   });
   await writeAuditLog({
@@ -351,7 +373,8 @@ async function processBatch(
     metadata: {
       batchId, audience,
       targeted: targets.length, eligible: sendable.length,
-      smsQueued, smsFailed, skipped: excluded.length, pointsReserved: cost,
+      smsQueued, smsFailed, skipped: excluded.length + noRelaySkipped,
+      noRelayForCountry: noRelaySkipped, pointsReserved: cost,
     },
   });
 }

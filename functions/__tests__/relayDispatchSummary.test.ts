@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  summarizeOutcomes, hasRelayCoverageForCountry, HEARTBEAT_STALE_MS,
+  summarizeOutcomes, hasRelayCoverageForCountry, supportedCountriesForDevices, HEARTBEAT_STALE_MS,
   type RecipientOutcome, type RouteDeviceCountry,
 } from '../src/sms/relayLogic';
 
@@ -49,5 +49,34 @@ describe('hasRelayCoverageForCountry — capacity-agnostic coverage', () => {
     expect(hasRelayCoverageForCountry([{ ...base, lastHeartbeatMs: NOW - HEARTBEAT_STALE_MS - 1 }], 'PS', NOW)).toBe(false);
     expect(hasRelayCoverageForCountry([{ ...base, status: 'offline' }], 'PS', NOW)).toBe(false);
     expect(hasRelayCoverageForCountry([{ ...base, countryRoutingEnabled: false }], 'PS', NOW)).toBe(false);
+  });
+});
+
+describe('supportedCountriesForDevices — phone sign-in country picker source', () => {
+  const NOW = 1_000_000_000;
+  const live = (over: Partial<RouteDeviceCountry>): RouteDeviceCountry => ({
+    deviceId: 'd', remaining: 100, status: 'active', lastHeartbeatMs: NOW - 1000,
+    countryRoutingEnabled: true, allowedCountryCodes: ['PS'], ...over,
+  });
+
+  it('returns the sorted, deduped union of countries served by live relays', () => {
+    expect(supportedCountriesForDevices([
+      live({ deviceId: 'a', allowedCountryCodes: ['PS', 'JO'] }),
+      live({ deviceId: 'b', allowedCountryCodes: ['JO', 'EG'] }),
+    ], NOW)).toEqual(['EG', 'JO', 'PS']);
+  });
+
+  it('excludes stale, paused, and unconfigured relays', () => {
+    expect(supportedCountriesForDevices([
+      live({ deviceId: 'stale', lastHeartbeatMs: NOW - HEARTBEAT_STALE_MS - 1, allowedCountryCodes: ['IL'] }),
+      live({ deviceId: 'paused', status: 'paused', allowedCountryCodes: ['JO'] }),
+      live({ deviceId: 'unconfigured', countryRoutingEnabled: false, allowedCountryCodes: ['EG'] }),
+      live({ deviceId: 'live', allowedCountryCodes: ['PS'] }),
+    ], NOW)).toEqual(['PS']);
+  });
+
+  it('returns [] when no live relay is configured', () => {
+    expect(supportedCountriesForDevices([], NOW)).toEqual([]);
+    expect(supportedCountriesForDevices([live({ allowedCountryCodes: [] })], NOW)).toEqual([]);
   });
 });

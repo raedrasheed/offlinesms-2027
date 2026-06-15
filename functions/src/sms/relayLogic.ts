@@ -237,6 +237,25 @@ export function deviceServesCountry(
   return Array.isArray(d.allowedCountryCodes) && d.allowedCountryCodes.includes(countryCode);
 }
 
+/**
+ * Claim-time safety check (defense-in-depth at the relay app boundary): may a
+ * device whose served countries are `allowedCountryCodes` claim a job tagged
+ * with `jobCountry`?
+ *   • Country-tagged job (recipientCountryCode set) → only if the device serves
+ *     that country. An unconfigured device (empty list) can claim NO tagged job.
+ *   • Untagged job (no recipientCountryCode — e.g. legacy/sign-in OTP) → any
+ *     device may claim it (those jobs are gated at creation, not at claim).
+ * A device can therefore NEVER pull a job for a country it doesn't serve, even
+ * if a job were created/mistagged incorrectly upstream.
+ */
+export function canDeviceClaimJobCountry(
+  allowedCountryCodes: string[] | null | undefined,
+  jobCountry: unknown,
+): boolean {
+  if (typeof jobCountry !== 'string' || jobCountry === '') return true; // untagged
+  return Array.isArray(allowedCountryCodes) && allowedCountryCodes.includes(jobCountry);
+}
+
 export interface RouteDeviceCountry {
   deviceId: string;
   remaining: number;
@@ -272,7 +291,44 @@ export function hasRelayCoverageForCountry(
     && deviceServesCountry(d, countryCode));
 }
 
+/** Union of all ISO alpha-2 countries served by at least one live, configured
+ *  relay (sorted, deduped). The set of countries a send/sign-in is possible to.
+ *  Capacity-agnostic — an at-capacity country still counts as supported. */
+export function supportedCountriesForDevices(
+  devices: RouteDeviceCountry[], nowMs: number,
+): string[] {
+  const out = new Set<string>();
+  for (const d of devices) {
+    if (d.status !== 'active') continue;
+    if (isHeartbeatStale(d.lastHeartbeatMs, nowMs)) continue;
+    if (!isRelayConfiguredForRouting(d)) continue;
+    for (const c of d.allowedCountryCodes ?? []) out.add(c);
+  }
+  return [...out].sort();
+}
+
 export type SkipReasonCode = 'invalid_phone' | 'unsupported_country' | 'no_relay_for_country';
+
+/**
+ * The single coverage decision applied to EVERY send (1:1, group, org, OTP,
+ * admin test) regardless of provider mode (relay AND http). Given a recipient
+ * whose phone has already been parsed, returns null when the message may be
+ * sent, or the skip reason when it must NOT be:
+ *   • invalid_phone       — number didn't parse
+ *   • unsupported_country — parsed but no ISO country detected
+ *   • no_relay_for_country — country detected but no live relay serves it
+ * Capacity-agnostic: an at-capacity but otherwise-covered country is NOT a gap
+ * (it queues), so this returns null for it.
+ */
+export function coverageSkipReason(
+  devices: RouteDeviceCountry[],
+  parsed: { valid: boolean; countryCode: string | null },
+  nowMs: number,
+): SkipReasonCode | null {
+  if (!parsed.valid) return 'invalid_phone';
+  if (!parsed.countryCode) return 'unsupported_country';
+  return hasRelayCoverageForCountry(devices, parsed.countryCode, nowMs) ? null : 'no_relay_for_country';
+}
 
 export interface RecipientOutcome { countryCode: string | null; queued: boolean; reason?: string }
 

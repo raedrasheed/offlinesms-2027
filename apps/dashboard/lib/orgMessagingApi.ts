@@ -161,33 +161,36 @@ export function quotaAllows(limit: number, used: number, requested: number): boo
 }
 
 export type ResolvedItem = SendItem & {
-  status:         OrgMessageStatus;     // queued | failed | unsupported_recipient (never sent/delivered)
+  status:         OrgMessageStatus;     // queued | failed | unsupported_recipient | no_relay_for_country (never sent/delivered)
   failureReason:  string | null;
   resolvedUserId: string | null;
-  // Country-based relay routing (annotation only — in-app delivery is unaffected;
-  // SMS escalation itself is gated by the dispatcher). Whether the recipient's
-  // country has a live relay for the SMS-fallback step.
+  // Country-based relay routing. A recipient whose detected country has no
+  // eligible relay is HARD-BLOCKED: status becomes 'no_relay_for_country' and
+  // the message is never delivered (in-app or SMS). 'covered' → normal delivery;
+  // 'unknown' (no phone / undetectable country) → not blocked.
   recipientCountryCode?: string | null;
   smsRelayCoverage?: 'covered' | 'no_relay_for_country' | 'unknown';
 };
 
 export type BatchSummary = {
-  total:       number;
-  accepted:    number;   // recorded with a viable in-app target → 'queued'
-  queued:      number;
-  failed:      number;
-  unsupported: number;
-  batchStatus: OrgBatchStatus;
+  total:             number;
+  accepted:          number;   // recorded with a viable in-app target → 'queued'
+  queued:            number;
+  failed:            number;
+  unsupported:       number;
+  noRelayForCountry: number;   // hard-blocked: recipient country has no eligible relay
+  batchStatus:       OrgBatchStatus;
 };
 
 export function summarizeItems(items: Array<Pick<ResolvedItem, 'status'>>): BatchSummary {
-  const queued      = items.filter(i => i.status === 'queued').length;
-  const failed      = items.filter(i => i.status === 'failed').length;
-  const unsupported = items.filter(i => i.status === 'unsupported_recipient').length;
+  const queued            = items.filter(i => i.status === 'queued').length;
+  const failed            = items.filter(i => i.status === 'failed').length;
+  const unsupported       = items.filter(i => i.status === 'unsupported_recipient').length;
+  const noRelayForCountry = items.filter(i => i.status === 'no_relay_for_country').length;
   const batchStatus: OrgBatchStatus = queued === items.length
     ? 'accepted'
     : queued > 0 ? 'partial' : 'failed';
-  return { total: items.length, accepted: queued, queued, failed, unsupported, batchStatus };
+  return { total: items.length, accepted: queued, queued, failed, unsupported, noRelayForCountry, batchStatus };
 }
 
 // ─── Shared submission context + doc shaping (pure) ──────────────────────────
@@ -238,11 +241,12 @@ export function batchDocFields(organizationId: string, summary: BatchSummary, ct
     source:      ctx.source,
     createdBy:   createdByForContext(ctx),
     status:      summary.batchStatus,
-    total:       summary.total,
-    accepted:    summary.accepted,
-    queued:      summary.queued,
-    failed:      summary.failed,
-    unsupported: summary.unsupported,
+    total:             summary.total,
+    accepted:          summary.accepted,
+    queued:            summary.queued,
+    failed:            summary.failed,
+    unsupported:       summary.unsupported,
+    noRelayForCountry: summary.noRelayForCountry,
   };
 }
 
