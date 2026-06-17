@@ -225,15 +225,20 @@ export default function App() {
     if (user && profileCompleted === true) void registerForPush(user.uid);
   }, [user, profileCompleted]);
 
-  // Route notification taps (cold start + warm). Cold-start tap is delivered
-  // via getLastNotificationResponseAsync.
+  // Route notification taps (cold start + warm). Cold-start tap is delivered via
+  // getLastNotificationResponseAsync; the listener can ALSO fire for that same
+  // response, so dedupe by notification identifier to avoid double navigation.
   useEffect(() => {
-    Notifications.getLastNotificationResponseAsync().then(resp => {
-      if (resp) routeFromPush(resp.notification.request.content.data);
-    });
-    const sub = Notifications.addNotificationResponseReceivedListener(resp => {
+    const handled = new Set<string>();
+    const handle = (resp: Notifications.NotificationResponse | null) => {
+      if (!resp) return;
+      const id = resp.notification.request.identifier;
+      if (id && handled.has(id)) return;
+      if (id) handled.add(id);
       routeFromPush(resp.notification.request.content.data);
-    });
+    };
+    Notifications.getLastNotificationResponseAsync().then(handle);
+    const sub = Notifications.addNotificationResponseReceivedListener(handle);
     return () => sub.remove();
   }, []);
 

@@ -20,6 +20,9 @@ import {
   type BroadcastInput, type BroadcastAudienceConfig, type BroadcastActionType,
 } from './broadcastLogic';
 import { isDeadTokenError, collapseKey } from './notifyLogic';
+import { resolveDeviceToken, deviceHasToken, type DeviceTokenDoc } from './deviceToken';
+import { buildExpoMessage, isExpoDeadTokenTicket, type ExpoPushMessage } from './expoPushLogic';
+import { sendExpoPush } from './expoPush';
 
 const REGION = 'us-central1';
 const MAX_BROADCASTS_PER_HOUR = 3;
@@ -100,7 +103,8 @@ async function countEligibleDevicesForUser(uid: string): Promise<{ devices: numb
   const masterDisabled = settingsSnap.exists && settingsSnap.get('enabled') === false;
   if (masterDisabled) return { devices: 0, eligible: false };
   let devices = 0;
-  for (const d of devicesSnap.docs) if ((d.get('fcmToken') as string | undefined)) devices++;
+  // Count any device with a usable push token (FCM or Expo), not just fcmToken.
+  for (const d of devicesSnap.docs) if (deviceHasToken(d.data() as DeviceTokenDoc)) devices++;
   return { devices, eligible: devices > 0 };
 }
 
@@ -231,58 +235,66 @@ export const sendNotificationBroadcast = onCall({ region: REGION, timeoutSeconds
     // Resolve audience again to pick up any since-disabled tokens.
     const { uids } = await resolveAudience(me.isSuper ? undefined : me.orgId, b.audience);
 
-    // Collect (uid, deviceId, token) triples; dedupe by TOKEN so two devices
-    // sharing the same FCM token (rare but possible) receive once.
-    interface Target { uid: string; deviceId: string; token: string }
-    const targets: Target[] = [];
+    // Collect (provider, uid, deviceId, token) targets; dedupe by TOKEN so two
+    // devices sharing the same token (rare) receive once. Android = native FCM,
+    // iOS = Expo push token.
+    interface Target { uid: string; deviceId: string; token: string; provider: 'fcm' | 'expo' }
+    const fcmTargets: Target[] = [];
+    const expoTargets: Target[] = [];
     const seenTokens = new Set<string>();
     for (const uid of uids) {
       const devs = await db.collection('users').doc(uid).collection('devices').where('enabled', '==', true).get();
       for (const dev of devs.docs) {
-        const token = dev.get('fcmToken') as string | undefined;
-        if (!token || seenTokens.has(token)) continue;
-        seenTokens.add(token);
-        targets.push({ uid, deviceId: dev.id, token });
+        const resolved = resolveDeviceToken(dev.data() as DeviceTokenDoc);
+        if (!resolved || seenTokens.has(resolved.token)) continue;
+        seenTokens.add(resolved.token);
+        (resolved.provider === 'expo' ? expoTargets : fcmTargets)
+          .push({ uid, deviceId: dev.id, token: resolved.token, provider: resolved.provider });
       }
     }
 
+    const tag = collapseKey(`broadcast_${ref.id}`);
+
+    const recordDelivery = (t: Target, status: 'sent' | 'invalid_token' | 'failed', errorCode?: string) =>
+      ref.collection('deliveries').doc(`${t.uid}_${t.deviceId}`).set({
+        uid: t.uid, deviceId: t.deviceId, provider: t.provider, fcmTokenMasked: maskFcmToken(t.token),
+        status, ...(errorCode ? { errorCode } : {}), sentAt: FieldValue.serverTimestamp(),
+      });
+    const tally = (r: 'sent' | 'invalid' | 'failed') => {
+      if (r === 'sent') sent++;
+      else if (r === 'invalid') { failed++; invalid++; }
+      else failed++;
+    };
+    const checkpoint = () => ref.update({ sentDevices: sent, failedDevices: failed, invalidTokens: invalid, updatedAt: FieldValue.serverTimestamp() });
+
+    // ── Android: native FCM via firebase-admin (behavior unchanged) ──
     const messaging = getMessaging();
-    // Chunk the target list (each carries uid + deviceId + token) so each
-    // batch sends in parallel without losing per-target context.
-    const batches: Target[][] = [];
-    for (let i = 0; i < targets.length; i += SEND_BATCH_SIZE) batches.push(targets.slice(i, i + SEND_BATCH_SIZE));
-    for (const batch of batches) {
+    const fcmBatches: Target[][] = [];
+    for (let i = 0; i < fcmTargets.length; i += SEND_BATCH_SIZE) fcmBatches.push(fcmTargets.slice(i, i + SEND_BATCH_SIZE));
+    for (const batch of fcmBatches) {
       const responses = await Promise.all(batch.map(async (t) => {
-        const token = t.token;
         const msg: Message = {
-          token,
+          token: t.token,
           notification: { title: display.title, body: display.body, ...(display.imageUrl ? { imageUrl: display.imageUrl } : {}) },
           data: payload as unknown as Record<string, string>,
           android: {
-            collapseKey: collapseKey(`broadcast_${ref.id}`),
+            collapseKey: tag,
             priority: 'high',
-            notification: { tag: collapseKey(`broadcast_${ref.id}`), defaultSound: true },
+            notification: { tag, defaultSound: true },
           },
           apns: {
-            headers: { 'apns-collapse-id': collapseKey(`broadcast_${ref.id}`) },
+            headers: { 'apns-collapse-id': tag },
             payload: { aps: { sound: 'default' } },
           },
         };
         try {
           await messaging.send(msg);
-          await ref.collection('deliveries').doc(`${t.uid}_${t.deviceId}`).set({
-            uid: t.uid, deviceId: t.deviceId, fcmTokenMasked: maskFcmToken(token),
-            status: 'sent', sentAt: FieldValue.serverTimestamp(),
-          });
+          await recordDelivery(t, 'sent');
           return 'sent' as const;
         } catch (e: any) {
           const code = e?.errorInfo?.code ?? e?.code;
           const dead = isDeadTokenError(code);
-          await ref.collection('deliveries').doc(`${t.uid}_${t.deviceId}`).set({
-            uid: t.uid, deviceId: t.deviceId, fcmTokenMasked: maskFcmToken(token),
-            status: dead ? 'invalid_token' : 'failed', errorCode: code ?? 'unknown',
-            sentAt: FieldValue.serverTimestamp(),
-          });
+          await recordDelivery(t, dead ? 'invalid_token' : 'failed', code ?? 'unknown');
           if (dead) {
             const devRef = db.collection('users').doc(t.uid).collection('devices').doc(t.deviceId);
             cleanups.push(devRef.set({ enabled: false, disabledAt: FieldValue.serverTimestamp(), disabledReason: code }, { merge: true }));
@@ -290,13 +302,33 @@ export const sendNotificationBroadcast = onCall({ region: REGION, timeoutSeconds
           return dead ? 'invalid' as const : 'failed' as const;
         }
       }));
-      for (const r of responses) {
-        if (r === 'sent') sent++;
-        else if (r === 'invalid') { failed++; invalid++; }
-        else failed++;
+      for (const r of responses) tally(r);
+      await checkpoint();
+    }
+
+    // ── iOS: Expo push service (APNs) ──
+    const expoBatches: Target[][] = [];
+    for (let i = 0; i < expoTargets.length; i += SEND_BATCH_SIZE) expoBatches.push(expoTargets.slice(i, i + SEND_BATCH_SIZE));
+    for (const batch of expoBatches) {
+      const messages: ExpoPushMessage[] = batch.map(t => buildExpoMessage(t.token, {
+        title: display.title, body: display.body,
+        data: payload as unknown as Record<string, string>,
+        conversationId: ref.id,
+      }));
+      const tickets = await sendExpoPush(messages);
+      for (let i = 0; i < batch.length; i++) {
+        const t = batch[i];
+        const ticket = tickets[i];
+        if (ticket?.status === 'ok') { await recordDelivery(t, 'sent'); tally('sent'); continue; }
+        const dead = isExpoDeadTokenTicket(ticket);
+        await recordDelivery(t, dead ? 'invalid_token' : 'failed', ticket?.details?.error ?? ticket?.message ?? 'unknown');
+        if (dead) {
+          const devRef = db.collection('users').doc(t.uid).collection('devices').doc(t.deviceId);
+          cleanups.push(devRef.set({ enabled: false, disabledAt: FieldValue.serverTimestamp(), disabledReason: 'DeviceNotRegistered' }, { merge: true }));
+        }
+        tally(dead ? 'invalid' : 'failed');
       }
-      // Progress checkpoint so the dashboard can show live counters.
-      await ref.update({ sentDevices: sent, failedDevices: failed, invalidTokens: invalid, updatedAt: FieldValue.serverTimestamp() });
+      await checkpoint();
     }
 
     await Promise.allSettled(cleanups);
