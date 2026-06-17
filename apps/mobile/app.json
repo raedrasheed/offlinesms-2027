@@ -14,7 +14,8 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": false,
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
+      "requireFullScreen": true,
       "bundleIdentifier": "app.offlinesms.mobile",
       "buildNumber": "1",
       "entitlements": {
