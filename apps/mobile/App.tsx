@@ -43,7 +43,7 @@ import JoinRequests from './src/screens/JoinRequests';
 import ForwardPicker from './src/screens/ForwardPicker';
 import MessageInfo from './src/screens/MessageInfo';
 import TransactionDetail from './src/screens/TransactionDetail';
-import BuyPoints from './src/screens/BuyPoints';
+import RequestPoints from './src/screens/RequestPoints';
 import TransferPoints from './src/screens/TransferPoints';
 import ChatWallpaper from './src/screens/ChatWallpaper';
 import SmsBatchReport from './src/screens/SmsBatchReport';
@@ -296,7 +296,7 @@ export default function App() {
             <RootStack.Screen name="ForwardPicker" component={ForwardPicker} />
             <RootStack.Screen name="MessageInfo" component={MessageInfo} />
             <RootStack.Screen name="TransactionDetail" component={TransactionDetail} />
-            <RootStack.Screen name="BuyPoints" component={BuyPoints} />
+            <RootStack.Screen name="RequestPoints" component={RequestPoints} />
             <RootStack.Screen name="TransferPoints" component={TransferPoints} />
             <RootStack.Screen name="ChatWallpaper" component={ChatWallpaper} />
             <RootStack.Screen name="NotificationSettings" component={NotificationSettings} />

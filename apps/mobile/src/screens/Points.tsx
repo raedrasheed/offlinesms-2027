@@ -1,8 +1,9 @@
-// OfflineSMS Points wallet — Phase 9.
+// OfflineSMS Points wallet.
 //
-// Read-only screen. Shows balance / reserved / available, recent
-// transactions with type filter chips, and disabled "Buy points" /
-// "Transfer" affordances (Phase 10).
+// Read-only screen. Shows balance / reserved / available and recent
+// transactions with type filter chips. Points are NOT sold in the mobile app:
+// the "Request points" action opens an informational screen (no purchase,
+// price, package, or payment). "Transfer" moves existing points between users.
 
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -22,8 +23,7 @@ import { LoadingState, EmptyState } from '../components/state';
 
 type FilterKey = 'all' | 'sms_spend' | 'refund' | 'purchase' | 'transfer' | 'admin';
 
-const BUY_ENABLED = true;       // Phase 10 — webhook-driven purchase flow wired.
-const TRANSFER_ENABLED = true;  // Phase 10 — hardened transfer flow wired.
+const TRANSFER_ENABLED = true;  // moves existing points between users (no buying).
 
 function filterMatches(filter: FilterKey, t: Transaction): boolean {
   if (filter === 'all') return true;
@@ -115,16 +115,14 @@ export default function Points({ navigation }: any) {
 
             <View style={s.actions}>
               <Pressable
-                style={[s.action, !BUY_ENABLED && { opacity: 0.45 }]}
-                disabled={!BUY_ENABLED}
-                onPress={() => navigation.navigate('BuyPoints')}
+                style={s.action}
+                onPress={() => navigation.navigate('RequestPoints')}
                 accessible={true}
                 accessibilityRole="button"
-                accessibilityLabel={t('points.buy')}
-                accessibilityState={{ disabled: !BUY_ENABLED }}
+                accessibilityLabel={t('points.request')}
               >
-                <Text style={s.actionTitle}>{t('points.buy')}</Text>
-                <Text style={s.actionSub}>{BUY_ENABLED ? t('points.buySubtitle') : t('points.comingSoon')}</Text>
+                <Text style={s.actionTitle}>{t('points.request')}</Text>
+                <Text style={s.actionSub}>{t('points.requestSubtitle')}</Text>
               </Pressable>
               <Pressable
                 style={[s.action, !TRANSFER_ENABLED && { opacity: 0.45 }]}

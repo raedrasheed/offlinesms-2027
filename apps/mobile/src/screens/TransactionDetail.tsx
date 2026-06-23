@@ -94,13 +94,6 @@ export default function TransactionDetail({ route, navigation }: any) {
           </View>
         ) : null}
 
-        {tx.package ? (
-          <View style={s.card}>
-            <Row label="Package" value={tx.package} />
-            {tx.priceCents != null ? <Row label="Price" value={`${(tx.priceCents / 100).toFixed(2)}`} /> : null}
-          </View>
-        ) : null}
-
         {tx.relatedSmsBatchId ? (
           <Pressable
             style={s.linkCard}
@@ -109,13 +102,6 @@ export default function TransactionDetail({ route, navigation }: any) {
             <Text style={s.linkTitle}>OfflineSMS Delivery Report</Text>
             <Text style={s.linkSub}>OfflineSMS batch · {tx.relatedSmsBatchId}</Text>
           </Pressable>
-        ) : null}
-
-        {tx.relatedPaymentId ? (
-          <View style={s.card}>
-            <Text style={s.sectionLabel}>Payment</Text>
-            <Row label="Payment ID" value={tx.relatedPaymentId} />
-          </View>
         ) : null}
 
         {tx.relatedTransferId ? (
