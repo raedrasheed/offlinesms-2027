@@ -140,6 +140,16 @@
     "requestAlreadyPending": "لديك طلب قيد المراجعة بالفعل. يرجى الانتظار حتى تتم مراجعته.",
     "requestPackageUnavailable": "هذه الباقة غير متاحة حاليًا.",
     "requestErrorGeneric": "حدث خطأ ما. يرجى المحاولة مرة أخرى.",
+    "myRequestsLink": "طلباتي",
+    "myRequestsTitle": "طلباتي",
+    "myRequestsEmpty": "لا توجد طلبات بعد",
+    "myRequestsEmptyDesc": "ستظهر الباقات التي تطلبها هنا مع حالتها.",
+    "loadingRequests": "جارٍ تحميل الطلبات…",
+    "reqStatus": {
+      "pending": "قيد المراجعة",
+      "approved": "تمت الموافقة",
+      "rejected": "مرفوض"
+    },
     "transfer": "تحويل نقاط",
     "transferSubtitle": "إرسال نقاط إلى مستخدم آخر",
     "smsBatch": "دفعة OfflineSMS",
