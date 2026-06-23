@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { View, Text, TextInput, Pressable, StyleSheet, Alert, ScrollView } from 'react-native';
+import { useRef, useState } from 'react';
+import { Text, TextInput, Pressable, StyleSheet, Alert } from 'react-native';
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
@@ -7,6 +7,7 @@ import {
 } from 'firebase/auth';
 import { auth } from '../lib/firebase';
 import { colors, radius } from '../theme';
+import KeyboardAwareScreen from '../components/KeyboardAwareScreen';
 
 type Mode = 'signIn' | 'signUp';
 
@@ -30,6 +31,7 @@ export default function EmailLogin() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
+  const passwordRef = useRef<TextInput>(null);
 
   const canSubmit = email.includes('@') && password.length >= 6 && !busy;
 
@@ -68,7 +70,7 @@ export default function EmailLogin() {
   }
 
   return (
-    <ScrollView style={s.root} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
+    <KeyboardAwareScreen style={s.root} contentStyle={s.content}>
       <Text style={s.h1}>{mode === 'signIn' ? 'Sign in with email' : 'Create your account'}</Text>
       <Text style={s.sub}>
         {mode === 'signIn'
@@ -88,10 +90,14 @@ export default function EmailLogin() {
         textContentType="emailAddress"
         placeholder="you@example.com"
         placeholderTextColor={colors.ink400}
+        returnKeyType="next"
+        onSubmitEditing={() => passwordRef.current?.focus()}
+        submitBehavior="submit"
       />
 
       <Text style={s.label}>Password</Text>
       <TextInput
+        ref={passwordRef}
         style={s.input}
         value={password}
         onChangeText={setPassword}
@@ -101,6 +107,8 @@ export default function EmailLogin() {
         textContentType={mode === 'signIn' ? 'password' : 'newPassword'}
         placeholder="••••••••"
         placeholderTextColor={colors.ink400}
+        returnKeyType="go"
+        onSubmitEditing={() => { if (canSubmit) submit(); }}
       />
 
       <Pressable
@@ -128,7 +136,7 @@ export default function EmailLogin() {
           {mode === 'signIn' ? 'New here? Create an account' : 'Already have an account? Sign in'}
         </Text>
       </Pressable>
-    </ScrollView>
+    </KeyboardAwareScreen>
   );
 }
 

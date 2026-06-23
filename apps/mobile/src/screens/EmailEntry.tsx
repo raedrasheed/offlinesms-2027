@@ -3,6 +3,7 @@ import { View, Text, TextInput, Pressable, StyleSheet, Alert } from 'react-nativ
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius } from '../theme';
+import KeyboardAwareScreen from '../components/KeyboardAwareScreen';
 import { requestEmailOtp, isValidEmail, emailOtpErrorCopy } from '../lib/auth';
 import { useOffline } from '../context/OfflineContext';
 
@@ -29,7 +30,7 @@ export default function EmailEntry({ navigation }: any) {
   }
 
   return (
-    <View style={[s.root, { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 16 }]}>
+    <KeyboardAwareScreen style={s.screen} contentStyle={[s.root, { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 16 }]}>
       <Pressable style={s.back} onPress={() => navigation.goBack()} hitSlop={12}>
         <Ionicons name="chevron-back" size={24} color={colors.ink} />
       </Pressable>
@@ -70,12 +71,13 @@ export default function EmailEntry({ navigation }: any) {
       <Pressable style={[s.btn, !canSubmit && { opacity: 0.5 }]} onPress={next} disabled={!canSubmit}>
         <Text style={s.btnText}>{busy ? 'Sending…' : 'Send code'}</Text>
       </Pressable>
-    </View>
+    </KeyboardAwareScreen>
   );
 }
 
 const s = StyleSheet.create({
-  root:  { flex: 1, backgroundColor: '#fff', paddingHorizontal: 24 },
+  screen: { backgroundColor: '#fff' },
+  root:  { backgroundColor: '#fff', paddingHorizontal: 24 },
   back:  { marginTop: 8, marginBottom: 24, alignSelf: 'flex-start' },
   h1:    { fontSize: 26, fontWeight: '800', color: colors.ink, letterSpacing: -0.4 },
   sub:   { fontSize: 13, color: colors.ink500, marginTop: 8, lineHeight: 20 },
