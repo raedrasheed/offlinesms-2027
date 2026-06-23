@@ -78,15 +78,6 @@ export default function RequestPoints({ navigation }: any) {
           <Ionicons name={isRTL ? 'chevron-forward' : 'chevron-back'} size={24} color={colors.text.primary} />
         </Pressable>
         <Text style={s.title}>{t('points.requestTitle')}</Text>
-        <Pressable
-          onPress={() => navigation.navigate('MyPointsRequests')}
-          hitSlop={8}
-          accessible
-          accessibilityRole="button"
-          accessibilityLabel={t('points.myRequestsTitle')}
-        >
-          <Text style={s.headerLink}>{t('points.myRequestsLink')}</Text>
-        </Pressable>
       </View>
 
       <View style={s.iconBubble}>
@@ -123,6 +114,17 @@ export default function RequestPoints({ navigation }: any) {
         </>
       ) : null}
 
+      <Pressable
+        style={s.secondaryBtn}
+        onPress={() => navigation.navigate('MyPointsRequests')}
+        accessible
+        accessibilityRole="button"
+        accessibilityLabel={t('points.myRequestsTitle')}
+      >
+        <Ionicons name="time-outline" size={18} color={colors.action.primary} />
+        <Text style={s.secondaryBtnText}>{t('points.myRequestsLink')}</Text>
+      </Pressable>
+
       <View style={s.noteCard}>
         <Ionicons name="business-outline" size={18} color={colors.text.muted} />
         <Text style={s.noteText}>{t('points.requestAdminNote')}</Text>
@@ -146,8 +148,9 @@ function buildStyles(colors: any, rtl: boolean) {
     root:    { flex: 1, backgroundColor: colors.background.app },
     content: { paddingHorizontal: 20 },
     header:  { paddingBottom: 12, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 12 },
-    title:   { flex: 1, fontSize: 16, fontWeight: '800', color: colors.text.primary },
-    headerLink: { fontSize: 13, fontWeight: '700', color: colors.action.primary },
+    title:   { fontSize: 16, fontWeight: '800', color: colors.text.primary },
+    secondaryBtn: { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 12, padding: 14, borderRadius: radius.md, backgroundColor: colors.background.surface, borderWidth: 1, borderColor: colors.action.primary },
+    secondaryBtnText: { color: colors.action.primary, fontWeight: '800', fontSize: 14 },
     iconBubble: { alignSelf: 'center', width: 72, height: 72, borderRadius: 36, backgroundColor: colors.action.subtle, alignItems: 'center', justifyContent: 'center', marginTop: 24, marginBottom: 16 },
     heading: { fontSize: 20, fontWeight: '800', color: colors.text.primary, textAlign: 'center' },
     body:    { fontSize: 14, color: colors.text.secondary, lineHeight: 21, textAlign: 'center', marginTop: 10 },
