@@ -129,6 +129,8 @@
     "requestHeading": "النقاط تُعيَّن ولا تُشترى",
     "requestExplainer": "تُعيَّن النقاط من قِبل مؤسستك أو مسؤول OfflineSMS. شراء النقاط غير متاح في تطبيق الجوال.",
     "requestAdminNote": "للحصول على مزيد من النقاط، تواصل مع مؤسستك أو مسؤول OfflineSMS.",
+    "packagesTitle": "الباقات المتاحة",
+    "unit": "نقطة",
     "transfer": "تحويل نقاط",
     "transferSubtitle": "إرسال نقاط إلى مستخدم آخر",
     "smsBatch": "دفعة OfflineSMS",
