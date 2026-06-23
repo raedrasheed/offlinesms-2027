@@ -14,6 +14,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { adminDb } from './firebase-admin';
 import { verifySession } from './session';
 import { canDo } from './adminPermissions';
+import { decideReview } from './pointsRequestLogic';
 
 export type PointsRequestActionState = { error?: string; success?: boolean };
 
@@ -41,11 +42,13 @@ export async function reviewPointsRequestAction(
       if (!snap.exists) throw new Error('request-not-found');
       const r = snap.data() as { userId?: string; status?: string; points?: number };
 
-      // Idempotent: terminal states are a no-op.
-      if (r.status === 'approved' || r.status === 'rejected') {
-        return { applied: false, userId: r.userId, points: 0 };
+      const decision = decideReview({
+        status: r.status ?? '', outcome, points: r.points ?? 0, userId: r.userId,
+      });
+      if (decision.kind === 'noop') return { applied: false, userId: r.userId, points: 0 };
+      if (decision.kind === 'error') {
+        throw new Error(decision.code === 'unexpected-status' ? `unexpected-status:${r.status}` : 'request-misconfigured');
       }
-      if (r.status !== 'pending') throw new Error(`unexpected-status:${r.status}`);
 
       const now = FieldValue.serverTimestamp();
       const review = {
@@ -53,15 +56,14 @@ export async function reviewPointsRequestAction(
         reviewedByUid: session.user.uid, reviewNote: note,
       };
 
-      if (outcome === 'rejected') {
+      if (decision.kind === 'reject') {
         tx.update(reqRef, review);
         return { applied: true, userId: r.userId, points: 0 };
       }
 
-      const points = r.points ?? 0;
-      if (points <= 0 || !r.userId) throw new Error('request-misconfigured');
-
-      const walletRef = adminDb.collection('wallets').doc(r.userId);
+      // decision.kind === 'credit'
+      const points = decision.points;
+      const walletRef = adminDb.collection('wallets').doc(r.userId!);
       const wSnap = await tx.get(walletRef);
       const balance = wSnap.exists ? ((wSnap.get('balance') as number) ?? 0) : 0;
       tx.set(walletRef, { balance: balance + points, updatedAt: now }, { merge: true });
