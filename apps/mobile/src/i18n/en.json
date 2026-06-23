@@ -129,6 +129,8 @@
     "requestHeading": "Points are assigned, not purchased",
     "requestExplainer": "Points are assigned by your organization or OfflineSMS admin. Purchasing points is not available in the mobile app.",
     "requestAdminNote": "To get more points, contact your organization or OfflineSMS admin.",
+    "packagesTitle": "Available packages",
+    "unit": "pts",
     "transfer": "Transfer",
     "transferSubtitle": "Send points to another user",
     "smsBatch": "OfflineSMS batch",

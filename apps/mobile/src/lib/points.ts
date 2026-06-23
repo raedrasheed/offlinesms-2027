@@ -194,6 +194,46 @@ export async function getTransaction(transactionId: string): Promise<Transaction
 }
 
 // ─────────────────────────────────────────────────────────────────
+// Points packages (READ-ONLY, informational).
+//
+// The mobile app does NOT sell points — there is no price, currency,
+// purchase, checkout, or payment. This read-only list shows the point
+// bundles an organization/admin can assign, so users know what to request.
+// Only the package name and point amount are exposed; price/bonus/currency
+// are intentionally NOT read or surfaced.
+// ─────────────────────────────────────────────────────────────────
+
+export type PointsPackage = {
+  id:        string;
+  name:      string;
+  points:    number;
+  sortOrder: number;
+};
+
+export function subscribePackages(cb: (rows: PointsPackage[]) => void) {
+  const q = query(
+    collection(db, 'pointsPackages'),
+    where('status', '==', 'active'),
+    orderBy('sortOrder', 'asc'),
+    limit(20),
+  );
+  return onSnapshot(q, snap => {
+    cb(snap.docs.map(d => {
+      const data = d.data() as { name?: string; points?: number; sortOrder?: number };
+      return {
+        id:        d.id,
+        name:      data.name ?? '',
+        points:    data.points ?? 0,
+        sortOrder: data.sortOrder ?? 0,
+      };
+    }));
+  }, err => {
+    console.warn('[points] subscribePackages failed:', err);
+    cb([]);
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────
 // Transfers (callable wrapper). NOTE: points are NOT sold in the mobile
 // app — there is no purchase / package / payment flow. Points are assigned
 // by an organization or OfflineSMS admin. Transfers move existing points

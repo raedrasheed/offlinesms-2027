@@ -2,9 +2,11 @@
 //
 // The mobile app does NOT sell points. Points are assigned by an organization
 // or an OfflineSMS admin. This screen replaces the former purchase flow: it
-// explains how points are obtained and offers no price, package, currency,
-// checkout, or payment of any kind.
+// explains how points are obtained and lists the available point packages by
+// NAME and POINT AMOUNT only — no price, currency, bonus, package checkout,
+// invoice, or payment of any kind.
 
+import { useEffect, useState } from 'react';
 import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -12,12 +14,16 @@ import { useTranslation } from 'react-i18next';
 import { useTheme } from '../context/ThemeContext';
 import { isRTL } from '../i18n';
 import { radius } from '../theme';
+import { subscribePackages, type PointsPackage } from '../lib/points';
 
 export default function RequestPoints({ navigation }: any) {
   const insets = useSafeAreaInsets();
   const { t } = useTranslation();
   const { colors } = useTheme();
   const s = buildStyles(colors, isRTL);
+
+  const [packages, setPackages] = useState<PointsPackage[] | null>(null);
+  useEffect(() => subscribePackages(setPackages), []);
 
   return (
     <ScrollView
@@ -43,6 +49,18 @@ export default function RequestPoints({ navigation }: any) {
 
       <Text style={s.heading}>{t('points.requestHeading')}</Text>
       <Text style={s.body}>{t('points.requestExplainer')}</Text>
+
+      {packages && packages.length > 0 ? (
+        <>
+          <Text style={s.sectionLabel}>{t('points.packagesTitle')}</Text>
+          {packages.map(p => (
+            <View key={p.id} style={s.packageCard}>
+              <Text style={s.pkgName}>{p.name}</Text>
+              <Text style={s.pkgPoints}>{p.points.toLocaleString()} {t('points.unit')}</Text>
+            </View>
+          ))}
+        </>
+      ) : null}
 
       <View style={s.noteCard}>
         <Ionicons name="business-outline" size={18} color={colors.text.muted} />
@@ -71,6 +89,10 @@ function buildStyles(colors: any, rtl: boolean) {
     iconBubble: { alignSelf: 'center', width: 72, height: 72, borderRadius: 36, backgroundColor: colors.action.subtle, alignItems: 'center', justifyContent: 'center', marginTop: 24, marginBottom: 16 },
     heading: { fontSize: 20, fontWeight: '800', color: colors.text.primary, textAlign: 'center' },
     body:    { fontSize: 14, color: colors.text.secondary, lineHeight: 21, textAlign: 'center', marginTop: 10 },
+    sectionLabel: { fontSize: 11, fontWeight: '700', color: colors.text.muted, letterSpacing: 0.6, marginTop: 24, marginBottom: 10, textTransform: 'uppercase', textAlign: rtl ? 'right' : 'left' },
+    packageCard: { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, backgroundColor: colors.background.surface, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border.subtle, marginBottom: 8 },
+    pkgName:   { fontSize: 15, fontWeight: '700', color: colors.text.primary },
+    pkgPoints: { fontSize: 14, fontWeight: '800', color: colors.action.primary, writingDirection: 'ltr' },
     noteCard: { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 10, marginTop: 22, padding: 14, backgroundColor: colors.background.surface, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border.subtle },
     noteText: { flex: 1, fontSize: 13, color: colors.text.secondary, lineHeight: 19, textAlign: rtl ? 'right' : 'left' },
     primaryBtn: { marginTop: 28, padding: 16, borderRadius: radius.md, backgroundColor: colors.action.primary, alignItems: 'center' },

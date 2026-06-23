@@ -137,8 +137,6 @@ export default function PhoneEntry({ navigation }: any) {
         </>
       )}
 
-      <View style={{ flex: 1 }} />
-
       <Pressable style={[s.btn, !canSubmit && { opacity: 0.5 }]} onPress={next} disabled={!canSubmit}>
         <Text style={s.btnText}>{t('auth.sendCode')}</Text>
       </Pressable>
@@ -201,7 +199,7 @@ const s = StyleSheet.create({
   hintRow:    { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 14 },
   hint:       { fontSize: 12, color: colors.ink500 },
 
-  btn:        { padding: 16, backgroundColor: colors.primary, borderRadius: radius.md, alignItems: 'center' },
+  btn:        { padding: 16, backgroundColor: colors.primary, borderRadius: radius.md, alignItems: 'center', marginTop: 28 },
   btnText:    { color: '#fff', fontWeight: '700', fontSize: 15 },
 
   modal:        { flex: 1, backgroundColor: '#fff' },
