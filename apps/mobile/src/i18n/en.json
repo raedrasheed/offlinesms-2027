@@ -140,6 +140,16 @@
     "requestAlreadyPending": "You already have a pending request. Please wait for it to be reviewed.",
     "requestPackageUnavailable": "That package isn't available right now.",
     "requestErrorGeneric": "Something went wrong. Please try again.",
+    "myRequestsLink": "My requests",
+    "myRequestsTitle": "My requests",
+    "myRequestsEmpty": "No requests yet",
+    "myRequestsEmptyDesc": "Packages you request will appear here with their status.",
+    "loadingRequests": "Loading requests…",
+    "reqStatus": {
+      "pending": "Pending",
+      "approved": "Approved",
+      "rejected": "Rejected"
+    },
     "transfer": "Transfer",
     "transferSubtitle": "Send points to another user",
     "smsBatch": "OfflineSMS batch",
