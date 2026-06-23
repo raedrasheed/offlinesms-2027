@@ -50,7 +50,7 @@ export function getTransactionLabel(type: CanonicalType): string {
     case 'reservation':          return 'Reservation';
     case 'reservation_release':  return 'Reservation released';
     case 'refund':               return 'Refund';
-    case 'purchase':             return 'Purchase';
+    case 'purchase':             return 'Points added';
     case 'transfer_in':          return 'Transfer in';
     case 'transfer_out':         return 'Transfer out';
     case 'admin_adjustment':     return 'Admin adjustment';

@@ -194,50 +194,54 @@ export async function getTransaction(transactionId: string): Promise<Transaction
 }
 
 // ─────────────────────────────────────────────────────────────────
-// Phase 10 — packages, payments, transfers (callable wrappers)
+// Points packages (READ-ONLY, informational).
+//
+// The mobile app does NOT sell points — there is no price, currency,
+// purchase, checkout, or payment. This read-only list shows the point
+// bundles an organization/admin can assign, so users know what to request.
+// Only the package name and point amount are exposed; price/bonus/currency
+// are intentionally NOT read or surfaced.
+// ─────────────────────────────────────────────────────────────────
+
+export type PointsPackage = {
+  id:        string;
+  name:      string;
+  points:    number;
+  sortOrder: number;
+};
+
+export function subscribePackages(cb: (rows: PointsPackage[]) => void) {
+  const q = query(
+    collection(db, 'pointsPackages'),
+    where('status', '==', 'active'),
+    orderBy('sortOrder', 'asc'),
+    limit(20),
+  );
+  return onSnapshot(q, snap => {
+    cb(snap.docs.map(d => {
+      const data = d.data() as { name?: string; points?: number; sortOrder?: number };
+      return {
+        id:        d.id,
+        name:      data.name ?? '',
+        points:    data.points ?? 0,
+        sortOrder: data.sortOrder ?? 0,
+      };
+    }));
+  }, err => {
+    console.warn('[points] subscribePackages failed:', err);
+    cb([]);
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Transfers (callable wrapper). NOTE: points are NOT sold in the mobile
+// app — there is no purchase / package / payment flow. Points are assigned
+// by an organization or OfflineSMS admin. Transfers move existing points
+// between users and never involve buying.
 // ─────────────────────────────────────────────────────────────────
 
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { app } from './firebase';
-
-export type PointsPackage = {
-  id:          string;
-  name:        string;
-  points:      number;
-  bonusPoints: number;
-  price:       number;
-  currency:    string;
-  status:      'active' | 'disabled';
-  sortOrder:   number;
-};
-
-export type Payment = {
-  id:             string;
-  userId:         string;
-  packageId:      string;
-  points:         number;
-  bonusPoints:    number;
-  totalPoints:    number;
-  amount:         number;
-  currency:       string;
-  status:         'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'refunded';
-  checkoutUrl?:   string | null;
-  failureReason?: string | null;
-  createdAt:      any;
-  completedAt?:   any;
-};
-
-export type PurchaseResult = {
-  paymentId:      string;
-  idempotencyKey: string;
-  checkoutUrl:    string | null;
-  points:         number;
-  bonusPoints:    number;
-  totalPoints:    number;
-  amount:         number;
-  currency:       string;
-  status:         'pending';
-};
 
 export type TransferResult = {
   transferId: string;
@@ -249,50 +253,31 @@ function callable<T = unknown, R = unknown>(name: string) {
   return httpsCallable<T, R>(getFunctions(app), name);
 }
 
-export function subscribePackages(cb: (rows: PointsPackage[]) => void) {
-  const q = query(
-    collection(db, 'pointsPackages'),
-    where('status', '==', 'active'),
-    orderBy('sortOrder', 'asc'),
-    limit(20),
-  );
-  return onSnapshot(q, snap => {
-    const rows = snap.docs.map(d => ({ id: d.id, ...(d.data() as Omit<PointsPackage, 'id'>) }));
-    cb(rows);
-  }, err => {
-    // Without an error path a failed query (e.g. a missing composite index)
-    // would leave the screen stuck on "Loading packages…" forever.
-    console.warn('[points] subscribePackages failed:', err);
-    cb([]);
-  });
-}
-
-export function subscribePayment(paymentId: string, cb: (p: Payment | null) => void) {
-  if (!paymentId) { cb(null); return () => {}; }
-  return onSnapshot(doc(db, 'payments', paymentId), snap => {
-    if (!snap.exists()) { cb(null); return; }
-    cb({ id: snap.id, ...(snap.data() as Omit<Payment, 'id'>) });
-  });
-}
-
-export async function createPurchase(packageId: string): Promise<PurchaseResult> {
-  const res = await callable<{ packageId: string }, PurchaseResult>('createPurchase')({ packageId });
-  return res.data;
-}
-
-/** Emulator-only. The callable refuses to run in production. */
-export async function confirmPaymentMock(paymentId: string, status: 'completed' | 'failed' = 'completed') {
-  await callable<{ paymentId: string; status: 'completed' | 'failed' }, { ok: true }>(
-    'confirmPaymentMock',
-  )({ paymentId, status });
-}
-
 export async function transferPoints(args: {
   recipientUid: string;
   amount: number;
   note?: string;
 }): Promise<TransferResult> {
   const res = await callable<typeof args, TransferResult>('transferPoints')(args);
+  return res.data;
+}
+
+export type PointsRequestResult = {
+  requestId:   string;
+  status:      'pending';
+  points:      number;
+  packageName: string;
+};
+
+/**
+ * Ask an org / OfflineSMS admin to assign a points package. NOT a purchase:
+ * no price, currency, or payment — creates a pending pointsRequests doc the
+ * admin approves (credits) or rejects from the dashboard.
+ */
+export async function createPointsRequest(packageId: string, note?: string): Promise<PointsRequestResult> {
+  const res = await callable<{ packageId: string; note?: string }, PointsRequestResult>(
+    'createPointsRequest',
+  )({ packageId, ...(note ? { note } : {}) });
   return res.data;
 }
 
@@ -313,13 +298,6 @@ export function pointsErrorCopy(code: string, reason?: string | null): string {
       case 'wallet-closed':            return 'Your OfflineSMS Points wallet is closed.';
       case 'recipient-wallet-frozen':  return 'The recipient’s wallet is frozen.';
       case 'recipient-not-found':      return 'Recipient not found.';
-      case 'package-inactive':         return 'That package is no longer available.';
-      case 'package-not-found':        return 'Package not found.';
-      case 'package-misconfigured':    return 'That package is misconfigured. Contact support.';
-      case 'payment-not-found':        return 'Payment not found.';
-      case 'emulator-only':            return 'Mock confirmations only work in development.';
-      case 'payment-webhook-not-configured':
-        return 'OfflineSMS payment confirmation isn’t configured yet.';
     }
   }
   switch (code) {

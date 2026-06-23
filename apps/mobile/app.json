@@ -2,7 +2,7 @@
   "expo": {
     "name": "OfflineSMS",
     "slug": "offlinesms",
-    "version": "0.1.0",
+    "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "offlinesms",
@@ -14,10 +14,15 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": false,
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
+      "requireFullScreen": true,
       "bundleIdentifier": "app.offlinesms.mobile",
-      "buildNumber": "1",
+      "buildNumber": "3",
+      "entitlements": {
+        "aps-environment": "production"
+      },
       "infoPlist": {
+        "UIBackgroundModes": ["remote-notification"],
         "NSCameraUsageDescription": "OfflineSMS uses your camera to capture and share photos in conversations.",
         "NSMicrophoneUsageDescription": "OfflineSMS uses your microphone to record and send voice messages.",
         "NSPhotoLibraryUsageDescription": "OfflineSMS accesses your photo library to share images in conversations.",

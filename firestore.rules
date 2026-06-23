@@ -573,6 +573,18 @@ service cloud.firestore {
     }
 
     // ════════════════════════════════════════════════════════════
+    // POINTS REQUESTS — a user asks an admin to assign a points
+    // package (NO payment / price). Requester reads own; admin reads
+    // all. Server-only write: created by createPointsRequest, reviewed
+    // (approve/reject + wallet credit) by the dashboard via Admin SDK.
+    // ════════════════════════════════════════════════════════════
+    match /pointsRequests/{requestId} {
+      allow read:  if isAdmin() ||
+                      (isAuthed() && resource.data.userId == request.auth.uid);
+      allow write: if false;
+    }
+
+    // ════════════════════════════════════════════════════════════
     // GATEWAY HEALTH — admin read, server-only write.
     // ════════════════════════════════════════════════════════════
     match /gatewayHealth/{docId} {

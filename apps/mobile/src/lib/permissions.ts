@@ -29,7 +29,10 @@ export async function getStatus(key: PermissionKey): Promise<PermissionStatus> {
 export async function request(key: PermissionKey): Promise<PermissionStatus> {
   switch (key) {
     case 'contacts':      return mapStatus((await Contacts.requestPermissionsAsync()).status);
-    case 'notifications': return mapStatus((await Notifications.requestPermissionsAsync()).status);
+    case 'notifications': return mapStatus((await Notifications.requestPermissionsAsync({
+      // iOS: explicitly request alert + sound + badge (Android ignores these).
+      ios: { allowAlert: true, allowSound: true, allowBadge: true },
+    })).status);
     case 'camera':        return mapStatus((await Camera.requestCameraPermissionsAsync()).status);
     case 'microphone':    return mapStatus((await Audio.requestPermissionsAsync()).status);
   }

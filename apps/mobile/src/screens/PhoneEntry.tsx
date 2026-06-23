@@ -4,6 +4,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { colors, radius } from '../theme';
+import KeyboardAwareScreen from '../components/KeyboardAwareScreen';
 import { requestPhoneOtp, otpErrorCopy, getSupportedPhoneCountries } from '../lib/auth';
 import { availableCountries, flagEmoji, type Country } from '../lib/countries';
 
@@ -85,7 +86,7 @@ export default function PhoneEntry({ navigation }: any) {
   }
 
   return (
-    <View style={[s.root, { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 16 }]}>
+    <KeyboardAwareScreen style={s.screen} contentStyle={[s.root, { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 16 }]}>
       <Pressable style={s.back} onPress={() => navigation.goBack()} hitSlop={12}>
         <Ionicons name="chevron-back" size={24} color={colors.ink} />
       </Pressable>
@@ -124,6 +125,8 @@ export default function PhoneEntry({ navigation }: any) {
               placeholder="555 0188"
               placeholderTextColor={colors.ink400}
               autoFocus
+              returnKeyType="done"
+              onSubmitEditing={() => { if (canSubmit) next(); }}
             />
           </View>
 
@@ -133,8 +136,6 @@ export default function PhoneEntry({ navigation }: any) {
           </View>
         </>
       )}
-
-      <View style={{ flex: 1 }} />
 
       <Pressable style={[s.btn, !canSubmit && { opacity: 0.5 }]} onPress={next} disabled={!canSubmit}>
         <Text style={s.btnText}>{t('auth.sendCode')}</Text>
@@ -175,12 +176,13 @@ export default function PhoneEntry({ navigation }: any) {
           />
         </SafeAreaView>
       </Modal>
-    </View>
+    </KeyboardAwareScreen>
   );
 }
 
 const s = StyleSheet.create({
-  root:  { flex: 1, backgroundColor: '#fff', paddingHorizontal: 24 },
+  screen: { backgroundColor: '#fff' },
+  root:  { backgroundColor: '#fff', paddingHorizontal: 24 },
   back:  { marginTop: 8, marginBottom: 24, alignSelf: 'flex-start' },
   h1:    { fontSize: 26, fontWeight: '800', color: colors.ink, letterSpacing: -0.4 },
   sub:   { fontSize: 13, color: colors.ink500, marginTop: 8, lineHeight: 20 },
@@ -197,7 +199,7 @@ const s = StyleSheet.create({
   hintRow:    { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 14 },
   hint:       { fontSize: 12, color: colors.ink500 },
 
-  btn:        { padding: 16, backgroundColor: colors.primary, borderRadius: radius.md, alignItems: 'center' },
+  btn:        { padding: 16, backgroundColor: colors.primary, borderRadius: radius.md, alignItems: 'center', marginTop: 28 },
   btnText:    { color: '#fff', fontWeight: '700', fontSize: 15 },
 
   modal:        { flex: 1, backgroundColor: '#fff' },

@@ -43,7 +43,7 @@ import JoinRequests from './src/screens/JoinRequests';
 import ForwardPicker from './src/screens/ForwardPicker';
 import MessageInfo from './src/screens/MessageInfo';
 import TransactionDetail from './src/screens/TransactionDetail';
-import BuyPoints from './src/screens/BuyPoints';
+import RequestPoints from './src/screens/RequestPoints';
 import TransferPoints from './src/screens/TransferPoints';
 import ChatWallpaper from './src/screens/ChatWallpaper';
 import SmsBatchReport from './src/screens/SmsBatchReport';
@@ -225,15 +225,20 @@ export default function App() {
     if (user && profileCompleted === true) void registerForPush(user.uid);
   }, [user, profileCompleted]);
 
-  // Route notification taps (cold start + warm). Cold-start tap is delivered
-  // via getLastNotificationResponseAsync.
+  // Route notification taps (cold start + warm). Cold-start tap is delivered via
+  // getLastNotificationResponseAsync; the listener can ALSO fire for that same
+  // response, so dedupe by notification identifier to avoid double navigation.
   useEffect(() => {
-    Notifications.getLastNotificationResponseAsync().then(resp => {
-      if (resp) routeFromPush(resp.notification.request.content.data);
-    });
-    const sub = Notifications.addNotificationResponseReceivedListener(resp => {
+    const handled = new Set<string>();
+    const handle = (resp: Notifications.NotificationResponse | null) => {
+      if (!resp) return;
+      const id = resp.notification.request.identifier;
+      if (id && handled.has(id)) return;
+      if (id) handled.add(id);
       routeFromPush(resp.notification.request.content.data);
-    });
+    };
+    Notifications.getLastNotificationResponseAsync().then(handle);
+    const sub = Notifications.addNotificationResponseReceivedListener(handle);
     return () => sub.remove();
   }, []);
 
@@ -291,7 +296,7 @@ export default function App() {
             <RootStack.Screen name="ForwardPicker" component={ForwardPicker} />
             <RootStack.Screen name="MessageInfo" component={MessageInfo} />
             <RootStack.Screen name="TransactionDetail" component={TransactionDetail} />
-            <RootStack.Screen name="BuyPoints" component={BuyPoints} />
+            <RootStack.Screen name="RequestPoints" component={RequestPoints} />
             <RootStack.Screen name="TransferPoints" component={TransferPoints} />
             <RootStack.Screen name="ChatWallpaper" component={ChatWallpaper} />
             <RootStack.Screen name="NotificationSettings" component={NotificationSettings} />

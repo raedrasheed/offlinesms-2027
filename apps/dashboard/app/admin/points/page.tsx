@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { verifySession } from '@/lib/session';
 import { canDo } from '@/lib/adminPermissions';
 import { PermissionState } from '@/components/state';
-import { Wallet, ArrowLeftRight, CreditCard, Package } from 'lucide-react';
+import { Wallet, ArrowLeftRight, CreditCard, Package, Inbox } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -17,7 +17,8 @@ const BORDER = 'var(--c-border)';
 const sections = [
   { href: '/admin/points/wallets',      label: 'Wallets',       icon: Wallet,          desc: 'User wallet balances and reserved amounts.' },
   { href: '/admin/points/transactions', label: 'Transactions',  icon: ArrowLeftRight,  desc: 'All point transactions: purchases, SMS spend, transfers, refunds.' },
-  { href: '/admin/points/payments',     label: 'Payments',      icon: CreditCard,       desc: 'In-app purchase records and payment statuses.' },
+  { href: '/admin/points/requests',     label: 'Requests',      icon: Inbox,           desc: 'User points requests — approve to assign points (no payment).' },
+  { href: '/admin/points/payments',     label: 'Payments',      icon: CreditCard,       desc: 'Legacy in-app purchase records and payment statuses.' },
   { href: '/admin/points/packages',     label: 'Packages',      icon: Package,         desc: 'Points package catalog (read-only).' },
 ];
 

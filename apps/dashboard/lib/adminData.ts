@@ -615,6 +615,45 @@ export async function listTransactions(cursor?: string, uid?: string, type?: str
   });
 }
 
+export type AdminPointsRequestRow = {
+  id: string;
+  userId: string;
+  packageId: string | null;
+  packageName: string;
+  points: number;
+  note: string | null;
+  status: string;        // pending | approved | rejected
+  reviewNote: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/** Points requests (user asks an admin to assign a package — no payment). */
+export async function listPointsRequests(cursor?: string, status?: string): Promise<AdminPointsRequestRow[]> {
+  let q = adminDb.collection('pointsRequests').orderBy('createdAt', 'desc').limit(50) as FirebaseFirestore.Query;
+  if (status) q = q.where('status', '==', status);
+  if (cursor) {
+    const snap = await adminDb.collection('pointsRequests').doc(cursor).get();
+    if (snap.exists) q = q.startAfter(snap);
+  }
+  const result = await q.get();
+  return result.docs.map(d => {
+    const data = d.data();
+    return {
+      id:          d.id,
+      userId:      (data.userId as string) ?? '—',
+      packageId:   (data.packageId as string | null) ?? null,
+      packageName: (data.packageName as string) ?? '',
+      points:      (data.points as number) ?? 0,
+      note:        (data.note as string | null) ?? null,
+      status:      (data.status as string) ?? '—',
+      reviewNote:  (data.reviewNote as string | null) ?? null,
+      createdAt:   safeDate(data.createdAt),
+      updatedAt:   safeDate(data.updatedAt),
+    };
+  });
+}
+
 export async function listPayments(cursor?: string, status?: string): Promise<AdminPaymentRow[]> {
   let q = adminDb.collection('payments').orderBy('createdAt', 'desc').limit(50) as FirebaseFirestore.Query;
   if (status) q = q.where('status', '==', status);
