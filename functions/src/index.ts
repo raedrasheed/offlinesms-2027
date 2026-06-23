@@ -86,6 +86,7 @@ export { createPurchase }      from './points/createPurchase';
 export { confirmPayment }      from './points/confirmPayment';
 export { confirmPaymentMock }  from './points/confirmPaymentMock';
 export { transferPoints }      from './points/transferPoints';
+export { createPointsRequest } from './points/createPointsRequest';
 export { onUserCreate } from './auth/onUserCreate';
 export { setAdminClaim } from './auth/setAdminClaim';
 export { claimUsername } from './auth/claimUsername';

@@ -262,6 +262,25 @@ export async function transferPoints(args: {
   return res.data;
 }
 
+export type PointsRequestResult = {
+  requestId:   string;
+  status:      'pending';
+  points:      number;
+  packageName: string;
+};
+
+/**
+ * Ask an org / OfflineSMS admin to assign a points package. NOT a purchase:
+ * no price, currency, or payment — creates a pending pointsRequests doc the
+ * admin approves (credits) or rejects from the dashboard.
+ */
+export async function createPointsRequest(packageId: string, note?: string): Promise<PointsRequestResult> {
+  const res = await callable<{ packageId: string; note?: string }, PointsRequestResult>(
+    'createPointsRequest',
+  )({ packageId, ...(note ? { note } : {}) });
+  return res.data;
+}
+
 export function pointsErrorReason(err: unknown): string | null {
   const msg = (err as { message?: string })?.message ?? '';
   if (!msg) return null;

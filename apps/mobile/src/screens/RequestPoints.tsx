@@ -1,20 +1,23 @@
-// RequestPoints — informational screen (no purchase / payment).
+// RequestPoints — request a points package from an admin (NO purchase / payment).
 //
 // The mobile app does NOT sell points. Points are assigned by an organization
-// or an OfflineSMS admin. This screen replaces the former purchase flow: it
-// explains how points are obtained and lists the available point packages by
-// NAME and POINT AMOUNT only — no price, currency, bonus, package checkout,
-// invoice, or payment of any kind.
+// or an OfflineSMS admin. This screen lists the available packages by NAME +
+// POINT AMOUNT only (no price, currency, bonus). Tapping a package submits a
+// request to the backend (createPointsRequest) — the admin then approves
+// (credits the wallet) or rejects it from the dashboard. No checkout, invoice,
+// or payment is ever involved.
 
 import { useEffect, useState } from 'react';
-import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, Pressable, ScrollView, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../context/ThemeContext';
 import { isRTL } from '../i18n';
 import { radius } from '../theme';
-import { subscribePackages, type PointsPackage } from '../lib/points';
+import {
+  subscribePackages, createPointsRequest, pointsErrorReason, type PointsPackage,
+} from '../lib/points';
 
 export default function RequestPoints({ navigation }: any) {
   const insets = useSafeAreaInsets();
@@ -23,7 +26,41 @@ export default function RequestPoints({ navigation }: any) {
   const s = buildStyles(colors, isRTL);
 
   const [packages, setPackages] = useState<PointsPackage[] | null>(null);
+  const [submittingId, setSubmittingId] = useState<string | null>(null);
   useEffect(() => subscribePackages(setPackages), []);
+
+  function requestErrorCopy(e: unknown): string {
+    const reason = pointsErrorReason(e);
+    if (reason === 'request-already-pending') return t('points.requestAlreadyPending');
+    if (reason === 'package-inactive' || reason === 'package-not-found' || reason === 'package-misconfigured') {
+      return t('points.requestPackageUnavailable');
+    }
+    return t('points.requestErrorGeneric');
+  }
+
+  async function submit(pkg: PointsPackage) {
+    setSubmittingId(pkg.id);
+    try {
+      await createPointsRequest(pkg.id);
+      Alert.alert(t('points.requestSentTitle'), t('points.requestSentMessage'));
+    } catch (e) {
+      Alert.alert(t('points.requestFailedTitle'), requestErrorCopy(e));
+    } finally {
+      setSubmittingId(null);
+    }
+  }
+
+  function confirmRequest(pkg: PointsPackage) {
+    if (submittingId) return;
+    Alert.alert(
+      t('points.requestConfirmTitle', { name: pkg.name }),
+      t('points.requestConfirmMessage', { points: pkg.points.toLocaleString() }),
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        { text: t('points.requestCta'), onPress: () => { void submit(pkg); } },
+      ],
+    );
+  }
 
   return (
     <ScrollView
@@ -53,12 +90,27 @@ export default function RequestPoints({ navigation }: any) {
       {packages && packages.length > 0 ? (
         <>
           <Text style={s.sectionLabel}>{t('points.packagesTitle')}</Text>
-          {packages.map(p => (
-            <View key={p.id} style={s.packageCard}>
-              <Text style={s.pkgName}>{p.name}</Text>
-              <Text style={s.pkgPoints}>{p.points.toLocaleString()} {t('points.unit')}</Text>
-            </View>
-          ))}
+          {packages.map(p => {
+            const submitting = submittingId === p.id;
+            return (
+              <Pressable
+                key={p.id}
+                style={[s.packageCard, !!submittingId && !submitting && { opacity: 0.5 }]}
+                onPress={() => confirmRequest(p)}
+                disabled={!!submittingId}
+                accessible
+                accessibilityRole="button"
+                accessibilityLabel={`${t('points.requestCta')} ${p.name}, ${p.points.toLocaleString()} ${t('points.unit')}`}
+              >
+                <Text style={s.pkgName}>{p.name}</Text>
+                {submitting ? (
+                  <ActivityIndicator color={colors.action.primary} />
+                ) : (
+                  <Text style={s.pkgPoints}>{p.points.toLocaleString()} {t('points.unit')}</Text>
+                )}
+              </Pressable>
+            );
+          })}
         </>
       ) : null}
 
