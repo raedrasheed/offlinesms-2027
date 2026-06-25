@@ -17,6 +17,7 @@ functions/lib/
 .env
 .env.local
 .env*.local
+eas.env
 
 # Firebase
 .firebase/
