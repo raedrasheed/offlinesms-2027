@@ -80,16 +80,9 @@ export default function RequestPoints({ navigation }: any) {
         <Text style={s.title}>{t('points.requestTitle')}</Text>
       </View>
 
-      <View style={s.iconBubble}>
-        <Ionicons name="information-circle-outline" size={36} color={colors.action.primary} />
-      </View>
-
-      <Text style={s.heading}>{t('points.requestHeading')}</Text>
-      <Text style={s.body}>{t('points.requestExplainer')}</Text>
-
       {packages && packages.length > 0 ? (
         <>
-          <Text style={s.sectionLabel}>{t('points.packagesTitle')}</Text>
+          <Text style={[s.sectionLabel, { marginTop: 8 }]}>{t('points.packagesTitle')}</Text>
           {packages.map(p => {
             const submitting = submittingId === p.id;
             return (
@@ -151,9 +144,6 @@ function buildStyles(colors: any, rtl: boolean) {
     title:   { fontSize: 16, fontWeight: '800', color: colors.text.primary },
     secondaryBtn: { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 12, padding: 14, borderRadius: radius.md, backgroundColor: colors.background.surface, borderWidth: 1, borderColor: colors.action.primary },
     secondaryBtnText: { color: colors.action.primary, fontWeight: '800', fontSize: 14 },
-    iconBubble: { alignSelf: 'center', width: 72, height: 72, borderRadius: 36, backgroundColor: colors.action.subtle, alignItems: 'center', justifyContent: 'center', marginTop: 24, marginBottom: 16 },
-    heading: { fontSize: 20, fontWeight: '800', color: colors.text.primary, textAlign: 'center' },
-    body:    { fontSize: 14, color: colors.text.secondary, lineHeight: 21, textAlign: 'center', marginTop: 10 },
     sectionLabel: { fontSize: 11, fontWeight: '700', color: colors.text.muted, letterSpacing: 0.6, marginTop: 24, marginBottom: 10, textTransform: 'uppercase', textAlign: rtl ? 'right' : 'left' },
     packageCard: { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, backgroundColor: colors.background.surface, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border.subtle, marginBottom: 8 },
     pkgName:   { fontSize: 15, fontWeight: '700', color: colors.text.primary },
