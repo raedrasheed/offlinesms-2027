@@ -1,21 +1,26 @@
-// Seed the App Review demo account + pre-populated content.
+// Seed the App Review demo accounts + pre-populated content.
 //
-// Creates a NON-EXPIRING email/password account Apple reviewers can use to test
-// every end-user feature without real SMS or relay coverage, plus sample chats,
-// a contact to start a new chat with, and points balance + history.
+// Provisions the accounts Apple reviewers use to test every end-user feature
+// without real SMS, plus sample chats, a contact to start a new chat with, and
+// points balance + history. Two sign-in options are seeded:
+//
+//   1) PHONE (primary): +970599999999, verification code 123456 (the fixed
+//      App-review test number; the backend skips real SMS for it).
+//   2) EMAIL/PASSWORD (fallback): DEMO_REVIEW_EMAIL + DEMO_REVIEW_PASSWORD,
+//      via Welcome → "Use email" → "Sign in with a password instead".
 //
 // Run (against the prod project):
 //   GOOGLE_APPLICATION_CREDENTIALS=./service-account.json \
 //   DEMO_REVIEW_EMAIL=appreview@offlinesms.com \
 //   DEMO_REVIEW_PASSWORD='<choose-a-strong-password>' \
-//   npx tsx scripts/seedReviewDemo.ts
+//   npm run seed:review
 //
 // The password is read from the environment so it is NEVER committed. Put the
-// same email/password into App Store Connect → App Review Information.
+// same credentials into App Store Connect → App Review Information.
 //
-// Messages are written with the app's canonical doc shapes, so the existing
-// onMessageCreate triggers fan out receipts / unread / lastMessage exactly as a
-// real send would. Idempotent: re-running updates the same docs.
+// Messages use the app's canonical doc shapes, so the existing onMessageCreate
+// triggers fan out receipts / unread / lastMessage. Idempotent: re-running
+// updates the same docs and does not duplicate messages.
 
 import { cert, initializeApp } from 'firebase-admin/app';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
@@ -34,23 +39,15 @@ initializeApp({ credential: cert(JSON.parse(readFileSync(credPath, 'utf-8'))) })
 const db = getFirestore();
 const auth = getAuth();
 
-const DEMO_UID = 'appreview_demo';
+// Fixed App-review test phone (must match functions/src/auth/otpLogic.ts).
+const TEST_PHONE = '+970599999999';
+const EMAIL_UID = 'appreview_demo';
 const CONTACTS = [
   { id: 'appreview_contact_lina', displayName: 'Lina Haddad', username: 'lina', usernameLower: 'lina', phoneNumber: '+14155550111' },
   { id: 'appreview_contact_sam',  displayName: 'Sam Rivera',  username: 'samr', usernameLower: 'samr', phoneNumber: '+14155550122' },
 ];
 
 function directKey(a: string, b: string) { return [a, b].sort().join('_'); }
-
-async function ensureAuthUser() {
-  try {
-    await auth.updateUser(DEMO_UID, { email, password, emailVerified: true, displayName: 'OfflineSMS Reviewer' });
-    console.log('Updated demo auth user', DEMO_UID);
-  } catch {
-    await auth.createUser({ uid: DEMO_UID, email, password, emailVerified: true, displayName: 'OfflineSMS Reviewer' });
-    console.log('Created demo auth user', DEMO_UID);
-  }
-}
 
 async function ensureUserDoc(uid: string, fields: Record<string, unknown>) {
   await db.collection('users').doc(uid).set(
@@ -59,55 +56,42 @@ async function ensureUserDoc(uid: string, fields: Record<string, unknown>) {
   );
 }
 
-async function main() {
-  console.log('Seeding App Review demo…');
-
-  await ensureAuthUser();
-
-  // Demo user profile + contacts (contacts are searchable by username so the
-  // reviewer can start a brand-new chat).
-  await ensureUserDoc(DEMO_UID, {
-    displayName: 'OfflineSMS Reviewer', username: 'reviewer', usernameLower: 'reviewer',
-    email, about: 'App Review demo account',
-  });
-  for (const c of CONTACTS) await ensureUserDoc(c.id, c);
-
+/** Wallet + transaction history + one existing chat with sent/received messages. */
+async function seedContentFor(uid: string, displayName: string, idPrefix: string) {
   // Wallet with a visible balance.
-  await db.collection('wallets').doc(DEMO_UID).set(
+  await db.collection('wallets').doc(uid).set(
     { balance: 2500, reserved: 0, updatedAt: FieldValue.serverTimestamp() }, { merge: true },
   );
 
-  // Transaction history (admin grant + an SMS spend) so the Points screens show data.
-  const txCol = db.collection('transactions');
-  await txCol.doc('appreview_tx_grant').set({
-    userId: DEMO_UID, type: 'admin_adjustment', direction: 'credit', amount: 3000, status: 'completed',
+  // Transaction history (admin grant + an SMS spend).
+  await db.collection('transactions').doc(`${idPrefix}_tx_grant`).set({
+    userId: uid, type: 'admin_adjustment', direction: 'credit', amount: 3000, status: 'completed',
     note: 'Points assigned by admin', createdAt: FieldValue.serverTimestamp(), completedAt: FieldValue.serverTimestamp(),
   }, { merge: true });
-  await txCol.doc('appreview_tx_spend').set({
-    userId: DEMO_UID, type: 'sms_spend', direction: 'debit', amount: 500, status: 'completed',
+  await db.collection('transactions').doc(`${idPrefix}_tx_spend`).set({
+    userId: uid, type: 'sms_spend', direction: 'debit', amount: 500, status: 'completed',
     createdAt: FieldValue.serverTimestamp(), completedAt: FieldValue.serverTimestamp(),
   }, { merge: true });
 
   // One existing direct conversation (canonical shape) with sent + received messages.
   const peer = CONTACTS[0];
-  const key = directKey(DEMO_UID, peer.id);
+  const key = directKey(uid, peer.id);
   const existing = await db.collection('conversations').where('participantKey', '==', key).limit(1).get();
   const convoRef = existing.empty ? db.collection('conversations').doc() : existing.docs[0].ref;
   const now = FieldValue.serverTimestamp();
-  const participantUids = [DEMO_UID, peer.id];
+  const participantUids = [uid, peer.id];
   await convoRef.set({
     type: 'direct', participantUids, participantKey: key, memberIds: participantUids,
     createdBy: peer.id, status: 'active',
     lastMessage: null, lastMessageText: '', lastMessageAt: now, lastSenderId: '',
     createdAt: now, updatedAt: now,
   }, { merge: true });
-  for (const uid of participantUids) {
-    await convoRef.collection('userState').doc(uid).set({
-      uid, pinned: false, muted: false, archived: false, favorite: false,
+  for (const u of participantUids) {
+    await convoRef.collection('userState').doc(u).set({
+      uid: u, pinned: false, muted: false, archived: false, favorite: false,
       unreadCount: 0, lastReadAt: now, lastMessagePreview: '', lastMessageAt: now, updatedAt: now,
     }, { merge: true });
   }
-  // Only seed messages once (avoid duplicates on re-run).
   const msgs = await convoRef.collection('messages').limit(1).get();
   if (msgs.empty) {
     const mk = (senderUid: string, senderDisplayName: string, text: string) => ({
@@ -115,14 +99,58 @@ async function main() {
       status: 'sent', deletedForEveryone: false, senderDisplayName,
       createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
     });
-    // The onMessageCreate trigger fans out receipts / unread / lastMessage.
     await convoRef.collection('messages').add(mk(peer.id, peer.displayName, 'Welcome to OfflineSMS! 👋'));
-    await convoRef.collection('messages').add(mk(DEMO_UID, 'OfflineSMS Reviewer', 'Thanks — testing the app.'));
+    await convoRef.collection('messages').add(mk(uid, displayName, 'Thanks — testing the app.'));
     await convoRef.collection('messages').add(mk(peer.id, peer.displayName, 'Great, let me know if you need anything.'));
   }
+}
+
+async function provisionPhoneAccount(): Promise<string> {
+  let uid: string;
+  try {
+    uid = (await auth.getUserByPhoneNumber(TEST_PHONE)).uid;
+    console.log('Found existing phone test user', uid);
+  } catch {
+    uid = (await auth.createUser({ phoneNumber: TEST_PHONE })).uid;
+    console.log('Created phone test user', uid);
+  }
+  await ensureUserDoc(uid, {
+    displayName: 'OfflineSMS Reviewer', username: 'reviewer', usernameLower: 'reviewer',
+    phoneNumber: TEST_PHONE, phoneVerified: true, about: 'App Review demo account',
+  });
+  return uid;
+}
+
+async function provisionEmailAccount(): Promise<string> {
+  try {
+    await auth.updateUser(EMAIL_UID, { email, password, emailVerified: true, displayName: 'OfflineSMS Reviewer' });
+    console.log('Updated email demo user', EMAIL_UID);
+  } catch {
+    await auth.createUser({ uid: EMAIL_UID, email, password, emailVerified: true, displayName: 'OfflineSMS Reviewer' });
+    console.log('Created email demo user', EMAIL_UID);
+  }
+  await ensureUserDoc(EMAIL_UID, {
+    displayName: 'OfflineSMS Reviewer', username: 'reviewer_email', usernameLower: 'reviewer_email',
+    email, about: 'App Review demo account',
+  });
+  return EMAIL_UID;
+}
+
+async function main() {
+  console.log('Seeding App Review demo…');
+
+  // Searchable contacts so the reviewer can start a brand-new chat.
+  for (const c of CONTACTS) await ensureUserDoc(c.id, c);
+
+  const phoneUid = await provisionPhoneAccount();
+  await seedContentFor(phoneUid, 'OfflineSMS Reviewer', 'appreview_phone');
+
+  const emailUid = await provisionEmailAccount();
+  await seedContentFor(emailUid, 'OfflineSMS Reviewer', 'appreview_email');
 
   console.log('Done.');
-  console.log(`Demo login → email: ${email}  (password from DEMO_REVIEW_PASSWORD env)`);
+  console.log(`Phone login → ${TEST_PHONE}  code 123456`);
+  console.log(`Email login → ${email}  (password from DEMO_REVIEW_PASSWORD env)`);
 }
 
 main().catch(e => { console.error(e); process.exit(1); });

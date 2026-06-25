@@ -45,16 +45,18 @@ This creates a **non-expiring** email/password account pre-populated with:
 
 Put these into App Store Connect → **App Review Information**:
 - **Sign-in required:** Yes
-- **User name:** `appreview@offlinesms.com`
-- **Password:** the value used for `DEMO_REVIEW_PASSWORD`
-- **How to sign in:** On the welcome screen tap **Use email** → **"Sign in with
-  a password instead"** → enter the demo email + password.
+- **Phone number (primary):** `+970599999999`
+- **How to sign in (phone):** On the welcome screen tap **Continue with phone**,
+  choose country **Palestine (+970)**, enter **599999999**, tap **Send code**,
+  then enter verification code **123456**.
+- **User name (email fallback):** `appreview@offlinesms.com`
+- **Password (email fallback):** the value used for `DEMO_REVIEW_PASSWORD`
+- **How to sign in (email):** Welcome → **Use email** → **"Sign in with a
+  password instead"** → enter the demo email + password.
 
-> Alternative fixed-OTP path (no email/password): phone **+970599999999**, code
-> **123456** (a scoped App-review test number that skips real SMS). Use the
-> email/password path as the primary method — it does not depend on country/relay
-> availability. This is **not** a general auth bypass; it is limited to that one
-> number and the seeded demo account.
+> The fixed test number `+970599999999` / code `123456` skips real SMS and its
+> country is always selectable in the picker. This is **not** a general auth
+> bypass — it is limited to that one number plus the seeded demo accounts.
 
 ## Verification performed
 - `npx expo config` → version **2.2.16**, sdk **53.0.0**, bundle id
@@ -87,15 +89,15 @@ NO DIGITAL PURCHASES
   purchasing points is not available in the mobile app.
 
 DEMO ACCOUNT (sign-in required)
-- Username: appreview@offlinesms.com
-- Password: <the DEMO_REVIEW_PASSWORD value>
-- To sign in: Welcome screen → "Use email" → "Sign in with a password instead"
-  → enter the email and password above.
-- The account is pre-populated with an existing chat, contacts to start a new
+- Phone (primary): +970599999999, verification code 123456.
+  To sign in: Welcome -> "Continue with phone" -> country Palestine (+970) ->
+  enter 599999999 -> "Send code" -> enter 123456. This is a fixed test number
+  that does not send a real SMS.
+- Email (fallback): appreview@offlinesms.com / <the DEMO_REVIEW_PASSWORD value>.
+  To sign in: Welcome -> "Use email" -> "Sign in with a password instead".
+- Both accounts are pre-populated with an existing chat, contacts to start a new
   chat (search @lina or @samr), sent/received messages, and a points balance +
   history.
-- The app normally uses an SMS/email code; the password path above lets you test
-  without receiving a code.
 
 Thank you for re-reviewing.
 ```
@@ -116,12 +118,13 @@ usage credits for sending SMS that are assigned to a user by their organization
 or an OfflineSMS administrator outside the app; the in-app "Request points"
 screen is informational only.
 
-Guideline 2.1(a): We added a demo account and pre-populated test data, provided
-in App Review Information. Because the app normally uses a one-time code, we
-included a password sign-in path so you can log in without receiving a code:
-Welcome → "Use email" → "Sign in with a password instead", then use the demo
-email and password. The account has an existing chat, contacts to start a new
-chat, sample sent/received messages, and a points balance with history.
+Guideline 2.1(a): We provided a demo account with pre-populated test data in App
+Review Information. Primary sign-in is a fixed test phone number that does not
+send a real SMS: Welcome -> "Continue with phone" -> Palestine (+970) -> enter
+599999999 -> "Send code" -> enter code 123456. An email/password fallback is
+also provided (Welcome -> "Use email" -> "Sign in with a password instead"). The
+account has an existing chat, contacts to start a new chat, sample sent/received
+messages, and a points balance with history.
 
 This is version 2.2.16 (build 8). We appreciate your time and are happy to
 provide anything else you need.
