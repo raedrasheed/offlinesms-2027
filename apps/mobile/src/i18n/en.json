@@ -127,7 +127,7 @@
     "requestSubtitle": "Assigned by your admin",
     "requestTitle": "Request points",
     "requestAdminNote": "Tap a package to request it. The OfflineSMS admin will review and assign the points. Purchasing points is not available in the mobile app.",
-    "packagesTitle": "Available packages",
+    "packagesTitle": "How many points you need?",
     "unit": "pts",
     "requestConfirmTitle": "Request {{name}}?",
     "requestConfirmMessage": "Ask your admin to assign {{points}} pts? They'll review your request.",

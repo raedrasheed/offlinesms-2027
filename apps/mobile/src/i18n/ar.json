@@ -127,7 +127,7 @@
     "requestSubtitle": "تُعيَّن من قِبل المسؤول",
     "requestTitle": "طلب نقاط",
     "requestAdminNote": "اضغط على باقة لطلبها. سيقوم مسؤول OfflineSMS بمراجعة الطلب وتعيين النقاط. شراء النقاط غير متاح في تطبيق الجوال.",
-    "packagesTitle": "الباقات المتاحة",
+    "packagesTitle": "كم عدد النقاط التي تحتاجها؟",
     "unit": "نقطة",
     "requestConfirmTitle": "طلب {{name}}؟",
     "requestConfirmMessage": "هل تطلب من المسؤول تعيين {{points}} نقطة؟ سيقوم بمراجعة طلبك.",
