@@ -69,6 +69,10 @@ export default function EmailEntry({ navigation }: any) {
       <Pressable style={[s.btn, !canSubmit && { opacity: 0.5 }]} onPress={next} disabled={!canSubmit}>
         <Text style={s.btnText}>{busy ? 'Sending…' : 'Send code'}</Text>
       </Pressable>
+
+      <Pressable style={s.passwordLink} onPress={() => navigation.navigate('EmailLogin')} hitSlop={8}>
+        <Text style={s.passwordLinkText}>Sign in with a password instead</Text>
+      </Pressable>
     </KeyboardAwareScreen>
   );
 }
@@ -87,4 +91,6 @@ const s = StyleSheet.create({
 
   btn:     { padding: 16, backgroundColor: colors.primary, borderRadius: radius.md, alignItems: 'center', marginTop: 28 },
   btnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  passwordLink: { alignItems: 'center', marginTop: 18 },
+  passwordLinkText: { fontSize: 13, fontWeight: '600', color: colors.primary },
 });
