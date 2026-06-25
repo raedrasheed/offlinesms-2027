@@ -17,8 +17,8 @@ Addresses the rejection of 2.2.15 (build 7):
   bonus wording, checkout, invoices, external/website/WhatsApp payment, or
   payment confirmation. The Points screen shows balance / available / reserved /
   transaction history only, plus an informational **Request points** screen:
-  > "Points are assigned by your organization or OfflineSMS admin. Purchasing
-  > points is not available in the mobile app."
+  > "Points are assigned by the OfflineSMS admin. Purchasing points is not
+  > available in the mobile app."
   Tapping a package sends an in-app request that an administrator reviews
   **outside** any purchase flow. Points are usage credits for sending SMS.
 - **Review-safe login added:** a "Sign in with a password instead" link on the
@@ -84,7 +84,7 @@ NO DIGITAL PURCHASES
   There are no in-app purchases, prices, packages, checkout, invoices, or
   external payment links.
 - "Points" are usage credits for sending SMS. They are assigned to a user by
-  their organization or by an OfflineSMS administrator OUTSIDE the app. The
+  an OfflineSMS administrator OUTSIDE the app. The
   in-app "Request points" screen is informational only and states that
   purchasing points is not available in the mobile app.
 
@@ -114,8 +114,8 @@ selection and no links to any external signup, web dashboard, pricing, plans,
 sales, or subscription pages. The app does not sell points, credits,
 subscriptions, or any digital content, and contains no in-app purchases,
 prices, packages, checkout, invoices, or external payment links. "Points" are
-usage credits for sending SMS that are assigned to a user by their organization
-or an OfflineSMS administrator outside the app; the in-app "Request points"
+usage credits for sending SMS that are assigned to a user by an OfflineSMS
+administrator outside the app; the in-app "Request points"
 screen is informational only.
 
 Guideline 2.1(a): We provided a demo account with pre-populated test data in App

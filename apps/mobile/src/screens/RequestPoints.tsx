@@ -126,7 +126,7 @@ export default function RequestPoints({ navigation }: any) {
       </Pressable>
 
       <View style={s.noteCard}>
-        <Ionicons name="business-outline" size={18} color={colors.text.muted} />
+        <Ionicons name="shield-checkmark-outline" size={18} color={colors.text.muted} />
         <Text style={s.noteText}>{t('points.requestAdminNote')}</Text>
       </View>
 
