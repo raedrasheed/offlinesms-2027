@@ -1,9 +1,31 @@
 import { describe, it, expect } from 'vitest';
 import {
   normalizeE164, phoneKey, generateOtp, newSalt, hashOtp, verifyOtpHash,
-  isOtpExpired, canResend, nextSendWindow,
+  isOtpExpired, canResend, nextSendWindow, isSupportedSignInNumber,
   OTP_CODE_LENGTH, OTP_RESEND_COOLDOWN_MS, OTP_MAX_PER_HOUR,
 } from '../src/auth/otpLogic';
+
+describe('isSupportedSignInNumber — PS/IL restricted to 59/56 prefixes', () => {
+  it('PS allows national numbers starting with 59 or 56', () => {
+    expect(isSupportedSignInNumber('PS', '599123456')).toBe(true);
+    expect(isSupportedSignInNumber('PS', '569123456')).toBe(true);
+  });
+  it('IL allows national numbers starting with 59 or 56', () => {
+    expect(isSupportedSignInNumber('IL', '591234567')).toBe(true);
+    expect(isSupportedSignInNumber('IL', '561234567')).toBe(true);
+  });
+  it('PS/IL reject other prefixes', () => {
+    expect(isSupportedSignInNumber('PS', '521234567')).toBe(false);
+    expect(isSupportedSignInNumber('PS', '501234567')).toBe(false);
+    expect(isSupportedSignInNumber('IL', '541234567')).toBe(false);
+    expect(isSupportedSignInNumber('IL', '')).toBe(false);
+  });
+  it('other countries are unrestricted', () => {
+    expect(isSupportedSignInNumber('US', '4155550188')).toBe(true);
+    expect(isSupportedSignInNumber('EG', '1001234567')).toBe(true);
+    expect(isSupportedSignInNumber(null, '123')).toBe(true);
+  });
+});
 
 describe('normalizeE164', () => {
   it('accepts plausible E.164 and strips formatting', () => {

@@ -9,9 +9,10 @@ import { getMessaging } from 'firebase-admin/messaging';
 import { writeAuditLog } from '../lib/auditLog';
 import {
   normalizeE164, phoneKey, generateOtp, newSalt, hashOtp,
-  canResend, nextSendWindow, OTP_TTL_MS, isTestPhone,
+  canResend, nextSendWindow, OTP_TTL_MS, isTestPhone, isSupportedSignInNumber,
 } from './otpLogic';
 import { normalizePhoneAndCountry } from '../lib/phoneCountry';
+import { parsePhoneNumberFromString } from 'libphonenumber-js';
 import { loadActiveRelayDevices } from '../sms/countryRouting';
 import { hasRelayCoverageForCountry } from '../sms/relayLogic';
 
@@ -41,6 +42,13 @@ export const requestPhoneOtp = onCall({ region: REGION }, async (request) => {
   // covers this number's country, don't send (sign-in isn't possible there).
   const { countryCode } = normalizePhoneAndCountry(phone);
   if (!countryCode) throw new HttpsError('failed-precondition', 'no-relay-for-country');
+
+  // Restricted mobile prefixes per country (PS/IL must start with 59 or 56).
+  const nationalNumber = parsePhoneNumberFromString(phone)?.nationalNumber ?? '';
+  if (!isSupportedSignInNumber(countryCode, nationalNumber)) {
+    throw new HttpsError('invalid-argument', 'number-not-supported');
+  }
+
   const otpRelays = await loadActiveRelayDevices(businessId);
   if (!hasRelayCoverageForCountry(otpRelays, countryCode, Date.now())) {
     throw new HttpsError('failed-precondition', 'no-relay-for-country');
