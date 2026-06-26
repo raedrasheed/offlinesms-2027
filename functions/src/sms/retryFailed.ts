@@ -88,7 +88,7 @@ export const retryFailedSmsRecipients = onCall({ region: 'us-central1' }, async 
       skippedByDedupe.push(r.id);
       continue;
     }
-    // F1 Phase B: read from users/{uid}/userPrivate/profile (public fallback inside).
+    // F1 Phase C: read the phone from users/{uid}/userPrivate/profile (private only).
     const phone = (await readUserPhone(db, r.id)) ?? undefined;
     if (!phone) continue;
     failed.push({
