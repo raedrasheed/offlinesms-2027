@@ -69,8 +69,6 @@ export const verifyEmailOtp = onCall({ region: REGION, ...appCheckOptions() }, a
     // hook, so bootstrap the profile + welcome wallet here (mirrors verifyPhoneOtp).
     await userRef.set({
       displayName:      null,
-      phoneNumber:      null,
-      email,
       username:         null,
       usernameLower:    null,
       about:            null,
@@ -88,12 +86,12 @@ export const verifyEmailOtp = onCall({ region: REGION, ...appCheckOptions() }, a
   } else {
     await adminAuth.updateUser(uid, { emailVerified: true });
     await userRef.set(
-      { email, emailVerified: true, updatedAt: FieldValue.serverTimestamp() },
+      { emailVerified: true, updatedAt: FieldValue.serverTimestamp() },
       { merge: true },
     );
   }
-  // F1 Phase A: mirror PII into the owner/admin-only private subdoc (public
-  // users/{uid} fields above are kept unchanged until Phase C).
+  // F1 Phase C: sensitive PII (email) is written ONLY to the owner/admin-only
+  // private subdoc users/{uid}/userPrivate/profile — never to the public users doc.
   await writeUserPrivateProfile(db, uid, { email, ...(created ? { phoneNumber: null } : {}) });
 
   const customToken = await adminAuth.createCustomToken(uid);

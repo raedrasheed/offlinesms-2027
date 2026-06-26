@@ -14,8 +14,6 @@ export const onUserCreate = beforeUserCreated(async (event) => {
   const db = getFirestore();
   await db.collection('users').doc(user.uid).set({
     displayName:      user.displayName ?? null,
-    phoneNumber:      user.phoneNumber ?? null,
-    email:            user.email ?? null,
     username:         null,
     usernameLower:    null,
     about:            null,
@@ -28,8 +26,8 @@ export const onUserCreate = beforeUserCreated(async (event) => {
     reserved:   0,
     createdAt:  FieldValue.serverTimestamp(),
   }, { merge: true });
-  // F1 Phase A: mirror PII into the owner/admin-only private subdoc. The public
-  // fields above are intentionally left unchanged until Phase C.
+  // F1 Phase C: sensitive PII (phone/email) is written ONLY to the owner/admin-only
+  // private subdoc users/{uid}/userPrivate/profile — never to the public users doc.
   await writeUserPrivateProfile(db, user.uid, {
     phoneNumber: user.phoneNumber ?? null,
     email:       user.email ?? null,
