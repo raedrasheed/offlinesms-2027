@@ -26,6 +26,9 @@ async function main() {
   for (const u of users) {
     await db.collection('users').doc(u.id).set({ ...u, createdAt: FieldValue.serverTimestamp(), status: 'active' }, { merge: true });
     await db.collection('wallets').doc(u.id).set({ balance: 1250, reserved: 0 }, { merge: true });
+    // F1 Phase A: mirror PII into the private subdoc (public field kept too).
+    await db.collection('users').doc(u.id).collection('private').doc('profile')
+      .set({ phoneNumber: u.phoneNumber, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   }
 
   // 1:1 conversation

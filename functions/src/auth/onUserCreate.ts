@@ -6,6 +6,7 @@
 
 import { beforeUserCreated } from 'firebase-functions/v2/identity';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { writeUserPrivateProfile } from '../lib/userPrivate';
 
 export const onUserCreate = beforeUserCreated(async (event) => {
   const user = event.data;
@@ -27,4 +28,10 @@ export const onUserCreate = beforeUserCreated(async (event) => {
     reserved:   0,
     createdAt:  FieldValue.serverTimestamp(),
   }, { merge: true });
+  // F1 Phase A: mirror PII into the owner/admin-only private subdoc. The public
+  // fields above are intentionally left unchanged until Phase C.
+  await writeUserPrivateProfile(db, user.uid, {
+    phoneNumber: user.phoneNumber ?? null,
+    email:       user.email ?? null,
+  });
 });

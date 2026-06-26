@@ -11,6 +11,7 @@ import {
   isTestPhone, TEST_PHONE_OTP,
 } from './otpLogic';
 import { appCheckOptions } from '../lib/appCheck';
+import { writeUserPrivateProfile } from '../lib/userPrivate';
 
 const REGION = 'us-central1';
 
@@ -95,6 +96,10 @@ export const verifyPhoneOtp = onCall({ region: REGION, ...appCheckOptions() }, a
       { merge: true },
     );
   }
+  // F1 Phase A: mirror PII into the owner/admin-only private subdoc (public
+  // users/{uid} fields above are kept unchanged until Phase C).
+  await writeUserPrivateProfile(db, uid, { phoneNumber: phone, ...(created ? { email: null } : {}) });
+
   const customToken = await adminAuth.createCustomToken(uid);
 
   await writeAuditLog({

@@ -203,6 +203,15 @@ service cloud.firestore {
                        (isSelf(uid) && onlyAllowedUserProfileUpdates());
       allow delete: if isAdmin();
 
+      // Sensitive PII at rest (F1) — phoneNumber / email / pinHash / pinSalt.
+      // Owner or admin only; NOT readable by other signed-in users (unlike the
+      // public users/{uid} doc). Phase A dual-writes here via the Admin SDK; the
+      // backend may also read across users via a collectionGroup('private')
+      // query (Admin SDK bypasses these rules).
+      match /private/{doc} {
+        allow read, write: if isSelf(uid) || isAdmin();
+      }
+
       // Push device tokens (Phase 27) — a user manages only their own devices;
       // the backend (Admin SDK) sends to them + purges dead ones.
       match /devices/{deviceId} {

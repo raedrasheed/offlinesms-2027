@@ -86,4 +86,53 @@ describe('users/{uid}', () => {
     const db = await asAdmin();
     await assertSucceeds(updateDoc(doc(db, 'users', 'u-target'), { displayName: 'AdminEdit' }));
   });
+
+  it('public user read still works unchanged after F1 (regression)', async () => {
+    await seed(async db => {
+      await setDoc(doc(db, 'users', 'u-target'), { displayName: 'Target', photoURL: null });
+    });
+    const db = await asUser('u-other');
+    await assertSucceeds(getDoc(doc(db, 'users', 'u-target')));
+  });
+});
+
+// F1 — sensitive PII moved to an owner/admin-only private subdoc.
+describe('users/{uid}/private/profile', () => {
+  it('owner can write and read their own private profile', async () => {
+    const db = await asUser('u-a');
+    await assertSucceeds(setDoc(doc(db, 'users/u-a/private/profile'), {
+      phoneNumber: '+970599123456', email: 'a@example.com',
+    }));
+    await assertSucceeds(getDoc(doc(db, 'users/u-a/private/profile')));
+  });
+
+  it('another authed user CANNOT read the private profile', async () => {
+    await seed(async db => {
+      await setDoc(doc(db, 'users/u-a/private/profile'), { phoneNumber: '+970599123456' });
+    });
+    const db = await asUser('u-b');
+    await assertFails(getDoc(doc(db, 'users/u-a/private/profile')));
+  });
+
+  it('another authed user CANNOT write the private profile', async () => {
+    const db = await asUser('u-b');
+    await assertFails(setDoc(doc(db, 'users/u-a/private/profile'), { phoneNumber: '+970599000000' }));
+  });
+
+  it('unauthed cannot read the private profile', async () => {
+    await seed(async db => {
+      await setDoc(doc(db, 'users/u-a/private/profile'), { email: 'a@example.com' });
+    });
+    const db = await asAnon();
+    await assertFails(getDoc(doc(db, 'users/u-a/private/profile')));
+  });
+
+  it('admin can read and write any private profile', async () => {
+    await seed(async db => {
+      await setDoc(doc(db, 'users/u-a/private/profile'), { phoneNumber: '+970599123456' });
+    });
+    const db = await asAdmin();
+    await assertSucceeds(getDoc(doc(db, 'users/u-a/private/profile')));
+    await assertSucceeds(setDoc(doc(db, 'users/u-a/private/profile'), { email: 'x@example.com' }, { merge: true }));
+  });
 });

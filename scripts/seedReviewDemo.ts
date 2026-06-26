@@ -54,6 +54,13 @@ async function ensureUserDoc(uid: string, fields: Record<string, unknown>) {
     { ...fields, profileCompleted: true, status: 'active', createdAt: FieldValue.serverTimestamp() },
     { merge: true },
   );
+  // F1 Phase A: mirror PII into the private subdoc (public fields kept too).
+  const priv: Record<string, unknown> = { updatedAt: FieldValue.serverTimestamp() };
+  if (fields.phoneNumber !== undefined) priv.phoneNumber = fields.phoneNumber;
+  if (fields.email !== undefined) priv.email = fields.email;
+  if (priv.phoneNumber !== undefined || priv.email !== undefined) {
+    await db.collection('users').doc(uid).collection('private').doc('profile').set(priv, { merge: true });
+  }
 }
 
 /** Wallet + transaction history + one existing chat with sent/received messages. */
