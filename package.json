@@ -22,6 +22,7 @@
     "validate": "npm run typecheck && npm run lint && npm run i18n:check && npm run test && npm run build",
     "seed": "tsx scripts/seed.ts",
     "seed:review": "tsx scripts/seedReviewDemo.ts",
+    "verify:userprivate": "tsx scripts/verifyUserPrivateBackfill.ts",
     "promote:admin": "tsx scripts/promoteAdmin.ts",
     "firebase:emulators": "firebase emulators:start",
     "firebase:deploy": "firebase deploy"
