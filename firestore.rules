@@ -263,9 +263,13 @@ service cloud.firestore {
       allow create: if isAuthed()
                        && isConversationParticipantData(request.resource.data)
                        && (!isGroupTypeData(request.resource.data) || safeGroupConversationCreate());
-      allow update: if isMember(convoId)
-                       || isConversationParticipant(convoId)
-                       || isAdmin();
+      // F4: conversation docs are mutated ONLY by the callables (Admin SDK) —
+      // createGroup / updateGroupInfo / lockGroup / add-remove member / the
+      // lastMessage fanout trigger. Direct client updates are denied so a
+      // participant can't tamper with ownerUid, participantUids/memberIds, type,
+      // or other access-control/metadata fields. (Per-user state lives in the
+      // userState subcollection, which keeps its own owner-scoped write rule.)
+      allow update: if isAdmin();
       allow delete: if isGroupAdmin(convoId) || isAdmin();
 
       // /members:

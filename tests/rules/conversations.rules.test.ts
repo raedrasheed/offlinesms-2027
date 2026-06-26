@@ -32,6 +32,41 @@ describe('conversations/{convoId}', () => {
     await assertFails(getDoc(doc(db, 'conversations', 'c-1')));
   });
 
+  // F4: conversation docs are updated only via callables (Admin SDK). A
+  // participant must NOT be able to tamper with the doc directly.
+  it('participant CANNOT update a conversation (e.g. add themselves elsewhere / hijack)', async () => {
+    await seed(async db => {
+      await setDoc(doc(db, 'conversations', 'c-1'), {
+        type: 'direct', participantUids: ['u-a', 'u-b'],
+      });
+    });
+    const db = await asUser('u-a');
+    // Try to inject a new participant + seize ownership.
+    await assertFails(updateDoc(doc(db, 'conversations', 'c-1'), {
+      participantUids: ['u-a', 'u-b', 'u-evil'], ownerUid: 'u-a',
+    }));
+  });
+
+  it('participant CANNOT rename / change a group conversation directly', async () => {
+    await seed(async db => {
+      await setDoc(doc(db, 'conversations', 'g-1'), {
+        type: 'group', ownerUid: 'u-a', participantUids: ['u-a', 'u-b'], name: 'Team',
+      });
+    });
+    const db = await asUser('u-b');
+    await assertFails(updateDoc(doc(db, 'conversations', 'g-1'), { name: 'Hijacked' }));
+  });
+
+  it('admin can update a conversation (callable/admin escape hatch)', async () => {
+    await seed(async db => {
+      await setDoc(doc(db, 'conversations', 'c-1'), {
+        type: 'direct', participantUids: ['u-a', 'u-b'],
+      });
+    });
+    const db = await asAdmin();
+    await assertSucceeds(updateDoc(doc(db, 'conversations', 'c-1'), { name: 'x' }));
+  });
+
   it('admin can read any conversation', async () => {
     await seed(async db => {
       await setDoc(doc(db, 'conversations', 'c-1'), {
