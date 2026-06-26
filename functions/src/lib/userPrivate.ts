@@ -59,22 +59,18 @@ export async function dualWriteUserPrivateProfile(uid: string, fields: UserPriva
   await writeUserPrivateProfile(getFirestore(), uid, fields);
 }
 
-// ── Phase B reads (private-first, with a public-field fallback) ───────────────
+// ── Phase C reads (private-only — no public fallback) ─────────────────────────
 
 /**
- * Read a user's phone (Phase B): userPrivate/profile first; if absent (e.g. a
- * user created before the Phase A backfill ran), fall back to the still-present
- * public users/{uid}.phoneNumber. Admin SDK only.
+ * Read a user's phone (Phase C): exclusively from users/{uid}/userPrivate/profile.
+ * The public users/{uid} doc no longer carries phoneNumber. Admin SDK only.
  */
 export async function readUserPhone(
   db: FirebaseFirestore.Firestore,
   uid: string,
 ): Promise<string | null> {
   const priv = await userPrivateProfileRef(db, uid).get();
-  const p = priv.exists ? (priv.get('phoneNumber') as string | null | undefined) : undefined;
-  if (p) return p;
-  const pub = await db.collection('users').doc(uid).get();
-  return (pub.get('phoneNumber') as string | null | undefined) ?? null;
+  return priv.exists ? ((priv.get('phoneNumber') as string | null | undefined) ?? null) : null;
 }
 
 /**
