@@ -4,11 +4,7 @@
   },
   "targets": {
     "offlinesms-prod-2027": {
-      "hosting": {
-        "dashboard": [
-          "offlinesms-dashboard"
-        ]
-      }
+      "hosting": {}
     }
   }
 }

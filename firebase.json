@@ -22,21 +22,6 @@
   ],
   "hosting": [
     {
-      "target": "dashboard",
-      "public": "apps/dashboard/out",
-      "ignore": [
-        "firebase.json",
-        "**/.*",
-        "**/node_modules/**"
-      ],
-      "rewrites": [
-        {
-          "source": "**",
-          "destination": "/index.html"
-        }
-      ]
-    },
-    {
       "target": "website",
       "public": "apps/website",
       "ignore": [
