@@ -101,11 +101,19 @@ function MessageBubbleImpl({
   // For images without a caption, overlay time + ticks on the photo (WhatsApp
   // style) instead of below the bubble.
   const imageOverlayFooter = !deleted && m.type === 'image' && !(m.caption && m.caption.trim());
-  // Sender avatar/name: message snapshot first, then the resolved member profile.
+  // Sender avatar/name. Prefer the resolved member profile (kept in sync with
+  // the live user photo) over the per-message snapshot: the snapshot is frozen
+  // at send time and goes stale once the sender changes their picture, leaving
+  // a broken URL that renders as an invisible avatar. The snapshot is only a
+  // fallback for when the profile hasn't resolved (e.g. a left member).
   const senderProfile = context.reactorNames?.[m.senderUid];
-  const senderPhoto = m.senderPhotoURL ?? senderProfile?.photoURL ?? null;
+  const senderPhoto = senderProfile?.photoURL ?? m.senderPhotoURL ?? null;
   const senderName = m.senderDisplayName ?? senderProfile?.name ?? m.senderUid.slice(0, 2);
   const [sheetOpen, setSheetOpen] = useState(false);
+  // Track a photo URL that failed to load so we can fall back to the initials
+  // placeholder instead of leaving a blank gap. Keyed by URL so a new/updated
+  // photo is retried rather than permanently suppressed.
+  const [avatarErrorUri, setAvatarErrorUri] = useState<string | null>(null);
   const [reactionsOpen, setReactionsOpen] = useState(false);
   const [emojiReplay, setEmojiReplay] = useState(0);
 
@@ -256,8 +264,12 @@ function MessageBubbleImpl({
     <View style={[s.row, mine ? s.rowMine : s.rowTheirs]}>
       {showAvatar ? (
         showSender ? (
-          senderPhoto ? (
-            <Image source={senderImgSrc!} style={s.avatar} />
+          senderPhoto && avatarErrorUri !== senderPhoto ? (
+            <Image
+              source={senderImgSrc!}
+              style={s.avatar}
+              onError={() => setAvatarErrorUri(senderPhoto)}
+            />
           ) : (
             <View style={[s.avatar, { backgroundColor: avatarColor(m.senderUid) }]}>
               <Text style={s.avatarText}>{initials(senderName)}</Text>

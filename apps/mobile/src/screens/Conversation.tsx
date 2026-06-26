@@ -246,7 +246,13 @@ export default function Conversation({ route, navigation }: any) {
       const prof = memberProfiles[m.uid];
       map[m.uid] = {
         name: m.displayNameSnapshot || prof?.displayName || m.uid.slice(0, 6),
-        photoURL: m.photoURLSnapshot || prof?.photoURL || null,
+        // Prefer the member's LIVE profile photo over the add-time snapshot.
+        // The snapshot is captured when the member joins and goes stale once
+        // they change their picture (a broken URL → invisible avatar), whereas
+        // the chat list reads the live photo — so the group bubble would
+        // disagree with the list. Fall back to the snapshot only while the
+        // live profile is still loading / unavailable (offline-first).
+        photoURL: prof?.photoURL || m.photoURLSnapshot || null,
       };
     }
     return map;
