@@ -8,12 +8,12 @@ import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { writeAuditLog } from '../lib/auditLog';
 import { normalizePhoneToE164 } from '../lib/phone';
 import { newPhoneContactDoc, cleanDisplayName } from './contactLogic';
+import { findUidByPhoneNumber } from '../lib/userPrivate';
 
-/** Find a registered user by E.164 phone; returns uid or null. */
+/** Find a registered user by E.164 phone; returns uid or null.
+ *  F1 Phase B: resolves via the private/profile collection group. */
 export async function findRegisteredUidByPhone(e164: string): Promise<string | null> {
-  const snap = await getFirestore()
-    .collection('users').where('phoneNumber', '==', e164).limit(1).get();
-  return snap.empty ? null : snap.docs[0].id;
+  return findUidByPhoneNumber(getFirestore(), e164);
 }
 
 export const createPhoneContact = onCall(async (request) => {

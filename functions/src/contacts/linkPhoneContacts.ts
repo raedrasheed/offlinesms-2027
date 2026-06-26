@@ -28,10 +28,14 @@ export function phoneChanged(before: string | null | undefined, after: string | 
   return !!a && a !== b;
 }
 
-export const linkPhoneContactsOnUserWrite = onDocumentWritten('users/{uid}', async (event) => {
-  const uid = (event.params as { uid: string }).uid;
+// F1 Phase B: phoneNumber now lives in users/{uid}/private/profile, so this
+// trigger fires on that subdoc write (not the public users/{uid} doc). The
+// non-PII display fields for the promotion snapshot are read from the public doc.
+export const linkPhoneContactsOnUserWrite = onDocumentWritten('users/{uid}/private/{doc}', async (event) => {
+  const { uid, doc } = event.params as { uid: string; doc: string };
+  if (doc !== 'profile') return;
   const before = event.data?.before?.data() as { phoneNumber?: string } | undefined;
-  const after  = event.data?.after?.data()  as { phoneNumber?: string; displayName?: string; photoURL?: string } | undefined;
+  const after  = event.data?.after?.data()  as { phoneNumber?: string } | undefined;
   if (!after) return;                                  // deleted
   if (!phoneChanged(before?.phoneNumber, after.phoneNumber)) return;
 
@@ -41,6 +45,11 @@ export const linkPhoneContactsOnUserWrite = onDocumentWritten('users/{uid}', asy
 
   const db = getFirestore();
   const now = FieldValue.serverTimestamp();
+
+  // Non-PII display fields for the promotion snapshot live on the public user doc.
+  const userSnap = await db.collection('users').doc(uid).get();
+  const promoDisplayName = (userSnap.get('displayName') as string | undefined) ?? uid;
+  const promoPhotoURL = (userSnap.get('photoURL') as string | null | undefined) ?? null;
 
   // 1. Flip the owner's private phone contacts that match this number.
   const contactSnap = await db.collection('phoneContacts').where('normalizedPhone', '==', digits).get();
@@ -72,8 +81,8 @@ export const linkPhoneContactsOnUserWrite = onDocumentWritten('users/{uid}', asy
           tx.update(convoRef, { participantUids: next, memberIds: next, memberCount: next.length, updatedAt: now });
           tx.set(convoRef.collection('members').doc(uid), {
             uid, role: 'member', status: 'active', addedBy: 'system:link',
-            displayNameSnapshot: after.displayName ?? uid,
-            photoURLSnapshot: after.photoURL ?? null,
+            displayNameSnapshot: promoDisplayName,
+            photoURLSnapshot: promoPhotoURL,
             joinedAt: now, updatedAt: now,
           }, { merge: true });
           tx.set(convoRef.collection('userState').doc(uid), {

@@ -11,6 +11,7 @@ import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { sendBatch } from './gateway';
 import { COST_PER_SMS, MAX_BATCHES_PER_DAY, maskPhone, todayKey } from './recipients';
 import { writeAuditLog } from '../lib/auditLog';
+import { readUserPhone } from '../lib/userPrivate';
 
 export const retryFailedSmsRecipients = onCall({ region: 'us-central1' }, async (request) => {
   const uid = request.auth?.uid;
@@ -87,8 +88,8 @@ export const retryFailedSmsRecipients = onCall({ region: 'us-central1' }, async 
       skippedByDedupe.push(r.id);
       continue;
     }
-    const u = await db.collection('users').doc(r.id).get();
-    const phone = u.data()?.phoneNumber as string | undefined;
+    // F1 Phase B: read from users/{uid}/private/profile (public fallback inside).
+    const phone = (await readUserPhone(db, r.id)) ?? undefined;
     if (!phone) continue;
     failed.push({
       uid: r.id,

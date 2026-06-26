@@ -17,6 +17,7 @@ import {
   DEFAULT_MAX_ATTEMPTS, type RecipientOutcome, type DispatchSummary, type RouteDeviceCountry,
 } from './relayLogic';
 import { loadActiveRelayDevices } from './countryRouting';
+import { readUserPhone } from '../lib/userPrivate';
 
 export interface DispatchResult {
   routed: number;            // recipients given a relay job
@@ -95,8 +96,8 @@ export async function dispatchBatchToRelay(
   for (const recipientUid of recipientUids) {
     let phoneE164 = phoneOnDoc.get(recipientUid) ?? null;
     if (!phoneE164) {
-      const userSnap = await db.collection('users').doc(recipientUid).get();
-      phoneE164 = (userSnap.get('phoneNumber') as string | null) ?? null;
+      // F1 Phase B: read from users/{uid}/private/profile (public fallback inside).
+      phoneE164 = await readUserPhone(db, recipientUid);
     }
 
     const norm = normalizePhoneAndCountry(phoneE164 ?? '');

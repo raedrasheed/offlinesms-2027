@@ -50,3 +50,54 @@ export async function writeUserPrivateProfile(
 export async function dualWriteUserPrivateProfile(uid: string, fields: UserPrivateProfile): Promise<void> {
   await writeUserPrivateProfile(getFirestore(), uid, fields);
 }
+
+// ── Phase B reads (private-first, with a public-field fallback) ───────────────
+
+/**
+ * Read a user's phone (Phase B): private/profile first; if absent (e.g. a user
+ * created before the Phase A backfill ran), fall back to the still-present
+ * public users/{uid}.phoneNumber. Admin SDK only.
+ */
+export async function readUserPhone(
+  db: FirebaseFirestore.Firestore,
+  uid: string,
+): Promise<string | null> {
+  const priv = await userPrivateProfileRef(db, uid).get();
+  const p = priv.exists ? (priv.get('phoneNumber') as string | null | undefined) : undefined;
+  if (p) return p;
+  const pub = await db.collection('users').doc(uid).get();
+  return (pub.get('phoneNumber') as string | null | undefined) ?? null;
+}
+
+/**
+ * Resolve phone E.164 → uid via the private/profile collection group (Phase B
+ * discovery). Pass ≤ Firestore's `in` limit (callers chunk). Admin SDK only;
+ * requires the COLLECTION_GROUP index on private.phoneNumber to be Enabled.
+ */
+export async function findUidsByPhoneNumbers(
+  db: FirebaseFirestore.Firestore,
+  phones: string[],
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (phones.length === 0) return out;
+  const snap = await db.collectionGroup('private').where('phoneNumber', 'in', phones).get();
+  for (const d of snap.docs) {
+    if (d.id !== 'profile') continue;                 // only the profile doc carries PII
+    const uid = d.ref.parent.parent?.id;
+    const phone = d.get('phoneNumber') as string | undefined;
+    if (uid && phone && !out.has(phone)) out.set(phone, uid);
+  }
+  return out;
+}
+
+/** Single phone → uid (Phase B). Admin SDK only. */
+export async function findUidByPhoneNumber(
+  db: FirebaseFirestore.Firestore,
+  e164: string,
+): Promise<string | null> {
+  const snap = await db.collectionGroup('private').where('phoneNumber', '==', e164).limit(1).get();
+  for (const d of snap.docs) {
+    if (d.id === 'profile') return d.ref.parent.parent?.id ?? null;
+  }
+  return null;
+}

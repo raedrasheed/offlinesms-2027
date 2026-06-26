@@ -12,6 +12,7 @@
 
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore } from 'firebase-admin/firestore';
+import { findUidsByPhoneNumbers } from '../lib/userPrivate';
 
 const MAX_PHONES_PER_CALL = 500;
 const FIRESTORE_IN_LIMIT = 30;
@@ -44,21 +45,37 @@ export const matchContacts = onCall({ region: 'us-central1' }, async (request) =
     phoneE164:   string;
   }> = [];
 
+  // F1 Phase B: resolve phone → uid via the private/profile collection group,
+  // then read the PUBLIC user doc for the non-PII display fields.
+  const phoneToUid = new Map<string, string>();   // phone → uid (excluding self)
   for (const batch of chunk(cleaned, FIRESTORE_IN_LIMIT)) {
-    const snap = await db.collection('users')
-      .where('phoneNumber', 'in', batch)
-      .select('displayName', 'username', 'phoneNumber')
-      .get();
-    for (const doc of snap.docs) {
-      if (doc.id === uid) continue;
-      const d = doc.data();
-      matches.push({
-        uid:         doc.id,
-        displayName: (d.displayName as string) ?? '',
-        username:    (d.username as string) ?? null,
-        phoneE164:   d.phoneNumber as string,
+    const found = await findUidsByPhoneNumbers(db, batch);
+    for (const [phone, ownerUid] of found) {
+      if (ownerUid !== uid) phoneToUid.set(phone, ownerUid);
+    }
+  }
+
+  const uids = [...new Set(phoneToUid.values())];
+  const profiles = new Map<string, { displayName: string; username: string | null }>();
+  for (const ids of chunk(uids, 100)) {
+    const snaps = await db.getAll(...ids.map(id => db.collection('users').doc(id)));
+    for (const s of snaps) {
+      if (!s.exists) continue;
+      profiles.set(s.id, {
+        displayName: (s.get('displayName') as string) ?? '',
+        username:    (s.get('username') as string) ?? null,
       });
     }
+  }
+
+  for (const [phone, ownerUid] of phoneToUid) {
+    const p = profiles.get(ownerUid);
+    matches.push({
+      uid:         ownerUid,
+      displayName: p?.displayName ?? '',
+      username:    p?.username ?? null,
+      phoneE164:   phone,
+    });
   }
 
   return { matches };
