@@ -162,6 +162,16 @@ service cloud.firestore {
       ]);
     }
 
+    // F1 Phase C: the ONLY fields the owner may write to their own private
+    // profile from the client are the PIN factor (mobile setPin). phoneNumber /
+    // email are written EXCLUSIVELY by the verified OTP flow (Admin SDK, which
+    // bypasses rules); letting the owner write them would allow phone spoofing
+    // for contact discovery via collectionGroup('userPrivate'). pinSetAt is the
+    // server timestamp paired with the hash; updatedAt is benign metadata.
+    function allowedUserPrivateOwnerFields() {
+      return ['pinHash', 'pinSalt', 'pinSetAt', 'updatedAt'];
+    }
+
     // ────────────────────────────────────────────────────────────
     // Receipt enum (Phase 3)
     // ────────────────────────────────────────────────────────────
@@ -204,13 +214,24 @@ service cloud.firestore {
       allow delete: if isAdmin();
 
       // Sensitive PII at rest (F1) — phoneNumber / email / pinHash / pinSalt.
-      // Owner or admin only; NOT readable by other signed-in users (unlike the
-      // public users/{uid} doc). Phase A dual-writes here via the Admin SDK; the
-      // backend may also read across users via a collectionGroup('userPrivate')
-      // query (Admin SDK bypasses these rules). The collection id is specific
-      // (not a generic 'private') so collectionGroup() can't collide elsewhere.
+      // Read:   owner or admin only; NOT readable by other signed-in users
+      //         (unlike the public users/{uid} doc) and never via a client
+      //         collectionGroup query.
+      // Write:  the backend (Admin SDK, bypasses rules) owns phoneNumber/email
+      //         via the verified OTP flow; an admin may write anything; the
+      //         OWNER may write ONLY the PIN factor (pinHash/pinSalt/pinSetAt) —
+      //         never phoneNumber/email, so a user can't spoof their phone for
+      //         contact discovery (collectionGroup('userPrivate')).
+      // Delete: admin/server only (account deletion runs via the Admin SDK).
+      // The collection id is specific (not a generic 'private') so
+      // collectionGroup() can't collide with an unrelated subcollection.
       match /userPrivate/{doc} {
-        allow read, write: if isSelf(uid) || isAdmin();
+        allow read:   if isSelf(uid) || isAdmin();
+        allow create: if isAdmin()
+                         || (isSelf(uid) && changedKeysOnCreate().hasOnly(allowedUserPrivateOwnerFields()));
+        allow update: if isAdmin()
+                         || (isSelf(uid) && changedKeys().hasOnly(allowedUserPrivateOwnerFields()));
+        allow delete: if isAdmin();
       }
 
       // Push device tokens (Phase 27) — a user manages only their own devices;

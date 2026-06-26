@@ -74,8 +74,6 @@ export const verifyPhoneOtp = onCall({ region: REGION, ...appCheckOptions() }, a
     // admin list's orderBy) and no wallet.
     await userRef.set({
       displayName:      null,
-      phoneNumber:      phone,
-      email:            null,
       username:         null,
       usernameLower:    null,
       about:            null,
@@ -92,12 +90,12 @@ export const verifyPhoneOtp = onCall({ region: REGION, ...appCheckOptions() }, a
     }, { merge: true });
   } else {
     await userRef.set(
-      { phoneNumber: phone, phoneVerified: true, updatedAt: FieldValue.serverTimestamp() },
+      { phoneVerified: true, updatedAt: FieldValue.serverTimestamp() },
       { merge: true },
     );
   }
-  // F1 Phase A: mirror PII into the owner/admin-only private subdoc (public
-  // users/{uid} fields above are kept unchanged until Phase C).
+  // F1 Phase C: sensitive PII (phone) is written ONLY to the owner/admin-only
+  // private subdoc users/{uid}/userPrivate/profile — never to the public users doc.
   await writeUserPrivateProfile(db, uid, { phoneNumber: phone, ...(created ? { email: null } : {}) });
 
   const customToken = await adminAuth.createCustomToken(uid);

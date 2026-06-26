@@ -35,14 +35,22 @@ export async function GET(request: Request) {
   const header = csvRow(['uid', 'displayName', 'username', 'email', 'phone', 'status', 'profileCompleted', 'smsOptOut', 'createdAt']);
   const lines: string[] = [header];
 
-  for (const d of snap.docs) {
+  // F1 Phase C: phone/email live in users/{uid}/userPrivate/profile, not the
+  // public user doc. Fetch each row's private subdoc for the export.
+  const privSnaps = await Promise.all(
+    snap.docs.map(d => d.ref.collection('userPrivate').doc('profile').get()),
+  );
+
+  for (let i = 0; i < snap.docs.length; i++) {
+    const d = snap.docs[i];
     const data = d.data();
+    const priv = privSnaps[i].data() ?? {};
     lines.push(csvRow([
       d.id,
       data.displayName ?? '',
       data.username ?? '',
-      maskEmail(data.email ?? null, session.role),
-      maskPhone(data.phoneNumber ?? null),
+      maskEmail((priv.email as string | null) ?? null, session.role),
+      maskPhone((priv.phoneNumber as string | null) ?? null),
       data.status ?? 'active',
       data.profileCompleted === true ? 'true' : 'false',
       data.smsOptOut === true ? 'true' : 'false',

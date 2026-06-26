@@ -5,7 +5,7 @@
 
 import { afterAll, beforeAll, beforeEach, describe, it } from 'vitest';
 import { assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
-import { doc, getDoc, setDoc, updateDoc, collectionGroup, query, where, getDocs } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, deleteDoc, collectionGroup, query, where, getDocs } from 'firebase/firestore';
 import { asUser, asAdmin, asAnon, clearAll, teardownEnv, seed } from '../helpers/rules-helpers';
 
 beforeAll(async () => {
@@ -98,12 +98,23 @@ describe('users/{uid}', () => {
 
 // F1 — sensitive PII moved to an owner/admin-only private subdoc.
 describe('users/{uid}/userPrivate/profile', () => {
-  it('owner can write and read their own private profile', async () => {
+  it('owner can READ their own private profile (backend-written)', async () => {
+    await seed(async db => {
+      await setDoc(doc(db, 'users/u-a/userPrivate/profile'), {
+        phoneNumber: '+970599123456', email: 'a@example.com',
+      });
+    });
     const db = await asUser('u-a');
-    await assertSucceeds(setDoc(doc(db, 'users/u-a/userPrivate/profile'), {
-      phoneNumber: '+970599123456', email: 'a@example.com',
-    }));
     await assertSucceeds(getDoc(doc(db, 'users/u-a/userPrivate/profile')));
+  });
+
+  // F1 Phase C: phoneNumber/email are backend-only (verified OTP via Admin SDK).
+  // The owner must NOT be able to write them, or they could spoof their phone
+  // for contact discovery via collectionGroup('userPrivate').
+  it('owner CANNOT write phoneNumber or email to own private profile', async () => {
+    const db = await asUser('u-a');
+    await assertFails(setDoc(doc(db, 'users/u-a/userPrivate/profile'), { phoneNumber: '+970599123456' }));
+    await assertFails(setDoc(doc(db, 'users/u-a/userPrivate/profile'), { email: 'a@example.com' }));
   });
 
   it('another authed user CANNOT read the private profile', async () => {
@@ -142,6 +153,39 @@ describe('users/{uid}/userPrivate/profile', () => {
     await assertSucceeds(setDoc(doc(db, 'users/u-a/userPrivate/profile'), {
       pinHash: 'abc', pinSalt: 'def', pinSetAt: new Date(),
     }, { merge: true }));
+  });
+
+  // The real mobile flow: setPin merges the PIN factor into the profile the OTP
+  // backend already created with phone/email. The diff only touches PIN keys.
+  it('owner can merge PIN fields into an existing backend-written profile', async () => {
+    await seed(async db => {
+      await setDoc(doc(db, 'users/u-a/userPrivate/profile'), {
+        phoneNumber: '+970599123456', email: 'a@example.com',
+      });
+    });
+    const db = await asUser('u-a');
+    await assertSucceeds(setDoc(doc(db, 'users/u-a/userPrivate/profile'), {
+      pinHash: 'abc', pinSalt: 'def', pinSetAt: new Date(),
+    }, { merge: true }));
+  });
+
+  // The owner cannot smuggle a phoneNumber change in alongside a PIN write.
+  it('owner CANNOT change phoneNumber while writing PIN fields', async () => {
+    await seed(async db => {
+      await setDoc(doc(db, 'users/u-a/userPrivate/profile'), { phoneNumber: '+970599123456' });
+    });
+    const db = await asUser('u-a');
+    await assertFails(setDoc(doc(db, 'users/u-a/userPrivate/profile'), {
+      pinHash: 'abc', phoneNumber: '+970599999999',
+    }, { merge: true }));
+  });
+
+  it('owner CANNOT delete own private profile (admin/server only)', async () => {
+    await seed(async db => {
+      await setDoc(doc(db, 'users/u-a/userPrivate/profile'), { phoneNumber: '+970599123456' });
+    });
+    const db = await asUser('u-a');
+    await assertFails(deleteDoc(doc(db, 'users/u-a/userPrivate/profile')));
   });
 
   // F1 Phase B: phone discovery uses collectionGroup('userPrivate'), run ONLY by the

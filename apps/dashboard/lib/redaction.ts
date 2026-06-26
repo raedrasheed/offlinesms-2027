@@ -43,18 +43,3 @@ export function safeDate(ts: any): string {
     hour: '2-digit', minute: '2-digit', hour12: false,
   });
 }
-
-export function safeUserSummary(doc: Record<string, any>, role?: RoleKey) {
-  return {
-    uid:              doc.id as string,
-    displayName:      (doc.displayName as string | null) ?? null,
-    username:         (doc.username as string | null) ?? null,
-    email:            maskEmail(doc.email as string | null, role),
-    phone:            maskPhone(doc.phoneNumber as string | null),
-    status:           (doc.status as string | null) ?? 'active',
-    profileCompleted: doc.profileCompleted === true,
-    smsOptOut:        doc.smsOptOut === true,
-    createdAt:        safeDate(doc.createdAt),
-    updatedAt:        safeDate(doc.updatedAt),
-  };
-}

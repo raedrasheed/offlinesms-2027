@@ -79,14 +79,20 @@ export async function listUsers(cursor?: string, status?: string): Promise<Admin
     if (snap.exists) q = q.startAfter(snap);
   }
   const result = await q.get();
-  return result.docs.map(d => {
+  // F1 Phase C: phone/email live in users/{uid}/userPrivate/profile, not the
+  // public user doc. Fetch each row's private subdoc for display.
+  const privSnaps = await Promise.all(
+    result.docs.map(d => d.ref.collection('userPrivate').doc('profile').get()),
+  );
+  return result.docs.map((d, i) => {
     const data = d.data();
+    const priv = privSnaps[i].data() ?? {};
     return {
       uid:              d.id,
       displayName:      (data.displayName as string | null) ?? null,
       username:         (data.username as string | null) ?? null,
-      email:            (data.email as string | null) ?? null,
-      phoneNumber:      (data.phoneNumber as string | null) ?? null,
+      email:            (priv.email as string | null) ?? null,
+      phoneNumber:      (priv.phoneNumber as string | null) ?? null,
       status:           (data.status as string | null) ?? 'active',
       profileCompleted: data.profileCompleted === true,
       smsOptOut:        data.smsOptOut === true,
@@ -100,12 +106,14 @@ export async function getUser(uid: string): Promise<AdminUserRow | null> {
   const snap = await adminDb.collection('users').doc(uid).get();
   if (!snap.exists) return null;
   const data = snap.data()!;
+  // F1 Phase C: phone/email are read from users/{uid}/userPrivate/profile.
+  const priv = (await snap.ref.collection('userPrivate').doc('profile').get()).data() ?? {};
   return {
     uid: snap.id,
     displayName:      (data.displayName as string | null) ?? null,
     username:         (data.username as string | null) ?? null,
-    email:            (data.email as string | null) ?? null,
-    phoneNumber:      (data.phoneNumber as string | null) ?? null,
+    email:            (priv.email as string | null) ?? null,
+    phoneNumber:      (priv.phoneNumber as string | null) ?? null,
     status:           (data.status as string | null) ?? 'active',
     profileCompleted: data.profileCompleted === true,
     smsOptOut:        data.smsOptOut === true,

@@ -3,6 +3,7 @@
 // verification, opt-out, duplicates).
 
 import type { Firestore, DocumentSnapshot } from 'firebase-admin/firestore';
+import { userPrivateProfileRef } from '../lib/userPrivate';
 
 export type AudienceWire = 'everyone' | 'unread_only' | 'undelivered_only';
 
@@ -85,7 +86,9 @@ export function filterByAudience(
 
 /**
  * Per-recipient eligibility — produces split eligible / excluded lists
- * from a candidate set. Reads /users/{uid} for phone + opt-out status.
+ * from a candidate set. Reads /users/{uid} for opt-out/verification status and
+ * users/{uid}/userPrivate/profile for the phone (F1 Phase C: phone is no longer
+ * on the public user doc).
  *
  * Duplicate-phone detection runs after individual eligibility so the
  * earliest uid in the list keeps the phone and later duplicates are
@@ -99,9 +102,10 @@ export async function classifyRecipients(
   const eligible: Eligible[] = [];
   const excluded: Excluded[] = [];
 
-  const userSnaps = await Promise.all(
-    candidates.map(c => db.collection('users').doc(c.uid).get()),
-  );
+  const [userSnaps, privSnaps] = await Promise.all([
+    Promise.all(candidates.map(c => db.collection('users').doc(c.uid).get())),
+    Promise.all(candidates.map(c => userPrivateProfileRef(db, c.uid).get())),
+  ]);
   const seenPhones = new Set<string>();
 
   for (let i = 0; i < candidates.length; i++) {
@@ -125,12 +129,12 @@ export async function classifyRecipients(
     }
     const u = snap.data() as {
       displayName?: string;
-      phoneNumber?: string | null;
       phoneVerified?: boolean;
       smsOptOut?: boolean;
     };
     const displayName = u.displayName ?? null;
-    const phone = u.phoneNumber ?? null;
+    // F1 Phase C: phone is read exclusively from users/{uid}/userPrivate/profile.
+    const phone = (privSnaps[i].get('phoneNumber') as string | null | undefined) ?? null;
 
     if (u.smsOptOut === true) {
       excluded.push({ uid: c.uid, displayName, appReceiptStatus: c.appReceiptStatus, skipReason: 'opt-out' });

@@ -96,7 +96,7 @@ export async function dispatchBatchToRelay(
   for (const recipientUid of recipientUids) {
     let phoneE164 = phoneOnDoc.get(recipientUid) ?? null;
     if (!phoneE164) {
-      // F1 Phase B: read from users/{uid}/userPrivate/profile (public fallback inside).
+      // F1 Phase C: read the phone from users/{uid}/userPrivate/profile (private only).
       phoneE164 = await readUserPhone(db, recipientUid);
     }
 

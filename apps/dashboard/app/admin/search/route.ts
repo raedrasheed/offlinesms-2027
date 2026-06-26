@@ -44,10 +44,12 @@ async function searchUsers(q: string, role: string): Promise<SearchResult[]> {
     const snap = await adminDb.collection('users').doc(q).get().catch(() => null);
     if (snap?.exists) {
       const d = snap.data()!;
+      // F1 Phase C: email lives in users/{uid}/userPrivate/profile, not the public doc.
+      const priv = (await snap.ref.collection('userPrivate').doc('profile').get()).data() ?? {};
       results.push({
         type:     'user',
         title:    (d.displayName as string | null) ?? d.uid,
-        subtitle: maskEmail(d.email as string | null, role as any),
+        subtitle: maskEmail((priv.email as string | null) ?? null, role as any),
         href:     `/admin/users/${snap.id}`,
         status:   (d.status as string | null) ?? 'active',
       });
@@ -78,10 +80,12 @@ async function searchUsers(q: string, role: string): Promise<SearchResult[]> {
       if (seen.has(d.id) || results.length >= GROUP_LIMIT) break;
       seen.add(d.id);
       const data = d.data();
+      // F1 Phase C: email lives in users/{uid}/userPrivate/profile, not the public doc.
+      const priv = (await d.ref.collection('userPrivate').doc('profile').get()).data() ?? {};
       results.push({
         type:     'user',
         title:    (data.displayName as string | null) ?? `@${data.usernameLower}`,
-        subtitle: `@${data.usernameLower ?? d.id.slice(0, 8)} · ${maskEmail(data.email as string | null, role as any)}`,
+        subtitle: `@${data.usernameLower ?? d.id.slice(0, 8)} · ${maskEmail((priv.email as string | null) ?? null, role as any)}`,
         href:     `/admin/users/${d.id}`,
         status:   (data.status as string | null) ?? 'active',
       });
