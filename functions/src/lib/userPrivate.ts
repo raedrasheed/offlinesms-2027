@@ -1,16 +1,19 @@
 // Sensitive user PII at rest (F1).
 //
-// A user's sensitive fields live in an owner/admin-only subdocument
-// `users/{uid}/userPrivate/profile`. Phase A dual-writes here while the public
-// `users/{uid}` doc still carries the same fields (removed only in Phase C);
-// Phase B reads from here. The collection-group id is intentionally specific
-// (`userPrivate`, not a generic `private`) so collectionGroup() queries can
-// never collide with an unrelated subcollection elsewhere in the tree.
+// A user's sensitive fields (phoneNumber, email, pinHash, pinSalt, pinSetAt)
+// live in an owner/admin-only subdocument `users/{uid}/userPrivate/profile`.
+// All sensitive reads and writes go through here: the verified backend flows
+// (Admin SDK) write phoneNumber/email, the mobile client writes only the PIN
+// fields, and discovery reads cross-user via collectionGroup('userPrivate').
+// The collection-group id is intentionally specific (`userPrivate`, not a
+// generic `private`) so collectionGroup() queries can never collide with an
+// unrelated subcollection elsewhere in the tree.
 //
-// Rules (firestore.rules): users/{uid}/userPrivate/{doc} is readable/writable
-// only by the owner or an admin, so the PII is not exposed to other users.
+// Rules (firestore.rules): users/{uid}/userPrivate/{doc} is readable only by
+// the owner or an admin; the owner may write only the PIN fields, phoneNumber/
+// email are backend/admin-only — so the PII is not exposed to other users.
 
-import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { FieldValue } from 'firebase-admin/firestore';
 
 /** Collection-group id for the private PII subcollection. Keep in sync with
  *  firestore.rules, firestore.indexes.json, and the non-backend copies
@@ -37,10 +40,10 @@ export function userPrivateProfileRef(
 }
 
 /**
- * Phase A dual-write: merge the given sensitive fields into
- * users/{uid}/userPrivate/profile (+ updatedAt). Idempotent (merge). Only keys
- * that are explicitly provided (including explicit null) are written;
- * `undefined` keys are skipped so we never clobber an existing value.
+ * Merge the given sensitive fields into users/{uid}/userPrivate/profile
+ * (+ updatedAt). Idempotent (merge). Only keys that are explicitly provided
+ * (including explicit null) are written; `undefined` keys are skipped so we
+ * never clobber an existing value. Admin SDK only (bypasses rules).
  */
 export async function writeUserPrivateProfile(
   db: FirebaseFirestore.Firestore,
@@ -52,11 +55,6 @@ export async function writeUserPrivateProfile(
     if (v !== undefined) payload[k] = v;
   }
   await userPrivateProfileRef(db, uid).set(payload, { merge: true });
-}
-
-// Convenience for callers that only have the default Firestore instance.
-export async function dualWriteUserPrivateProfile(uid: string, fields: UserPrivateProfile): Promise<void> {
-  await writeUserPrivateProfile(getFirestore(), uid, fields);
 }
 
 // ── Phase C reads (private-only — no public fallback) ─────────────────────────

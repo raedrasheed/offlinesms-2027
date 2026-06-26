@@ -68,8 +68,6 @@ async function ensureOrgSender(organizationId: string, orgName: string): Promise
     await userRef.set({
       displayName:      orgName,
       photoURL:         null,
-      phoneNumber:      null,
-      email:            null,
       username:         null,
       usernameLower:    null,
       about:            'Official organization announcements',
