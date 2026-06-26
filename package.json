@@ -23,6 +23,8 @@
     "seed": "tsx scripts/seed.ts",
     "seed:review": "tsx scripts/seedReviewDemo.ts",
     "verify:userprivate": "tsx scripts/verifyUserPrivateBackfill.ts",
+    "cleanup:public-pii": "tsx scripts/cleanupPublicPii.ts",
+    "verify:public-pii-cleanup": "tsx scripts/verifyPublicPiiCleanup.ts",
     "promote:admin": "tsx scripts/promoteAdmin.ts",
     "firebase:emulators": "firebase emulators:start",
     "firebase:deploy": "firebase deploy"
