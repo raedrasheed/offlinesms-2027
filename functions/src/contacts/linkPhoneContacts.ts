@@ -28,10 +28,10 @@ export function phoneChanged(before: string | null | undefined, after: string | 
   return !!a && a !== b;
 }
 
-// F1 Phase B: phoneNumber now lives in users/{uid}/private/profile, so this
+// F1 Phase B: phoneNumber now lives in users/{uid}/userPrivate/profile, so this
 // trigger fires on that subdoc write (not the public users/{uid} doc). The
 // non-PII display fields for the promotion snapshot are read from the public doc.
-export const linkPhoneContactsOnUserWrite = onDocumentWritten('users/{uid}/private/{doc}', async (event) => {
+export const linkPhoneContactsOnUserWrite = onDocumentWritten('users/{uid}/userPrivate/{doc}', async (event) => {
   const { uid, doc } = event.params as { uid: string; doc: string };
   if (doc !== 'profile') return;
   const before = event.data?.before?.data() as { phoneNumber?: string } | undefined;

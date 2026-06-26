@@ -59,7 +59,7 @@ async function ensureUserDoc(uid: string, fields: Record<string, unknown>) {
   if (fields.phoneNumber !== undefined) priv.phoneNumber = fields.phoneNumber;
   if (fields.email !== undefined) priv.email = fields.email;
   if (priv.phoneNumber !== undefined || priv.email !== undefined) {
-    await db.collection('users').doc(uid).collection('private').doc('profile').set(priv, { merge: true });
+    await db.collection('users').doc(uid).collection('userPrivate').doc('profile').set(priv, { merge: true });
   }
 }
 

@@ -45,7 +45,7 @@ export const matchContacts = onCall({ region: 'us-central1' }, async (request) =
     phoneE164:   string;
   }> = [];
 
-  // F1 Phase B: resolve phone → uid via the private/profile collection group,
+  // F1 Phase B: resolve phone → uid via the userPrivate/profile collection group,
   // then read the PUBLIC user doc for the non-PII display fields.
   const phoneToUid = new Map<string, string>();   // phone → uid (excluding self)
   for (const batch of chunk(cleaned, FIRESTORE_IN_LIMIT)) {

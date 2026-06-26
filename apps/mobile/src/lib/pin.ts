@@ -1,6 +1,6 @@
 // PIN: hashed at rest with a per-user salt. Stored in the owner-only private
-// subdoc users/{uid}/private/profile (F1 Phase B). It previously targeted the
-// public users/{uid} doc, which the profile-field allow-list rule actually
+// subdoc users/{uid}/userPrivate/profile (F1 Phase B). It previously targeted
+// the public users/{uid} doc, which the profile-field allow-list rule actually
 // denied — moving it here also makes PIN set/verify work for the first time.
 //
 // This is a *second-device confirmation* factor, not a primary password —
@@ -13,7 +13,7 @@ import { db, auth } from './firebase';
 
 /** Owner-only private profile subdoc holding sensitive fields (incl. PIN). */
 function privateProfileRef(uid: string) {
-  return doc(db, 'users', uid, 'private', 'profile');
+  return doc(db, 'users', uid, 'userPrivate', 'profile');
 }
 
 function bytesToHex(b: Uint8Array): string {

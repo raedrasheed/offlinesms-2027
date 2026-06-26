@@ -729,7 +729,7 @@
       ]
     },
     {
-      "collectionGroup": "private",
+      "collectionGroup": "userPrivate",
       "fieldPath": "phoneNumber",
       "indexes": [
         {

@@ -11,7 +11,7 @@ import { newPhoneContactDoc, cleanDisplayName } from './contactLogic';
 import { findUidByPhoneNumber } from '../lib/userPrivate';
 
 /** Find a registered user by E.164 phone; returns uid or null.
- *  F1 Phase B: resolves via the private/profile collection group. */
+ *  F1 Phase B: resolves via the userPrivate/profile collection group. */
 export async function findRegisteredUidByPhone(e164: string): Promise<string | null> {
   return findUidByPhoneNumber(getFirestore(), e164);
 }

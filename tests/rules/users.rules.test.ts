@@ -97,54 +97,54 @@ describe('users/{uid}', () => {
 });
 
 // F1 — sensitive PII moved to an owner/admin-only private subdoc.
-describe('users/{uid}/private/profile', () => {
+describe('users/{uid}/userPrivate/profile', () => {
   it('owner can write and read their own private profile', async () => {
     const db = await asUser('u-a');
-    await assertSucceeds(setDoc(doc(db, 'users/u-a/private/profile'), {
+    await assertSucceeds(setDoc(doc(db, 'users/u-a/userPrivate/profile'), {
       phoneNumber: '+970599123456', email: 'a@example.com',
     }));
-    await assertSucceeds(getDoc(doc(db, 'users/u-a/private/profile')));
+    await assertSucceeds(getDoc(doc(db, 'users/u-a/userPrivate/profile')));
   });
 
   it('another authed user CANNOT read the private profile', async () => {
     await seed(async db => {
-      await setDoc(doc(db, 'users/u-a/private/profile'), { phoneNumber: '+970599123456' });
+      await setDoc(doc(db, 'users/u-a/userPrivate/profile'), { phoneNumber: '+970599123456' });
     });
     const db = await asUser('u-b');
-    await assertFails(getDoc(doc(db, 'users/u-a/private/profile')));
+    await assertFails(getDoc(doc(db, 'users/u-a/userPrivate/profile')));
   });
 
   it('another authed user CANNOT write the private profile', async () => {
     const db = await asUser('u-b');
-    await assertFails(setDoc(doc(db, 'users/u-a/private/profile'), { phoneNumber: '+970599000000' }));
+    await assertFails(setDoc(doc(db, 'users/u-a/userPrivate/profile'), { phoneNumber: '+970599000000' }));
   });
 
   it('unauthed cannot read the private profile', async () => {
     await seed(async db => {
-      await setDoc(doc(db, 'users/u-a/private/profile'), { email: 'a@example.com' });
+      await setDoc(doc(db, 'users/u-a/userPrivate/profile'), { email: 'a@example.com' });
     });
     const db = await asAnon();
-    await assertFails(getDoc(doc(db, 'users/u-a/private/profile')));
+    await assertFails(getDoc(doc(db, 'users/u-a/userPrivate/profile')));
   });
 
   it('admin can read and write any private profile', async () => {
     await seed(async db => {
-      await setDoc(doc(db, 'users/u-a/private/profile'), { phoneNumber: '+970599123456' });
+      await setDoc(doc(db, 'users/u-a/userPrivate/profile'), { phoneNumber: '+970599123456' });
     });
     const db = await asAdmin();
-    await assertSucceeds(getDoc(doc(db, 'users/u-a/private/profile')));
-    await assertSucceeds(setDoc(doc(db, 'users/u-a/private/profile'), { email: 'x@example.com' }, { merge: true }));
+    await assertSucceeds(getDoc(doc(db, 'users/u-a/userPrivate/profile')));
+    await assertSucceeds(setDoc(doc(db, 'users/u-a/userPrivate/profile'), { email: 'x@example.com' }, { merge: true }));
   });
 
   // F1 Phase B: PIN moved here (was rules-denied on the public doc). Owner-write.
   it('owner can write PIN fields to own private profile', async () => {
     const db = await asUser('u-a');
-    await assertSucceeds(setDoc(doc(db, 'users/u-a/private/profile'), {
+    await assertSucceeds(setDoc(doc(db, 'users/u-a/userPrivate/profile'), {
       pinHash: 'abc', pinSalt: 'def', pinSetAt: new Date(),
     }, { merge: true }));
   });
 
-  // F1 Phase B: phone discovery uses collectionGroup('private'), run ONLY by the
+  // F1 Phase B: phone discovery uses collectionGroup('userPrivate'), run ONLY by the
   // backend via the Admin SDK (which bypasses rules). From a CLIENT, a
   // collection-group query over private profiles must be denied so no signed-in
   // user can harvest other users' phone numbers. (Firestore does not grant
@@ -152,10 +152,10 @@ describe('users/{uid}/private/profile', () => {
   // claim or not — which is exactly what we want; the server uses Admin SDK.)
   it('a client CANNOT run a collectionGroup(private) phone query (no harvesting)', async () => {
     await seed(async db => {
-      await setDoc(doc(db, 'users/u-a/private/profile'), { phoneNumber: '+970599123456' });
-      await setDoc(doc(db, 'users/u-b/private/profile'), { phoneNumber: '+970599000000' });
+      await setDoc(doc(db, 'users/u-a/userPrivate/profile'), { phoneNumber: '+970599123456' });
+      await setDoc(doc(db, 'users/u-b/userPrivate/profile'), { phoneNumber: '+970599000000' });
     });
     const db = await asUser('u-c');
-    await assertFails(getDocs(query(collectionGroup(db, 'private'), where('phoneNumber', '==', '+970599123456'))));
+    await assertFails(getDocs(query(collectionGroup(db, 'userPrivate'), where('phoneNumber', '==', '+970599123456'))));
   });
 });

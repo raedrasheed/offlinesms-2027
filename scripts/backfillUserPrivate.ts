@@ -1,5 +1,5 @@
 // Backfill (F1, Phase A): copy sensitive PII from each public users/{uid} doc
-// into the owner/admin-only private subdoc users/{uid}/private/profile.
+// into the owner/admin-only private subdoc users/{uid}/userPrivate/profile.
 //
 // - Idempotent: re-running only writes when the subdoc is missing a field or
 //   differs; safe to run repeatedly.
@@ -23,7 +23,7 @@ if (!credPath) { console.error('Set GOOGLE_APPLICATION_CREDENTIALS to a service-
 initializeApp({ credential: cert(JSON.parse(readFileSync(credPath, 'utf-8'))) });
 const db = getFirestore();
 
-// Fields mirrored into users/{uid}/private/profile.
+// Fields mirrored into users/{uid}/userPrivate/profile.
 const FIELDS = ['phoneNumber', 'email', 'pinHash', 'pinSalt', 'pinSetAt'] as const;
 
 async function main() {
@@ -56,7 +56,7 @@ async function main() {
       if (Object.keys(present).length === 0) { noPii++; continue; }
 
       // Compare against the existing private subdoc to stay idempotent.
-      const privRef = userDoc.ref.collection('private').doc('profile');
+      const privRef = userDoc.ref.collection('userPrivate').doc('profile');
       const privSnap = await privRef.get();
       const priv = privSnap.exists ? privSnap.data() ?? {} : {};
 
