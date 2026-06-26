@@ -10,10 +10,11 @@ import {
   normalizeE164, phoneKey, verifyOtpHash, isOtpExpired, OTP_MAX_ATTEMPTS, OTP_CODE_LENGTH,
   isTestPhone, TEST_PHONE_OTP,
 } from './otpLogic';
+import { appCheckOptions } from '../lib/appCheck';
 
 const REGION = 'us-central1';
 
-export const verifyPhoneOtp = onCall({ region: REGION }, async (request) => {
+export const verifyPhoneOtp = onCall({ region: REGION, ...appCheckOptions() }, async (request) => {
   const data = (request.data ?? {}) as { phoneE164?: unknown; code?: unknown };
   const phone = normalizeE164(data.phoneE164);
   const code = typeof data.code === 'string' ? data.code.trim() : '';

@@ -66,6 +66,7 @@ import NotificationSettings from './src/screens/NotificationSettings';
 import { inviteCodeFromUrl, setPendingInvite, takePendingInvite } from './src/lib/deepLinks';
 import * as Notifications from 'expo-notifications';
 import { installForegroundHandler, registerForPush, routeFromNotification } from './src/lib/notifications';
+import { initAppCheck } from './src/lib/appCheck';
 import { dispatchForRoute } from './src/lib/pushRouting';
 import { Linking as RNLinking } from 'react-native';
 
@@ -73,6 +74,10 @@ const navRef = createNavigationContainerRef();
 
 // Foreground display behaviour — must be set once at module load.
 installForegroundHandler();
+
+// App Check (F2): initializes only on web with a configured reCAPTCHA key;
+// no-op on native until a native attestation module is added. Never throws.
+initAppCheck();
 
 function routeFromPush(data: unknown) {
   const decision = dispatchForRoute(routeFromNotification(data));

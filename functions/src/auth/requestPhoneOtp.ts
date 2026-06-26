@@ -15,6 +15,7 @@ import { normalizePhoneAndCountry } from '../lib/phoneCountry';
 import { parsePhoneNumberFromString } from 'libphonenumber-js';
 import { loadActiveRelayDevices } from '../sms/countryRouting';
 import { hasRelayCoverageForCountry } from '../sms/relayLogic';
+import { appCheckOptions } from '../lib/appCheck';
 
 const REGION = 'us-central1';
 
@@ -24,7 +25,7 @@ async function otpBusinessId(db: FirebaseFirestore.Firestore): Promise<string | 
   return id ?? null;
 }
 
-export const requestPhoneOtp = onCall({ region: REGION }, async (request) => {
+export const requestPhoneOtp = onCall({ region: REGION, ...appCheckOptions() }, async (request) => {
   // TODO(security): enforce App Check once the mobile app attests.
   const phone = normalizeE164((request.data ?? {}).phoneE164);
   if (!phone) throw new HttpsError('invalid-argument', 'phone-invalid');

@@ -9,10 +9,11 @@ import { getAuth } from 'firebase-admin/auth';
 import { writeAuditLog } from '../lib/auditLog';
 import { verifyOtpHash, isOtpExpired, OTP_MAX_ATTEMPTS, OTP_CODE_LENGTH } from './otpLogic';
 import { normalizeEmail, emailKey } from './emailOtpLogic';
+import { appCheckOptions } from '../lib/appCheck';
 
 const REGION = 'us-central1';
 
-export const verifyEmailOtp = onCall({ region: REGION }, async (request) => {
+export const verifyEmailOtp = onCall({ region: REGION, ...appCheckOptions() }, async (request) => {
   const data = (request.data ?? {}) as { email?: unknown; code?: unknown };
   const email = normalizeEmail(data.email);
   const code = typeof data.code === 'string' ? data.code.trim() : '';

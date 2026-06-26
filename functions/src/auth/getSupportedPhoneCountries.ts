@@ -13,6 +13,7 @@ import { onCall } from 'firebase-functions/v2/https';
 import { getFirestore } from 'firebase-admin/firestore';
 import { loadActiveRelayDevices } from '../sms/countryRouting';
 import { supportedCountriesForDevices } from '../sms/relayLogic';
+import { appCheckOptions } from '../lib/appCheck';
 
 const REGION = 'us-central1';
 
@@ -22,7 +23,7 @@ async function otpBusinessId(db: FirebaseFirestore.Firestore): Promise<string | 
   return id ?? null;
 }
 
-export const getSupportedPhoneCountries = onCall({ region: REGION }, async () => {
+export const getSupportedPhoneCountries = onCall({ region: REGION, ...appCheckOptions() }, async () => {
   const db = getFirestore();
   const businessId = await otpBusinessId(db);
   if (!businessId) return { countries: [] as string[] };
