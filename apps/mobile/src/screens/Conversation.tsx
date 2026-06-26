@@ -23,6 +23,7 @@ import {
   UserState,
   subscribeMembers,
   GroupMember,
+  getOrCreateDirectConversation,
 } from '../lib/conversations';
 import type { ReactorInfo } from '../components/ReactionsSheet';
 import { useUserProfiles } from '../lib/userProfiles';
@@ -35,6 +36,7 @@ import { useWallpaper } from '../lib/wallpaper';
 import { ChatWallpaperBackground } from '../components/ChatWallpaperBackground';
 import { Ionicons } from '@expo/vector-icons';
 import { MessageBubble } from '../components/MessageBubble';
+import { MemberInfoSheet } from '../components/MemberInfoSheet';
 import { useTheme } from '../context/ThemeContext';
 import { isRTL } from '../i18n';
 import { LoadingState, EmptyState, ErrorState } from '../components/state';
@@ -257,6 +259,23 @@ export default function Conversation({ route, navigation }: any) {
     }
     return map;
   }, [members, memberProfiles]);
+
+  // Group chat: tap a sender's avatar → member-info sheet (avatar/name/handle +
+  // quick actions). Holds the tapped uid; the sheet is seeded from reactorNames
+  // for an instant paint, then upgrades to the live public profile.
+  const [infoMemberUid, setInfoMemberUid] = useState<string | null>(null);
+  const onAvatarPress = useCallback((uid: string) => setInfoMemberUid(uid), []);
+  const openMemberChat = useCallback(async (uid: string) => {
+    setInfoMemberUid(null);
+    try {
+      const conversationId = await getOrCreateDirectConversation(uid);
+      // push (not navigate) so the group stays on the back stack — we're already
+      // on a Conversation screen and navigate() would just swap its params.
+      (navigation.push ?? navigation.navigate)('Conversation', { id: conversationId });
+    } catch (e: any) {
+      Alert.alert('Couldn’t open chat', e?.message ?? 'Please try again.');
+    }
+  }, [navigation]);
 
   // Presence: peer online/last-seen + everyone's typing/recording activity.
   const presence = useChatPresence(id, isDirect ? peerUid : null);
@@ -765,12 +784,13 @@ export default function Conversation({ route, navigation }: any) {
               onRetryMedia={retryMedia}
               onPlayedVoice={onPlayedVoice}
               onSendViaSms={onSendViaSms}
+              onAvatarPress={onAvatarPress}
             />
           );
         }}
       />
     );
-  }, [data, visibleMsgs, queuedItems, me, isGroup, id, myRoleIsAdmin, starred, convo?.pinnedMessage, convo?.memberCount, reactorNames, useLocal, startReply, startEdit, startForward, jumpTo, openInfo, openImage, retryMedia, onPlayedVoice, onSendViaSms]);
+  }, [data, visibleMsgs, queuedItems, me, isGroup, id, myRoleIsAdmin, starred, convo?.pinnedMessage, convo?.memberCount, reactorNames, useLocal, startReply, startEdit, startForward, jumpTo, openInfo, openImage, retryMedia, onPlayedVoice, onSendViaSms, onAvatarPress]);
 
   return (
     <KeyboardAvoidingView behavior="padding" style={s.root}>
@@ -1023,6 +1043,17 @@ export default function Conversation({ route, navigation }: any) {
         visible={emojiOpen}
         onClose={() => setEmojiOpen(false)}
         onSelect={e => setDraft(d => d + e.char)}
+      />
+
+      <MemberInfoSheet
+        visible={!!infoMemberUid}
+        uid={infoMemberUid}
+        fallbackName={infoMemberUid ? reactorNames[infoMemberUid]?.name : null}
+        fallbackPhoto={infoMemberUid ? reactorNames[infoMemberUid]?.photoURL : null}
+        isSelf={infoMemberUid === me}
+        onClose={() => setInfoMemberUid(null)}
+        onMessage={openMemberChat}
+        onViewGroupInfo={() => navigation.navigate('GroupInfo', { id })}
       />
     </KeyboardAvoidingView>
   );

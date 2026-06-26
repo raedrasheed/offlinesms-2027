@@ -75,6 +75,8 @@ export type MessageBubbleProps = {
   onOpenImage?:   (uri: string) => void;
   onRetryMedia?:  (msg: Message) => void;
   onPlayedVoice?: (msg: Message) => void;
+  // Group chat: tap a sender's avatar to open their member-info sheet.
+  onAvatarPress?: (uid: string) => void;
   // Offline-first: locally queued outgoing message not yet on the server.
   pending?:   'queued' | 'syncing' | 'failed';
   onRetry?:   () => void;
@@ -94,7 +96,7 @@ function formatTime(value: any): string {
 
 function MessageBubbleImpl({
   message: m, context, showSender, onReply, onEditStart, onForward, onJumpTo, onInfo, onSendViaSms,
-  onOpenImage, onRetryMedia, onPlayedVoice, pending, onRetry,
+  onOpenImage, onRetryMedia, onPlayedVoice, onAvatarPress, pending, onRetry,
 }: MessageBubbleProps) {
   const mine    = context.isMyMessage;
   const deleted = m.deletedForEveryone === true;
@@ -264,17 +266,25 @@ function MessageBubbleImpl({
     <View style={[s.row, mine ? s.rowMine : s.rowTheirs]}>
       {showAvatar ? (
         showSender ? (
-          senderPhoto && avatarErrorUri !== senderPhoto ? (
-            <Image
-              source={senderImgSrc!}
-              style={s.avatar}
-              onError={() => setAvatarErrorUri(senderPhoto)}
-            />
-          ) : (
-            <View style={[s.avatar, { backgroundColor: avatarColor(m.senderUid) }]}>
-              <Text style={s.avatarText}>{initials(senderName)}</Text>
-            </View>
-          )
+          <Pressable
+            onPress={onAvatarPress ? () => onAvatarPress(m.senderUid) : undefined}
+            disabled={!onAvatarPress}
+            hitSlop={6}
+            accessibilityRole="button"
+            accessibilityLabel={`${senderName} info`}
+          >
+            {senderPhoto && avatarErrorUri !== senderPhoto ? (
+              <Image
+                source={senderImgSrc!}
+                style={s.avatar}
+                onError={() => setAvatarErrorUri(senderPhoto)}
+              />
+            ) : (
+              <View style={[s.avatar, { backgroundColor: avatarColor(m.senderUid) }]}>
+                <Text style={s.avatarText}>{initials(senderName)}</Text>
+              </View>
+            )}
+          </Pressable>
         ) : (
           <View style={s.avatarSpacer} />
         )
@@ -512,6 +522,7 @@ function areBubblePropsEqual(prev: MessageBubbleProps, next: MessageBubbleProps)
   if (prev.onOpenImage   !== next.onOpenImage)   return false;
   if (prev.onRetryMedia  !== next.onRetryMedia)  return false;
   if (prev.onPlayedVoice !== next.onPlayedVoice) return false;
+  if (prev.onAvatarPress !== next.onAvatarPress) return false;
   if (prev.onRetry       !== next.onRetry)       return false;
 
   const a = prev.message, b = next.message;
