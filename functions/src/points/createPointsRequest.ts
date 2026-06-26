@@ -33,27 +33,34 @@ export const createPointsRequest = onCall({ region: 'us-central1' }, async (requ
   if (points <= 0) throw new HttpsError('failed-precondition', 'package-misconfigured');
 
   // One pending request at a time.
-  const pending = await db.collection('pointsRequests')
+  // Atomically enforce "one pending request per user": the pending-check and
+  // the create happen in a single transaction, so two concurrent requests can't
+  // both pass the check. The query read joins the transaction's conflict set —
+  // the second committer is retried, sees the now-existing pending doc, and
+  // fails with 'request-already-pending'.
+  const pendingQuery = db.collection('pointsRequests')
     .where('userId', '==', uid)
     .where('status', '==', 'pending')
-    .limit(1)
-    .get();
-  if (!pending.empty) throw new HttpsError('failed-precondition', 'request-already-pending');
-
+    .limit(1);
   const reqRef = db.collection('pointsRequests').doc();
   const now = FieldValue.serverTimestamp();
-  await reqRef.set({
-    userId:       uid,
-    packageId:    data.packageId,
-    packageName:  pkg.name ?? '',
-    points,                       // snapshot — what the admin will assign on approve
-    note,
-    status:       'pending',      // pending | approved | rejected
-    createdAt:    now,
-    updatedAt:    now,
-    reviewedAt:   null,
-    reviewedByUid: null,
-    reviewNote:   null,
+
+  await db.runTransaction(async tx => {
+    const pending = await tx.get(pendingQuery);
+    if (!pending.empty) throw new HttpsError('failed-precondition', 'request-already-pending');
+    tx.set(reqRef, {
+      userId:       uid,
+      packageId:    data.packageId,
+      packageName:  pkg.name ?? '',
+      points,                       // snapshot — what the admin will assign on approve
+      note,
+      status:       'pending',      // pending | approved | rejected
+      createdAt:    now,
+      updatedAt:    now,
+      reviewedAt:   null,
+      reviewedByUid: null,
+      reviewNote:   null,
+    });
   });
 
   await writeAuditLog({

@@ -233,6 +233,51 @@ export function subscribePackages(cb: (rows: PointsPackage[]) => void) {
   });
 }
 
+export type PointsRequestStatus = 'pending' | 'approved' | 'rejected' | (string & {});
+
+export type PointsRequest = {
+  id:          string;
+  packageId:   string | null;
+  packageName: string;
+  points:      number;
+  status:      PointsRequestStatus;
+  note:        string | null;
+  reviewNote:  string | null;
+  createdAt:   any;
+  reviewedAt:  any;
+};
+
+/**
+ * The signed-in user's own points requests (rules allow reading own only).
+ * Queried by userId and sorted newest-first client-side to avoid needing a
+ * composite index — a user's request volume is tiny.
+ */
+export function subscribeMyPointsRequests(uid: string, cb: (rows: PointsRequest[]) => void) {
+  if (!uid) { cb([]); return () => {}; }
+  const q = query(collection(db, 'pointsRequests'), where('userId', '==', uid), limit(50));
+  return onSnapshot(q, snap => {
+    const rows = snap.docs.map(d => {
+      const data = d.data() as Record<string, unknown>;
+      return {
+        id:          d.id,
+        packageId:   (data.packageId as string | null) ?? null,
+        packageName: (data.packageName as string) ?? '',
+        points:      (data.points as number) ?? 0,
+        status:      (data.status as string) ?? 'pending',
+        note:        (data.note as string | null) ?? null,
+        reviewNote:  (data.reviewNote as string | null) ?? null,
+        createdAt:   data.createdAt ?? null,
+        reviewedAt:  data.reviewedAt ?? null,
+      } as PointsRequest;
+    });
+    rows.sort((a, b) => (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0));
+    cb(rows);
+  }, err => {
+    console.warn('[points] subscribeMyPointsRequests failed:', err);
+    cb([]);
+  });
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Transfers (callable wrapper). NOTE: points are NOT sold in the mobile
 // app — there is no purchase / package / payment flow. Points are assigned

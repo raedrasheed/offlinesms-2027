@@ -9,10 +9,12 @@ import { getAuth } from 'firebase-admin/auth';
 import { writeAuditLog } from '../lib/auditLog';
 import { verifyOtpHash, isOtpExpired, OTP_MAX_ATTEMPTS, OTP_CODE_LENGTH } from './otpLogic';
 import { normalizeEmail, emailKey } from './emailOtpLogic';
+import { appCheckOptions } from '../lib/appCheck';
+import { writeUserPrivateProfile } from '../lib/userPrivate';
 
 const REGION = 'us-central1';
 
-export const verifyEmailOtp = onCall({ region: REGION }, async (request) => {
+export const verifyEmailOtp = onCall({ region: REGION, ...appCheckOptions() }, async (request) => {
   const data = (request.data ?? {}) as { email?: unknown; code?: unknown };
   const email = normalizeEmail(data.email);
   const code = typeof data.code === 'string' ? data.code.trim() : '';
@@ -90,6 +92,10 @@ export const verifyEmailOtp = onCall({ region: REGION }, async (request) => {
       { merge: true },
     );
   }
+  // F1 Phase A: mirror PII into the owner/admin-only private subdoc (public
+  // users/{uid} fields above are kept unchanged until Phase C).
+  await writeUserPrivateProfile(db, uid, { email, ...(created ? { phoneNumber: null } : {}) });
+
   const customToken = await adminAuth.createCustomToken(uid);
 
   await writeAuditLog({

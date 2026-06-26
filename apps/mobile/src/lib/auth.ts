@@ -58,6 +58,7 @@ export async function verifyPhoneOtpAndSignIn(phoneE164: string, code: string): 
 export function otpErrorCopy(reason?: string): string {
   switch (reason) {
     case 'phone-invalid':          return 'Enter a valid phone number.';
+    case 'number-not-supported':   return 'Number not supported.';
     case 'otp-not-configured':     return 'Phone sign-in isn’t available yet. Please use email.';
     case 'no-relay-for-country':   return 'Sign-in isn’t available in your country yet (no relay).';
     case 'otp-cooldown':           return 'Please wait a moment before requesting another code.';

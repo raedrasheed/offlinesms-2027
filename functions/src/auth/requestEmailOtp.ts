@@ -12,6 +12,7 @@ import { generateOtp, newSalt, hashOtp, canResend, nextSendWindow } from './otpL
 import { normalizeEmail, emailKey, EMAIL_OTP_TTL_MS } from './emailOtpLogic';
 import { sendEmail } from '../lib/email';
 import { renderOtpEmail } from '../lib/email/template';
+import { appCheckOptions } from '../lib/appCheck';
 
 const REGION = 'us-central1';
 const TTL_MINUTES = Math.round(EMAIL_OTP_TTL_MS / 60000);
@@ -27,7 +28,7 @@ async function readGeneralSettings(
   };
 }
 
-export const requestEmailOtp = onCall({ region: REGION }, async (request) => {
+export const requestEmailOtp = onCall({ region: REGION, ...appCheckOptions() }, async (request) => {
   const email = normalizeEmail((request.data ?? {}).email);
   if (!email) throw new HttpsError('invalid-argument', 'email-invalid');
 

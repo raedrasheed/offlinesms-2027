@@ -10,6 +10,10 @@ import { availableCountries, flagEmoji, type Country } from '../lib/countries';
 
 type LoadState = 'loading' | 'ready' | 'error';
 
+// App-review test number's country (+970599999999). Always offered in the picker
+// so reviewers can sign in with the fixed demo phone regardless of relay state.
+const DEMO_COUNTRY = 'PS';
+
 function formatPhone(digits: string): string {
   // Loose grouping for visual rhythm; doesn't enforce any spec.
   if (digits.length <= 3) return digits;
@@ -43,8 +47,13 @@ export default function PhoneEntry({ navigation }: any) {
 
   useEffect(() => { loadSupported(); }, []);
 
-  // The picker shows only supported countries (priority-ordered).
-  const available = useMemo(() => availableCountries(supported), [supported]);
+  // The picker shows supported countries, plus the App-review test number's
+  // country (PS / +970) so the fixed demo phone is always selectable even if no
+  // relay currently serves it. The backend skips coverage for the test number.
+  const available = useMemo(
+    () => availableCountries(new Set([...supported, DEMO_COUNTRY])),
+    [supported],
+  );
 
   // Default/clamp the selection to a supported country whenever the set changes.
   useEffect(() => {

@@ -32,6 +32,41 @@ describe('conversations/{convoId}', () => {
     await assertFails(getDoc(doc(db, 'conversations', 'c-1')));
   });
 
+  // F4: conversation docs are updated only via callables (Admin SDK). A
+  // participant must NOT be able to tamper with the doc directly.
+  it('participant CANNOT update a conversation (e.g. add themselves elsewhere / hijack)', async () => {
+    await seed(async db => {
+      await setDoc(doc(db, 'conversations', 'c-1'), {
+        type: 'direct', participantUids: ['u-a', 'u-b'],
+      });
+    });
+    const db = await asUser('u-a');
+    // Try to inject a new participant + seize ownership.
+    await assertFails(updateDoc(doc(db, 'conversations', 'c-1'), {
+      participantUids: ['u-a', 'u-b', 'u-evil'], ownerUid: 'u-a',
+    }));
+  });
+
+  it('participant CANNOT rename / change a group conversation directly', async () => {
+    await seed(async db => {
+      await setDoc(doc(db, 'conversations', 'g-1'), {
+        type: 'group', ownerUid: 'u-a', participantUids: ['u-a', 'u-b'], name: 'Team',
+      });
+    });
+    const db = await asUser('u-b');
+    await assertFails(updateDoc(doc(db, 'conversations', 'g-1'), { name: 'Hijacked' }));
+  });
+
+  it('admin can update a conversation (callable/admin escape hatch)', async () => {
+    await seed(async db => {
+      await setDoc(doc(db, 'conversations', 'c-1'), {
+        type: 'direct', participantUids: ['u-a', 'u-b'],
+      });
+    });
+    const db = await asAdmin();
+    await assertSucceeds(updateDoc(doc(db, 'conversations', 'c-1'), { name: 'x' }));
+  });
+
   it('admin can read any conversation', async () => {
     await seed(async db => {
       await setDoc(doc(db, 'conversations', 'c-1'), {
@@ -44,16 +79,33 @@ describe('conversations/{convoId}', () => {
 });
 
 describe('conversations/{convoId}/messages', () => {
-  it('participant can send a valid text message', async () => {
+  // F3: messages are created ONLY via the sendTextMessage callable (Admin SDK).
+  // A direct client create — even a well-formed one from a real participant —
+  // must be denied so the callable's send-policy + blocked-user gates can't be
+  // bypassed by writing straight to Firestore.
+  it('participant CANNOT directly create a message (callable-only)', async () => {
     await seed(async db => {
       await setDoc(doc(db, 'conversations', 'c-1'), {
         type: 'direct', participantUids: ['u-a', 'u-b'],
       });
     });
     const db = await asUser('u-a');
-    await assertSucceeds(addDoc(collection(db, 'conversations/c-1/messages'), {
+    await assertFails(addDoc(collection(db, 'conversations/c-1/messages'), {
       type: 'text', senderUid: 'u-a', text: 'hello',
     }));
+  });
+
+  it('participant can still READ messages', async () => {
+    await seed(async db => {
+      await setDoc(doc(db, 'conversations', 'c-1'), {
+        type: 'direct', participantUids: ['u-a', 'u-b'],
+      });
+      await setDoc(doc(db, 'conversations/c-1/messages/m-1'), {
+        type: 'text', senderUid: 'u-b', text: 'hi',
+      });
+    });
+    const db = await asUser('u-a');
+    await assertSucceeds(getDoc(doc(db, 'conversations/c-1/messages/m-1')));
   });
 
   it('participant cannot send message as someone else', async () => {

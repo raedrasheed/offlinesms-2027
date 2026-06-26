@@ -203,6 +203,16 @@ service cloud.firestore {
                        (isSelf(uid) && onlyAllowedUserProfileUpdates());
       allow delete: if isAdmin();
 
+      // Sensitive PII at rest (F1) — phoneNumber / email / pinHash / pinSalt.
+      // Owner or admin only; NOT readable by other signed-in users (unlike the
+      // public users/{uid} doc). Phase A dual-writes here via the Admin SDK; the
+      // backend may also read across users via a collectionGroup('userPrivate')
+      // query (Admin SDK bypasses these rules). The collection id is specific
+      // (not a generic 'private') so collectionGroup() can't collide elsewhere.
+      match /userPrivate/{doc} {
+        allow read, write: if isSelf(uid) || isAdmin();
+      }
+
       // Push device tokens (Phase 27) — a user manages only their own devices;
       // the backend (Admin SDK) sends to them + purges dead ones.
       match /devices/{deviceId} {
@@ -263,9 +273,13 @@ service cloud.firestore {
       allow create: if isAuthed()
                        && isConversationParticipantData(request.resource.data)
                        && (!isGroupTypeData(request.resource.data) || safeGroupConversationCreate());
-      allow update: if isMember(convoId)
-                       || isConversationParticipant(convoId)
-                       || isAdmin();
+      // F4: conversation docs are mutated ONLY by the callables (Admin SDK) —
+      // createGroup / updateGroupInfo / lockGroup / add-remove member / the
+      // lastMessage fanout trigger. Direct client updates are denied so a
+      // participant can't tamper with ownerUid, participantUids/memberIds, type,
+      // or other access-control/metadata fields. (Per-user state lives in the
+      // userState subcollection, which keeps its own owner-scoped write rule.)
+      allow update: if isAdmin();
       allow delete: if isGroupAdmin(convoId) || isAdmin();
 
       // /members:
@@ -334,8 +348,12 @@ service cloud.firestore {
 
       match /messages/{messageId} {
         allow read:   if isMember(convoId) || isConversationParticipant(convoId) || isAdmin();
-        allow create: if (isMember(convoId) || isConversationParticipant(convoId))
-                        && isValidTextMessage();
+        // Messages are created ONLY through the sendTextMessage callable (Admin
+        // SDK), which enforces the send policy (group locked / admins-only) and
+        // blocked-user checks that rules can't cheaply evaluate. A direct client
+        // create would bypass those gates, so it is denied here. (isValidTextMessage
+        // is retained above for documentation of the shape the callable writes.)
+        allow create: if false;
         // Phase 6: every legitimate update flows through a callable
         // (editMessage / deleteMessage / reactToMessage / pinMessage)
         // using the Admin SDK. The pre-Phase-6 sender-may-update path

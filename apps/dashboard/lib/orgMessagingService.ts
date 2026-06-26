@@ -203,10 +203,14 @@ async function resolveItems(items: SendItem[]): Promise<ResolvedItem[]> {
 
   const phoneToUid = new Map<string, string>();
   for (const ph of chunk(phones, 10)) {
-    const snap = await adminDb.collection('users').where('phoneNumber', 'in', ph).get();
+    // F1 Phase B: resolve phone → uid via the owner-only userPrivate/profile
+    // collection group (PII no longer on the public users doc).
+    const snap = await adminDb.collectionGroup('userPrivate').where('phoneNumber', 'in', ph).get();
     for (const d of snap.docs) {
-      const p = (d.data().phoneNumber as string | undefined) ?? '';
-      if (p && !phoneToUid.has(p)) phoneToUid.set(p, d.id);
+      if (d.id !== 'profile') continue;
+      const ownerUid = d.ref.parent?.parent?.id;
+      const p = (d.get('phoneNumber') as string | undefined) ?? '';
+      if (ownerUid && p && !phoneToUid.has(p)) phoneToUid.set(p, ownerUid);
     }
   }
 

@@ -10,10 +10,12 @@ import {
   normalizeE164, phoneKey, verifyOtpHash, isOtpExpired, OTP_MAX_ATTEMPTS, OTP_CODE_LENGTH,
   isTestPhone, TEST_PHONE_OTP,
 } from './otpLogic';
+import { appCheckOptions } from '../lib/appCheck';
+import { writeUserPrivateProfile } from '../lib/userPrivate';
 
 const REGION = 'us-central1';
 
-export const verifyPhoneOtp = onCall({ region: REGION }, async (request) => {
+export const verifyPhoneOtp = onCall({ region: REGION, ...appCheckOptions() }, async (request) => {
   const data = (request.data ?? {}) as { phoneE164?: unknown; code?: unknown };
   const phone = normalizeE164(data.phoneE164);
   const code = typeof data.code === 'string' ? data.code.trim() : '';
@@ -94,6 +96,10 @@ export const verifyPhoneOtp = onCall({ region: REGION }, async (request) => {
       { merge: true },
     );
   }
+  // F1 Phase A: mirror PII into the owner/admin-only private subdoc (public
+  // users/{uid} fields above are kept unchanged until Phase C).
+  await writeUserPrivateProfile(db, uid, { phoneNumber: phone, ...(created ? { email: null } : {}) });
+
   const customToken = await adminAuth.createCustomToken(uid);
 
   await writeAuditLog({
