@@ -44,16 +44,33 @@ describe('conversations/{convoId}', () => {
 });
 
 describe('conversations/{convoId}/messages', () => {
-  it('participant can send a valid text message', async () => {
+  // F3: messages are created ONLY via the sendTextMessage callable (Admin SDK).
+  // A direct client create — even a well-formed one from a real participant —
+  // must be denied so the callable's send-policy + blocked-user gates can't be
+  // bypassed by writing straight to Firestore.
+  it('participant CANNOT directly create a message (callable-only)', async () => {
     await seed(async db => {
       await setDoc(doc(db, 'conversations', 'c-1'), {
         type: 'direct', participantUids: ['u-a', 'u-b'],
       });
     });
     const db = await asUser('u-a');
-    await assertSucceeds(addDoc(collection(db, 'conversations/c-1/messages'), {
+    await assertFails(addDoc(collection(db, 'conversations/c-1/messages'), {
       type: 'text', senderUid: 'u-a', text: 'hello',
     }));
+  });
+
+  it('participant can still READ messages', async () => {
+    await seed(async db => {
+      await setDoc(doc(db, 'conversations', 'c-1'), {
+        type: 'direct', participantUids: ['u-a', 'u-b'],
+      });
+      await setDoc(doc(db, 'conversations/c-1/messages/m-1'), {
+        type: 'text', senderUid: 'u-b', text: 'hi',
+      });
+    });
+    const db = await asUser('u-a');
+    await assertSucceeds(getDoc(doc(db, 'conversations/c-1/messages/m-1')));
   });
 
   it('participant cannot send message as someone else', async () => {
