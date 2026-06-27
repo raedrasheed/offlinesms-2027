@@ -8,8 +8,10 @@ import { getAuth } from 'firebase-admin/auth';
 import { writeAuditLog } from '../lib/auditLog';
 import {
   normalizeE164, phoneKey, verifyOtpHash, isOtpExpired, OTP_MAX_ATTEMPTS, OTP_CODE_LENGTH,
-  isTestPhone, TEST_PHONE_OTP,
+  isTestPhone, TEST_PHONE_OTP, isSupportedSignInNumber,
 } from './otpLogic';
+import { normalizePhoneAndCountry } from '../lib/phoneCountry';
+import { parsePhoneNumberFromString } from 'libphonenumber-js';
 import { appCheckOptions } from '../lib/appCheck';
 import { writeUserPrivateProfile } from '../lib/userPrivate';
 
@@ -19,9 +21,21 @@ export const verifyPhoneOtp = onCall({ region: REGION, ...appCheckOptions() }, a
   const data = (request.data ?? {}) as { phoneE164?: unknown; code?: unknown };
   const phone = normalizeE164(data.phoneE164);
   const code = typeof data.code === 'string' ? data.code.trim() : '';
-  if (!phone) throw new HttpsError('invalid-argument', 'phone-invalid');
+  if (!phone) throw new HttpsError('invalid-argument', 'number-not-supported');
   if (!/^\d+$/.test(code) || code.length !== OTP_CODE_LENGTH) {
     throw new HttpsError('invalid-argument', 'code-invalid');
+  }
+
+  // Defense-in-depth: re-apply the supported-number gate here too. requestPhoneOtp
+  // never issues a challenge for an unsupported number, but verification must
+  // never create an account for one either (e.g. a stale/forged challenge). The
+  // App-review test number is exempt (no challenge is ever stored for it).
+  if (!isTestPhone(phone)) {
+    const { countryCode } = normalizePhoneAndCountry(phone);
+    const nationalNumber = parsePhoneNumberFromString(phone)?.nationalNumber ?? '';
+    if (!isSupportedSignInNumber(countryCode, nationalNumber)) {
+      throw new HttpsError('invalid-argument', 'number-not-supported');
+    }
   }
 
   const db = getFirestore();

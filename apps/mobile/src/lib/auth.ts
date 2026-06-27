@@ -54,11 +54,27 @@ export async function verifyPhoneOtpAndSignIn(phoneE164: string, code: string): 
   await signInWithCustomToken(auth, res.data.customToken);
 }
 
+// Sign-in is limited to the mobile prefixes the relay serves. The national
+// (significant) number — trunk "0" stripped — must start with one of these.
+// Keep in sync with functions/src/auth/otpLogic.ts SIGNIN_ALLOWED_PREFIXES.
+export const SIGNIN_ALLOWED_PREFIXES = ['59', '56'] as const;
+
+/**
+ * True when a locally-entered national number is a supported sign-in number:
+ * once the leading trunk "0" is stripped it must start with 59 or 56. Used to
+ * block the request client-side before it ever reaches the relay (the backend
+ * enforces the same rule and returns "number-not-supported").
+ */
+export function isSupportedSignInLocalNumber(localDigits: string): boolean {
+  const n = (localDigits ?? '').replace(/\D/g, '').replace(/^0+/, '');
+  return n.length > 0 && SIGNIN_ALLOWED_PREFIXES.some(p => n.startsWith(p));
+}
+
 /** Map an OTP callable error (message or code) to user-facing copy. */
 export function otpErrorCopy(reason?: string): string {
   switch (reason) {
     case 'phone-invalid':          return 'Enter a valid phone number.';
-    case 'number-not-supported':   return 'Number not supported.';
+    case 'number-not-supported':   return 'Not supported number.';
     case 'otp-not-configured':     return 'Phone sign-in isn’t available yet. Please use email.';
     case 'no-relay-for-country':   return 'Sign-in isn’t available in your country yet (no relay).';
     case 'otp-cooldown':           return 'Please wait a moment before requesting another code.';

@@ -5,25 +5,29 @@ import {
   OTP_CODE_LENGTH, OTP_RESEND_COOLDOWN_MS, OTP_MAX_PER_HOUR,
 } from '../src/auth/otpLogic';
 
-describe('isSupportedSignInNumber — PS/IL restricted to 59/56 prefixes', () => {
-  it('PS allows national numbers starting with 59 or 56', () => {
+describe('isSupportedSignInNumber — only 59/56 mobile numbers', () => {
+  it('allows national numbers starting with 59 or 56', () => {
     expect(isSupportedSignInNumber('PS', '599123456')).toBe(true);
     expect(isSupportedSignInNumber('PS', '569123456')).toBe(true);
-  });
-  it('IL allows national numbers starting with 59 or 56', () => {
     expect(isSupportedSignInNumber('IL', '591234567')).toBe(true);
     expect(isSupportedSignInNumber('IL', '561234567')).toBe(true);
   });
-  it('PS/IL reject other prefixes', () => {
+  it('rejects other prefixes (e.g. 81, 97, 52, 50)', () => {
+    expect(isSupportedSignInNumber('PS', '811124073')).toBe(false); // from the report
+    expect(isSupportedSignInNumber('PS', '976952')).toBe(false);    // from the report
     expect(isSupportedSignInNumber('PS', '521234567')).toBe(false);
     expect(isSupportedSignInNumber('PS', '501234567')).toBe(false);
     expect(isSupportedSignInNumber('IL', '541234567')).toBe(false);
+  });
+  it('rejects empty national numbers', () => {
+    expect(isSupportedSignInNumber('PS', '')).toBe(false);
     expect(isSupportedSignInNumber('IL', '')).toBe(false);
   });
-  it('other countries are unrestricted', () => {
-    expect(isSupportedSignInNumber('US', '4155550188')).toBe(true);
-    expect(isSupportedSignInNumber('EG', '1001234567')).toBe(true);
-    expect(isSupportedSignInNumber(null, '123')).toBe(true);
+  it('rejects numbers with no country code (and ignores non-59/56 countries)', () => {
+    expect(isSupportedSignInNumber(null, '599123456')).toBe(false); // no country code
+    expect(isSupportedSignInNumber(undefined, '599123456')).toBe(false);
+    expect(isSupportedSignInNumber('US', '4155550188')).toBe(false);
+    expect(isSupportedSignInNumber('EG', '1001234567')).toBe(false);
   });
 });
 

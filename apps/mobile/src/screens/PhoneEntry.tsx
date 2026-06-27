@@ -5,7 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { colors, radius } from '../theme';
 import KeyboardAwareScreen from '../components/KeyboardAwareScreen';
-import { requestPhoneOtp, otpErrorCopy, getSupportedPhoneCountries } from '../lib/auth';
+import { requestPhoneOtp, otpErrorCopy, getSupportedPhoneCountries, isSupportedSignInLocalNumber } from '../lib/auth';
 import { availableCountries, flagEmoji, type Country } from '../lib/countries';
 
 type LoadState = 'loading' | 'ready' | 'error';
@@ -81,8 +81,16 @@ export default function PhoneEntry({ navigation }: any) {
 
   async function next() {
     if (!country) return;
-    // E.164 = dial code (already has +) + local digits.
-    const phoneE164 = `${country.dial}${digits.replace(/\D/g, '')}`;
+    // E.164 = dial code (already has +) + local digits, with the leading national
+    // trunk "0" dropped so "059…" becomes "+97059…" (not "+9700559…").
+    const local = digits.replace(/\D/g, '').replace(/^0+/, '');
+    const phoneE164 = `${country.dial}${local}`;
+    // Only 59/56 mobile numbers are supported — block others up-front so we don't
+    // send an SMS that the backend would reject anyway.
+    if (!isSupportedSignInLocalNumber(local)) {
+      Alert.alert(t('auth.couldntSendCode'), otpErrorCopy('number-not-supported'));
+      return;
+    }
     setBusy(true);
     try {
       await requestPhoneOtp(phoneE164);
