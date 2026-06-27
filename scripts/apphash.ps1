@@ -38,9 +38,16 @@ function Get-CertBytes {
   }
   $tmp = [System.IO.Path]::GetTempFileName()
   try {
-    # Capture keytool's own message (stdout+stderr) so failures aren't opaque.
+    # keytool writes its "Certificate stored in file…" status to stderr. With
+    # $ErrorActionPreference='Stop' that stderr write is otherwise treated as a
+    # terminating NativeCommandError, so relax it just for this call and judge
+    # success by the exit code + the output file instead.
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     $out = & keytool -exportcert -alias $Alias -keystore $Keystore -storepass $StorePass -file $tmp 2>&1
-    if (-not (Test-Path $tmp) -or (Get-Item $tmp).Length -eq 0) {
+    $exit = $LASTEXITCODE
+    $ErrorActionPreference = $prevEAP
+    if ($exit -ne 0 -or -not (Test-Path $tmp) -or (Get-Item $tmp).Length -eq 0) {
       throw "keytool could not export alias '$Alias' from '$Keystore'. Check the alias name, the store password, and that the file is a valid keystore.`nkeytool said:`n$out"
     }
     return [System.IO.File]::ReadAllBytes($tmp)
