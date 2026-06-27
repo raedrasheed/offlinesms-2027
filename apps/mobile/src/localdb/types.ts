@@ -207,4 +207,8 @@ export type SyncStateKey =
   // Per-conversation message high-water mark (max remote createdAt pulled).
   | `msg_cursor:${string}`
   // Per-conversation "cleared chat" watermark (hide messages at/older than ms).
-  | `chat_cleared:${string}`;
+  | `chat_cleared:${string}`
+  // Full-history backfill: low-water frontier (oldest createdAt fetched so far)
+  // and a "complete" flag, so backfill is resumable across sync runs.
+  | `backfill_before:${string}`
+  | `backfill_done:${string}`;

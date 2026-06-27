@@ -61,6 +61,16 @@ export async function getMaxMessageTime(conversationId: string): Promise<number>
   return row?.t ?? 0;
 }
 
+/** Oldest synced message time (min remote createdAt) for a conversation; 0 when
+ *  none. Used as the starting frontier for the full-history backfill. */
+export async function getMinMessageTime(conversationId: string): Promise<number> {
+  const row = await getDb().first<{ t: number | null }>(
+    `SELECT MIN(remote_created_at) AS t FROM messages WHERE conversation_id = ?`,
+    [conversationId],
+  );
+  return row?.t ?? 0;
+}
+
 /** Phase 23 — delete all local messages for a conversation ("clear chat"). */
 export async function deleteConversationMessages(conversationId: string): Promise<number> {
   const before = await getDb().first<{ n: number }>(
