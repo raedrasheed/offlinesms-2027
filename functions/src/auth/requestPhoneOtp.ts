@@ -19,10 +19,28 @@ import { appCheckOptions } from '../lib/appCheck';
 
 const REGION = 'us-central1';
 
-async function otpBusinessId(db: FirebaseFirestore.Firestore): Promise<string | null> {
+async function otpConfig(
+  db: FirebaseFirestore.Firestore,
+): Promise<{ businessId: string | null; androidAppHash: string | null }> {
   const snap = await db.collection('smsConfig').doc('otp').get();
-  const id = snap.exists ? (snap.data()?.businessId as string | undefined) : undefined;
-  return id ?? null;
+  const d = snap.exists ? (snap.data() ?? {}) : {};
+  const businessId = (d.businessId as string | undefined) ?? null;
+  // Optional 11-char app-signature hash for the Android SMS Retriever API. When
+  // set, it's appended to the OTP SMS so the app can auto-read the code (zero
+  // tap). Left unset → the message is sent unchanged. Keep in sync with the hash
+  // produced by the installed app build (react-native-otp-verify getHash()).
+  const androidAppHash = (d.androidAppHash as string | undefined)?.trim() || null;
+  return { businessId, androidAppHash };
+}
+
+/**
+ * Build the OTP SMS body. With an Android app hash configured we emit the SMS
+ * Retriever format — leading `<#>` marker and the hash on the final line — so
+ * the app auto-reads the code; otherwise a plain human-readable message.
+ */
+function buildOtpMessage(code: string, androidAppHash: string | null): string {
+  const base = `Your OfflineSMS verification code is ${code}. It expires in 5 minutes.`;
+  return androidAppHash ? `<#> ${base}\n${androidAppHash}` : base;
 }
 
 export const requestPhoneOtp = onCall({ region: REGION, ...appCheckOptions() }, async (request) => {
@@ -48,7 +66,7 @@ export const requestPhoneOtp = onCall({ region: REGION, ...appCheckOptions() }, 
   }
 
   const db = getFirestore();
-  const businessId = await otpBusinessId(db);
+  const { businessId, androidAppHash } = await otpConfig(db);
   if (!businessId) throw new HttpsError('failed-precondition', 'otp-not-configured');
 
   // Country-based relay routing: the OTP is sent via relay, so it must respect
@@ -94,7 +112,7 @@ export const requestPhoneOtp = onCall({ region: REGION, ...appCheckOptions() }, 
     jobId, businessId, kind: 'otp',
     batchId: null, recipientUid: null,
     phoneE164: phone, recipientCountryCode: countryCode,
-    messageBody: `Your OfflineSMS verification code is ${code}. It expires in 5 minutes.`,
+    messageBody: buildOtpMessage(code, androidAppHash),
     assignedDeviceId: null, assignedSimSubscriptionId: null,
     status: 'queued', attempts: 0, maxAttempts: 1,   // never resend an OTP
     leaseOwnerDeviceId: null, leaseExpiresAt: null, nextAttemptAt: null,
