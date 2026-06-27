@@ -89,6 +89,31 @@ function buildPreview(text: string): string {
   return t.length > 80 ? t.slice(0, 79) + '…' : t;
 }
 
+// Milliseconds for a message timestamp (Firestore Timestamp-like or raw number).
+function msOf(value: any): number {
+  if (!value) return 0;
+  if (typeof value.toMillis === 'function') return value.toMillis();
+  if (typeof value === 'number') return value;
+  return 0;
+}
+
+function isSameDay(a: Date, b: Date): boolean {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
+// Label for a day-separator pill: Today / Yesterday / a localized date.
+function daySeparatorLabel(ms: number, t: (k: string, d?: string) => string): string {
+  if (!ms) return '';
+  const d = new Date(ms);
+  const now = new Date();
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (isSameDay(d, now)) return t('chat.dateToday', 'Today');
+  if (isSameDay(d, yesterday)) return t('chat.dateYesterday', 'Yesterday');
+  const sameYear = d.getFullYear() === now.getFullYear();
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'long', ...(sameYear ? {} : { year: 'numeric' }) });
+}
+
 export default function Conversation({ route, navigation }: any) {
   const { t } = useTranslation();
   const { colors } = useTheme();
@@ -788,7 +813,6 @@ export default function Conversation({ route, navigation }: any) {
         // "encrypted" banner sits above the oldest message as intended.
         ListFooterComponent={
           <View style={s.listHeader}>
-            <View style={s.datePill}><Text style={s.datePillText}>Today</Text></View>
             <View style={s.e2eBanner}>
               <Ionicons name="lock-closed" size={12} color="#92400E" />
               <Text style={s.e2eBannerText}>Messages and calls are end-to-end encrypted</Text>
@@ -833,7 +857,14 @@ export default function Conversation({ route, navigation }: any) {
           // (older) message — the one rendered just above — is at index + 1.
           const previous = index < invData.length - 1 ? invData[index + 1] : null;
           const showSender = isGroup && !mine && (!previous || previous.__pending || previous.senderUid !== item.senderUid);
-          return (
+          // Day separator: shown above the first message of each day (i.e. when
+          // the older message above belongs to a different calendar day, or this
+          // is the very oldest message). Rendered above the bubble in the cell so
+          // — even inverted — it appears at the top of that day's group.
+          const ts = msOf(item.createdAt);
+          const prevTs = previous ? msOf(previous.createdAt) : 0;
+          const showDate = ts > 0 && (!prevTs || !isSameDay(new Date(ts), new Date(prevTs)));
+          const bubble = (
             <MessageBubble
               message={item}
               showSender={showSender}
@@ -861,10 +892,19 @@ export default function Conversation({ route, navigation }: any) {
               onAvatarPress={onAvatarPress}
             />
           );
+          if (!showDate) return bubble;
+          return (
+            <>
+              <View style={s.dateSep}>
+                <View style={s.datePill}><Text style={s.datePillText}>{daySeparatorLabel(ts, t as any)}</Text></View>
+              </View>
+              {bubble}
+            </>
+          );
         }}
       />
     );
-  }, [invData, visibleMsgs, queuedItems, me, isGroup, id, myRoleIsAdmin, starred, convo?.pinnedMessage, convo?.memberCount, reactorNames, useLocal, startReply, startEdit, startForward, jumpTo, openInfo, openImage, retryMedia, onPlayedVoice, onSendViaSms, onAvatarPress, onListScroll, onReachOlder]);
+  }, [invData, visibleMsgs, queuedItems, me, isGroup, id, myRoleIsAdmin, starred, convo?.pinnedMessage, convo?.memberCount, reactorNames, useLocal, startReply, startEdit, startForward, jumpTo, openInfo, openImage, retryMedia, onPlayedVoice, onSendViaSms, onAvatarPress, onListScroll, onReachOlder, t]);
 
   return (
     <KeyboardAvoidingView behavior="padding" style={s.root}>
@@ -1178,6 +1218,7 @@ function buildStyles(colors: any, rtl: boolean) {
     title:    { fontSize: 16, fontWeight: '800', color: colors.text.primary, textAlign: rtl ? 'right' : 'left' },
     subtitle: { fontSize: 12, color: colors.action.primary, marginTop: 1, textAlign: rtl ? 'right' : 'left' },
     listHeader: { alignItems: 'center', gap: 10, paddingTop: 6, paddingBottom: 8 },
+    dateSep:    { alignItems: 'center', marginVertical: 6 },
     datePill:   { backgroundColor: colors.background.surface, paddingHorizontal: 14, paddingVertical: 5, borderRadius: 999, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 3, shadowOffset: { width: 0, height: 1 }, elevation: 1 },
     datePillText: { fontSize: 12, fontWeight: '700', color: colors.text.muted },
     e2eBanner:  { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FBEFD0', paddingHorizontal: 14, paddingVertical: 9, borderRadius: 14, maxWidth: '88%' },
