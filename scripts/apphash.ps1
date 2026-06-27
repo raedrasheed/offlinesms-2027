@@ -33,11 +33,15 @@ function Get-CertBytes {
     throw "Provide either -CertFile, or all of -Keystore -Alias -StorePass."
   }
   if (-not (Test-Path $Keystore)) { throw "Keystore not found: $Keystore" }
+  if (-not (Get-Command keytool -ErrorAction SilentlyContinue)) {
+    throw "keytool not found on PATH. It ships with the JDK / Android Studio (e.g. 'C:\Program Files\Android\Android Studio\jbr\bin'). Add that to PATH, or list aliases first with:`n  keytool -list -v -keystore '$Keystore' -storepass '<password>'"
+  }
   $tmp = [System.IO.Path]::GetTempFileName()
   try {
-    & keytool -exportcert -alias $Alias -keystore $Keystore -storepass $StorePass -file $tmp 2>$null | Out-Null
+    # Capture keytool's own message (stdout+stderr) so failures aren't opaque.
+    $out = & keytool -exportcert -alias $Alias -keystore $Keystore -storepass $StorePass -file $tmp 2>&1
     if (-not (Test-Path $tmp) -or (Get-Item $tmp).Length -eq 0) {
-      throw "keytool failed to export the certificate (check alias / keystore / password / that keytool is on PATH)."
+      throw "keytool could not export alias '$Alias' from '$Keystore'. Check the alias name, the store password, and that the file is a valid keystore.`nkeytool said:`n$out"
     }
     return [System.IO.File]::ReadAllBytes($tmp)
   } finally {
