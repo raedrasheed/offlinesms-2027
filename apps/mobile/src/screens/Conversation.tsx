@@ -115,7 +115,8 @@ export default function Conversation({ route, navigation }: any) {
   useEffect(() => navigation.addListener('focus', () => {
     refreshRef.current?.();
     // Land on the latest message whenever the chat is opened/re-focused.
-    requestAnimationFrame(() => listRef.current?.scrollToEnd?.({ animated: false }));
+    // The list is inverted, so the latest message is at offset 0 (the bottom).
+    requestAnimationFrame(() => listRef.current?.scrollToOffset?.({ offset: 0, animated: false }));
   }), [navigation]);
 
   const [msgs, setMsgs] = useState<Message[] | null>(null);
@@ -136,17 +137,12 @@ export default function Conversation({ route, navigation }: any) {
   const [editing, setEditing] = useState<{ messageId: string; originalText: string } | null>(null);
 
   const listRef = useRef<FlatList<Message>>(null);
-  // Pagination/scroll bookkeeping for "load older on scroll-up":
-  //  - nearBottomRef: only auto-scroll to the end for NEW messages, never when
-  //    older history is prepended (which would yank the view back down).
-  //  - loadingOlderRef: cheap cooldown so a burst of scroll events triggers at
-  //    most one loadOlder() at a time.
+  // Scroll bookkeeping for the inverted list. "bottom" (latest) is offset 0;
+  // nearBottomRef tracks whether we're there so we only auto-jump for genuinely
+  // NEW newest messages — never when older history loads at the top.
   const nearBottomRef = useRef(true);
-  const loadingOlderRef = useRef(false);
-  // Auto-scroll bookkeeping: only jump to the bottom for the initial load and
-  // for genuinely NEW newest messages — never when older history is prepended.
-  const didInitialScrollRef = useRef(false);
   const lastBottomIdRef = useRef<string | null>(null);
+  const dataLenRef = useRef(0); // total rendered rows (messages + queued), for jumpTo index math
   const [showScrollDown, setShowScrollDown] = useState(false);
 
   // Conversation doc. Firestore hands us a fresh object on every snapshot —
@@ -350,7 +346,11 @@ export default function Conversation({ route, navigation }: any) {
   const jumpTo = useCallback((messageId: string) => {
     if (!visibleMsgs) return;
     const idx = visibleMsgs.findIndex(m => m.id === messageId);
-    if (idx >= 0) listRef.current?.scrollToIndex?.({ index: idx, animated: true, viewPosition: 0.3 });
+    if (idx < 0) return;
+    // The list is inverted: index 0 is the newest. Map the chronological index
+    // to the inverted one across the full data length (messages + queued).
+    const total = dataLenRef.current || visibleMsgs.length;
+    listRef.current?.scrollToIndex?.({ index: total - 1 - idx, animated: true, viewPosition: 0.5 });
   }, [visibleMsgs]);
 
   const startReply = useCallback((m: Message) => {
@@ -708,23 +708,26 @@ export default function Conversation({ route, navigation }: any) {
   // inverted (oldest at top, newest at bottom), so "older" lives at the top.
   // local.loadOlder grows the local window and, when local history is
   // exhausted, back-fills from Firestore — so evicted/older messages return.
+  // Inverted list: newest is at the top of the data array (index 0) and the
+  // bottom of the screen (scroll offset 0).
+  const invData = useMemo(() => data.slice().reverse(), [data]);
+  useEffect(() => { dataLenRef.current = data.length; }, [data]);
+
   const onListScroll = useCallback((e: any) => {
-    const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-    const nearBottom = contentOffset.y >= contentSize.height - layoutMeasurement.height - 120;
+    // Inverted: the bottom (latest) is offset 0; away from it → show the button.
+    const nearBottom = e.nativeEvent.contentOffset.y <= 80;
     nearBottomRef.current = nearBottom;
-    // Show the "scroll to latest" button whenever we're away from the bottom.
     setShowScrollDown(prev => (prev === !nearBottom ? prev : !nearBottom));
-    if (useLocal && contentOffset.y <= 80 && !loadingOlderRef.current) {
-      loadingOlderRef.current = true;
-      Promise.resolve(local.loadOlder()).finally(() => {
-        // brief cooldown so momentum scrolling doesn't fire repeatedly
-        setTimeout(() => { loadingOlderRef.current = false; }, 400);
-      });
-    }
+  }, []);
+
+  // Pagination: onEndReached fires near the visual TOP in an inverted list.
+  const onReachOlder = useCallback(() => {
+    if (useLocal) void local.loadOlder();
   }, [useLocal, local]);
 
   const scrollToBottom = useCallback(() => {
-    listRef.current?.scrollToEnd?.({ animated: true });
+    // One reliable jump — offset 0 is the latest message in an inverted list.
+    listRef.current?.scrollToOffset?.({ offset: 0, animated: true });
     nearBottomRef.current = true;
     setShowScrollDown(false);
   }, []);
@@ -734,15 +737,15 @@ export default function Conversation({ route, navigation }: any) {
   // messages, leave my position alone and surface the scroll-to-latest button.
   useEffect(() => {
     if (!data.length) return;
-    const last = data[data.length - 1];
+    const last = data[data.length - 1]; // chronological newest
     const lastId: string | null = last?.id ?? null;
-    if (lastBottomIdRef.current === lastId) return; // older prepended → not a new bottom msg
+    if (lastBottomIdRef.current === lastId) return; // older loaded → not a new bottom msg
     const prev = lastBottomIdRef.current;
     lastBottomIdRef.current = lastId;
-    if (prev == null) return; // first population — initial scroll handled on layout
+    if (prev == null) return; // first population — inverted list already sits at the bottom
     const mine = last?.senderUid === me || (last as any)?.senderId === me;
     if (mine || nearBottomRef.current) {
-      requestAnimationFrame(() => listRef.current?.scrollToEnd?.({ animated: true }));
+      requestAnimationFrame(() => listRef.current?.scrollToOffset?.({ offset: 0, animated: true }));
     } else {
       setShowScrollDown(true);
     }
@@ -774,10 +777,16 @@ export default function Conversation({ route, navigation }: any) {
       <FlatList
         ref={listRef}
         style={s.msgList}
-        data={data}
+        // Inverted: index 0 (newest) renders at the bottom and the list opens
+        // there automatically — so "scroll to latest" is just offset 0, and
+        // loading older history (appended to the data tail) never moves the view.
+        inverted
+        data={invData}
         keyExtractor={(m: any) => m.id}
         contentContainerStyle={{ padding: 12, gap: 4 }}
-        ListHeaderComponent={
+        // In an inverted list the footer renders at the visual TOP, so the
+        // "encrypted" banner sits above the oldest message as intended.
+        ListFooterComponent={
           <View style={s.listHeader}>
             <View style={s.datePill}><Text style={s.datePillText}>Today</Text></View>
             <View style={s.e2eBanner}>
@@ -786,29 +795,23 @@ export default function Conversation({ route, navigation }: any) {
             </View>
           </View>
         }
-        // Snap to the end ONLY on the very first layout. After that, scrolling
-        // is intent-based (see the new-message effect): older history loading
-        // must never yank the view to the bottom.
-        onContentSizeChange={() => {
-          if (!didInitialScrollRef.current && data.length > 0) {
-            listRef.current?.scrollToEnd?.({ animated: false });
-            didInitialScrollRef.current = true;
-          }
-        }}
         onScroll={onListScroll}
         scrollEventThrottle={64}
-        // Keep the viewport anchored when older messages are prepended so the
-        // list doesn't jump while paging back through history.
-        maintainVisibleContentPosition={{ minIndexForVisible: 1 }}
-        // FlatList tuning: only render what's near the viewport on first
-        // paint, batch new rows in small windows, and let RN unmount rows
-        // that scroll out of the viewport on Android. Big wins for long
-        // chat histories.
+        // Page in older history when the user nears the top of the inverted list.
+        onEndReached={onReachOlder}
+        onEndReachedThreshold={0.4}
+        onScrollToIndexFailed={(info) => {
+          // Reply-jump target not measured yet: approximate, then retry.
+          listRef.current?.scrollToOffset?.({ offset: info.averageItemLength * info.index, animated: false });
+          setTimeout(() => listRef.current?.scrollToIndex?.({ index: info.index, animated: true, viewPosition: 0.5 }), 120);
+        }}
+        // FlatList tuning. removeClippedSubviews is left OFF: combined with an
+        // inverted list on Android it can blank out rows.
         initialNumToRender={15}
         maxToRenderPerBatch={10}
         windowSize={10}
         updateCellsBatchingPeriod={50}
-        removeClippedSubviews={Platform.OS === 'android'}
+        removeClippedSubviews={false}
         renderItem={({ item, index }) => {
           if (item.__pending) {
             return (
@@ -826,7 +829,9 @@ export default function Conversation({ route, navigation }: any) {
             );
           }
           const mine = item.senderUid === me || (item as any).senderId === me;
-          const previous = index > 0 ? data[index - 1] : null;
+          // Inverted data is newest-first, so the chronologically-previous
+          // (older) message — the one rendered just above — is at index + 1.
+          const previous = index < invData.length - 1 ? invData[index + 1] : null;
           const showSender = isGroup && !mine && (!previous || previous.__pending || previous.senderUid !== item.senderUid);
           return (
             <MessageBubble
@@ -859,7 +864,7 @@ export default function Conversation({ route, navigation }: any) {
         }}
       />
     );
-  }, [data, visibleMsgs, queuedItems, me, isGroup, id, myRoleIsAdmin, starred, convo?.pinnedMessage, convo?.memberCount, reactorNames, useLocal, startReply, startEdit, startForward, jumpTo, openInfo, openImage, retryMedia, onPlayedVoice, onSendViaSms, onAvatarPress, onListScroll]);
+  }, [invData, visibleMsgs, queuedItems, me, isGroup, id, myRoleIsAdmin, starred, convo?.pinnedMessage, convo?.memberCount, reactorNames, useLocal, startReply, startEdit, startForward, jumpTo, openInfo, openImage, retryMedia, onPlayedVoice, onSendViaSms, onAvatarPress, onListScroll, onReachOlder]);
 
   return (
     <KeyboardAvoidingView behavior="padding" style={s.root}>
