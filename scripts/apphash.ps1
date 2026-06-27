@@ -58,11 +58,14 @@ function Get-CertBytes {
 
 $certBytes = Get-CertBytes
 
-# input = UTF8("<package> ") + certBytes
-$prefix = [System.Text.Encoding]::UTF8.GetBytes("$Package ")
-$buf = New-Object byte[] ($prefix.Length + $certBytes.Length)
-[Array]::Copy($prefix, 0, $buf, 0, $prefix.Length)
-[Array]::Copy($certBytes, 0, $buf, $prefix.Length, $certBytes.Length)
+# Android's SmsRetriever computes the hash from the cert's *hex string* form,
+# NOT its raw bytes: AppSignatureHelper does
+#   appInfo = "<package> " + Signature.toCharsString()
+# where toCharsString() is the lowercase, unseparated hex of the DER cert bytes.
+# Hash that UTF-8 string, take the first 9 bytes, base64 (no padding), 11 chars.
+$hex = -join ($certBytes | ForEach-Object { $_.ToString('x2') })
+$appInfo = "$Package $hex"
+$buf = [System.Text.Encoding]::UTF8.GetBytes($appInfo)
 
 $hash = [System.Security.Cryptography.SHA256]::Create().ComputeHash($buf)
 $appHash = [Convert]::ToBase64String([byte[]]($hash[0..8])).Substring(0, 11)
