@@ -17,7 +17,10 @@ import type { Message } from '../lib/conversations';
 
 export type ConversationSource = 'disabled' | 'local' | 'firestoreFallback';
 
-const PAGE = 40;
+// Initial messages shown when a chat opens, and the chunk size loaded each time
+// the user scrolls up (see loadOlder). 100 keeps plenty of recent history on
+// screen before any paging is needed; matches the Firestore-fallback window.
+const PAGE = 100;
 
 export interface LocalConversation {
   messages: Message[];
