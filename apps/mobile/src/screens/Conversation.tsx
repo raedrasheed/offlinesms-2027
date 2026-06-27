@@ -136,6 +136,13 @@ export default function Conversation({ route, navigation }: any) {
   const [editing, setEditing] = useState<{ messageId: string; originalText: string } | null>(null);
 
   const listRef = useRef<FlatList<Message>>(null);
+  // Pagination/scroll bookkeeping for "load older on scroll-up":
+  //  - nearBottomRef: only auto-scroll to the end for NEW messages, never when
+  //    older history is prepended (which would yank the view back down).
+  //  - loadingOlderRef: cheap cooldown so a burst of scroll events triggers at
+  //    most one loadOlder() at a time.
+  const nearBottomRef = useRef(true);
+  const loadingOlderRef = useRef(false);
 
   // Conversation doc. Firestore hands us a fresh object on every snapshot —
   // even when nothing actually changed for this screen (e.g. lastMessage
@@ -692,6 +699,23 @@ export default function Conversation({ route, navigation }: any) {
     return [...visibleMsgs, ...queuedItems];
   }, [visibleMsgs, queuedItems]);
 
+  // Load older history when the user scrolls near the top. The list is NOT
+  // inverted (oldest at top, newest at bottom), so "older" lives at the top.
+  // local.loadOlder grows the local window and, when local history is
+  // exhausted, back-fills from Firestore — so evicted/older messages return.
+  const onListScroll = useCallback((e: any) => {
+    const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+    nearBottomRef.current =
+      contentOffset.y >= contentSize.height - layoutMeasurement.height - 120;
+    if (useLocal && contentOffset.y <= 80 && !loadingOlderRef.current) {
+      loadingOlderRef.current = true;
+      Promise.resolve(local.loadOlder()).finally(() => {
+        // brief cooldown so momentum scrolling doesn't fire repeatedly
+        setTimeout(() => { loadingOlderRef.current = false; }, 400);
+      });
+    }
+  }, [useLocal, local]);
+
   const body = useMemo(() => {
     if (visibleMsgs === null) return <LoadingState fullPage title="Loading messages…" />;
 
@@ -730,7 +754,14 @@ export default function Conversation({ route, navigation }: any) {
             </View>
           </View>
         }
-        onContentSizeChange={() => listRef.current?.scrollToEnd?.({ animated: false })}
+        // Only snap to the end for new/initial content (when already near the
+        // bottom). When older history is prepended at the top, stay put.
+        onContentSizeChange={() => { if (nearBottomRef.current) listRef.current?.scrollToEnd?.({ animated: false }); }}
+        onScroll={onListScroll}
+        scrollEventThrottle={64}
+        // Keep the viewport anchored when older messages are prepended so the
+        // list doesn't jump while paging back through history.
+        maintainVisibleContentPosition={{ minIndexForVisible: 1 }}
         // FlatList tuning: only render what's near the viewport on first
         // paint, batch new rows in small windows, and let RN unmount rows
         // that scroll out of the viewport on Android. Big wins for long
@@ -790,7 +821,7 @@ export default function Conversation({ route, navigation }: any) {
         }}
       />
     );
-  }, [data, visibleMsgs, queuedItems, me, isGroup, id, myRoleIsAdmin, starred, convo?.pinnedMessage, convo?.memberCount, reactorNames, useLocal, startReply, startEdit, startForward, jumpTo, openInfo, openImage, retryMedia, onPlayedVoice, onSendViaSms, onAvatarPress]);
+  }, [data, visibleMsgs, queuedItems, me, isGroup, id, myRoleIsAdmin, starred, convo?.pinnedMessage, convo?.memberCount, reactorNames, useLocal, startReply, startEdit, startForward, jumpTo, openInfo, openImage, retryMedia, onPlayedVoice, onSendViaSms, onAvatarPress, onListScroll]);
 
   return (
     <KeyboardAvoidingView behavior="padding" style={s.root}>
