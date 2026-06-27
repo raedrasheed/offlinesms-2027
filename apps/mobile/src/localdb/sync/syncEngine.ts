@@ -11,7 +11,8 @@ import { isOnline } from './networkState';
 import { isPermanent, errorCode, nextAttemptAt } from './retryPolicy';
 import { LOCAL_MESSAGE_RETENTION_LIMIT } from '../../config/features';
 
-let running = false;
+let running = false;   // guards the heavy pull + history backfill
+let pushing = false;   // guards the outbox push (independent → sends never wait on a pull)
 
 // Realtime feeders own steady-state reads, so the engine only pulls on these
 // lifecycle transitions (cold start, reconnect, return to foreground) to close
@@ -38,7 +39,7 @@ async function maybePrune(): Promise<void> {
 // per-conversation cursors (frontier + done flag) and bounded per run so a
 // single sync never runs away on a huge/old account.
 const BACKFILL_PAGE = 100;                 // messages fetched per page
-const MAX_BACKFILL_PAGES_PER_RUN = 25;     // ≈ 2,500 messages per sync run
+const MAX_BACKFILL_PAGES_PER_RUN = 8;      // ≈ 800 messages per run; resumes next sync
 const BACKFILL_REASONS: ReadonlySet<SyncReason> = new Set(['boot', 'online', 'foreground']);
 
 /** Backfill one conversation's older history, consuming from the shared page
@@ -153,20 +154,33 @@ export async function pullRemoteChanges(activeConversationId?: string): Promise<
   }
 }
 
+// Push the outbox under its OWN single-flight guard, independent of the heavy
+// pull/backfill `running` lock. This is what makes a freshly-sent message go out
+// immediately even while a long history backfill is in progress — otherwise the
+// send would sit in the outbox (stuck "pending", with no Message-info menu)
+// until the backfill released the lock.
+export async function flushOutbox(): Promise<void> {
+  if (pushing) return;
+  pushing = true;
+  try { await pushOutbox(); }
+  catch { /* per-item failures are recorded in the outbox */ }
+  finally { pushing = false; }
+}
+
 export async function syncNow(reason: SyncReason, activeConversationId?: string): Promise<void> {
+  // Always flush the outbox first, regardless of any in-flight pull/backfill.
+  await flushOutbox();
+  if (!PULL_REASONS.has(reason)) return;
   if (running) return;
   running = true;
   try {
-    await pushOutbox();
-    if (PULL_REASONS.has(reason)) {
-      await pullRemoteChanges(activeConversationId);
-      // Pull any older history still missing from the device (resumable, bounded
-      // per run) so going online eventually mirrors the full history locally.
-      if (BACKFILL_REASONS.has(reason)) await backfillMissingMessages(activeConversationId);
-      // Keep the retention sweep off the conversation-open path; run it only on
-      // app start / foreground so it never stalls opening a chat.
-      if (reason === 'boot' || reason === 'foreground') await maybePrune();
-    }
+    await pullRemoteChanges(activeConversationId);
+    // Pull any older history still missing from the device (resumable, bounded
+    // per run) so going online eventually mirrors the full history locally.
+    if (BACKFILL_REASONS.has(reason)) await backfillMissingMessages(activeConversationId);
+    // Keep the retention sweep off the conversation-open path; run it only on
+    // app start / foreground so it never stalls opening a chat.
+    if (reason === 'boot' || reason === 'foreground') await maybePrune();
   } catch {
     // Never throw out of a sync run; individual failures are recorded per-item.
   } finally {
