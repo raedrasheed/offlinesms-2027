@@ -17,6 +17,27 @@ import { useEffect } from 'react';
 import { Platform } from 'react-native';
 
 /**
+ * Return this Android build's SMS Retriever signature hash(es). Set the value
+ * in Firestore at smsConfig/otp.androidAppHash so requestPhoneOtp appends it to
+ * the OTP SMS (which is what makes zero-tap auto-read fire). The hash differs
+ * per signing key (debug vs release) — read it from the build you ship.
+ *
+ * Returns null on iOS or when the native module isn't linked yet (Expo Go).
+ */
+export async function getAndroidAppHash(): Promise<string[] | null> {
+  if (Platform.OS !== 'android') return null;
+  try {
+    const mod = require('react-native-otp-verify');
+    const RNOtpVerify = mod?.default ?? mod;
+    if (!RNOtpVerify?.getHash) return null;
+    const hashes = await RNOtpVerify.getHash();
+    return Array.isArray(hashes) ? hashes : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Subscribe to the Android SMS Retriever and call `onCode` with the extracted
  * verification code. `onCode` should be stable (wrap in useCallback) so the
  * listener isn't torn down/re-created on every render.

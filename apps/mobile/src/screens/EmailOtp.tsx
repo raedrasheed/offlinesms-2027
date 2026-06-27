@@ -1,9 +1,8 @@
-import { useEffect, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, ActivityIndicator } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { View, Text, Pressable, StyleSheet, ActivityIndicator, TextInput } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius } from '../theme';
-import NumberPad from '../components/NumberPad';
 import { verifyEmailOtpAndSignIn, resendEmailOtp, emailOtpErrorCopy } from '../lib/auth';
 import { useOffline } from '../context/OfflineContext';
 
@@ -18,12 +17,19 @@ export default function EmailOtp({ navigation, route }: any) {
   const [remaining, setRemaining] = useState(RESEND_SECONDS);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const inputRef = useRef<TextInput>(null);
 
   useEffect(() => {
     if (remaining <= 0) return;
     const t = setInterval(() => setRemaining(r => r - 1), 1000);
     return () => clearInterval(t);
   }, [remaining]);
+
+  const acceptCode = useCallback((raw: string) => {
+    const digits = raw.replace(/\D/g, '').slice(0, LENGTH);
+    setErr(null);
+    setCode(digits);
+  }, []);
 
   // Auto-verify once all digits are entered.
   useEffect(() => {
@@ -32,23 +38,19 @@ export default function EmailOtp({ navigation, route }: any) {
     setBusy(true); setErr(null);
     verifyEmailOtpAndSignIn(email, code)
       // On success the app's auth listener routes onward — nothing to do here.
-      .catch((e: any) => { setErr(emailOtpErrorCopy(e?.message ?? e?.code)); setCode(''); })
+      .catch((e: any) => {
+        setErr(emailOtpErrorCopy(e?.message ?? e?.code));
+        setCode('');
+        requestAnimationFrame(() => inputRef.current?.focus());
+      })
       .finally(() => setBusy(false));
   }, [code, busy, email, isOffline]);
 
-  function pressDigit(d: string) {
-    if (busy || code.length >= LENGTH) return;
-    setErr(null);
-    setCode(c => c + d);
-  }
-  function pressDelete() {
-    setCode(c => c.slice(0, -1));
-  }
   async function resend() {
     if (remaining > 0 || busy) return;
     if (isOffline) { setErr('You’re offline — connect and try again.'); return; }
     setErr(null); setCode('');
-    try { await resendEmailOtp(email); setRemaining(RESEND_SECONDS); }
+    try { await resendEmailOtp(email); setRemaining(RESEND_SECONDS); inputRef.current?.focus(); }
     catch (e: any) { setErr(emailOtpErrorCopy(e?.message ?? e?.code)); }
   }
 
@@ -64,7 +66,10 @@ export default function EmailOtp({ navigation, route }: any) {
       <Text style={s.h1}>Verify your email</Text>
       <Text style={s.sub}>Code sent to <Text style={{ fontWeight: '700', color: colors.ink }}>{email}</Text></Text>
 
-      <View style={s.boxes}>
+      {/* Visual boxes backed by one invisible TextInput on the system keyboard,
+          so iOS can offer the emailed code (textContentType=oneTimeCode) and the
+          keyboard's clipboard suggestion can fill it in one tap. */}
+      <Pressable style={s.boxes} onPress={() => inputRef.current?.focus()}>
         {Array.from({ length: LENGTH }).map((_, i) => {
           const ch = code[i];
           const active = i === code.length;
@@ -74,7 +79,21 @@ export default function EmailOtp({ navigation, route }: any) {
             </View>
           );
         })}
-      </View>
+        <TextInput
+          ref={inputRef}
+          style={s.hiddenInput}
+          value={code}
+          onChangeText={acceptCode}
+          keyboardType="number-pad"
+          textContentType="oneTimeCode"
+          autoComplete="one-time-code"
+          importantForAutofill="yes"
+          maxLength={LENGTH}
+          autoFocus
+          caretHidden
+          editable={!busy}
+        />
+      </Pressable>
 
       {busy ? <ActivityIndicator style={{ marginTop: 16 }} color={colors.primary} /> : null}
       {err ? <Text style={s.err}>{err}</Text> : null}
@@ -89,8 +108,6 @@ export default function EmailOtp({ navigation, route }: any) {
       </View>
 
       <View style={{ flex: 1 }} />
-
-      <NumberPad onDigit={pressDigit} onDelete={pressDelete} />
     </View>
   );
 }
@@ -101,11 +118,12 @@ const s = StyleSheet.create({
   h1:    { fontSize: 26, fontWeight: '800', color: colors.ink, letterSpacing: -0.4 },
   sub:   { fontSize: 13, color: colors.ink500, marginTop: 8 },
 
-  boxes: { flexDirection: 'row', gap: 10, marginTop: 28, justifyContent: 'space-between' },
+  boxes: { flexDirection: 'row', gap: 10, marginTop: 28, justifyContent: 'space-between', position: 'relative' },
   box:   { flex: 1, aspectRatio: 1, borderRadius: radius.md, borderWidth: 1, borderColor: colors.ink200, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff' },
   boxFilled: { borderColor: colors.ink300 },
   boxActive: { borderColor: colors.primary, borderWidth: 2 },
   boxText:   { fontSize: 24, fontWeight: '800', color: colors.ink },
+  hiddenInput: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, opacity: 0 },
   err:       { marginTop: 14, fontSize: 13, color: '#B91C1C', fontWeight: '600' },
 
   resendRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 18 },

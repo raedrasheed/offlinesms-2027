@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, ActivityIndicator, TextInput, Platform } from 'react-native';
+import { View, Text, Pressable, StyleSheet, ActivityIndicator, TextInput, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius } from '../theme';
 import { verifyPhoneOtpAndSignIn, requestPhoneOtp, otpErrorCopy } from '../lib/auth';
-import { useOtpAutoRead } from '../hooks/useOtpAutoRead';
+import { useOtpAutoRead, getAndroidAppHash } from '../hooks/useOtpAutoRead';
 
 const LENGTH = 6;
 const RESEND_SECONDS = 42;
@@ -55,6 +55,16 @@ export default function Otp({ navigation, route }: any) {
     setErr(null); setCode('');
     try { await requestPhoneOtp(phone); setRemaining(RESEND_SECONDS); inputRef.current?.focus(); }
     catch (e: any) { setErr(otpErrorCopy(e?.message ?? e?.code)); }
+  }
+
+  // Dev-only: surface this build's SMS Retriever hash so it can be copied into
+  // Firestore (smsConfig/otp.androidAppHash) to enable zero-tap Android.
+  async function showHash() {
+    const hashes = await getAndroidAppHash();
+    const text = hashes?.length ? hashes.join('\n') : 'unavailable (iOS, or native module not linked)';
+    // eslint-disable-next-line no-console
+    console.log('[OTP] SMS Retriever app hash:', text);
+    Alert.alert('SMS Retriever app hash', `${text}\n\nSet smsConfig/otp.androidAppHash to this value.`);
   }
 
   const mm = Math.floor(remaining / 60).toString().padStart(1, '0');
@@ -112,6 +122,12 @@ export default function Otp({ navigation, route }: any) {
       </View>
 
       <View style={{ flex: 1 }} />
+
+      {__DEV__ ? (
+        <Pressable onPress={showHash} style={s.devBtn}>
+          <Text style={s.devText}>Dev: show SMS Retriever hash</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -134,4 +150,6 @@ const s = StyleSheet.create({
   resendRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 18 },
   didnt:  { fontSize: 13, color: colors.ink500 },
   resend: { fontSize: 13, fontWeight: '700', color: colors.primary },
+  devBtn:  { alignSelf: 'center', paddingVertical: 8, paddingHorizontal: 12, marginBottom: 8, borderRadius: radius.md, backgroundColor: colors.ink100 },
+  devText: { fontSize: 12, fontWeight: '700', color: colors.ink500 },
 });
