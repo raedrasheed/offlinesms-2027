@@ -41,6 +41,10 @@ export function useLocalConversation(conversationId: string | undefined, uid: st
   const localCountRef = useRef(0);
   const oldestMsRef = useRef<number | null>(null);
   const clearedAtRef = useRef(0);
+  // Paging guards: avoid overlapping loadOlder() calls, and stop hitting the
+  // server once we've reached the true start of (this view of) the history.
+  const loadingOlderRef = useRef(false);
+  const reachedStartRef = useRef(false);
 
   const refresh = useCallback(async () => {
     if (!enabled || !conversationId || refreshing.current) return;
@@ -78,6 +82,9 @@ export function useLocalConversation(conversationId: string | undefined, uid: st
         setActiveConversation(conversationId);
         await importLegacyQueueOnce(uid);
         clearedAtRef.current = await getChatClearedAt(conversationId);
+        // Fresh window each time the chat (re)opens.
+        limitRef.current = PAGE;
+        reachedStartRef.current = false;
         if (cancelled) return;
         await refresh();
         stopFeeder = startConversationFeeder(conversationId, () => { void refresh(); });
@@ -93,22 +100,35 @@ export function useLocalConversation(conversationId: string | undefined, uid: st
 
   const loadOlder = useCallback(async () => {
     if (!enabled || !conversationId) return;
-    limitRef.current += PAGE;
-    await refresh();
-    // Local history exhausted (fewer rows than asked for): backfill older
-    // messages from Firestore — covers history evicted by retention or never
-    // reached by the forward pull — then re-read.
-    if (localCountRef.current < limitRef.current && oldestMsRef.current != null) {
-      try {
-        const fetched = await pullMessagesBefore(conversationId, oldestMsRef.current);
-        if (fetched > 0) await refresh();
-      } catch { /* best-effort: keep showing what we have */ }
+    // Skip if a page is already in flight or we've already reached the start.
+    if (loadingOlderRef.current || reachedStartRef.current) return;
+    loadingOlderRef.current = true;
+    try {
+      limitRef.current += PAGE;
+      await refresh();
+      // Window filled entirely from the local DB → more local history remains,
+      // no server round-trip needed this round.
+      if (localCountRef.current >= limitRef.current) return;
+      // Local history exhausted within the window. Back-fill older messages from
+      // Firestore (covers history evicted by retention or never reached by the
+      // forward pull), bounded below by any "clear chat" watermark so we never
+      // resurrect cleared messages. fetched === 0 ⇒ no older history → stop.
+      if (oldestMsRef.current == null) { reachedStartRef.current = true; return; }
+      const fetched = await pullMessagesBefore(conversationId, oldestMsRef.current, clearedAtRef.current);
+      if (fetched > 0) await refresh();
+      else reachedStartRef.current = true;
+    } catch {
+      /* best-effort: keep showing what we have; a later scroll can retry */
+    } finally {
+      loadingOlderRef.current = false;
     }
   }, [enabled, conversationId, refresh]);
 
   const clear = useCallback(async () => {
     if (!conversationId) return;
     clearedAtRef.current = await clearChat(conversationId);
+    limitRef.current = PAGE;
+    reachedStartRef.current = false;
     setMessages([]);
   }, [conversationId]);
 
