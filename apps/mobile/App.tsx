@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import * as Linking from 'expo-linking';
@@ -68,6 +68,7 @@ import * as Notifications from 'expo-notifications';
 import { installForegroundHandler, registerForPush, routeFromNotification } from './src/lib/notifications';
 import { initAppCheck } from './src/lib/appCheck';
 import { dispatchForRoute } from './src/lib/pushRouting';
+import { syncNow } from './src/localdb';
 import { Linking as RNLinking } from 'react-native';
 
 const navRef = createNavigationContainerRef();
@@ -79,13 +80,36 @@ installForegroundHandler();
 // no-op on native until a native attestation module is added. Never throws.
 initAppCheck();
 
-function routeFromPush(data: unknown) {
+// The conversation a notification points at (direct message or open_chat/group
+// broadcast), or undefined.
+function conversationIdFromData(data: unknown): string | undefined {
+  const r = routeFromNotification(data);
+  if (!r) return undefined;
+  if (r.conversationId) return r.conversationId;
+  if (r.actionType === 'open_chat' || r.actionType === 'open_group') return r.actionTarget;
+  return undefined;
+}
+
+// Pull the target chat's newest messages NOW (on push arrival / tap) so the
+// chat is already up to date by the time it opens. Targeted pull only — does
+// NOT change the "active conversation", so it never suppresses other banners.
+// Best-effort: a no-op until the local DB/scheduler are ready.
+function prefetchFromData(data: unknown) {
+  const cid = conversationIdFromData(data);
+  if (cid) void syncNow('active-change', cid);
+}
+
+// Try to navigate to a tapped notification's destination. Returns false when it
+// can't be applied yet (navigator not mounted, or the authed RootStack — which
+// holds Conversation/JoinRequests/Tabs — isn't up), so the caller can retry.
+function tryDispatchPush(data: unknown, authed: boolean): boolean {
   const decision = dispatchForRoute(routeFromNotification(data));
-  if (decision.kind === 'none') return;
-  if (decision.kind === 'url') { void RNLinking.openURL(decision.href); return; }
-  if (!navRef.isReady()) return;
-  if (decision.name === 'Tabs') { (navRef as any).navigate('Tabs'); return; }
+  if (decision.kind === 'none') return true;
+  if (decision.kind === 'url') { void RNLinking.openURL(decision.href); return true; }
+  if (!navRef.isReady() || !authed) return false;   // keep pending; retry later
+  if (decision.name === 'Tabs') { (navRef as any).navigate('Tabs'); return true; }
   (navRef as any).navigate(decision.name, decision.params);
+  return true;
 }
 
 const AuthStack = createNativeStackNavigator();
@@ -231,22 +255,56 @@ export default function App() {
     if (user && profileCompleted === true) void registerForPush(user.uid);
   }, [user, profileCompleted]);
 
-  // Route notification taps (cold start + warm). Cold-start tap is delivered via
-  // getLastNotificationResponseAsync; the listener can ALSO fire for that same
-  // response, so dedupe by notification identifier to avoid double navigation.
+  // A tapped-notification destination we couldn't navigate to yet (cold start:
+  // navigator not mounted / auth not resolved). Drained once both are ready.
+  const pendingPushRef = useRef<unknown>(null);
+  const drainPush = useCallback(() => {
+    if (pendingPushRef.current == null) return;
+    if (tryDispatchPush(pendingPushRef.current, authedRef.current)) pendingPushRef.current = null;
+  }, []);
+
+  // Route notification taps (cold start + warm) and pre-sync on arrival/tap.
+  // Cold-start tap is delivered via getLastNotificationResponseAsync; the
+  // listener can ALSO fire for that same response, so dedupe by notification
+  // identifier to avoid double navigation.
   useEffect(() => {
     const handled = new Set<string>();
-    const handle = (resp: Notifications.NotificationResponse | null) => {
+    const handleTap = (resp: Notifications.NotificationResponse | null) => {
       if (!resp) return;
       const id = resp.notification.request.identifier;
       if (id && handled.has(id)) return;
       if (id) handled.add(id);
-      routeFromPush(resp.notification.request.content.data);
+      const data = resp.notification.request.content.data;
+      // Kick a targeted pull immediately so the chat is loaded by the time it
+      // opens, then navigate (stashing + retrying if we're not ready yet).
+      prefetchFromData(data);
+      pendingPushRef.current = data;
+      drainPush();
     };
-    Notifications.getLastNotificationResponseAsync().then(handle);
-    const sub = Notifications.addNotificationResponseReceivedListener(handle);
-    return () => sub.remove();
-  }, []);
+    // Sync the related chat the moment a notification ARRIVES (foreground, and
+    // iOS content-available background), so its messages are already local.
+    const subRecv = Notifications.addNotificationReceivedListener(n => {
+      prefetchFromData(n.request.content.data);
+    });
+    Notifications.getLastNotificationResponseAsync().then(handleTap);
+    const subTap = Notifications.addNotificationResponseReceivedListener(handleTap);
+    return () => { subRecv.remove(); subTap.remove(); };
+  }, [drainPush]);
+
+  // Once authed + onboarded (and the navigator is mounted), drain any pending
+  // notification tap. Retries until the authed RootStack is ready so a cold-
+  // start tap reliably lands on the right chat.
+  useEffect(() => {
+    if (!(user && profileCompleted === true)) return;
+    let cancelled = false;
+    const tryDrain = () => {
+      if (cancelled || pendingPushRef.current == null) return;
+      if (tryDispatchPush(pendingPushRef.current, true)) { pendingPushRef.current = null; return; }
+      setTimeout(tryDrain, 150);
+    };
+    tryDrain();
+    return () => { cancelled = true; };
+  }, [user, profileCompleted]);
 
   // Replay a stashed invite once the user is authenticated + onboarded.
   useEffect(() => {
