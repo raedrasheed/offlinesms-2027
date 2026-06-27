@@ -143,6 +143,11 @@ export default function Conversation({ route, navigation }: any) {
   //    most one loadOlder() at a time.
   const nearBottomRef = useRef(true);
   const loadingOlderRef = useRef(false);
+  // Auto-scroll bookkeeping: only jump to the bottom for the initial load and
+  // for genuinely NEW newest messages — never when older history is prepended.
+  const didInitialScrollRef = useRef(false);
+  const lastBottomIdRef = useRef<string | null>(null);
+  const [showScrollDown, setShowScrollDown] = useState(false);
 
   // Conversation doc. Firestore hands us a fresh object on every snapshot —
   // even when nothing actually changed for this screen (e.g. lastMessage
@@ -705,8 +710,10 @@ export default function Conversation({ route, navigation }: any) {
   // exhausted, back-fills from Firestore — so evicted/older messages return.
   const onListScroll = useCallback((e: any) => {
     const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-    nearBottomRef.current =
-      contentOffset.y >= contentSize.height - layoutMeasurement.height - 120;
+    const nearBottom = contentOffset.y >= contentSize.height - layoutMeasurement.height - 120;
+    nearBottomRef.current = nearBottom;
+    // Show the "scroll to latest" button whenever we're away from the bottom.
+    setShowScrollDown(prev => (prev === !nearBottom ? prev : !nearBottom));
     if (useLocal && contentOffset.y <= 80 && !loadingOlderRef.current) {
       loadingOlderRef.current = true;
       Promise.resolve(local.loadOlder()).finally(() => {
@@ -715,6 +722,31 @@ export default function Conversation({ route, navigation }: any) {
       });
     }
   }, [useLocal, local]);
+
+  const scrollToBottom = useCallback(() => {
+    listRef.current?.scrollToEnd?.({ animated: true });
+    nearBottomRef.current = true;
+    setShowScrollDown(false);
+  }, []);
+
+  // Jump to the bottom only for genuinely new newest messages: ones I sent, or
+  // incoming ones while I'm already near the bottom. If I'm reading older
+  // messages, leave my position alone and surface the scroll-to-latest button.
+  useEffect(() => {
+    if (!data.length) return;
+    const last = data[data.length - 1];
+    const lastId: string | null = last?.id ?? null;
+    if (lastBottomIdRef.current === lastId) return; // older prepended → not a new bottom msg
+    const prev = lastBottomIdRef.current;
+    lastBottomIdRef.current = lastId;
+    if (prev == null) return; // first population — initial scroll handled on layout
+    const mine = last?.senderUid === me || (last as any)?.senderId === me;
+    if (mine || nearBottomRef.current) {
+      requestAnimationFrame(() => listRef.current?.scrollToEnd?.({ animated: true }));
+    } else {
+      setShowScrollDown(true);
+    }
+  }, [data, me]);
 
   const body = useMemo(() => {
     if (visibleMsgs === null) return <LoadingState fullPage title="Loading messages…" />;
@@ -754,9 +786,15 @@ export default function Conversation({ route, navigation }: any) {
             </View>
           </View>
         }
-        // Only snap to the end for new/initial content (when already near the
-        // bottom). When older history is prepended at the top, stay put.
-        onContentSizeChange={() => { if (nearBottomRef.current) listRef.current?.scrollToEnd?.({ animated: false }); }}
+        // Snap to the end ONLY on the very first layout. After that, scrolling
+        // is intent-based (see the new-message effect): older history loading
+        // must never yank the view to the bottom.
+        onContentSizeChange={() => {
+          if (!didInitialScrollRef.current && data.length > 0) {
+            listRef.current?.scrollToEnd?.({ animated: false });
+            didInitialScrollRef.current = true;
+          }
+        }}
         onScroll={onListScroll}
         scrollEventThrottle={64}
         // Keep the viewport anchored when older messages are prepended so the
@@ -905,6 +943,23 @@ export default function Conversation({ route, navigation }: any) {
       ) : null}
 
       {body}
+
+      {showScrollDown ? (
+        <Pressable
+          onPress={scrollToBottom}
+          accessibilityRole="button"
+          accessibilityLabel={t('common.scrollToLatest', 'Scroll to latest messages')}
+          style={{
+            position: 'absolute', right: 16, bottom: 88,
+            width: 44, height: 44, borderRadius: 22,
+            alignItems: 'center', justifyContent: 'center',
+            backgroundColor: colors.background.surface, borderWidth: 1, borderColor: colors.border.subtle,
+            shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 5,
+          }}
+        >
+          <Ionicons name="chevron-down" size={24} color={colors.action.primary} />
+        </Pressable>
+      ) : null}
 
       {deliveredChip > 0 ? <SyncSuccessChip count={deliveredChip} /> : null}
       {isOffline ? <OfflineNotice /> : null}
