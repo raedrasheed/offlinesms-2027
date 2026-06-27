@@ -60,19 +60,25 @@ export function useOtpAutoRead(onCode: (code: string) => void, length = 6): void
     let active = true;
     const handle = (message: string | null) => {
       if (!active || !message) return;
-      // Prefer an exactly-`length` run of digits; fall back to any 4–8 digit run.
-      const exact = message.match(new RegExp(`(?<!\\d)(\\d{${length}})(?!\\d)`));
-      const loose = message.match(/(\d{4,8})/);
-      const code = (exact?.[1] ?? loose?.[1] ?? '').slice(0, length);
-      if (code.length === length) onCode(code);
+      try {
+        // Avoid look-behind/ahead (not supported on all Hermes versions). Pull
+        // every digit run, prefer an exactly-`length` one, else the first run of
+        // at least 4 digits.
+        const runs = message.match(/\d+/g) ?? [];
+        const code = (runs.find(r => r.length === length) ?? runs.find(r => r.length >= 4) ?? '').slice(0, length);
+        if (__DEV__) console.log('[OTP] retriever message:', JSON.stringify(message), '→ code:', code);
+        if (code.length === length) onCode(code);
+      } catch (e) {
+        if (__DEV__) console.log('[OTP] retriever parse error:', e);
+      }
     };
 
     try {
       RNOtpVerify.getOtp()
-        .then(() => RNOtpVerify.addListener(handle))
-        .catch(() => { /* retriever unavailable on this device */ });
-    } catch {
-      /* ignore */
+        .then((started: boolean) => { if (__DEV__) console.log('[OTP] retriever started:', started); RNOtpVerify.addListener(handle); })
+        .catch((e: unknown) => { if (__DEV__) console.log('[OTP] retriever unavailable:', e); });
+    } catch (e) {
+      if (__DEV__) console.log('[OTP] retriever init threw:', e);
     }
 
     return () => {
