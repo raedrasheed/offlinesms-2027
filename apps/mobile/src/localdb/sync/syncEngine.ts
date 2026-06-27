@@ -8,6 +8,7 @@ import { pullConversations, pullMessages, pullMembers } from './firebasePull';
 import { pushOutboxItem } from './firebasePush';
 import { isOnline } from './networkState';
 import { isPermanent, errorCode, nextAttemptAt } from './retryPolicy';
+import { LOCAL_MESSAGE_RETENTION_LIMIT } from '../../config/features';
 
 let running = false;
 
@@ -21,9 +22,12 @@ const PULL_REASONS: ReadonlySet<SyncReason> = new Set(['boot', 'auth-change', 'o
 const PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 async function maybePrune(): Promise<void> {
+  // Retention disabled (limit <= 0) → keep ALL messages on-device so the full
+  // history stays available offline and reads come straight from local cache.
+  if (LOCAL_MESSAGE_RETENTION_LIMIT <= 0) return;
   const last = await getCursor('last_prune_at');
   if (Date.now() - last < PRUNE_INTERVAL_MS) return;
-  try { await messagesRepo.pruneOldMessages(); } catch { /* best-effort */ }
+  try { await messagesRepo.pruneOldMessages(LOCAL_MESSAGE_RETENTION_LIMIT); } catch { /* best-effort */ }
   await setCursor('last_prune_at', Date.now());
 }
 

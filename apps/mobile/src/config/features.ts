@@ -10,6 +10,22 @@ function envFlag(name: string, fallback: boolean): boolean {
   return raw === '1' || raw.toLowerCase() === 'true';
 }
 
+function envInt(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw == null || raw === '') return fallback;
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+/**
+ * Max messages kept on-device per conversation by the retention sweep.
+ * 0 (default) = unlimited — store ALL synced messages locally and never prune,
+ * so the full history stays available offline and reads come straight from
+ * cache. Set EXPO_PUBLIC_LOCAL_MESSAGE_RETENTION_LIMIT to a positive number
+ * (e.g. 2000) to cap local storage instead.
+ */
+export const LOCAL_MESSAGE_RETENTION_LIMIT = envInt('EXPO_PUBLIC_LOCAL_MESSAGE_RETENTION_LIMIT', 0);
+
 /**
  * When true, the chat list reads from the local SQLite DB (Phase 22B) instead
  * of subscribing to Firestore directly — the list renders instantly from cache
