@@ -63,12 +63,18 @@ export async function requeueStaleProcessing(staleMs = 90_000, now = Date.now())
   return res?.changes ?? res?.rowsAffected ?? 0;
 }
 
-/** Items that are due to be sent now (pending and next_attempt_at <= now). */
+/** Items that are due to be sent now (pending and next_attempt_at <= now).
+ *  Actual message sends are prioritized over bookkeeping items (receipts, etc.)
+ *  so a large backlog of read-receipts can't starve outgoing messages and leave
+ *  them stuck "Sending…". Within a priority tier, oldest first. */
 export async function claimDue(now = Date.now(), limit = 10): Promise<OutboxRow[]> {
   return getDb().all<OutboxRow>(
     `SELECT * FROM outbox
       WHERE status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
-      ORDER BY created_at ASC LIMIT ?`,
+      ORDER BY
+        CASE WHEN type IN ('send_message','send_image_message','send_voice_message') THEN 0 ELSE 1 END,
+        created_at ASC
+      LIMIT ?`,
     [now, limit],
   );
 }

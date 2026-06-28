@@ -109,7 +109,7 @@ export async function pushOutbox(): Promise<number> {
     await outboxRepo.markProcessing(item.id);
     try {
       const res = await pushOutboxItem(item);
-      console.log(`[outbox] sent ${item.type} ${item.id} → ${res.remoteId ?? '(no id)'}`);
+      if (item.type.startsWith('send_')) console.log(`[outbox] sent ${item.type} ${item.id} → ${res.remoteId ?? '(no id)'}`);
       // Reconcile an optimistic send (text or media) with its canonical server
       // message id so the local row flips from pending → sent.
       if ((item.type === 'send_message' || item.type === 'send_image_message' || item.type === 'send_voice_message') && res.remoteId) {
