@@ -46,7 +46,7 @@ import { OfflineNotice, SyncSuccessChip } from '../components/OfflineBanners';
 import { getDraft, setDraft as persistDraft, clearDraft } from '../lib/drafts';
 import { useLocalConversation } from '../hooks/useLocalConversation';
 import { useMessagePersistence } from '../hooks/useLocalPersistence';
-import { queueSendMessage, queueEditMessage, queueMarkReceipt, retryMediaMessage, queueSendVoiceMessage, openLocalDb } from '../localdb';
+import { queueSendMessage, queueEditMessage, queueMarkReceipt, retryMediaMessage, queueSendVoiceMessage, openLocalDb, kickSync } from '../localdb';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import { prefetchMedia } from '../media/mediaCache';
@@ -377,6 +377,10 @@ export default function Conversation({ route, navigation }: any) {
     const total = dataLenRef.current || visibleMsgs.length;
     listRef.current?.scrollToIndex?.({ index: total - 1 - idx, animated: true, viewPosition: 0.5 });
   }, [visibleMsgs]);
+
+  // Re-attempt a stuck/failed local send: poke the sync engine to flush the
+  // outbox (it re-claims due items).
+  const retrySend = useCallback(() => { kickSync('manual'); }, []);
 
   const startReply = useCallback((m: Message) => {
     if (m.deletedForEveryone) return;
@@ -853,6 +857,16 @@ export default function Conversation({ route, navigation }: any) {
             );
           }
           const mine = item.senderUid === me || (item as any).senderId === me;
+          // Surface real send state for my own not-yet-synced TEXT messages so
+          // they show "Sending/Queued/Failed" instead of a misleading "Seen by
+          // 0" — and so the un-pushed message has no server-info menu (which
+          // would 404 with message-not-found). Media keeps its own upload UI.
+          const sendState: 'queued' | 'syncing' | 'failed' | undefined =
+            mine && !item.deletedForEveryone && (item.type ?? 'text') === 'text'
+              ? (item.status === 'failed' ? 'failed'
+                : item.status === 'sending' ? (isOffline ? 'queued' : 'syncing')
+                : undefined)
+              : undefined;
           // Inverted data is newest-first, so the chronologically-previous
           // (older) message — the one rendered just above — is at index + 1.
           const previous = index < invData.length - 1 ? invData[index + 1] : null;
@@ -867,6 +881,8 @@ export default function Conversation({ route, navigation }: any) {
           const bubble = (
             <MessageBubble
               message={item}
+              pending={sendState}
+              onRetry={retrySend}
               showSender={showSender}
               context={{
                 conversationId: id,
@@ -904,7 +920,7 @@ export default function Conversation({ route, navigation }: any) {
         }}
       />
     );
-  }, [invData, visibleMsgs, queuedItems, me, isGroup, id, myRoleIsAdmin, starred, convo?.pinnedMessage, convo?.memberCount, reactorNames, useLocal, startReply, startEdit, startForward, jumpTo, openInfo, openImage, retryMedia, onPlayedVoice, onSendViaSms, onAvatarPress, onListScroll, onReachOlder, t]);
+  }, [invData, visibleMsgs, queuedItems, me, isGroup, id, myRoleIsAdmin, starred, convo?.pinnedMessage, convo?.memberCount, reactorNames, useLocal, startReply, startEdit, startForward, jumpTo, openInfo, openImage, retryMedia, onPlayedVoice, onSendViaSms, onAvatarPress, onListScroll, onReachOlder, t, isOffline, retrySend]);
 
   return (
     <KeyboardAvoidingView behavior="padding" style={s.root}>
