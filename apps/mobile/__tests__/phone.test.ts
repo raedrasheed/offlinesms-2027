@@ -41,6 +41,24 @@ describe('normalizePhoneToE164', () => {
     const once = normalizePhoneToE164('+14155550123');
     expect(normalizePhoneToE164(once!)).toBe(once);
   });
+
+  it('restores + on a number that already carries a country code (no +)', () => {
+    expect(normalizePhoneToE164('972599303231')).toBe('+972599303231');
+    expect(normalizePhoneToE164('970591234567')).toBe('+970591234567');
+  });
+
+  it('does NOT prepend the default dial to an already-coded number', () => {
+    // The +1 (US) bug: "972599…" must become "+972599…", never "+1972599…".
+    expect(normalizePhoneToE164('972599758280', '+1')).toBe('+972599758280');
+  });
+
+  it('handles the 00 international access prefix', () => {
+    expect(normalizePhoneToE164('00972591234567')).toBe('+972591234567');
+  });
+
+  it('leaves a foreign + number untouched even with a default dial', () => {
+    expect(normalizePhoneToE164('+14155550123', '+970')).toBe('+14155550123');
+  });
 });
 
 describe('isE164', () => {

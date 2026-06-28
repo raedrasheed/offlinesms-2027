@@ -12,8 +12,6 @@ import { db, auth } from '../lib/firebase';
 import { addGroupMembers, addExternalContactToGroup, groupErrorCopy } from '../lib/conversations';
 import { normalizeUsername } from '../lib/username';
 import { normalizePhoneToE164 } from '../lib/phone';
-import { dialForRegion } from '../lib/countries';
-import * as Localization from 'expo-localization';
 import { LOCAL_FIRST_CONVERSATION_ENABLED } from '../config/features';
 import { queueAddExternalContactToGroup, getCurrentUid } from '../localdb';
 import { ContactPickerModal, type PickedContact } from '../components/ContactPickerModal';
@@ -92,15 +90,17 @@ export default function AddMembers({ route, navigation }: any) {
   const [bulkPickerOpen, setBulkPickerOpen] = useState(false);
   const [bulkProgress, setBulkProgress] = useState<{ total: number; done: number; failed: number } | null>(null);
 
-  // Default dial code for phone normalization, derived from the device region
-  // (e.g. PS → +970) and falling back to the app's primary region. Passing this
-  // through lets locally-formatted numbers ("0599…") be promoted to E.164 — both
-  // in the contact picker and the manual form — so they aren't silently dropped
-  // or rejected by the server when added as external (SMS-only) members.
-  const defaultDial = useMemo(() => {
-    try { return dialForRegion(Localization.getLocales?.()[0]?.regionCode) ?? '+970'; }
-    catch { return '+970'; }
-  }, []);
+  // Default dial code for normalizing a LOCAL number entered without a country
+  // code. The app is Palestine-scoped (sign-in is restricted to +970/+972, 59x/
+  // 56x), so such a number is Palestinian — we must NOT default to the device
+  // region (which can be +1 and would mangle "0599…" into "+1599…"). Numbers
+  // that already carry a country code (e.g. "972599…") or a "+" are detected and
+  // left intact by normalizePhoneToE164, so foreign contacts stay untouched.
+  // Prefer the signed-in user's own country code when known.
+  const defaultDial = useMemo(
+    () => ((auth.currentUser?.phoneNumber ?? '').startsWith('+972') ? '+972' : '+970'),
+    [],
+  );
 
   function applyPickedContact(c: PickedContact) {
     setContactName(c.name);
