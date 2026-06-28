@@ -35,8 +35,8 @@ describe('buildDefaultSmsBody', () => {
     expect(buildDefaultSmsBody(undefined)).toBe('');
   });
 
-  it('collapses whitespace in the message', () => {
-    expect(buildDefaultSmsBody('one    two\n\nthree')).toBe('one two three');
+  it('collapses spaces/tabs within a line but preserves line breaks', () => {
+    expect(buildDefaultSmsBody('one    two\n\nthree')).toBe('one two\n\nthree');
   });
 
   it('truncates very long messages with an ellipsis at the 320-char cap', () => {
@@ -45,8 +45,12 @@ describe('buildDefaultSmsBody', () => {
     expect(body).toContain('…');
   });
 
-  it('never embeds raw newlines from the message body', () => {
-    expect(buildDefaultSmsBody('line1\nline2\nline3')).not.toContain('\n');
+  it('preserves newlines from the message body', () => {
+    expect(buildDefaultSmsBody('line1\nline2\nline3')).toBe('line1\nline2\nline3');
+  });
+
+  it('normalizes CRLF and trims spaces hugging newlines', () => {
+    expect(buildDefaultSmsBody('line1 \r\n  line2')).toBe('line1\nline2');
   });
 });
 
