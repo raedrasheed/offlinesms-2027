@@ -46,6 +46,23 @@ export async function getById(id: string): Promise<OutboxRow | null> {
   return getDb().first<OutboxRow>(`SELECT * FROM outbox WHERE id = ?`, [id]);
 }
 
+/**
+ * Recover orphaned items stuck in 'processing': if a push was interrupted (app
+ * backgrounded/killed between markProcessing and markCompleted/markFailed) the
+ * item would otherwise never be re-claimed by claimDue and the message stays
+ * "Sending…" forever. Flip 'processing' rows untouched for `staleMs` back to
+ * 'pending'. The threshold avoids disturbing a genuinely in-flight push.
+ * Returns the number of rows recovered.
+ */
+export async function requeueStaleProcessing(staleMs = 90_000, now = Date.now()): Promise<number> {
+  const res: any = await getDb().run(
+    `UPDATE outbox SET status = 'pending', updated_at = ?
+      WHERE status = 'processing' AND updated_at <= ?`,
+    [now, now - staleMs],
+  );
+  return res?.changes ?? res?.rowsAffected ?? 0;
+}
+
 /** Items that are due to be sent now (pending and next_attempt_at <= now). */
 export async function claimDue(now = Date.now(), limit = 10): Promise<OutboxRow[]> {
   return getDb().all<OutboxRow>(

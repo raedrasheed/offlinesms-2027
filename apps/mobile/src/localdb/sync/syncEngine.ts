@@ -162,7 +162,12 @@ export async function pullRemoteChanges(activeConversationId?: string): Promise<
 export async function flushOutbox(): Promise<void> {
   if (pushing) return;
   pushing = true;
-  try { await pushOutbox(); }
+  try {
+    // Recover sends orphaned in 'processing' by an interrupted push (otherwise
+    // they'd stay "Sending…" forever and never re-attempt).
+    try { await outboxRepo.requeueStaleProcessing(); } catch { /* best-effort */ }
+    await pushOutbox();
+  }
   catch { /* per-item failures are recorded in the outbox */ }
   finally { pushing = false; }
 }

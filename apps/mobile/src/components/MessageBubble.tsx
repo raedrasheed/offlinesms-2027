@@ -147,37 +147,43 @@ function MessageBubbleImpl({
   const receiptTone: ReceiptTone = transparentBubble ? 'white' : mediaMessage ? 'ink' : 'green';
 
   if (pending) {
+    // Same row/column wrappers as a normal sent bubble so it hugs its content,
+    // caps at 80% width, and right-aligns — instead of stretching full width.
     return (
-      <Pressable
-        style={[{ marginBottom: 2 }]}
-        onPress={pending === 'failed' ? onRetry : undefined}
-        disabled={pending !== 'failed'}
-      >
-        <View style={[s.bubble, s.sent, pending !== 'failed' && { opacity: 0.92 }]}>
-          <View style={s.bubbleRow}>
-            <Text style={s.bubbleText}>{m.text ?? ''}</Text>
-          </View>
-          <View style={s.bubbleFooter}>
-            {pending === 'failed' ? (
-              <>
-                <Ionicons name="alert-circle" size={12} color={colors.err} />
-                <Text style={[s.foot, { color: colors.err }]}>Failed · tap to retry</Text>
-              </>
-            ) : pending === 'syncing' ? (
-              <>
-                <Ionicons name="sync-outline" size={12} color={TG_GREEN} />
-                <Text style={[s.foot, { color: TG_GREEN }]}>Sending…</Text>
-              </>
-            ) : (
-              <>
-                <Ionicons name="time-outline" size={12} color={TG_GREEN} />
-                <Text style={[s.foot, { color: TG_GREEN }]}>Queued · sends when online</Text>
-              </>
-            )}
-            <Text style={[s.foot, { color: TG_GREEN }]}>{timeText}</Text>
-          </View>
+      <View style={[s.row, s.rowMine]}>
+        <View style={[s.col, s.colMine]}>
+          <Pressable
+            style={{ marginBottom: 2 }}
+            onPress={pending === 'failed' ? onRetry : undefined}
+            disabled={pending !== 'failed'}
+          >
+            <View style={[s.bubble, s.sent, pending !== 'failed' && { opacity: 0.92 }]}>
+              <View style={s.bubbleRow}>
+                <Text style={s.bubbleText}>{m.text ?? ''}</Text>
+              </View>
+              <View style={s.bubbleFooter}>
+                {pending === 'failed' ? (
+                  <>
+                    <Ionicons name="alert-circle" size={12} color={colors.err} />
+                    <Text style={[s.foot, { color: colors.err }]}>Failed · tap to retry</Text>
+                  </>
+                ) : pending === 'syncing' ? (
+                  <>
+                    <Ionicons name="sync-outline" size={12} color={TG_GREEN} />
+                    <Text style={[s.foot, { color: TG_GREEN }]}>Sending…</Text>
+                  </>
+                ) : (
+                  <>
+                    <Ionicons name="time-outline" size={12} color={TG_GREEN} />
+                    <Text style={[s.foot, { color: TG_GREEN }]}>Queued · sends when online</Text>
+                  </>
+                )}
+                <Text style={[s.foot, { color: TG_GREEN }]}>{timeText}</Text>
+              </View>
+            </View>
+          </Pressable>
         </View>
-      </Pressable>
+      </View>
     );
   }
 
