@@ -19,6 +19,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme';
 import { avatarColor, initials } from '../lib/avatar';
+import { LinkText } from './LinkText';
 import { ChatActionSheet, SheetAction } from './ChatActionSheet';
 import { ReactionsSheet, ReactorInfo } from './ReactionsSheet';
 import { ImageMessageBubble } from './chat/ImageMessageBubble';
@@ -362,9 +363,11 @@ function MessageBubbleImpl({
           </Pressable>
         ) : (
           <View style={s.bubbleRow}>
-            <Text style={[s.bubbleText, deleted && s.deletedText]}>
-              {deleted ? 'This message was deleted.' : (m.text ?? '')}
-            </Text>
+            {deleted ? (
+              <Text style={[s.bubbleText, s.deletedText]}>This message was deleted.</Text>
+            ) : (
+              <LinkText style={s.bubbleText}>{m.text ?? ''}</LinkText>
+            )}
           </View>
         )}
 
