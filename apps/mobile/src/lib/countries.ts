@@ -227,6 +227,15 @@ export const ORDERED_COUNTRIES: Country[] = [
   ...COUNTRIES.filter(c => !PRIORITY_CODES.includes(c.code)),
 ];
 
+/** Dial code for an ISO alpha-2 region code (e.g. 'PS' → '+970'), or null if the
+ *  code is unknown. Used to give phone normalization a country context so a
+ *  locally-formatted number ("0599…") can be promoted to E.164. */
+export function dialForRegion(code: string | null | undefined): string | null {
+  if (!code) return null;
+  const c = COUNTRIES.find(x => x.code === code.toUpperCase());
+  return c ? c.dial : null;
+}
+
 /** Intersect the full ordered list with the ISO alpha-2 codes a relay currently
  *  serves — the only countries the phone sign-in picker may offer. Preserves
  *  the priority ordering and silently drops codes we don't have metadata for. */

@@ -12,6 +12,8 @@ import { db, auth } from '../lib/firebase';
 import { addGroupMembers, addExternalContactToGroup, groupErrorCopy } from '../lib/conversations';
 import { normalizeUsername } from '../lib/username';
 import { normalizePhoneToE164 } from '../lib/phone';
+import { dialForRegion } from '../lib/countries';
+import * as Localization from 'expo-localization';
 import { LOCAL_FIRST_CONVERSATION_ENABLED } from '../config/features';
 import { queueAddExternalContactToGroup, getCurrentUid } from '../localdb';
 import { ContactPickerModal, type PickedContact } from '../components/ContactPickerModal';
@@ -90,6 +92,16 @@ export default function AddMembers({ route, navigation }: any) {
   const [bulkPickerOpen, setBulkPickerOpen] = useState(false);
   const [bulkProgress, setBulkProgress] = useState<{ total: number; done: number; failed: number } | null>(null);
 
+  // Default dial code for phone normalization, derived from the device region
+  // (e.g. PS → +970) and falling back to the app's primary region. Passing this
+  // through lets locally-formatted numbers ("0599…") be promoted to E.164 — both
+  // in the contact picker and the manual form — so they aren't silently dropped
+  // or rejected by the server when added as external (SMS-only) members.
+  const defaultDial = useMemo(() => {
+    try { return dialForRegion(Localization.getLocales?.()[0]?.regionCode) ?? '+970'; }
+    catch { return '+970'; }
+  }, []);
+
   function applyPickedContact(c: PickedContact) {
     setContactName(c.name);
     setContactPhone(c.phoneE164);
@@ -110,9 +122,9 @@ export default function AddMembers({ route, navigation }: any) {
     for (const c of cs) {
       try {
         if (useLocalQueue) {
-          await queueAddExternalContactToGroup({ conversationId: id, displayName: c.name, phoneE164: c.phoneE164 });
+          await queueAddExternalContactToGroup({ conversationId: id, displayName: c.name, phoneE164: c.phoneE164, defaultCountry: defaultDial });
         } else {
-          await addExternalContactToGroup({ conversationId: id, displayName: c.name, phoneNumber: c.phoneE164 });
+          await addExternalContactToGroup({ conversationId: id, displayName: c.name, phoneNumber: c.phoneE164, defaultCountry: defaultDial });
         }
         done++;
       } catch {
@@ -132,7 +144,7 @@ export default function AddMembers({ route, navigation }: any) {
 
   async function addPhoneContact() {
     const name = contactName.trim();
-    const e164 = normalizePhoneToE164(contactPhone.trim());
+    const e164 = normalizePhoneToE164(contactPhone.trim(), defaultDial);
     if (!name) { Alert.alert('Name required', 'Enter a contact name.'); return; }
     if (!e164) { Alert.alert('Invalid number', 'Enter a phone number in international format, e.g. +972591234567.'); return; }
     setBusy(true); setErr(null);
@@ -140,10 +152,10 @@ export default function AddMembers({ route, navigation }: any) {
       // Local-first: queue optimistically (survives offline + app restart, shows
       // immediately in GroupInfo). Falls back to the direct callable otherwise.
       if (LOCAL_FIRST_CONVERSATION_ENABLED && getCurrentUid()) {
-        await queueAddExternalContactToGroup({ conversationId: id, displayName: name, phoneE164: e164 });
+        await queueAddExternalContactToGroup({ conversationId: id, displayName: name, phoneE164: e164, defaultCountry: defaultDial });
         navigation.goBack();
       } else {
-        const res = await addExternalContactToGroup({ conversationId: id, displayName: name, phoneNumber: e164 });
+        const res = await addExternalContactToGroup({ conversationId: id, displayName: name, phoneNumber: e164, defaultCountry: defaultDial });
         if (res.alreadyMember) Alert.alert('Already a member', 'That number already belongs to a member of this group.');
         else if (res.alreadyExternal) Alert.alert('Already added', 'That contact is already in this group.');
         else navigation.goBack();
@@ -228,12 +240,14 @@ export default function AddMembers({ route, navigation }: any) {
             {err ? <ErrorState compact title="Couldn’t complete" description={err} /> : null}
             <ContactPickerModal
               visible={pickerOpen}
+              defaultCountry={defaultDial}
               onClose={() => setPickerOpen(false)}
               onPick={applyPickedContact}
             />
             <ContactPickerModal
               visible={bulkPickerOpen}
               multi
+              defaultCountry={defaultDial}
               onClose={() => setBulkPickerOpen(false)}
               onPick={() => { /* unused in multi */ }}
               onPickMulti={applyBulkPickedContacts}
