@@ -168,6 +168,10 @@ export default function Conversation({ route, navigation }: any) {
   const nearBottomRef = useRef(true);
   const lastBottomIdRef = useRef<string | null>(null);
   const dataLenRef = useRef(0); // total rendered rows (messages + queued), for jumpTo index math
+  // Incoming messages we've already queued read/delivered receipts for, so we
+  // don't re-enqueue (and re-kick the outbox) for the whole history on every
+  // refresh/pagination — that was flooding the outbox with mark_receipt items.
+  const receiptedRef = useRef<Set<string>>(new Set());
   const [showScrollDown, setShowScrollDown] = useState(false);
 
   // Conversation doc. Firestore hands us a fresh object on every snapshot —
@@ -198,10 +202,11 @@ export default function Conversation({ route, navigation }: any) {
       for (const m of rows) {
         if (m.senderUid === me || (m as any).senderId === me) continue;
         if (m.deletedForEveryone) continue;
+        if (receiptedRef.current.has(m.id)) continue;
+        receiptedRef.current.add(m.id);
         markReceipt(id, m.id, 'delivered');
         markReceipt(id, m.id, 'read');
       }
-      requestAnimationFrame(() => listRef.current?.scrollToEnd?.({ animated: false }));
     });
   }, [id, me, useLocal]);
 
@@ -210,13 +215,18 @@ export default function Conversation({ route, navigation }: any) {
   useEffect(() => {
     if (!useLocal || !id) return;
     markRead(id).catch(() => {});
+    // Only emit per-message receipts for incoming messages we haven't already
+    // receipted this session (deduped above) — never re-mark the whole history.
     for (const m of local.messages) {
       if (m.senderUid === me) continue;
       if (m.deletedForEveryone) continue;
+      if (receiptedRef.current.has(m.id)) continue;
+      receiptedRef.current.add(m.id);
       void queueMarkReceipt({ conversationId: id, messageId: m.id, status: 'delivered' });
       void queueMarkReceipt({ conversationId: id, messageId: m.id, status: 'read' });
     }
-    requestAnimationFrame(() => listRef.current?.scrollToEnd?.({ animated: false }));
+    // No manual scroll here — the list is inverted (opens at the bottom) and the
+    // new-message effect handles following new messages.
   }, [useLocal, id, me, local.messages]);
 
   // userState (drives starred + deletedForMe filtering).
