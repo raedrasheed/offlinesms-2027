@@ -257,7 +257,21 @@ export async function setError(localId: string, code: string | null, message: st
 export async function reconcileToRemote(localId: string, remote: {
   remoteId: string; remoteCreatedAt: number | null; serverVersion?: number;
 }): Promise<void> {
-  await getDb().run(
+  const db = getDb();
+  // The canonical server message may already be in the table — the realtime feed
+  // can land it (keyed by remote_id) before the outbox reconciles the optimistic
+  // row. Forcing remote_id onto the local row would then violate the UNIQUE
+  // constraint on messages.remote_id, fail the outbox item, and make it re-send
+  // (duplicate) forever. If a *different* row already owns this remote_id, the
+  // optimistic row is a duplicate → drop it and let the canonical row stand.
+  const existing = await db.first<{ local_id: string }>(
+    `SELECT local_id FROM messages WHERE remote_id = ?`, [remote.remoteId],
+  );
+  if (existing && existing.local_id !== localId) {
+    await db.run(`DELETE FROM messages WHERE local_id = ?`, [localId]);
+    return;
+  }
+  await db.run(
     `UPDATE messages SET remote_id = ?, remote_created_at = COALESCE(?, remote_created_at),
        status = 'sent', sync_status = 'synced', server_version = COALESCE(?, server_version), updated_at = ?
      WHERE local_id = ?`,

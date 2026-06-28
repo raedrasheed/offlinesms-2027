@@ -355,6 +355,9 @@ export async function queueMarkReceipt(args: { conversationId: string; messageId
     // Idempotent per (message, status) → repeated receipts collapse to one item.
     idempotencyKey: idempotencyKey(['receipt', args.messageId, args.status]),
     payload: { conversationId: args.conversationId, messageId: args.messageId, status: args.status },
+    // Receipts are best-effort: cap retries so a chronically-failing backlog
+    // dead-letters quickly instead of churning the queue (and battery) 8× each.
+    maxAttempts: 3,
   });
   kick('outbox');
   return { ok: true };
