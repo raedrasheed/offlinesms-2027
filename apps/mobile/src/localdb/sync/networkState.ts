@@ -6,7 +6,13 @@ let online = true;
 const listeners = new Set<(online: boolean) => void>();
 
 function usable(state: { isConnected?: boolean | null; isInternetReachable?: boolean | null }): boolean {
-  return state.isConnected === true && state.isInternetReachable !== false;
+  // Only an explicit "disconnected" counts as offline. `isInternetReachable` is
+  // a heuristic reachability probe that is frequently null/false on Android even
+  // when the internet works — gating on it wrongly blocked the outbox (sends
+  // stuck "Sending…") while Firestore's realtime listeners kept receiving. If we
+  // misjudge (e.g. a captive portal), the send just fails the network call and
+  // retries, which is far better than never attempting.
+  return state.isConnected !== false;
 }
 
 export function startNetworkWatch(): () => void {
