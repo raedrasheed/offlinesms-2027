@@ -169,7 +169,15 @@ export async function flushOutbox(): Promise<void> {
     // Recover sends orphaned in 'processing' by an interrupted push (otherwise
     // they'd stay "Sending…" forever and never re-attempt).
     try { await outboxRepo.requeueStaleProcessing(); } catch { /* best-effort */ }
-    await pushOutbox();
+    // Drain in a loop so a large backlog (e.g. a queue of read-receipts) clears
+    // in one pass instead of 10 items per scheduler tick. Bounded so a run can't
+    // go on forever; pushOutbox returns 0 when nothing is due (or offline), which
+    // ends the loop. Newly-sent messages are still picked up first each
+    // iteration (claimDue prioritizes sends), so they never wait behind it.
+    for (let i = 0; i < 100; i++) {
+      const completed = await pushOutbox();
+      if (completed === 0) break;
+    }
   }
   catch { /* per-item failures are recorded in the outbox */ }
   finally { pushing = false; }
