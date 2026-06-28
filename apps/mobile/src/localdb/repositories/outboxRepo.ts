@@ -131,6 +131,22 @@ export async function retryByEntityId(entityId: string): Promise<void> {
   );
 }
 
+/**
+ * One-time housekeeping on startup: dead-letter pending read-receipt items that
+ * have already failed at least `minAttempts` times. Read receipts are
+ * best-effort, and a large backlog hard-failing with `internal` (e.g. thousands
+ * enqueued at once) would otherwise churn the queue — and battery — for a long
+ * time and slow every other item behind it. Returns the number cleared.
+ */
+export async function dropStuckReceipts(minAttempts = 2, now = Date.now()): Promise<number> {
+  const res: any = await getDb().run(
+    `UPDATE outbox SET status = 'dead', updated_at = ?
+      WHERE type = 'mark_receipt' AND status = 'pending' AND attempt_count >= ?`,
+    [now, minAttempts],
+  );
+  return res?.changes ?? res?.rowsAffected ?? 0;
+}
+
 export async function deleteCompleted(olderThanMs = 0): Promise<void> {
   await getDb().run(`DELETE FROM outbox WHERE status = 'completed' AND updated_at <= ?`, [Date.now() - olderThanMs]);
 }

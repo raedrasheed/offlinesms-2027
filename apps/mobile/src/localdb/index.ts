@@ -41,6 +41,10 @@ export async function openLocalDb(uid: string): Promise<void> {
 
 export async function initLocalDb(uid: string): Promise<void> {
   await openForUser(uid);
+  // Clear any inherited backlog of read-receipts that are stuck failing (e.g. a
+  // bulk enqueue hard-failing with `internal`). Best-effort, so dropping them is
+  // safe and keeps the outbox from churning + starving real mutations.
+  try { const n = await outboxRepo.dropStuckReceipts(); if (n) console.log(`[outbox] cleared ${n} stuck receipt(s)`); } catch { /* best-effort */ }
   if (!started) { startScheduler(); started = true; }
 }
 
