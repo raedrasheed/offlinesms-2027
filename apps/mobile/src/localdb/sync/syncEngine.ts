@@ -100,14 +100,16 @@ export type SyncReason =
 
 /** Push all due outbox items. Returns how many completed. */
 export async function pushOutbox(): Promise<number> {
-  if (!isOnline()) return 0;
+  if (!isOnline()) { console.log('[outbox] skip: offline'); return 0; }
   let completed = 0;
   const due = await outboxRepo.claimDue();
+  if (due.length) console.log(`[outbox] pushing ${due.length} item(s)`);
   for (const item of due) {
     if (!isOnline()) break;
     await outboxRepo.markProcessing(item.id);
     try {
       const res = await pushOutboxItem(item);
+      console.log(`[outbox] sent ${item.type} ${item.id} → ${res.remoteId ?? '(no id)'}`);
       // Reconcile an optimistic send (text or media) with its canonical server
       // message id so the local row flips from pending → sent.
       if ((item.type === 'send_message' || item.type === 'send_image_message' || item.type === 'send_voice_message') && res.remoteId) {
@@ -124,6 +126,7 @@ export async function pushOutbox(): Promise<number> {
     } catch (err: any) {
       const code = errorCode(err);
       const message = err?.message ?? 'push-failed';
+      console.log(`[outbox] push FAILED ${item.type} ${item.id}: ${code} — ${message} (permanent=${isPermanent(err)})`);
       if (isPermanent(err)) {
         // Permanent: dead-letter immediately and surface on the message.
         await outboxRepo.markFailed(item.id, code, message, Date.now() + 1e12);
