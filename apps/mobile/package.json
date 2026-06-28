@@ -52,6 +52,7 @@
     "expo-localization": "~16.1.6",
     "expo-notifications": "~0.31.5",
     "expo-secure-store": "~14.2.4",
+    "expo-share-intent": "^4.1.2",
     "expo-sqlite": "~15.2.14",
     "expo-status-bar": "~2.2.3",
     "firebase": "^10.13.2",

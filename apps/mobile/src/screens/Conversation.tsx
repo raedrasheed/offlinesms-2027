@@ -118,7 +118,7 @@ export default function Conversation({ route, navigation }: any) {
   const { t } = useTranslation();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
-  const { id } = route.params as { id: string };
+  const { id, sharedText } = route.params as { id: string; sharedText?: string };
   const me = auth.currentUser?.uid ?? '';
   const { isOffline, enqueue, queuedFor, deliveredFor, deliveredNonce } = useOffline();
   const wallpaper = useWallpaper(id);
@@ -325,12 +325,14 @@ export default function Conversation({ route, navigation }: any) {
   // Outbound typing (debounced; auto-stops on send/clear/leave; off while editing).
   useTypingPresence(id, draft, !editing);
 
-  // Restore a saved draft when opening the chat.
+  // Restore a saved draft when opening the chat. Text shared into the app (via
+  // ShareToChat → sharedText) takes precedence and pre-fills the composer.
   useEffect(() => {
     let on = true;
+    if (sharedText) { setDraft(prev => prev || sharedText); return () => { on = false; }; }
     getDraft(id).then(text => { if (on && text) setDraft(prev => prev || text); });
     return () => { on = false; };
-  }, [id]);
+  }, [id, sharedText]);
 
   // Persist the composer draft (debounced) so it survives navigation/restart.
   useEffect(() => {

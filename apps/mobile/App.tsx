@@ -69,6 +69,8 @@ import { installForegroundHandler, registerForPush, routeFromNotification } from
 import { initAppCheck } from './src/lib/appCheck';
 import { dispatchForRoute } from './src/lib/pushRouting';
 import { syncNow } from './src/localdb';
+import { ShareIntentProvider, useShareIntentContext } from 'expo-share-intent';
+import ShareToChat from './src/screens/ShareToChat';
 import { Linking as RNLinking } from 'react-native';
 
 const navRef = createNavigationContainerRef();
@@ -116,6 +118,33 @@ const AuthStack = createNativeStackNavigator();
 const OnboardingStack = createNativeStackNavigator();
 const Tabs = createBottomTabNavigator();
 const RootStack = createNativeStackNavigator();
+
+// Content shared INTO the app from another app (Android ACTION_SEND / iOS Share
+// Extension). When one arrives and we're signed in, route to the chat picker.
+function ShareIntentHandler({ authed }: { authed: boolean }) {
+  const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntentContext();
+  useEffect(() => {
+    if (!hasShareIntent || !authed) return;
+    let cancelled = false;
+    const go = () => {
+      if (cancelled) return;
+      if (!navRef.isReady()) { setTimeout(go, 150); return; }
+      const file = shareIntent.files?.[0];
+      if (file?.path) {
+        (navRef as any).navigate('ShareToChat', {
+          image: { uri: file.path, mimeType: file.mimeType, size: (file as any).size },
+        });
+      } else {
+        const text = shareIntent.text ?? shareIntent.webUrl ?? '';
+        if (text) (navRef as any).navigate('ShareToChat', { text });
+      }
+      resetShareIntent();
+    };
+    go();
+    return () => { cancelled = true; };
+  }, [hasShareIntent, authed]);
+  return null;
+}
 
 function AuthFlow() {
   return (
@@ -330,11 +359,13 @@ export default function App() {
   if (!ready) return null;
 
   return (
+    <ShareIntentProvider>
     <ThemeProvider userPreference={userTheme}>
     <OfflineProvider>
     <SafeAreaProvider>
     <KeyboardProvider>
       <ErrorBoundary>
+      <ShareIntentHandler authed={!!user && profileCompleted === true} />
       <NavigationContainer ref={navRef}>
         {!user ? (
           <AuthFlow />
@@ -358,6 +389,7 @@ export default function App() {
             <RootStack.Screen name="JoinRequests" component={JoinRequests} />
             <RootStack.Screen name="JoinGroup" component={JoinGroup} options={{ presentation: 'modal' }} />
             <RootStack.Screen name="ForwardPicker" component={ForwardPicker} />
+            <RootStack.Screen name="ShareToChat" component={ShareToChat} />
             <RootStack.Screen name="MessageInfo" component={MessageInfo} />
             <RootStack.Screen name="TransactionDetail" component={TransactionDetail} />
             <RootStack.Screen name="RequestPoints" component={RequestPoints} />
@@ -384,5 +416,6 @@ export default function App() {
     </SafeAreaProvider>
     </OfflineProvider>
     </ThemeProvider>
+    </ShareIntentProvider>
   );
 }
