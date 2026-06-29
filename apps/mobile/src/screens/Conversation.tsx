@@ -53,7 +53,7 @@ import { prefetchMedia } from '../media/mediaCache';
 import { AttachmentSheet } from '../components/chat/AttachmentSheet';
 import { EmojiPicker3D } from '../components/chat/EmojiPicker3D';
 import { SwipeToReply } from '../components/chat/SwipeToReply';
-import { detectMentionQuery, filterMembers, insertMention, resolveMentions, type MentionCandidate } from '../lib/mentions';
+import { detectMentionQuery, filterMembers, insertMention, resolveMentions, renderMentionSegments, type MentionCandidate } from '../lib/mentions';
 import { LockedVoiceRecorderBar } from '../components/chat/LockedVoiceRecorderBar';
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
 import { validateMediaMessage, formatDuration, type AttachmentKey } from '../media/mediaValidation';
@@ -334,6 +334,16 @@ export default function Conversation({ route, navigation }: any) {
     () => (activeMention ? filterMembers(mentionCandidates, activeMention.query, 100) : []),
     [activeMention, mentionCandidates],
   );
+  // Split the live draft into mention / plain runs so the composer can render
+  // inserted mentions bold + colored (like WhatsApp/Telegram). Null when there's
+  // nothing to highlight, so plain typing renders as a single string child.
+  const draftSegments = useMemo(() => {
+    if (convo?.type !== 'group' || selectedMentions.length === 0) return null;
+    const mentions = resolveMentions(draft, selectedMentions);
+    if (mentions.length === 0) return null;
+    return renderMentionSegments(draft, mentions);
+  }, [convo?.type, draft, selectedMentions]);
+
   const pickMention = useCallback((m: MentionCandidate) => {
     if (!activeMention) return;
     const r = insertMention(draft, activeMention.start, selection.end, m);
@@ -1110,25 +1120,27 @@ export default function Conversation({ route, navigation }: any) {
                 showsVerticalScrollIndicator
               >
                 {mentionSuggestions.map((m, i) => (
-                  <Pressable
-                    key={m.uid}
-                    style={({ pressed }) => [s.mentionRow, i > 0 && s.mentionDivider, pressed && s.mentionRowPressed]}
-                    onPress={() => pickMention(m)}
-                    accessibilityRole="button"
-                    accessibilityLabel={m.displayName}
-                  >
-                    <View style={[s.mentionAvatar, { backgroundColor: avatarColor(m.uid) }]}>
-                      {reactorNames[m.uid]?.photoURL ? (
-                        <Image source={{ uri: reactorNames[m.uid]!.photoURL! }} style={s.mentionAvatarImg} />
-                      ) : (
-                        <Text style={s.mentionAvatarText}>{initials(m.displayName)}</Text>
-                      )}
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={s.mentionName} numberOfLines={1}>{m.displayName}</Text>
-                      {m.username ? <Text style={s.mentionSub} numberOfLines={1}>@{m.username}</Text> : null}
-                    </View>
-                  </Pressable>
+                  <View key={m.uid}>
+                    {i > 0 ? <View style={s.mentionDivider} /> : null}
+                    <Pressable
+                      style={({ pressed }) => [s.mentionRow, pressed && s.mentionRowPressed]}
+                      onPress={() => pickMention(m)}
+                      accessibilityRole="button"
+                      accessibilityLabel={m.displayName}
+                    >
+                      <View style={[s.mentionAvatar, { backgroundColor: avatarColor(m.uid) }]}>
+                        {reactorNames[m.uid]?.photoURL ? (
+                          <Image source={{ uri: reactorNames[m.uid]!.photoURL! }} style={s.mentionAvatarImg} />
+                        ) : (
+                          <Text style={s.mentionAvatarText}>{initials(m.displayName)}</Text>
+                        )}
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={s.mentionName} numberOfLines={1}>{m.displayName}</Text>
+                        {m.username ? <Text style={s.mentionSub} numberOfLines={1}>@{m.username}</Text> : null}
+                      </View>
+                    </Pressable>
+                  </View>
                 ))}
               </ScrollView>
             </View>
@@ -1201,7 +1213,6 @@ export default function Conversation({ route, navigation }: any) {
                           </Pressable>
                         ) : null}
                         <TextInput
-                          value={draft}
                           onChangeText={setDraft}
                           onSelectionChange={e => setSelection(e.nativeEvent.selection)}
                           placeholder={editing ? t('messageActions.editingMessage') : isOffline ? 'Type · saved as draft' : t('convo.composerPlaceholder')}
@@ -1210,7 +1221,18 @@ export default function Conversation({ route, navigation }: any) {
                           maxLength={4000}
                           textAlign={isRTL ? 'right' : 'left'}
                           accessibilityLabel={t('convo.composerPlaceholder')}
-                        />
+                        >
+                          {/* Formatted children when the draft has mentions
+                              (bold + colored); otherwise the plain string. The
+                              TextInput is controlled by these children. */}
+                          {draftSegments
+                            ? draftSegments.map((seg, i) =>
+                                seg.type === 'mention'
+                                  ? <Text key={i} style={s.composerMentionText}>{seg.text}</Text>
+                                  : <Text key={i}>{seg.text}</Text>,
+                              )
+                            : draft}
+                        </TextInput>
                         {!editing ? (
                           <Pressable
                             style={s.inlineIcon}
@@ -1336,7 +1358,10 @@ function buildStyles(colors: any, rtl: boolean) {
     mentionScroll:  { maxHeight: 260 },
     mentionRow:     { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 11, backgroundColor: colors.background.surface },
     mentionRowPressed: { backgroundColor: colors.surface2 },
-    mentionDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderColor: colors.ink100 },
+    // Light-gray separator with a soft drop shadow so it reads as a raised "3D"
+    // divider rather than a flat hairline.
+    mentionDivider: { height: 1, backgroundColor: '#E2E6EB', marginHorizontal: 12, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 1.5, shadowOffset: { width: 0, height: 1 }, elevation: 2 },
+    composerMentionText: { color: colors.action.primary, fontWeight: '800' },
     mentionAvatar:  { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
     mentionAvatarImg:  { width: 42, height: 42, borderRadius: 21 },
     mentionAvatarText: { color: '#fff', fontWeight: '800', fontSize: 15 },
