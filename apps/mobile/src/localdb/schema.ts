@@ -3,7 +3,7 @@
 // Pure strings (no native import) so migrations.ts can apply them and tests can
 // assert on them. Booleans are stored as INTEGER 0/1; timestamps as INTEGER ms.
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 // Phase 22C — columns added to `messages` in migration v2 (ALTER, applied on
 // top of the v1 CREATE so existing installs upgrade cleanly).
@@ -204,6 +204,16 @@ export const CREATE_INDEXES = [
 export const EXTERNAL_MEMBERS_V4 = [
   CREATE_EXTERNAL_MEMBERS,
   `CREATE INDEX IF NOT EXISTS idx_external_members_conversation ON external_members(conversation_id);`,
+];
+
+// v5 — richer reply snapshot (sender uid/name/type so optimistic local replies
+// render correctly before the server pull) + @mention metadata. All nullable /
+// backward-compatible ALTERs applied on top of existing installs.
+export const MESSAGES_V5_COLUMNS = [
+  `ALTER TABLE messages ADD COLUMN reply_to_sender_uid TEXT;`,
+  `ALTER TABLE messages ADD COLUMN reply_to_sender_name TEXT;`,
+  `ALTER TABLE messages ADD COLUMN reply_to_type TEXT;`,
+  `ALTER TABLE messages ADD COLUMN mentions_json TEXT;`,
 ];
 
 export const ALL_TABLE_STATEMENTS = [

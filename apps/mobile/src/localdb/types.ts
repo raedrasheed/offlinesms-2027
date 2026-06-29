@@ -94,6 +94,11 @@ export interface MessageRow {
   deleted_at: number | null;
   reply_to_message_id: string | null;
   reply_to_preview: string | null;
+  // v5 — richer reply snapshot + @mention metadata. Optional for older rows/tests.
+  reply_to_sender_uid?: string | null;
+  reply_to_sender_name?: string | null;
+  reply_to_type?: string | null;
+  mentions_json?: string | null;
   forwarded: number;
   forwarded_from_message_id: string | null;
   status: MessageStatus;

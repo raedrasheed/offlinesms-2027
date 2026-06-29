@@ -75,8 +75,18 @@ export type ReplyTo = {
   senderUid:         string;
   senderDisplayName: string;
   preview:           string;
-  type:              'text';
+  type:              'text' | 'image' | 'voice';
   createdAt?:        any;
+};
+
+/** A single @mention inside a message's text. `startIndex`/`endIndex` mark the
+ *  span of the mention token (e.g. "@Raed") within `text` so the bubble can
+ *  highlight it; `userId` is the mentioned group member. */
+export type Mention = {
+  userId:      string;
+  displayName: string;
+  startIndex:  number;
+  endIndex:    number;
 };
 
 export type ForwardedFrom = {
@@ -131,6 +141,7 @@ export type Message = {
   deleteReason?:       string | null;
   editedAt?:           any;
   replyTo?:            ReplyTo | null;
+  mentions?:           Mention[] | null;
   forwarded?:          boolean;
   forwardedFrom?:      ForwardedFrom | null;
   reactions?:          Record<string, string[]> | null;
