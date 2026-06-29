@@ -22,6 +22,7 @@ import { avatarColor, initials } from '../lib/avatar';
 import { LinkText } from './LinkText';
 import { ChatActionSheet, SheetAction } from './ChatActionSheet';
 import { ReactionsSheet, ReactorInfo } from './ReactionsSheet';
+import { EmojiReactionPicker } from './chat/EmojiReactionPicker';
 import { ImageMessageBubble } from './chat/ImageMessageBubble';
 import { VoiceMessageBubble } from './chat/VoiceMessageBubble';
 import { AnimatedEmoji3D } from './chat/AnimatedEmoji3D';
@@ -118,6 +119,7 @@ function MessageBubbleImpl({
   // photo is retried rather than permanently suppressed.
   const [avatarErrorUri, setAvatarErrorUri] = useState<string | null>(null);
   const [reactionsOpen, setReactionsOpen] = useState(false);
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [emojiReplay, setEmojiReplay] = useState(0);
 
   // Memoise per-render allocations so a re-render (e.g. a sibling message
@@ -404,7 +406,14 @@ function MessageBubbleImpl({
         previewText={deleted ? 'This message was deleted.' : (m.text ?? '')}
         reactions={deleted ? [] : REACTION_EMOJIS}
         onReact={(e) => { close(); react(e); }}
+        onMore={deleted ? undefined : () => { close(); setEmojiPickerOpen(true); }}
         actions={sheetActions}
+      />
+
+      <EmojiReactionPicker
+        visible={emojiPickerOpen}
+        onClose={() => setEmojiPickerOpen(false)}
+        onSelect={(e) => { setEmojiPickerOpen(false); react(e); }}
       />
 
       <ReactionsSheet

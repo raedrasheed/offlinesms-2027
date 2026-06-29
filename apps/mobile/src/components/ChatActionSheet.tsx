@@ -19,7 +19,7 @@ export type SheetAction = {
 };
 
 export function ChatActionSheet({
-  visible, onClose, mine, previewText, reactions, onReact, actions,
+  visible, onClose, mine, previewText, reactions, onReact, onMore, actions,
 }: {
   visible:     boolean;
   onClose:     () => void;
@@ -27,6 +27,8 @@ export function ChatActionSheet({
   previewText: string;
   reactions:   readonly string[];
   onReact:     (emoji: string) => void;
+  /** Open the full emoji reaction picker ("+" on the quick-reaction strip). */
+  onMore?:     () => void;
   actions:     SheetAction[];
 }) {
   // "Breathe" animation — reactions + preview spring/scale in, menu rises.
@@ -60,9 +62,17 @@ export function ChatActionSheet({
                   <Text style={s.reactionEmoji}>{e}</Text>
                 </Pressable>
               ))}
-              <View style={s.reactionPlus}>
-                <Ionicons name="add" size={16} color={colors.ink500} />
-              </View>
+              {onMore ? (
+                <Pressable
+                  style={({ pressed }) => [s.reactionPlus, pressed && { transform: [{ scale: 1.1 }] }]}
+                  onPress={onMore}
+                  hitSlop={6}
+                  accessibilityRole="button"
+                  accessibilityLabel="More emojis"
+                >
+                  <Ionicons name="add" size={18} color={colors.ink700} />
+                </Pressable>
+              ) : null}
             </View>
           ) : null}
 

@@ -26,4 +26,19 @@ describe('toggleReaction (mirrors server reactToMessage)', () => {
     expect(toggleReaction({ '👍': ['u1'], '❤️': ['u2'] }, '❤️', 'u1'))
       .toEqual({ '❤️': ['u2', 'u1'] });
   });
+
+  it('accepts a custom emoji from the full picker (add / replace / remove)', () => {
+    // add a non-default emoji
+    expect(toggleReaction(null, '🥳', 'u1')).toEqual({ '🥳': ['u1'] });
+    // replace a default reaction with the custom one
+    expect(toggleReaction({ '👍': ['u1'] }, '🥳', 'u1')).toEqual({ '🥳': ['u1'] });
+    // toggling the same custom emoji off clears it
+    expect(toggleReaction({ '🥳': ['u1'] }, '🥳', 'u1')).toBeNull();
+  });
+
+  it('groups counts by emoji across users', () => {
+    const map = toggleReaction({ '🔥': ['u2', 'u3'] }, '🔥', 'u1')!; // u1 joins 🔥
+    const grouped = Object.entries(map).map(([emoji, uids]) => ({ emoji, count: uids.length }));
+    expect(grouped).toEqual([{ emoji: '🔥', count: 3 }]);
+  });
 });
