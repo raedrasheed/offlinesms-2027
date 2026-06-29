@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList, View, Text, TextInput, Pressable, StyleSheet, Alert,
-  Platform, PanResponder, Image,
+  Platform, PanResponder, Image, ScrollView,
 } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -329,7 +329,9 @@ export default function Conversation({ route, navigation }: any) {
     [convo?.type, editing, draft, selection.end],
   );
   const mentionSuggestions = useMemo(
-    () => (activeMention ? filterMembers(mentionCandidates, activeMention.query) : []),
+    // High cap so the (scrollable) list can show every matching member, not a
+    // truncated handful.
+    () => (activeMention ? filterMembers(mentionCandidates, activeMention.query, 100) : []),
     [activeMention, mentionCandidates],
   );
   const pickMention = useCallback((m: MentionCandidate) => {
@@ -1101,21 +1103,34 @@ export default function Conversation({ route, navigation }: any) {
         <View style={{ backgroundColor: 'transparent' }}>
           {mentionSuggestions.length > 0 ? (
             <View style={s.mentionList}>
-              {mentionSuggestions.map(m => (
-                <Pressable key={m.uid} style={s.mentionRow} onPress={() => pickMention(m)} accessibilityRole="button">
-                  <View style={[s.mentionAvatar, { backgroundColor: avatarColor(m.uid) }]}>
-                    {reactorNames[m.uid]?.photoURL ? (
-                      <Image source={{ uri: reactorNames[m.uid]!.photoURL! }} style={s.mentionAvatarImg} />
-                    ) : (
-                      <Text style={s.mentionAvatarText}>{initials(m.displayName)}</Text>
-                    )}
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.mentionName} numberOfLines={1}>{m.displayName}</Text>
-                    {m.username ? <Text style={s.mentionSub} numberOfLines={1}>@{m.username}</Text> : null}
-                  </View>
-                </Pressable>
-              ))}
+              <ScrollView
+                style={s.mentionScroll}
+                keyboardShouldPersistTaps="handled"
+                nestedScrollEnabled
+                showsVerticalScrollIndicator
+              >
+                {mentionSuggestions.map((m, i) => (
+                  <Pressable
+                    key={m.uid}
+                    style={({ pressed }) => [s.mentionRow, i > 0 && s.mentionDivider, pressed && s.mentionRowPressed]}
+                    onPress={() => pickMention(m)}
+                    accessibilityRole="button"
+                    accessibilityLabel={m.displayName}
+                  >
+                    <View style={[s.mentionAvatar, { backgroundColor: avatarColor(m.uid) }]}>
+                      {reactorNames[m.uid]?.photoURL ? (
+                        <Image source={{ uri: reactorNames[m.uid]!.photoURL! }} style={s.mentionAvatarImg} />
+                      ) : (
+                        <Text style={s.mentionAvatarText}>{initials(m.displayName)}</Text>
+                      )}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.mentionName} numberOfLines={1}>{m.displayName}</Text>
+                      {m.username ? <Text style={s.mentionSub} numberOfLines={1}>@{m.username}</Text> : null}
+                    </View>
+                  </Pressable>
+                ))}
+              </ScrollView>
             </View>
           ) : null}
           {editing ? (
@@ -1317,13 +1332,16 @@ function buildStyles(colors: any, rtl: boolean) {
     pinPreview:{ fontSize: 12, color: colors.text.primary, marginTop: 2, textAlign: rtl ? 'right' : 'left' },
     pinClose:  { fontSize: 18, color: '#A16207', fontWeight: '700', paddingHorizontal: 4, minWidth: 32, minHeight: 32, textAlignVertical: 'center', textAlign: 'center' },
     // @mention suggestion list above the composer (capped height; scrolls within).
-    mentionList:    { marginHorizontal: 12, marginBottom: 6, maxHeight: 220, backgroundColor: colors.background.surface, borderRadius: 16, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 10, shadowOffset: { width: 0, height: 3 }, elevation: 5 },
-    mentionRow:     { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 9, borderBottomWidth: 1, borderColor: colors.ink100 },
-    mentionAvatar:  { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-    mentionAvatarImg:  { width: 34, height: 34, borderRadius: 17 },
-    mentionAvatarText: { color: '#fff', fontWeight: '800', fontSize: 13 },
-    mentionName:    { fontSize: 14, fontWeight: '700', color: colors.text.primary, textAlign: rtl ? 'right' : 'left' },
-    mentionSub:     { fontSize: 12, color: colors.text.muted, marginTop: 1, textAlign: rtl ? 'right' : 'left' },
+    mentionList:    { marginHorizontal: 12, marginBottom: 6, maxHeight: 260, backgroundColor: colors.background.surface, borderRadius: 16, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 12, shadowOffset: { width: 0, height: 3 }, elevation: 6 },
+    mentionScroll:  { maxHeight: 260 },
+    mentionRow:     { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 11, backgroundColor: colors.background.surface },
+    mentionRowPressed: { backgroundColor: colors.surface2 },
+    mentionDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderColor: colors.ink100 },
+    mentionAvatar:  { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+    mentionAvatarImg:  { width: 42, height: 42, borderRadius: 21 },
+    mentionAvatarText: { color: '#fff', fontWeight: '800', fontSize: 15 },
+    mentionName:    { fontSize: 15, fontWeight: '700', color: colors.text.primary, textAlign: rtl ? 'right' : 'left' },
+    mentionSub:     { fontSize: 13, color: colors.text.muted, marginTop: 2, textAlign: rtl ? 'right' : 'left' },
     composerPreview: { marginHorizontal: 12, marginBottom: 6, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 10, padding: 12, backgroundColor: colors.background.surface, borderRadius: 18, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 3 },
     composerPreviewTitle: { fontSize: 11, fontWeight: '700', color: colors.action.primary, textAlign: rtl ? 'right' : 'left' },
     composerPreviewBody:  { fontSize: 12, color: colors.text.primary, marginTop: 2, textAlign: rtl ? 'right' : 'left' },
