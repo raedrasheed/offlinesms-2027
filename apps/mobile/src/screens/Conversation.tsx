@@ -53,6 +53,7 @@ import { prefetchMedia } from '../media/mediaCache';
 import { AttachmentSheet } from '../components/chat/AttachmentSheet';
 import { EmojiPicker3D } from '../components/chat/EmojiPicker3D';
 import { SwipeToReply } from '../components/chat/SwipeToReply';
+import { detectMentionQuery, filterMembers, insertMention, resolveMentions, type MentionCandidate } from '../lib/mentions';
 import { LockedVoiceRecorderBar } from '../components/chat/LockedVoiceRecorderBar';
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
 import { validateMediaMessage, formatDuration, type AttachmentKey } from '../media/mediaValidation';
@@ -161,6 +162,10 @@ export default function Conversation({ route, navigation }: any) {
 
   const [replyTo, setReplyTo] = useState<ReplyTo | null>(null);
   const [editing, setEditing] = useState<{ messageId: string; originalText: string } | null>(null);
+  // @mention composer state: caret position + the members the user has picked
+  // (resolved to concrete spans against the final text on send).
+  const [selection, setSelection] = useState<{ start: number; end: number }>({ start: 0, end: 0 });
+  const [selectedMentions, setSelectedMentions] = useState<Array<{ userId: string; displayName: string }>>([]);
 
   const listRef = useRef<FlatList<Message>>(null);
   // Scroll bookkeeping for the inverted list. "bottom" (latest) is offset 0;
@@ -303,6 +308,39 @@ export default function Conversation({ route, navigation }: any) {
     }
     return map;
   }, [members, memberProfiles]);
+
+  // @mention suggestions (groups only). Candidates are the current group members
+  // (excluding me) — so a user can never be mentioned outside the group. The
+  // active query is derived from the caret position in the draft.
+  const mentionCandidates = useMemo<MentionCandidate[]>(() => {
+    if (convo?.type !== 'group') return [];
+    return members
+      .filter(m => m.uid !== me && (m.status ?? 'active') === 'active')
+      .map(m => ({
+        uid: m.uid,
+        displayName: reactorNames[m.uid]?.name ?? m.displayNameSnapshot ?? m.uid.slice(0, 6),
+        username: (memberProfiles[m.uid] as any)?.username ?? null,
+        phone: null,
+      }));
+  }, [convo?.type, members, me, reactorNames, memberProfiles]);
+
+  const activeMention = useMemo(
+    () => (convo?.type === 'group' && !editing ? detectMentionQuery(draft, selection.end) : null),
+    [convo?.type, editing, draft, selection.end],
+  );
+  const mentionSuggestions = useMemo(
+    () => (activeMention ? filterMembers(mentionCandidates, activeMention.query) : []),
+    [activeMention, mentionCandidates],
+  );
+  const pickMention = useCallback((m: MentionCandidate) => {
+    if (!activeMention) return;
+    const r = insertMention(draft, activeMention.start, selection.end, m);
+    setDraft(r.text);
+    setSelection({ start: r.cursor, end: r.cursor });
+    setSelectedMentions(prev =>
+      prev.some(x => x.userId === m.uid) ? prev : [...prev, { userId: m.uid, displayName: m.displayName }],
+    );
+  }, [activeMention, draft, selection.end]);
 
   // Group chat: tap a sender's avatar → member-info sheet (avatar/name/handle +
   // quick actions). Holds the tapped uid; the sheet is seeded from reactorNames
@@ -659,6 +697,11 @@ export default function Conversation({ route, navigation }: any) {
     const text = draft.trim();
     if (!text || busy) return;
     if (gate.kind !== 'allowed' && !editing) return;
+    // Resolve @mentions against the final (trimmed) text so spans are correct
+    // regardless of edits made after each mention was inserted. Only members the
+    // user actually picked (all in this group) can match.
+    const mentions = isGroup ? resolveMentions(text, selectedMentions) : [];
+    const clearComposer = () => { setReplyTo(null); setDraft(''); setSelectedMentions([]); setSelection({ start: 0, end: 0 }); clearDraft(id); stopTyping(id); };
     setBusy(true); setErr(null);
     try {
       if (editing) {
@@ -680,25 +723,17 @@ export default function Conversation({ route, navigation }: any) {
             preview: replyTo.preview,
             type: replyTo.type,
           } : null,
+          mentions: mentions.length ? mentions : null,
         });
         local.refresh();
-        setReplyTo(null);
-        setDraft('');
-        clearDraft(id);
-        stopTyping(id);
+        clearComposer();
       } else if (isOffline) {
         // Offline-first: persist locally and deliver on reconnect.
-        await enqueue({ conversationId: id, conversationType: isGroup ? 'group' : 'direct', text, replyTo: replyTo ?? null });
-        setReplyTo(null);
-        setDraft('');
-        clearDraft(id);
-        stopTyping(id);
+        await enqueue({ conversationId: id, conversationType: isGroup ? 'group' : 'direct', text, replyTo: replyTo ?? null, mentions: mentions.length ? mentions : null });
+        clearComposer();
       } else {
-        await sendTextMessage(id, text, replyTo);
-        setReplyTo(null);
-        setDraft('');
-        clearDraft(id);
-        stopTyping(id);
+        await sendTextMessage(id, text, replyTo, mentions.length ? mentions : null);
+        clearComposer();
       }
     } catch (e: any) {
       const code = e?.message ?? 'send-failed';
@@ -921,6 +956,7 @@ export default function Conversation({ route, navigation }: any) {
               onPlayedVoice={onPlayedVoice}
               onSendViaSms={onSendViaSms}
               onAvatarPress={onAvatarPress}
+              onMentionPress={onAvatarPress}
             />
             </SwipeToReply>
           );
@@ -1063,6 +1099,25 @@ export default function Conversation({ route, navigation }: any) {
         </View>
       ) : (
         <View style={{ backgroundColor: 'transparent' }}>
+          {mentionSuggestions.length > 0 ? (
+            <View style={s.mentionList}>
+              {mentionSuggestions.map(m => (
+                <Pressable key={m.uid} style={s.mentionRow} onPress={() => pickMention(m)} accessibilityRole="button">
+                  <View style={[s.mentionAvatar, { backgroundColor: avatarColor(m.uid) }]}>
+                    {reactorNames[m.uid]?.photoURL ? (
+                      <Image source={{ uri: reactorNames[m.uid]!.photoURL! }} style={s.mentionAvatarImg} />
+                    ) : (
+                      <Text style={s.mentionAvatarText}>{initials(m.displayName)}</Text>
+                    )}
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.mentionName} numberOfLines={1}>{m.displayName}</Text>
+                    {m.username ? <Text style={s.mentionSub} numberOfLines={1}>@{m.username}</Text> : null}
+                  </View>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
           {editing ? (
             <View style={s.composerPreview}>
               <View style={{ flex: 1 }}>
@@ -1133,6 +1188,7 @@ export default function Conversation({ route, navigation }: any) {
                         <TextInput
                           value={draft}
                           onChangeText={setDraft}
+                          onSelectionChange={e => setSelection(e.nativeEvent.selection)}
                           placeholder={editing ? t('messageActions.editingMessage') : isOffline ? 'Type · saved as draft' : t('convo.composerPlaceholder')}
                           style={s.input}
                           multiline
@@ -1260,6 +1316,14 @@ function buildStyles(colors: any, rtl: boolean) {
     pinTitle:  { fontSize: 11, fontWeight: '700', color: '#A16207', textAlign: rtl ? 'right' : 'left' },
     pinPreview:{ fontSize: 12, color: colors.text.primary, marginTop: 2, textAlign: rtl ? 'right' : 'left' },
     pinClose:  { fontSize: 18, color: '#A16207', fontWeight: '700', paddingHorizontal: 4, minWidth: 32, minHeight: 32, textAlignVertical: 'center', textAlign: 'center' },
+    // @mention suggestion list above the composer (capped height; scrolls within).
+    mentionList:    { marginHorizontal: 12, marginBottom: 6, maxHeight: 220, backgroundColor: colors.background.surface, borderRadius: 16, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 10, shadowOffset: { width: 0, height: 3 }, elevation: 5 },
+    mentionRow:     { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 9, borderBottomWidth: 1, borderColor: colors.ink100 },
+    mentionAvatar:  { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+    mentionAvatarImg:  { width: 34, height: 34, borderRadius: 17 },
+    mentionAvatarText: { color: '#fff', fontWeight: '800', fontSize: 13 },
+    mentionName:    { fontSize: 14, fontWeight: '700', color: colors.text.primary, textAlign: rtl ? 'right' : 'left' },
+    mentionSub:     { fontSize: 12, color: colors.text.muted, marginTop: 1, textAlign: rtl ? 'right' : 'left' },
     composerPreview: { marginHorizontal: 12, marginBottom: 6, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 10, padding: 12, backgroundColor: colors.background.surface, borderRadius: 18, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 3 },
     composerPreviewTitle: { fontSize: 11, fontWeight: '700', color: colors.action.primary, textAlign: rtl ? 'right' : 'left' },
     composerPreviewBody:  { fontSize: 12, color: colors.text.primary, marginTop: 2, textAlign: rtl ? 'right' : 'left' },

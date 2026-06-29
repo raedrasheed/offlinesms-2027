@@ -390,11 +390,12 @@ export async function sendTextMessage(
   conversationId: string,
   text: string,
   replyTo?: ReplyTo | null,
+  mentions?: Mention[] | null,
 ): Promise<string> {
   const res = await fn<
-    { conversationId: string; text: string; replyTo?: ReplyTo | null },
+    { conversationId: string; text: string; replyTo?: ReplyTo | null; mentions?: Mention[] | null },
     { messageId: string }
-  >('sendTextMessage')({ conversationId, text, replyTo: replyTo ?? null });
+  >('sendTextMessage')({ conversationId, text, replyTo: replyTo ?? null, mentions: mentions ?? null });
   return res.data.messageId;
 }
 

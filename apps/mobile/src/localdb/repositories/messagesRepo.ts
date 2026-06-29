@@ -310,6 +310,8 @@ export async function upsertRemoteMessage(r: {
   type?: 'text' | 'image' | 'voice'; caption?: string | null;
   text: string | null; remoteCreatedAt: number | null; editedAt?: number | null;
   deletedForEveryone?: boolean; replyToMessageId?: string | null; replyToPreview?: string | null;
+  replyToSenderUid?: string | null; replyToSenderName?: string | null; replyToType?: string | null;
+  mentions?: Array<{ userId: string; displayName: string; startIndex: number; endIndex: number }> | null;
   forwarded?: boolean; serverVersion?: number; status?: MessageStatus;
   reactions?: Record<string, string[]> | null; counts?: RemoteReceiptCounts;
   media?: RemoteMediaInput | null;
@@ -317,6 +319,7 @@ export async function upsertRemoteMessage(r: {
   const existing = await getByRemoteId(r.remoteId);
   const now = Date.now();
   const reactionsJson = r.reactions != null ? JSON.stringify(r.reactions) : null;
+  const mentionsJson = r.mentions != null ? JSON.stringify(r.mentions) : null;
   const c = r.counts ?? {};
   const md = r.media ?? null;
   const waveformJson = md?.waveform != null ? JSON.stringify(md.waveform) : null;
@@ -330,15 +333,18 @@ export async function upsertRemoteMessage(r: {
       'sender_display_name = COALESCE(?, sender_display_name)',
       'remote_created_at = COALESCE(?, remote_created_at)', 'edited_at = ?',
       'deleted_for_everyone = ?', 'reply_to_message_id = ?', 'reply_to_preview = ?',
+      'reply_to_sender_uid = ?', 'reply_to_sender_name = ?', 'reply_to_type = ?',
       'forwarded = ?', 'status = COALESCE(?, status)', "sync_status = 'synced'",
       'server_version = COALESCE(?, server_version)', 'updated_at = ?',
     ];
     const params: any[] = [
       r.type ?? null, r.caption ?? null, r.text, r.senderDisplayName ?? null, r.remoteCreatedAt, r.editedAt ?? null,
       r.deletedForEveryone ? 1 : 0, r.replyToMessageId ?? null, r.replyToPreview ?? null,
+      r.replyToSenderUid ?? null, r.replyToSenderName ?? null, r.replyToType ?? null,
       r.forwarded ? 1 : 0, r.status ?? null, r.serverVersion ?? null, now,
     ];
     if (r.reactions !== undefined) { sets.push('reactions_json = ?'); params.push(reactionsJson); }
+    if (r.mentions !== undefined) { sets.push('mentions_json = ?'); params.push(mentionsJson); }
     if (r.counts !== undefined) {
       sets.push('delivered_count = ?', 'read_count = ?', 'viewed_count = ?', 'played_count = ?');
       params.push(c.delivered ?? 0, c.read ?? 0, c.viewed ?? 0, c.played ?? 0);
@@ -364,18 +370,21 @@ export async function upsertRemoteMessage(r: {
       `INSERT INTO messages
         (id, local_id, remote_id, conversation_id, sender_uid, sender_display_name, type, text, preview, caption,
          created_at, remote_created_at, updated_at, edited_at, deleted_for_everyone, deleted_for_me, deleted_at,
-         reply_to_message_id, reply_to_preview, forwarded, forwarded_from_message_id,
+         reply_to_message_id, reply_to_preview, reply_to_sender_uid, reply_to_sender_name, reply_to_type,
+         mentions_json, forwarded, forwarded_from_message_id,
          status, error_code, error_message, sync_status, client_sequence, server_version,
          reactions_json, delivered_count, read_count, viewed_count, played_count,
          media_mime, media_size, media_width, media_height, media_duration_ms, media_waveform,
          media_storage_path, media_download_url, media_thumb_path, media_thumb_url, media_upload_status)
-       VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, NULL, ?, NULL, NULL, 'synced', 0, ?, ?, ?, ?, ?, ?,
+       VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, NULL, 'synced', 0, ?, ?, ?, ?, ?, ?,
          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         r.remoteId, r.remoteId, r.conversationId, r.senderUid, r.senderDisplayName ?? null,
         type, r.text, (r.text ?? '').slice(0, 200), r.caption ?? null,
         r.remoteCreatedAt ?? now, r.remoteCreatedAt ?? now, now,
         r.editedAt ?? null, r.deletedForEveryone ? 1 : 0, r.replyToMessageId ?? null, r.replyToPreview ?? null,
+        r.replyToSenderUid ?? null, r.replyToSenderName ?? null, r.replyToType ?? null,
+        mentionsJson,
         r.forwarded ? 1 : 0, r.status ?? 'sent', r.serverVersion ?? 0,
         reactionsJson, c.delivered ?? 0, c.read ?? 0, c.viewed ?? 0, c.played ?? 0,
         md?.mimeType ?? null, md?.sizeBytes ?? null, md?.width ?? null, md?.height ?? null,

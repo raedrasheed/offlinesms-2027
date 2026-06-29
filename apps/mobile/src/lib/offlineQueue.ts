@@ -16,6 +16,7 @@ export type QueuedMessage = {
   conversationType: 'direct' | 'group';
   text:             string;
   replyTo:          any | null;
+  mentions?:        any[] | null;
   createdAt:        number;
   updatedAt:        number;
   status:           QueueStatus;
@@ -62,7 +63,7 @@ export async function getQueue(): Promise<QueuedMessage[]> {
 }
 
 export async function enqueue(
-  item: Pick<QueuedMessage, 'clientMessageId' | 'conversationId' | 'conversationType' | 'text' | 'replyTo'>,
+  item: Pick<QueuedMessage, 'clientMessageId' | 'conversationId' | 'conversationType' | 'text' | 'replyTo' | 'mentions'>,
 ): Promise<QueuedMessage> {
   const q = await load();
   const now = Date.now();

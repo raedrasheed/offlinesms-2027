@@ -28,7 +28,7 @@ export const sendTextMessage = onCall(async (request) => {
   if (!uid) throw new HttpsError('unauthenticated', 'sign-in-required');
 
   const data = (request.data ?? {}) as {
-    conversationId?: unknown; text?: unknown; replyTo?: unknown;
+    conversationId?: unknown; text?: unknown; replyTo?: unknown; mentions?: unknown;
     localId?: unknown; idempotencyKey?: unknown;
   };
   if (typeof data.conversationId !== 'string' || !data.conversationId) {
@@ -76,6 +76,23 @@ export const sendTextMessage = onCall(async (request) => {
     };
   }
 
+  // Optional @mentions. Validate shape and clamp; membership filtering happens
+  // once participants are known (a user can't be mentioned outside the group).
+  const MENTION_MAX = 50;
+  type RawMention = { userId: string; displayName: string; startIndex: number; endIndex: number };
+  let rawMentions: RawMention[] = [];
+  if (Array.isArray(data.mentions)) {
+    for (const item of data.mentions.slice(0, MENTION_MAX)) {
+      const r = item as Record<string, unknown>;
+      if (typeof r?.userId !== 'string' || !r.userId) continue;
+      if (typeof r?.displayName !== 'string') continue;
+      const startIndex = typeof r.startIndex === 'number' ? r.startIndex : -1;
+      const endIndex = typeof r.endIndex === 'number' ? r.endIndex : -1;
+      if (startIndex < 0 || endIndex <= startIndex || endIndex > text.length) continue;
+      rawMentions.push({ userId: r.userId, displayName: r.displayName.slice(0, 80), startIndex, endIndex });
+    }
+  }
+
   const db = getFirestore();
   const convoRef = db.collection('conversations').doc(data.conversationId);
   const convoSnap = await convoRef.get();
@@ -93,6 +110,10 @@ export const sendTextMessage = onCall(async (request) => {
   if (!participants.includes(uid)) {
     throw new HttpsError('permission-denied', 'not-a-participant');
   }
+  // Only mentions of actual conversation members survive — never mention someone
+  // outside the group.
+  const participantSet = new Set(participants);
+  const mentions = rawMentions.filter(m => participantSet.has(m.userId));
   if (convo.status === 'disabled') {
     throw new HttpsError('failed-precondition', 'conversation-disabled');
   }
@@ -159,6 +180,7 @@ export const sendTextMessage = onCall(async (request) => {
     deletedForEveryone: false,
     editedAt:           null,
     replyTo,
+    mentions:           mentions.length > 0 ? mentions : null,
     forwarded:          false,
     forwardedFrom:      null,
     reactions:          null,

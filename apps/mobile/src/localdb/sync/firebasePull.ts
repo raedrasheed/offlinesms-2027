@@ -118,6 +118,10 @@ export async function pullMessages(conversationId: string, max = MSG_PAGE): Prom
       deletedForEveryone: !!m.deletedForEveryone,
       replyToMessageId: m.replyTo?.messageId ?? null,
       replyToPreview: m.replyTo?.preview ?? null,
+      replyToSenderUid: m.replyTo?.senderUid ?? null,
+      replyToSenderName: m.replyTo?.senderDisplayName ?? null,
+      replyToType: m.replyTo?.type ?? null,
+      mentions: Array.isArray(m.mentions) ? m.mentions : null,
       forwarded: !!m.forwarded,
       reactions: m.reactions ?? null,
       counts: {
@@ -179,6 +183,10 @@ export async function pullMessagesBefore(conversationId: string, beforeMs: numbe
       deletedForEveryone: !!m.deletedForEveryone,
       replyToMessageId: m.replyTo?.messageId ?? null,
       replyToPreview: m.replyTo?.preview ?? null,
+      replyToSenderUid: m.replyTo?.senderUid ?? null,
+      replyToSenderName: m.replyTo?.senderDisplayName ?? null,
+      replyToType: m.replyTo?.type ?? null,
+      mentions: Array.isArray(m.mentions) ? m.mentions : null,
       forwarded: !!m.forwarded,
       reactions: m.reactions ?? null,
       counts: {

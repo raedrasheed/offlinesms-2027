@@ -20,6 +20,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme';
 import { avatarColor, initials } from '../lib/avatar';
 import { LinkText } from './LinkText';
+import { MentionText } from './MentionText';
 import { ChatActionSheet, SheetAction } from './ChatActionSheet';
 import { ReactionsSheet, ReactorInfo } from './ReactionsSheet';
 import { EmojiReactionPicker } from './chat/EmojiReactionPicker';
@@ -79,6 +80,8 @@ export type MessageBubbleProps = {
   onPlayedVoice?: (msg: Message) => void;
   // Group chat: tap a sender's avatar to open their member-info sheet.
   onAvatarPress?: (uid: string) => void;
+  // Tap a highlighted @mention to open that member's info.
+  onMentionPress?: (uid: string) => void;
   // Offline-first: locally queued outgoing message not yet on the server.
   pending?:   'queued' | 'syncing' | 'failed';
   onRetry?:   () => void;
@@ -98,7 +101,7 @@ function formatTime(value: any): string {
 
 function MessageBubbleImpl({
   message: m, context, showSender, onReply, onEditStart, onForward, onJumpTo, onInfo, onSendViaSms,
-  onOpenImage, onRetryMedia, onPlayedVoice, onAvatarPress, pending, onRetry,
+  onOpenImage, onRetryMedia, onPlayedVoice, onAvatarPress, onMentionPress, pending, onRetry,
 }: MessageBubbleProps) {
   const mine    = context.isMyMessage;
   const deleted = m.deletedForEveryone === true;
@@ -368,7 +371,12 @@ function MessageBubbleImpl({
             {deleted ? (
               <Text style={[s.bubbleText, s.deletedText]}>This message was deleted.</Text>
             ) : (
-              <LinkText style={s.bubbleText}>{m.text ?? ''}</LinkText>
+              <MentionText
+                style={s.bubbleText}
+                text={m.text ?? ''}
+                mentions={m.mentions}
+                onMentionPress={onMentionPress}
+              />
             )}
           </View>
         )}
@@ -541,6 +549,7 @@ function areBubblePropsEqual(prev: MessageBubbleProps, next: MessageBubbleProps)
   if (prev.onRetryMedia  !== next.onRetryMedia)  return false;
   if (prev.onPlayedVoice !== next.onPlayedVoice) return false;
   if (prev.onAvatarPress !== next.onAvatarPress) return false;
+  if (prev.onMentionPress !== next.onMentionPress) return false;
   if (prev.onRetry       !== next.onRetry)       return false;
 
   const a = prev.message, b = next.message;
@@ -558,6 +567,7 @@ function areBubblePropsEqual(prev: MessageBubbleProps, next: MessageBubbleProps)
     if ((a as any).starredBy !== (b as any).starredBy) return false;
     if ((a as any).media     !== (b as any).media)     return false; // media + upload progress
     if ((a as any).replyTo   !== (b as any).replyTo)   return false;
+    if ((a as any).mentions  !== (b as any).mentions)  return false;
     if ((a as any).forwardedFrom !== (b as any).forwardedFrom) return false;
     if (a.senderPhotoURL    !== b.senderPhotoURL)    return false;
     if (a.senderDisplayName !== b.senderDisplayName) return false;

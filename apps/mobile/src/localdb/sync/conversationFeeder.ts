@@ -32,6 +32,10 @@ export function startConversationFeeder(conversationId: string, onChange: () => 
           deletedForEveryone: !!m.deletedForEveryone,
           replyToMessageId: m.replyTo?.messageId ?? null,
           replyToPreview: m.replyTo?.preview ?? null,
+          replyToSenderUid: m.replyTo?.senderUid ?? null,
+          replyToSenderName: m.replyTo?.senderDisplayName ?? null,
+          replyToType: (m.replyTo as any)?.type ?? null,
+          mentions: Array.isArray((m as any).mentions) ? (m as any).mentions : null,
           forwarded: !!m.forwarded,
           reactions: m.reactions ?? null,
           counts: {
