@@ -52,6 +52,7 @@ import * as FileSystem from 'expo-file-system';
 import { prefetchMedia } from '../media/mediaCache';
 import { AttachmentSheet } from '../components/chat/AttachmentSheet';
 import { EmojiPicker3D } from '../components/chat/EmojiPicker3D';
+import { SwipeToReply } from '../components/chat/SwipeToReply';
 import { LockedVoiceRecorderBar } from '../components/chat/LockedVoiceRecorderBar';
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
 import { validateMediaMessage, formatDuration, type AttachmentKey } from '../media/mediaValidation';
@@ -677,6 +678,7 @@ export default function Conversation({ route, navigation }: any) {
             senderUid: replyTo.senderUid,
             senderDisplayName: replyTo.senderDisplayName,
             preview: replyTo.preview,
+            type: replyTo.type,
           } : null,
         });
         local.refresh();
@@ -891,6 +893,7 @@ export default function Conversation({ route, navigation }: any) {
           const prevTs = previous ? msOf(previous.createdAt) : 0;
           const showDate = ts > 0 && (!prevTs || !isSameDay(new Date(ts), new Date(prevTs)));
           const bubble = (
+            <SwipeToReply enabled={!sendState && !item.deletedForEveryone} onReply={() => startReply(item)}>
             <MessageBubble
               message={item}
               pending={sendState}
@@ -919,6 +922,7 @@ export default function Conversation({ route, navigation }: any) {
               onSendViaSms={onSendViaSms}
               onAvatarPress={onAvatarPress}
             />
+            </SwipeToReply>
           );
           if (!showDate) return bubble;
           return (

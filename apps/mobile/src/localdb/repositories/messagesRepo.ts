@@ -137,6 +137,10 @@ export interface NewLocalMessage {
   text: string;
   replyToMessageId?: string | null;
   replyToPreview?: string | null;
+  replyToSenderUid?: string | null;
+  replyToSenderName?: string | null;
+  replyToType?: string | null;
+  mentionsJson?: string | null;
   deviceId: string;
   clientSequence: number;
 }
@@ -150,12 +154,15 @@ export async function insertLocalMessage(m: NewLocalMessage): Promise<MessageRow
     `INSERT INTO messages
       (id, local_id, remote_id, conversation_id, sender_uid, sender_display_name, type, text, preview,
        created_at, remote_created_at, updated_at, edited_at, deleted_for_everyone, deleted_for_me, deleted_at,
-       reply_to_message_id, reply_to_preview, forwarded, forwarded_from_message_id,
+       reply_to_message_id, reply_to_preview, reply_to_sender_uid, reply_to_sender_name, reply_to_type,
+       mentions_json, forwarded, forwarded_from_message_id,
        status, error_code, error_message, sync_status, client_sequence, server_version)
-     VALUES (?,?,NULL,?,?,?, 'text', ?, ?, ?, NULL, ?, NULL, 0, 0, NULL, ?, ?, 0, NULL, 'pending', NULL, NULL, 'pending', ?, 0)`,
+     VALUES (?,?,NULL,?,?,?, 'text', ?, ?, ?, NULL, ?, NULL, 0, 0, NULL, ?, ?, ?, ?, ?, ?, 0, NULL, 'pending', NULL, NULL, 'pending', ?, 0)`,
     [
       id, id, m.conversationId, m.senderUid, m.senderDisplayName ?? null, m.text, preview,
-      now, now, m.replyToMessageId ?? null, m.replyToPreview ?? null, m.clientSequence,
+      now, now, m.replyToMessageId ?? null, m.replyToPreview ?? null,
+      m.replyToSenderUid ?? null, m.replyToSenderName ?? null, m.replyToType ?? null,
+      m.mentionsJson ?? null, m.clientSequence,
     ],
   );
   return (await getByLocalId(id))!;

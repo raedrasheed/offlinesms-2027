@@ -46,6 +46,27 @@ describe('mapMessageRow', () => {
     expect(m.replyTo?.preview).toBe('earlier');
   });
 
+  it('maps the full reply snapshot (sender uid/name/type) for optimistic rendering', () => {
+    const m = mapMessageRow(row({
+      reply_to_message_id: 'r0', reply_to_preview: 'earlier',
+      reply_to_sender_uid: 'u9', reply_to_sender_name: 'Raed', reply_to_type: 'image',
+    }));
+    expect(m.replyTo).toMatchObject({
+      messageId: 'r0', senderUid: 'u9', senderDisplayName: 'Raed', preview: 'earlier', type: 'image',
+    });
+  });
+
+  it('parses the mentions JSON array', () => {
+    const mentions = [{ userId: 'u2', displayName: 'Raed', startIndex: 0, endIndex: 5 }];
+    const m = mapMessageRow(row({ mentions_json: JSON.stringify(mentions) }));
+    expect(m.mentions).toEqual(mentions);
+  });
+
+  it('returns null mentions for empty/invalid JSON', () => {
+    expect(mapMessageRow(row({ mentions_json: null })).mentions).toBeNull();
+    expect(mapMessageRow(row({ mentions_json: 'not json' })).mentions).toBeNull();
+  });
+
   it('marks deleted-for-everyone and forwarded flags', () => {
     const m = mapMessageRow(row({ deleted_for_everyone: 1, forwarded: 1 }));
     expect(m.deletedForEveryone).toBe(true);

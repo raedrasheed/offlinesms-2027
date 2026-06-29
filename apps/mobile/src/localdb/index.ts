@@ -64,7 +64,8 @@ export interface QueueSendInput {
   senderUid: string;
   senderDisplayName?: string | null;
   text: string;
-  replyTo?: { messageId: string; senderUid?: string; senderDisplayName?: string; preview?: string } | null;
+  replyTo?: { messageId: string; senderUid?: string; senderDisplayName?: string; preview?: string; type?: string } | null;
+  mentions?: Array<{ userId: string; displayName: string; startIndex: number; endIndex: number }> | null;
 }
 
 /**
@@ -77,6 +78,7 @@ export async function queueSendMessage(input: QueueSendInput): Promise<MessageRo
   const deviceId = await getDeviceId();
   const clientSequence = await messagesRepo.nextClientSequence(input.conversationId);
 
+  const mentions = input.mentions && input.mentions.length > 0 ? input.mentions : null;
   const row = await messagesRepo.insertLocalMessage({
     conversationId: input.conversationId,
     senderUid: input.senderUid,
@@ -84,6 +86,10 @@ export async function queueSendMessage(input: QueueSendInput): Promise<MessageRo
     text: input.text,
     replyToMessageId: input.replyTo?.messageId ?? null,
     replyToPreview: input.replyTo?.preview ?? null,
+    replyToSenderUid: input.replyTo?.senderUid ?? null,
+    replyToSenderName: input.replyTo?.senderDisplayName ?? null,
+    replyToType: input.replyTo?.type ?? (input.replyTo ? 'text' : null),
+    mentionsJson: mentions ? JSON.stringify(mentions) : null,
     deviceId,
     clientSequence,
   });
@@ -98,6 +104,7 @@ export async function queueSendMessage(input: QueueSendInput): Promise<MessageRo
       conversationId: input.conversationId,
       text: input.text,
       replyTo: input.replyTo ?? null,
+      mentions,
       localId: row.local_id,
       clientCreatedAt: row.created_at,
     },
