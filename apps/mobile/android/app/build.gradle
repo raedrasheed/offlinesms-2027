@@ -102,8 +102,8 @@ android {
         applicationId 'app.offlinesms.mobile'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "0.1.0"
+        versionCode 15
+        versionName "2.3.18"
     }
     signingConfigs {
         debug {
