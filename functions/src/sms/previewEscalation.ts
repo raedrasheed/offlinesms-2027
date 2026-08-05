@@ -75,7 +75,12 @@ export const previewSmsEscalation = onCall({ region: 'us-central1' }, async (req
   // Phase 25 — include the group's external phone contacts in the preview so
   // their count + masked-phone row shows up in the Recipients step and the
   // Points/Audience math matches what escalateSms will actually charge.
-  if (convo.type === 'group') {
+  //
+  // We intentionally do NOT gate this on `convo.type === 'group'`: a 1:1 chat
+  // simply has no externalMembers subcollection (loadExternalEligibles returns
+  // []), while gating on an exact type string silently drops external
+  // recipients if a group's `type` field is ever missing or legacy.
+  {
     const existingPhones = new Set(eligible.map(e => e.phone));
     const externalEligible = await loadExternalEligibles(db, data.conversationId, participants, existingPhones);
     for (const e of externalEligible) eligible.push(e);

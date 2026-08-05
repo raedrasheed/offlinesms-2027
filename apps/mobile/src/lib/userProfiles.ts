@@ -11,13 +11,15 @@ import { db } from './firebase';
 export interface UserProfile {
   displayName: string | null;
   photoURL: string | null;
+  username: string | null;
+  about: string | null;
 }
 
 const cache = new Map<string, UserProfile>();
 const inflight = new Map<string, Promise<UserProfile>>();
 
 export async function getUserProfile(uid: string): Promise<UserProfile> {
-  if (!uid) return { displayName: null, photoURL: null };
+  if (!uid) return { displayName: null, photoURL: null, username: null, about: null };
   const cached = cache.get(uid);
   if (cached) return cached;
   const pending = inflight.get(uid);
@@ -26,15 +28,17 @@ export async function getUserProfile(uid: string): Promise<UserProfile> {
   const p = (async (): Promise<UserProfile> => {
     try {
       const snap = await getDoc(doc(db, 'users', uid));
-      const d = (snap.data() ?? {}) as { displayName?: string; username?: string; photoURL?: string | null };
+      const d = (snap.data() ?? {}) as { displayName?: string; username?: string; photoURL?: string | null; about?: string | null };
       const profile: UserProfile = {
         displayName: d.displayName || (d.username ? `@${d.username}` : null),
         photoURL: d.photoURL ?? null,
+        username: d.username ?? null,
+        about: d.about ?? null,
       };
       cache.set(uid, profile);
       return profile;
     } catch {
-      return { displayName: null, photoURL: null };
+      return { displayName: null, photoURL: null, username: null, about: null };
     } finally {
       inflight.delete(uid);
     }

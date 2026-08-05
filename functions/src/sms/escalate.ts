@@ -131,7 +131,11 @@ export const escalateSms = onCall({ region: 'us-central1' }, async (request) => 
   // treats them like any other recipient. Audience filters apply only to
   // in-app receipts, so external contacts are always targeted (they have no
   // in-app delivery state).
-  if (convo.type === 'group') {
+  //
+  // Not gated on `convo.type === 'group'` (see previewEscalation): a 1:1 chat
+  // has no externalMembers subcollection so this is a no-op there, while the
+  // gate would silently drop externals if a group's `type` field is missing.
+  {
     const existingPhones = new Set(eligible.map(e => e.phone));
     const externalEligible = await loadExternalEligibles(db, data.conversationId, participants, existingPhones);
     for (const e of externalEligible) eligible.push(e);

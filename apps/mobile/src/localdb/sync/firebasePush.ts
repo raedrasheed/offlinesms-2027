@@ -89,6 +89,7 @@ export async function pushOutboxItem(item: OutboxRow): Promise<PushResult> {
         conversationId: payload.conversationId,
         text: payload.text,
         replyTo: payload.replyTo ?? null,
+        mentions: payload.mentions ?? null,
         localId: payload.localId,
         idempotencyKey: item.idempotency_key,
         clientCreatedAt: payload.clientCreatedAt ?? null,

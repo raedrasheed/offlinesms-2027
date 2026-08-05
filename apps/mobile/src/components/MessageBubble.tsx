@@ -19,8 +19,11 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme';
 import { avatarColor, initials } from '../lib/avatar';
+import { LinkText } from './LinkText';
+import { MentionText } from './MentionText';
 import { ChatActionSheet, SheetAction } from './ChatActionSheet';
 import { ReactionsSheet, ReactorInfo } from './ReactionsSheet';
+import { EmojiReactionPicker } from './chat/EmojiReactionPicker';
 import { ImageMessageBubble } from './chat/ImageMessageBubble';
 import { VoiceMessageBubble } from './chat/VoiceMessageBubble';
 import { AnimatedEmoji3D } from './chat/AnimatedEmoji3D';
@@ -75,6 +78,10 @@ export type MessageBubbleProps = {
   onOpenImage?:   (uri: string) => void;
   onRetryMedia?:  (msg: Message) => void;
   onPlayedVoice?: (msg: Message) => void;
+  // Group chat: tap a sender's avatar to open their member-info sheet.
+  onAvatarPress?: (uid: string) => void;
+  // Tap a highlighted @mention to open that member's info.
+  onMentionPress?: (uid: string) => void;
   // Offline-first: locally queued outgoing message not yet on the server.
   pending?:   'queued' | 'syncing' | 'failed';
   onRetry?:   () => void;
@@ -94,19 +101,28 @@ function formatTime(value: any): string {
 
 function MessageBubbleImpl({
   message: m, context, showSender, onReply, onEditStart, onForward, onJumpTo, onInfo, onSendViaSms,
-  onOpenImage, onRetryMedia, onPlayedVoice, pending, onRetry,
+  onOpenImage, onRetryMedia, onPlayedVoice, onAvatarPress, onMentionPress, pending, onRetry,
 }: MessageBubbleProps) {
   const mine    = context.isMyMessage;
   const deleted = m.deletedForEveryone === true;
   // For images without a caption, overlay time + ticks on the photo (WhatsApp
   // style) instead of below the bubble.
   const imageOverlayFooter = !deleted && m.type === 'image' && !(m.caption && m.caption.trim());
-  // Sender avatar/name: message snapshot first, then the resolved member profile.
+  // Sender avatar/name. Prefer the resolved member profile (kept in sync with
+  // the live user photo) over the per-message snapshot: the snapshot is frozen
+  // at send time and goes stale once the sender changes their picture, leaving
+  // a broken URL that renders as an invisible avatar. The snapshot is only a
+  // fallback for when the profile hasn't resolved (e.g. a left member).
   const senderProfile = context.reactorNames?.[m.senderUid];
-  const senderPhoto = m.senderPhotoURL ?? senderProfile?.photoURL ?? null;
+  const senderPhoto = senderProfile?.photoURL ?? m.senderPhotoURL ?? null;
   const senderName = m.senderDisplayName ?? senderProfile?.name ?? m.senderUid.slice(0, 2);
   const [sheetOpen, setSheetOpen] = useState(false);
+  // Track a photo URL that failed to load so we can fall back to the initials
+  // placeholder instead of leaving a blank gap. Keyed by URL so a new/updated
+  // photo is retried rather than permanently suppressed.
+  const [avatarErrorUri, setAvatarErrorUri] = useState<string | null>(null);
   const [reactionsOpen, setReactionsOpen] = useState(false);
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [emojiReplay, setEmojiReplay] = useState(0);
 
   // Memoise per-render allocations so a re-render (e.g. a sibling message
@@ -137,37 +153,43 @@ function MessageBubbleImpl({
   const receiptTone: ReceiptTone = transparentBubble ? 'white' : mediaMessage ? 'ink' : 'green';
 
   if (pending) {
+    // Same row/column wrappers as a normal sent bubble so it hugs its content,
+    // caps at 80% width, and right-aligns — instead of stretching full width.
     return (
-      <Pressable
-        style={[{ marginBottom: 2 }]}
-        onPress={pending === 'failed' ? onRetry : undefined}
-        disabled={pending !== 'failed'}
-      >
-        <View style={[s.bubble, s.sent, pending !== 'failed' && { opacity: 0.92 }]}>
-          <View style={s.bubbleRow}>
-            <Text style={s.bubbleText}>{m.text ?? ''}</Text>
-          </View>
-          <View style={s.bubbleFooter}>
-            {pending === 'failed' ? (
-              <>
-                <Ionicons name="alert-circle" size={12} color={colors.err} />
-                <Text style={[s.foot, { color: colors.err }]}>Failed · tap to retry</Text>
-              </>
-            ) : pending === 'syncing' ? (
-              <>
-                <Ionicons name="sync-outline" size={12} color={TG_GREEN} />
-                <Text style={[s.foot, { color: TG_GREEN }]}>Sending…</Text>
-              </>
-            ) : (
-              <>
-                <Ionicons name="time-outline" size={12} color={TG_GREEN} />
-                <Text style={[s.foot, { color: TG_GREEN }]}>Queued · sends when online</Text>
-              </>
-            )}
-            <Text style={[s.foot, { color: TG_GREEN }]}>{timeText}</Text>
-          </View>
+      <View style={[s.row, s.rowMine]}>
+        <View style={[s.col, s.colMine]}>
+          <Pressable
+            style={{ marginBottom: 2 }}
+            onPress={pending === 'failed' ? onRetry : undefined}
+            disabled={pending !== 'failed'}
+          >
+            <View style={[s.bubble, s.sent, pending !== 'failed' && { opacity: 0.92 }]}>
+              <View style={s.bubbleRow}>
+                <Text style={s.bubbleText}>{m.text ?? ''}</Text>
+              </View>
+              <View style={s.bubbleFooter}>
+                {pending === 'failed' ? (
+                  <>
+                    <Ionicons name="alert-circle" size={12} color={colors.err} />
+                    <Text style={[s.foot, { color: colors.err }]}>Failed · tap to retry</Text>
+                  </>
+                ) : pending === 'syncing' ? (
+                  <>
+                    <Ionicons name="sync-outline" size={12} color={TG_GREEN} />
+                    <Text style={[s.foot, { color: TG_GREEN }]}>Sending…</Text>
+                  </>
+                ) : (
+                  <>
+                    <Ionicons name="time-outline" size={12} color={TG_GREEN} />
+                    <Text style={[s.foot, { color: TG_GREEN }]}>Queued · sends when online</Text>
+                  </>
+                )}
+                <Text style={[s.foot, { color: TG_GREEN }]}>{timeText}</Text>
+              </View>
+            </View>
+          </Pressable>
         </View>
-      </Pressable>
+      </View>
     );
   }
 
@@ -256,13 +278,25 @@ function MessageBubbleImpl({
     <View style={[s.row, mine ? s.rowMine : s.rowTheirs]}>
       {showAvatar ? (
         showSender ? (
-          senderPhoto ? (
-            <Image source={senderImgSrc!} style={s.avatar} />
-          ) : (
-            <View style={[s.avatar, { backgroundColor: avatarColor(m.senderUid) }]}>
-              <Text style={s.avatarText}>{initials(senderName)}</Text>
-            </View>
-          )
+          <Pressable
+            onPress={onAvatarPress ? () => onAvatarPress(m.senderUid) : undefined}
+            disabled={!onAvatarPress}
+            hitSlop={6}
+            accessibilityRole="button"
+            accessibilityLabel={`${senderName} info`}
+          >
+            {senderPhoto && avatarErrorUri !== senderPhoto ? (
+              <Image
+                source={senderImgSrc!}
+                style={s.avatar}
+                onError={() => setAvatarErrorUri(senderPhoto)}
+              />
+            ) : (
+              <View style={[s.avatar, { backgroundColor: avatarColor(m.senderUid) }]}>
+                <Text style={s.avatarText}>{initials(senderName)}</Text>
+              </View>
+            )}
+          </Pressable>
         ) : (
           <View style={s.avatarSpacer} />
         )
@@ -334,9 +368,16 @@ function MessageBubbleImpl({
           </Pressable>
         ) : (
           <View style={s.bubbleRow}>
-            <Text style={[s.bubbleText, deleted && s.deletedText]}>
-              {deleted ? 'This message was deleted.' : (m.text ?? '')}
-            </Text>
+            {deleted ? (
+              <Text style={[s.bubbleText, s.deletedText]}>This message was deleted.</Text>
+            ) : (
+              <MentionText
+                style={s.bubbleText}
+                text={m.text ?? ''}
+                mentions={m.mentions}
+                onMentionPress={onMentionPress}
+              />
+            )}
           </View>
         )}
 
@@ -373,7 +414,14 @@ function MessageBubbleImpl({
         previewText={deleted ? 'This message was deleted.' : (m.text ?? '')}
         reactions={deleted ? [] : REACTION_EMOJIS}
         onReact={(e) => { close(); react(e); }}
+        onMore={deleted ? undefined : () => { close(); setEmojiPickerOpen(true); }}
         actions={sheetActions}
+      />
+
+      <EmojiReactionPicker
+        visible={emojiPickerOpen}
+        onClose={() => setEmojiPickerOpen(false)}
+        onSelect={(e) => { setEmojiPickerOpen(false); react(e); }}
       />
 
       <ReactionsSheet
@@ -500,6 +548,8 @@ function areBubblePropsEqual(prev: MessageBubbleProps, next: MessageBubbleProps)
   if (prev.onOpenImage   !== next.onOpenImage)   return false;
   if (prev.onRetryMedia  !== next.onRetryMedia)  return false;
   if (prev.onPlayedVoice !== next.onPlayedVoice) return false;
+  if (prev.onAvatarPress !== next.onAvatarPress) return false;
+  if (prev.onMentionPress !== next.onMentionPress) return false;
   if (prev.onRetry       !== next.onRetry)       return false;
 
   const a = prev.message, b = next.message;
@@ -517,6 +567,7 @@ function areBubblePropsEqual(prev: MessageBubbleProps, next: MessageBubbleProps)
     if ((a as any).starredBy !== (b as any).starredBy) return false;
     if ((a as any).media     !== (b as any).media)     return false; // media + upload progress
     if ((a as any).replyTo   !== (b as any).replyTo)   return false;
+    if ((a as any).mentions  !== (b as any).mentions)  return false;
     if ((a as any).forwardedFrom !== (b as any).forwardedFrom) return false;
     if (a.senderPhotoURL    !== b.senderPhotoURL)    return false;
     if (a.senderDisplayName !== b.senderDisplayName) return false;

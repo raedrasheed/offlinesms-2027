@@ -5,6 +5,7 @@
 import * as Contacts from 'expo-contacts';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { app } from './firebase';
+import { normalizePhoneToE164 } from './phone';
 
 export type ContactMatch = {
   uid:         string;
@@ -19,14 +20,11 @@ export type SyncProgress = {
   matched: number;
 };
 
-function normalizeE164(raw: string, defaultCountry = '+1'): string | null {
-  const digits = raw.replace(/[^\d+]/g, '');
-  if (digits.startsWith('+')) return /^\+[1-9]\d{6,14}$/.test(digits) ? digits : null;
-  if (/^\d{10,15}$/.test(digits)) return `${defaultCountry}${digits.replace(/^0+/, '')}`;
-  return null;
-}
-
-export async function loadDeviceContactsAsE164(defaultCountry = '+1'): Promise<string[]> {
+// App is Palestine-scoped, so a device contact stored without a country code is
+// Palestinian — default to +970 (never the device region, which may be +1). The
+// shared normalizer leaves numbers that already carry a country code or "+"
+// untouched, so foreign contacts match correctly too.
+export async function loadDeviceContactsAsE164(defaultCountry = '+970'): Promise<string[]> {
   const { data } = await Contacts.getContactsAsync({
     fields: [Contacts.Fields.PhoneNumbers],
     pageSize: 1000,
@@ -34,7 +32,7 @@ export async function loadDeviceContactsAsE164(defaultCountry = '+1'): Promise<s
   const out = new Set<string>();
   for (const c of data) {
     for (const p of c.phoneNumbers ?? []) {
-      const n = normalizeE164(p.number ?? '', defaultCountry);
+      const n = normalizePhoneToE164(p.number ?? '', defaultCountry);
       if (n) out.add(n);
     }
   }

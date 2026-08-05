@@ -29,6 +29,19 @@ function parseReactions(json: string | null): Record<string, string[]> | null {
   }
 }
 
+function parseMentions(json: string | null | undefined): Message['mentions'] {
+  if (!json) return null;
+  try {
+    const parsed = JSON.parse(json);
+    if (!Array.isArray(parsed)) return null;
+    return parsed.filter(
+      (m) => m && typeof m.userId === 'string' && typeof m.startIndex === 'number' && typeof m.endIndex === 'number',
+    );
+  } catch {
+    return null;
+  }
+}
+
 function parseWaveform(json: string | null | undefined): number[] | null {
   if (!json) return null;
   try {
@@ -76,13 +89,14 @@ export function mapMessageRow(row: MessageRow): Message {
     replyTo: row.reply_to_message_id
       ? {
           messageId: row.reply_to_message_id,
-          senderUid: '',
-          senderDisplayName: '',
+          senderUid: row.reply_to_sender_uid ?? '',
+          senderDisplayName: row.reply_to_sender_name ?? '',
           preview: row.reply_to_preview ?? '',
-          type: 'text',
+          type: (row.reply_to_type as 'text' | 'image' | 'voice') ?? 'text',
           createdAt: null,
         }
       : null,
+    mentions: parseMentions(row.mentions_json),
     forwarded: row.forwarded === 1,
     reactions: parseReactions(row.reactions_json),
     createdAt: at,

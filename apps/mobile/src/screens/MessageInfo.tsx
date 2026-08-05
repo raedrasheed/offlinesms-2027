@@ -152,7 +152,7 @@ export default function MessageInfo({ route, navigation }: any) {
           && (a.pendingCount > 0 || a.failedCount > 0 || a.deliveredCount > readTotal) ? (
           <Pressable
             style={s.escalateBtn}
-            onPress={() => navigation.navigate('SmsEscalation', { conversationId: id, messageId })}
+            onPress={() => navigation.navigate('SmsEscalation', { conversationId: id, messageId, messageText })}
           >
             <Text style={s.escalateText}>Send via OfflineSMS</Text>
             <Text style={s.escalateSub}>Reach recipients who haven’t read or received this message.</Text>

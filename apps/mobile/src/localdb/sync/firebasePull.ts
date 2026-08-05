@@ -118,6 +118,10 @@ export async function pullMessages(conversationId: string, max = MSG_PAGE): Prom
       deletedForEveryone: !!m.deletedForEveryone,
       replyToMessageId: m.replyTo?.messageId ?? null,
       replyToPreview: m.replyTo?.preview ?? null,
+      replyToSenderUid: m.replyTo?.senderUid ?? null,
+      replyToSenderName: m.replyTo?.senderDisplayName ?? null,
+      replyToType: m.replyTo?.type ?? null,
+      mentions: Array.isArray(m.mentions) ? m.mentions : null,
       forwarded: !!m.forwarded,
       reactions: m.reactions ?? null,
       counts: {
@@ -150,13 +154,20 @@ export async function pullMessages(conversationId: string, max = MSG_PAGE): Prom
  * `beforeMs`), for paging back through history that retention has evicted or
  * that the forward pull never reached. Does not move the forward cursor.
  * Returns how many docs were fetched (0 means no older history remains).
+ *
+ * `afterMs` (default 0) sets an exclusive lower bound: pass a "clear chat"
+ * watermark so paging never crosses it and resurrects cleared history.
  */
-export async function pullMessagesBefore(conversationId: string, beforeMs: number, max = MSG_PAGE): Promise<number> {
-  const snap = await getDocs(query(
-    collection(db, 'conversations', conversationId, 'messages'),
+export async function pullMessagesBefore(conversationId: string, beforeMs: number, afterMs = 0, max = MSG_PAGE): Promise<number> {
+  const constraints = [
     where('createdAt', '<', Timestamp.fromMillis(beforeMs)),
+    ...(afterMs > 0 ? [where('createdAt', '>', Timestamp.fromMillis(afterMs))] : []),
     orderBy('createdAt', 'desc'),
     qlimit(max),
+  ];
+  const snap = await getDocs(query(
+    collection(db, 'conversations', conversationId, 'messages'),
+    ...constraints,
   ));
   for (const d of snap.docs) {
     const m = d.data() as any;
@@ -172,6 +183,10 @@ export async function pullMessagesBefore(conversationId: string, beforeMs: numbe
       deletedForEveryone: !!m.deletedForEveryone,
       replyToMessageId: m.replyTo?.messageId ?? null,
       replyToPreview: m.replyTo?.preview ?? null,
+      replyToSenderUid: m.replyTo?.senderUid ?? null,
+      replyToSenderName: m.replyTo?.senderDisplayName ?? null,
+      replyToType: m.replyTo?.type ?? null,
+      mentions: Array.isArray(m.mentions) ? m.mentions : null,
       forwarded: !!m.forwarded,
       reactions: m.reactions ?? null,
       counts: {

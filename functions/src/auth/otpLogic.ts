@@ -20,24 +20,24 @@ export function isTestPhone(e164: string): boolean {
   return e164 === TEST_PHONE_E164;
 }
 
-// Sign-in is restricted to specific mobile prefixes per country (the relay only
-// serves these). The national (significant) number must start with one of these
-// for the country; countries not listed are unrestricted.
-export const SIGNIN_ALLOWED_PREFIXES: Record<string, string[]> = {
-  PS: ['59', '56'],   // Palestine
-  IL: ['59', '56'],   // Israel
-};
+// Sign-in is restricted to the mobile prefixes the relay serves. The national
+// (significant) number must start with one of these — for EVERY number. A
+// number with no detectable country code, or whose national number starts with
+// any other prefix, is "not supported" and rejected.
+export const SIGNIN_ALLOWED_PREFIXES = ['59', '56'] as const;
 
 /**
  * Is this phone allowed to sign in, given its ISO country and national number?
- * For restricted countries (PS/IL) the national number must start with 59 or 56;
- * all other countries pass. Pure + unit-testable.
+ *
+ * The rule is intentionally strict (the system serves only 59/56 mobile
+ * numbers): a usable country code is required AND the national significant
+ * number must start with 59 or 56. Numbers without a country code (countryCode
+ * null) or with any other prefix are not supported. Pure + unit-testable.
  */
 export function isSupportedSignInNumber(countryCode: string | null | undefined, nationalNumber: string): boolean {
-  if (!countryCode) return true;
-  const prefixes = SIGNIN_ALLOWED_PREFIXES[countryCode];
-  if (!prefixes) return true;
-  return prefixes.some(p => nationalNumber.startsWith(p));
+  if (!countryCode) return false;          // no country code → can't be a supported number
+  if (!nationalNumber) return false;
+  return SIGNIN_ALLOWED_PREFIXES.some(p => nationalNumber.startsWith(p));
 }
 
 /** Normalize to E.164 (or null if implausible). */

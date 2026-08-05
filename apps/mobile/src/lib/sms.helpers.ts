@@ -69,9 +69,16 @@ export function smsSkipReasonCopy(reason: SmsSkipReason): string {
 }
 
 /** Default SMS body for an escalation = the original message text, which the
- *  sender can edit before sending. Capped at the 320-char smsBody limit. */
+ *  sender can edit before sending. Capped at the 320-char smsBody limit.
+ *  Newlines are preserved (only spaces/tabs within a line are collapsed) so a
+ *  multi-line message keeps its structure in the SMS. */
 export function buildDefaultSmsBody(messageText: string | null | undefined): string {
-  const raw = (messageText ?? '').replace(/\s+/g, ' ').trim();
+  const raw = (messageText ?? '')
+    .replace(/\r\n?/g, '\n')      // normalize CRLF / CR → LF
+    .replace(/[ \t]+/g, ' ')      // collapse runs of spaces/tabs (keep newlines)
+    .replace(/ *\n */g, '\n')     // trim spaces hugging a newline
+    .replace(/\n{3,}/g, '\n\n')   // cap consecutive blank lines
+    .trim();
   const cap = 320;
   return raw.length > cap ? raw.slice(0, cap - 1) + '…' : raw;
 }

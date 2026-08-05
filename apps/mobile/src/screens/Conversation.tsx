@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList, View, Text, TextInput, Pressable, StyleSheet, Alert,
-  Platform, PanResponder, Image,
+  Platform, PanResponder, Image, ScrollView,
 } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -23,6 +23,7 @@ import {
   UserState,
   subscribeMembers,
   GroupMember,
+  getOrCreateDirectConversation,
 } from '../lib/conversations';
 import type { ReactorInfo } from '../components/ReactionsSheet';
 import { useUserProfiles } from '../lib/userProfiles';
@@ -35,6 +36,7 @@ import { useWallpaper } from '../lib/wallpaper';
 import { ChatWallpaperBackground } from '../components/ChatWallpaperBackground';
 import { Ionicons } from '@expo/vector-icons';
 import { MessageBubble } from '../components/MessageBubble';
+import { MemberInfoSheet } from '../components/MemberInfoSheet';
 import { useTheme } from '../context/ThemeContext';
 import { isRTL } from '../i18n';
 import { LoadingState, EmptyState, ErrorState } from '../components/state';
@@ -44,12 +46,14 @@ import { OfflineNotice, SyncSuccessChip } from '../components/OfflineBanners';
 import { getDraft, setDraft as persistDraft, clearDraft } from '../lib/drafts';
 import { useLocalConversation } from '../hooks/useLocalConversation';
 import { useMessagePersistence } from '../hooks/useLocalPersistence';
-import { queueSendMessage, queueEditMessage, queueMarkReceipt, retryMediaMessage, queueSendVoiceMessage, openLocalDb } from '../localdb';
+import { queueSendMessage, queueEditMessage, queueMarkReceipt, retryMediaMessage, queueSendVoiceMessage, openLocalDb, kickSync } from '../localdb';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import { prefetchMedia } from '../media/mediaCache';
 import { AttachmentSheet } from '../components/chat/AttachmentSheet';
 import { EmojiPicker3D } from '../components/chat/EmojiPicker3D';
+import { SwipeToReply } from '../components/chat/SwipeToReply';
+import { detectMentionQuery, filterMembers, insertMention, resolveMentions, renderMentionSegments, type MentionCandidate } from '../lib/mentions';
 import { LockedVoiceRecorderBar } from '../components/chat/LockedVoiceRecorderBar';
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
 import { validateMediaMessage, formatDuration, type AttachmentKey } from '../media/mediaValidation';
@@ -87,11 +91,36 @@ function buildPreview(text: string): string {
   return t.length > 80 ? t.slice(0, 79) + '…' : t;
 }
 
+// Milliseconds for a message timestamp (Firestore Timestamp-like or raw number).
+function msOf(value: any): number {
+  if (!value) return 0;
+  if (typeof value.toMillis === 'function') return value.toMillis();
+  if (typeof value === 'number') return value;
+  return 0;
+}
+
+function isSameDay(a: Date, b: Date): boolean {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
+// Label for a day-separator pill: Today / Yesterday / a localized date.
+function daySeparatorLabel(ms: number, t: (k: string, d?: string) => string): string {
+  if (!ms) return '';
+  const d = new Date(ms);
+  const now = new Date();
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (isSameDay(d, now)) return t('chat.dateToday', 'Today');
+  if (isSameDay(d, yesterday)) return t('chat.dateYesterday', 'Yesterday');
+  const sameYear = d.getFullYear() === now.getFullYear();
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'long', ...(sameYear ? {} : { year: 'numeric' }) });
+}
+
 export default function Conversation({ route, navigation }: any) {
   const { t } = useTranslation();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
-  const { id } = route.params as { id: string };
+  const { id, sharedText } = route.params as { id: string; sharedText?: string };
   const me = auth.currentUser?.uid ?? '';
   const { isOffline, enqueue, queuedFor, deliveredFor, deliveredNonce } = useOffline();
   const wallpaper = useWallpaper(id);
@@ -113,7 +142,8 @@ export default function Conversation({ route, navigation }: any) {
   useEffect(() => navigation.addListener('focus', () => {
     refreshRef.current?.();
     // Land on the latest message whenever the chat is opened/re-focused.
-    requestAnimationFrame(() => listRef.current?.scrollToEnd?.({ animated: false }));
+    // The list is inverted, so the latest message is at offset 0 (the bottom).
+    requestAnimationFrame(() => listRef.current?.scrollToOffset?.({ offset: 0, animated: false }));
   }), [navigation]);
 
   const [msgs, setMsgs] = useState<Message[] | null>(null);
@@ -132,8 +162,23 @@ export default function Conversation({ route, navigation }: any) {
 
   const [replyTo, setReplyTo] = useState<ReplyTo | null>(null);
   const [editing, setEditing] = useState<{ messageId: string; originalText: string } | null>(null);
+  // @mention composer state: caret position + the members the user has picked
+  // (resolved to concrete spans against the final text on send).
+  const [selection, setSelection] = useState<{ start: number; end: number }>({ start: 0, end: 0 });
+  const [selectedMentions, setSelectedMentions] = useState<Array<{ userId: string; displayName: string }>>([]);
 
   const listRef = useRef<FlatList<Message>>(null);
+  // Scroll bookkeeping for the inverted list. "bottom" (latest) is offset 0;
+  // nearBottomRef tracks whether we're there so we only auto-jump for genuinely
+  // NEW newest messages — never when older history loads at the top.
+  const nearBottomRef = useRef(true);
+  const lastBottomIdRef = useRef<string | null>(null);
+  const dataLenRef = useRef(0); // total rendered rows (messages + queued), for jumpTo index math
+  // Incoming messages we've already queued read/delivered receipts for, so we
+  // don't re-enqueue (and re-kick the outbox) for the whole history on every
+  // refresh/pagination — that was flooding the outbox with mark_receipt items.
+  const receiptedRef = useRef<Set<string>>(new Set());
+  const [showScrollDown, setShowScrollDown] = useState(false);
 
   // Conversation doc. Firestore hands us a fresh object on every snapshot —
   // even when nothing actually changed for this screen (e.g. lastMessage
@@ -163,10 +208,11 @@ export default function Conversation({ route, navigation }: any) {
       for (const m of rows) {
         if (m.senderUid === me || (m as any).senderId === me) continue;
         if (m.deletedForEveryone) continue;
+        if (receiptedRef.current.has(m.id)) continue;
+        receiptedRef.current.add(m.id);
         markReceipt(id, m.id, 'delivered');
         markReceipt(id, m.id, 'read');
       }
-      requestAnimationFrame(() => listRef.current?.scrollToEnd?.({ animated: false }));
     });
   }, [id, me, useLocal]);
 
@@ -175,13 +221,18 @@ export default function Conversation({ route, navigation }: any) {
   useEffect(() => {
     if (!useLocal || !id) return;
     markRead(id).catch(() => {});
+    // Only emit per-message receipts for incoming messages we haven't already
+    // receipted this session (deduped above) — never re-mark the whole history.
     for (const m of local.messages) {
       if (m.senderUid === me) continue;
       if (m.deletedForEveryone) continue;
+      if (receiptedRef.current.has(m.id)) continue;
+      receiptedRef.current.add(m.id);
       void queueMarkReceipt({ conversationId: id, messageId: m.id, status: 'delivered' });
       void queueMarkReceipt({ conversationId: id, messageId: m.id, status: 'read' });
     }
-    requestAnimationFrame(() => listRef.current?.scrollToEnd?.({ animated: false }));
+    // No manual scroll here — the list is inverted (opens at the bottom) and the
+    // new-message effect handles following new messages.
   }, [useLocal, id, me, local.messages]);
 
   // userState (drives starred + deletedForMe filtering).
@@ -246,23 +297,93 @@ export default function Conversation({ route, navigation }: any) {
       const prof = memberProfiles[m.uid];
       map[m.uid] = {
         name: m.displayNameSnapshot || prof?.displayName || m.uid.slice(0, 6),
-        photoURL: m.photoURLSnapshot || prof?.photoURL || null,
+        // Prefer the member's LIVE profile photo over the add-time snapshot.
+        // The snapshot is captured when the member joins and goes stale once
+        // they change their picture (a broken URL → invisible avatar), whereas
+        // the chat list reads the live photo — so the group bubble would
+        // disagree with the list. Fall back to the snapshot only while the
+        // live profile is still loading / unavailable (offline-first).
+        photoURL: prof?.photoURL || m.photoURLSnapshot || null,
       };
     }
     return map;
   }, [members, memberProfiles]);
+
+  // @mention suggestions (groups only). Candidates are the current group members
+  // (excluding me) — so a user can never be mentioned outside the group. The
+  // active query is derived from the caret position in the draft.
+  const mentionCandidates = useMemo<MentionCandidate[]>(() => {
+    if (convo?.type !== 'group') return [];
+    return members
+      .filter(m => m.uid !== me && (m.status ?? 'active') === 'active')
+      .map(m => ({
+        uid: m.uid,
+        displayName: reactorNames[m.uid]?.name ?? m.displayNameSnapshot ?? m.uid.slice(0, 6),
+        username: (memberProfiles[m.uid] as any)?.username ?? null,
+        phone: null,
+      }));
+  }, [convo?.type, members, me, reactorNames, memberProfiles]);
+
+  const activeMention = useMemo(
+    () => (convo?.type === 'group' && !editing ? detectMentionQuery(draft, selection.end) : null),
+    [convo?.type, editing, draft, selection.end],
+  );
+  const mentionSuggestions = useMemo(
+    // High cap so the (scrollable) list can show every matching member, not a
+    // truncated handful.
+    () => (activeMention ? filterMembers(mentionCandidates, activeMention.query, 100) : []),
+    [activeMention, mentionCandidates],
+  );
+  // Split the live draft into mention / plain runs so the composer can render
+  // inserted mentions bold + colored (like WhatsApp/Telegram). Null when there's
+  // nothing to highlight, so plain typing renders as a single string child.
+  const draftSegments = useMemo(() => {
+    if (convo?.type !== 'group' || selectedMentions.length === 0) return null;
+    const mentions = resolveMentions(draft, selectedMentions);
+    if (mentions.length === 0) return null;
+    return renderMentionSegments(draft, mentions);
+  }, [convo?.type, draft, selectedMentions]);
+
+  const pickMention = useCallback((m: MentionCandidate) => {
+    if (!activeMention) return;
+    const r = insertMention(draft, activeMention.start, selection.end, m);
+    setDraft(r.text);
+    setSelection({ start: r.cursor, end: r.cursor });
+    setSelectedMentions(prev =>
+      prev.some(x => x.userId === m.uid) ? prev : [...prev, { userId: m.uid, displayName: m.displayName }],
+    );
+  }, [activeMention, draft, selection.end]);
+
+  // Group chat: tap a sender's avatar → member-info sheet (avatar/name/handle +
+  // quick actions). Holds the tapped uid; the sheet is seeded from reactorNames
+  // for an instant paint, then upgrades to the live public profile.
+  const [infoMemberUid, setInfoMemberUid] = useState<string | null>(null);
+  const onAvatarPress = useCallback((uid: string) => setInfoMemberUid(uid), []);
+  const openMemberChat = useCallback(async (uid: string) => {
+    setInfoMemberUid(null);
+    try {
+      const conversationId = await getOrCreateDirectConversation(uid);
+      // push (not navigate) so the group stays on the back stack — we're already
+      // on a Conversation screen and navigate() would just swap its params.
+      (navigation.push ?? navigation.navigate)('Conversation', { id: conversationId });
+    } catch (e: any) {
+      Alert.alert('Couldn’t open chat', e?.message ?? 'Please try again.');
+    }
+  }, [navigation]);
 
   // Presence: peer online/last-seen + everyone's typing/recording activity.
   const presence = useChatPresence(id, isDirect ? peerUid : null);
   // Outbound typing (debounced; auto-stops on send/clear/leave; off while editing).
   useTypingPresence(id, draft, !editing);
 
-  // Restore a saved draft when opening the chat.
+  // Restore a saved draft when opening the chat. Text shared into the app (via
+  // ShareToChat → sharedText) takes precedence and pre-fills the composer.
   useEffect(() => {
     let on = true;
+    if (sharedText) { setDraft(prev => prev || sharedText); return () => { on = false; }; }
     getDraft(id).then(text => { if (on && text) setDraft(prev => prev || text); });
     return () => { on = false; };
-  }, [id]);
+  }, [id, sharedText]);
 
   // Persist the composer draft (debounced) so it survives navigation/restart.
   useEffect(() => {
@@ -313,8 +434,16 @@ export default function Conversation({ route, navigation }: any) {
   const jumpTo = useCallback((messageId: string) => {
     if (!visibleMsgs) return;
     const idx = visibleMsgs.findIndex(m => m.id === messageId);
-    if (idx >= 0) listRef.current?.scrollToIndex?.({ index: idx, animated: true, viewPosition: 0.3 });
+    if (idx < 0) return;
+    // The list is inverted: index 0 is the newest. Map the chronological index
+    // to the inverted one across the full data length (messages + queued).
+    const total = dataLenRef.current || visibleMsgs.length;
+    listRef.current?.scrollToIndex?.({ index: total - 1 - idx, animated: true, viewPosition: 0.5 });
   }, [visibleMsgs]);
+
+  // Re-attempt a stuck/failed local send: poke the sync engine to flush the
+  // outbox (it re-claims due items).
+  const retrySend = useCallback(() => { kickSync('manual'); }, []);
 
   const startReply = useCallback((m: Message) => {
     if (m.deletedForEveryone) return;
@@ -580,6 +709,11 @@ export default function Conversation({ route, navigation }: any) {
     const text = draft.trim();
     if (!text || busy) return;
     if (gate.kind !== 'allowed' && !editing) return;
+    // Resolve @mentions against the final (trimmed) text so spans are correct
+    // regardless of edits made after each mention was inserted. Only members the
+    // user actually picked (all in this group) can match.
+    const mentions = isGroup ? resolveMentions(text, selectedMentions) : [];
+    const clearComposer = () => { setReplyTo(null); setDraft(''); setSelectedMentions([]); setSelection({ start: 0, end: 0 }); clearDraft(id); stopTyping(id); };
     setBusy(true); setErr(null);
     try {
       if (editing) {
@@ -599,26 +733,19 @@ export default function Conversation({ route, navigation }: any) {
             senderUid: replyTo.senderUid,
             senderDisplayName: replyTo.senderDisplayName,
             preview: replyTo.preview,
+            type: replyTo.type,
           } : null,
+          mentions: mentions.length ? mentions : null,
         });
         local.refresh();
-        setReplyTo(null);
-        setDraft('');
-        clearDraft(id);
-        stopTyping(id);
+        clearComposer();
       } else if (isOffline) {
         // Offline-first: persist locally and deliver on reconnect.
-        await enqueue({ conversationId: id, conversationType: isGroup ? 'group' : 'direct', text, replyTo: replyTo ?? null });
-        setReplyTo(null);
-        setDraft('');
-        clearDraft(id);
-        stopTyping(id);
+        await enqueue({ conversationId: id, conversationType: isGroup ? 'group' : 'direct', text, replyTo: replyTo ?? null, mentions: mentions.length ? mentions : null });
+        clearComposer();
       } else {
-        await sendTextMessage(id, text, replyTo);
-        setReplyTo(null);
-        setDraft('');
-        clearDraft(id);
-        stopTyping(id);
+        await sendTextMessage(id, text, replyTo, mentions.length ? mentions : null);
+        clearComposer();
       }
     } catch (e: any) {
       const code = e?.message ?? 'send-failed';
@@ -667,6 +794,53 @@ export default function Conversation({ route, navigation }: any) {
     return [...visibleMsgs, ...queuedItems];
   }, [visibleMsgs, queuedItems]);
 
+  // Load older history when the user scrolls near the top. The list is NOT
+  // inverted (oldest at top, newest at bottom), so "older" lives at the top.
+  // local.loadOlder grows the local window and, when local history is
+  // exhausted, back-fills from Firestore — so evicted/older messages return.
+  // Inverted list: newest is at the top of the data array (index 0) and the
+  // bottom of the screen (scroll offset 0).
+  const invData = useMemo(() => data.slice().reverse(), [data]);
+  useEffect(() => { dataLenRef.current = data.length; }, [data]);
+
+  const onListScroll = useCallback((e: any) => {
+    // Inverted: the bottom (latest) is offset 0; away from it → show the button.
+    const nearBottom = e.nativeEvent.contentOffset.y <= 80;
+    nearBottomRef.current = nearBottom;
+    setShowScrollDown(prev => (prev === !nearBottom ? prev : !nearBottom));
+  }, []);
+
+  // Pagination: onEndReached fires near the visual TOP in an inverted list.
+  const onReachOlder = useCallback(() => {
+    if (useLocal) void local.loadOlder();
+  }, [useLocal, local]);
+
+  const scrollToBottom = useCallback(() => {
+    // One reliable jump — offset 0 is the latest message in an inverted list.
+    listRef.current?.scrollToOffset?.({ offset: 0, animated: true });
+    nearBottomRef.current = true;
+    setShowScrollDown(false);
+  }, []);
+
+  // Jump to the bottom only for genuinely new newest messages: ones I sent, or
+  // incoming ones while I'm already near the bottom. If I'm reading older
+  // messages, leave my position alone and surface the scroll-to-latest button.
+  useEffect(() => {
+    if (!data.length) return;
+    const last = data[data.length - 1]; // chronological newest
+    const lastId: string | null = last?.id ?? null;
+    if (lastBottomIdRef.current === lastId) return; // older loaded → not a new bottom msg
+    const prev = lastBottomIdRef.current;
+    lastBottomIdRef.current = lastId;
+    if (prev == null) return; // first population — inverted list already sits at the bottom
+    const mine = last?.senderUid === me || (last as any)?.senderId === me;
+    if (mine || nearBottomRef.current) {
+      requestAnimationFrame(() => listRef.current?.scrollToOffset?.({ offset: 0, animated: true }));
+    } else {
+      setShowScrollDown(true);
+    }
+  }, [data, me]);
+
   const body = useMemo(() => {
     if (visibleMsgs === null) return <LoadingState fullPage title="Loading messages…" />;
 
@@ -693,28 +867,40 @@ export default function Conversation({ route, navigation }: any) {
       <FlatList
         ref={listRef}
         style={s.msgList}
-        data={data}
+        // Inverted: index 0 (newest) renders at the bottom and the list opens
+        // there automatically — so "scroll to latest" is just offset 0, and
+        // loading older history (appended to the data tail) never moves the view.
+        inverted
+        data={invData}
         keyExtractor={(m: any) => m.id}
         contentContainerStyle={{ padding: 12, gap: 4 }}
-        ListHeaderComponent={
+        // In an inverted list the footer renders at the visual TOP, so the
+        // "encrypted" banner sits above the oldest message as intended.
+        ListFooterComponent={
           <View style={s.listHeader}>
-            <View style={s.datePill}><Text style={s.datePillText}>Today</Text></View>
             <View style={s.e2eBanner}>
               <Ionicons name="lock-closed" size={12} color="#92400E" />
               <Text style={s.e2eBannerText}>Messages and calls are end-to-end encrypted</Text>
             </View>
           </View>
         }
-        onContentSizeChange={() => listRef.current?.scrollToEnd?.({ animated: false })}
-        // FlatList tuning: only render what's near the viewport on first
-        // paint, batch new rows in small windows, and let RN unmount rows
-        // that scroll out of the viewport on Android. Big wins for long
-        // chat histories.
+        onScroll={onListScroll}
+        scrollEventThrottle={64}
+        // Page in older history when the user nears the top of the inverted list.
+        onEndReached={onReachOlder}
+        onEndReachedThreshold={0.4}
+        onScrollToIndexFailed={(info) => {
+          // Reply-jump target not measured yet: approximate, then retry.
+          listRef.current?.scrollToOffset?.({ offset: info.averageItemLength * info.index, animated: false });
+          setTimeout(() => listRef.current?.scrollToIndex?.({ index: info.index, animated: true, viewPosition: 0.5 }), 120);
+        }}
+        // FlatList tuning. removeClippedSubviews is left OFF: combined with an
+        // inverted list on Android it can blank out rows.
         initialNumToRender={15}
         maxToRenderPerBatch={10}
         windowSize={10}
         updateCellsBatchingPeriod={50}
-        removeClippedSubviews={Platform.OS === 'android'}
+        removeClippedSubviews={false}
         renderItem={({ item, index }) => {
           if (item.__pending) {
             return (
@@ -732,11 +918,33 @@ export default function Conversation({ route, navigation }: any) {
             );
           }
           const mine = item.senderUid === me || (item as any).senderId === me;
-          const previous = index > 0 ? data[index - 1] : null;
+          // Surface real send state for my own not-yet-synced TEXT messages so
+          // they show "Sending/Queued/Failed" instead of a misleading "Seen by
+          // 0" — and so the un-pushed message has no server-info menu (which
+          // would 404 with message-not-found). Media keeps its own upload UI.
+          const sendState: 'queued' | 'syncing' | 'failed' | undefined =
+            mine && !item.deletedForEveryone && (item.type ?? 'text') === 'text'
+              ? (item.status === 'failed' ? 'failed'
+                : item.status === 'sending' ? (isOffline ? 'queued' : 'syncing')
+                : undefined)
+              : undefined;
+          // Inverted data is newest-first, so the chronologically-previous
+          // (older) message — the one rendered just above — is at index + 1.
+          const previous = index < invData.length - 1 ? invData[index + 1] : null;
           const showSender = isGroup && !mine && (!previous || previous.__pending || previous.senderUid !== item.senderUid);
-          return (
+          // Day separator: shown above the first message of each day (i.e. when
+          // the older message above belongs to a different calendar day, or this
+          // is the very oldest message). Rendered above the bubble in the cell so
+          // — even inverted — it appears at the top of that day's group.
+          const ts = msOf(item.createdAt);
+          const prevTs = previous ? msOf(previous.createdAt) : 0;
+          const showDate = ts > 0 && (!prevTs || !isSameDay(new Date(ts), new Date(prevTs)));
+          const bubble = (
+            <SwipeToReply enabled={!sendState && !item.deletedForEveryone} onReply={() => startReply(item)}>
             <MessageBubble
               message={item}
+              pending={sendState}
+              onRetry={retrySend}
               showSender={showSender}
               context={{
                 conversationId: id,
@@ -759,12 +967,24 @@ export default function Conversation({ route, navigation }: any) {
               onRetryMedia={retryMedia}
               onPlayedVoice={onPlayedVoice}
               onSendViaSms={onSendViaSms}
+              onAvatarPress={onAvatarPress}
+              onMentionPress={onAvatarPress}
             />
+            </SwipeToReply>
+          );
+          if (!showDate) return bubble;
+          return (
+            <>
+              <View style={s.dateSep}>
+                <View style={s.datePill}><Text style={s.datePillText}>{daySeparatorLabel(ts, t as any)}</Text></View>
+              </View>
+              {bubble}
+            </>
           );
         }}
       />
     );
-  }, [data, visibleMsgs, queuedItems, me, isGroup, id, myRoleIsAdmin, starred, convo?.pinnedMessage, convo?.memberCount, reactorNames, useLocal, startReply, startEdit, startForward, jumpTo, openInfo, openImage, retryMedia, onPlayedVoice, onSendViaSms]);
+  }, [invData, visibleMsgs, queuedItems, me, isGroup, id, myRoleIsAdmin, starred, convo?.pinnedMessage, convo?.memberCount, reactorNames, useLocal, startReply, startEdit, startForward, jumpTo, openInfo, openImage, retryMedia, onPlayedVoice, onSendViaSms, onAvatarPress, onListScroll, onReachOlder, t, isOffline, retrySend]);
 
   return (
     <KeyboardAvoidingView behavior="padding" style={s.root}>
@@ -849,6 +1069,23 @@ export default function Conversation({ route, navigation }: any) {
 
       {body}
 
+      {showScrollDown ? (
+        <Pressable
+          onPress={scrollToBottom}
+          accessibilityRole="button"
+          accessibilityLabel={t('common.scrollToLatest', 'Scroll to latest messages')}
+          style={{
+            position: 'absolute', right: 16, bottom: 88,
+            width: 44, height: 44, borderRadius: 22,
+            alignItems: 'center', justifyContent: 'center',
+            backgroundColor: colors.background.surface, borderWidth: 1, borderColor: colors.border.subtle,
+            shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 5,
+          }}
+        >
+          <Ionicons name="chevron-down" size={24} color={colors.action.primary} />
+        </Pressable>
+      ) : null}
+
       {deliveredChip > 0 ? <SyncSuccessChip count={deliveredChip} /> : null}
       {isOffline ? <OfflineNotice /> : null}
 
@@ -874,6 +1111,40 @@ export default function Conversation({ route, navigation }: any) {
         </View>
       ) : (
         <View style={{ backgroundColor: 'transparent' }}>
+          {mentionSuggestions.length > 0 ? (
+            <View style={s.mentionList}>
+              <ScrollView
+                style={s.mentionScroll}
+                keyboardShouldPersistTaps="handled"
+                nestedScrollEnabled
+                showsVerticalScrollIndicator
+              >
+                {mentionSuggestions.map((m, i) => (
+                  <View key={m.uid}>
+                    {i > 0 ? <View style={s.mentionDivider} /> : null}
+                    <Pressable
+                      style={({ pressed }) => [s.mentionRow, pressed && s.mentionRowPressed]}
+                      onPress={() => pickMention(m)}
+                      accessibilityRole="button"
+                      accessibilityLabel={m.displayName}
+                    >
+                      <View style={[s.mentionAvatar, { backgroundColor: avatarColor(m.uid) }]}>
+                        {reactorNames[m.uid]?.photoURL ? (
+                          <Image source={{ uri: reactorNames[m.uid]!.photoURL! }} style={s.mentionAvatarImg} />
+                        ) : (
+                          <Text style={s.mentionAvatarText}>{initials(m.displayName)}</Text>
+                        )}
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={s.mentionName} numberOfLines={1}>{m.displayName}</Text>
+                        {m.username ? <Text style={s.mentionSub} numberOfLines={1}>@{m.username}</Text> : null}
+                      </View>
+                    </Pressable>
+                  </View>
+                ))}
+              </ScrollView>
+            </View>
+          ) : null}
           {editing ? (
             <View style={s.composerPreview}>
               <View style={{ flex: 1 }}>
@@ -942,15 +1213,26 @@ export default function Conversation({ route, navigation }: any) {
                           </Pressable>
                         ) : null}
                         <TextInput
-                          value={draft}
                           onChangeText={setDraft}
+                          onSelectionChange={e => setSelection(e.nativeEvent.selection)}
                           placeholder={editing ? t('messageActions.editingMessage') : isOffline ? 'Type · saved as draft' : t('convo.composerPlaceholder')}
                           style={s.input}
                           multiline
                           maxLength={4000}
                           textAlign={isRTL ? 'right' : 'left'}
                           accessibilityLabel={t('convo.composerPlaceholder')}
-                        />
+                        >
+                          {/* Formatted children when the draft has mentions
+                              (bold + colored); otherwise the plain string. The
+                              TextInput is controlled by these children. */}
+                          {draftSegments
+                            ? draftSegments.map((seg, i) =>
+                                seg.type === 'mention'
+                                  ? <Text key={i} style={s.composerMentionText}>{seg.text}</Text>
+                                  : <Text key={i}>{seg.text}</Text>,
+                              )
+                            : draft}
+                        </TextInput>
                         {!editing ? (
                           <Pressable
                             style={s.inlineIcon}
@@ -1018,6 +1300,17 @@ export default function Conversation({ route, navigation }: any) {
         onClose={() => setEmojiOpen(false)}
         onSelect={e => setDraft(d => d + e.char)}
       />
+
+      <MemberInfoSheet
+        visible={!!infoMemberUid}
+        uid={infoMemberUid}
+        fallbackName={infoMemberUid ? reactorNames[infoMemberUid]?.name : null}
+        fallbackPhoto={infoMemberUid ? reactorNames[infoMemberUid]?.photoURL : null}
+        isSelf={infoMemberUid === me}
+        onClose={() => setInfoMemberUid(null)}
+        onMessage={openMemberChat}
+        onViewGroupInfo={() => navigation.navigate('GroupInfo', { id })}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -1050,6 +1343,7 @@ function buildStyles(colors: any, rtl: boolean) {
     title:    { fontSize: 16, fontWeight: '800', color: colors.text.primary, textAlign: rtl ? 'right' : 'left' },
     subtitle: { fontSize: 12, color: colors.action.primary, marginTop: 1, textAlign: rtl ? 'right' : 'left' },
     listHeader: { alignItems: 'center', gap: 10, paddingTop: 6, paddingBottom: 8 },
+    dateSep:    { alignItems: 'center', marginVertical: 6 },
     datePill:   { backgroundColor: colors.background.surface, paddingHorizontal: 14, paddingVertical: 5, borderRadius: 999, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 3, shadowOffset: { width: 0, height: 1 }, elevation: 1 },
     datePillText: { fontSize: 12, fontWeight: '700', color: colors.text.muted },
     e2eBanner:  { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FBEFD0', paddingHorizontal: 14, paddingVertical: 9, borderRadius: 14, maxWidth: '88%' },
@@ -1059,6 +1353,20 @@ function buildStyles(colors: any, rtl: boolean) {
     pinTitle:  { fontSize: 11, fontWeight: '700', color: '#A16207', textAlign: rtl ? 'right' : 'left' },
     pinPreview:{ fontSize: 12, color: colors.text.primary, marginTop: 2, textAlign: rtl ? 'right' : 'left' },
     pinClose:  { fontSize: 18, color: '#A16207', fontWeight: '700', paddingHorizontal: 4, minWidth: 32, minHeight: 32, textAlignVertical: 'center', textAlign: 'center' },
+    // @mention suggestion list above the composer (capped height; scrolls within).
+    mentionList:    { marginHorizontal: 12, marginBottom: 6, maxHeight: 260, backgroundColor: colors.background.surface, borderRadius: 16, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 12, shadowOffset: { width: 0, height: 3 }, elevation: 6 },
+    mentionScroll:  { maxHeight: 260 },
+    mentionRow:     { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 11, backgroundColor: colors.background.surface },
+    mentionRowPressed: { backgroundColor: colors.surface2 },
+    // Light-gray separator with a soft drop shadow so it reads as a raised "3D"
+    // divider rather than a flat hairline.
+    mentionDivider: { height: 1, backgroundColor: '#E2E6EB', marginHorizontal: 12, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 1.5, shadowOffset: { width: 0, height: 1 }, elevation: 2 },
+    composerMentionText: { color: colors.action.primary, fontWeight: '800' },
+    mentionAvatar:  { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+    mentionAvatarImg:  { width: 42, height: 42, borderRadius: 21 },
+    mentionAvatarText: { color: '#fff', fontWeight: '800', fontSize: 15 },
+    mentionName:    { fontSize: 15, fontWeight: '700', color: colors.text.primary, textAlign: rtl ? 'right' : 'left' },
+    mentionSub:     { fontSize: 13, color: colors.text.muted, marginTop: 2, textAlign: rtl ? 'right' : 'left' },
     composerPreview: { marginHorizontal: 12, marginBottom: 6, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 10, padding: 12, backgroundColor: colors.background.surface, borderRadius: 18, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 3 },
     composerPreviewTitle: { fontSize: 11, fontWeight: '700', color: colors.action.primary, textAlign: rtl ? 'right' : 'left' },
     composerPreviewBody:  { fontSize: 12, color: colors.text.primary, marginTop: 2, textAlign: rtl ? 'right' : 'left' },

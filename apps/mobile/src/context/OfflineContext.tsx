@@ -24,6 +24,7 @@ type EnqueueArgs = {
   conversationType: 'direct' | 'group';
   text:             string;
   replyTo?:         any | null;
+  mentions?:        any[] | null;
 };
 
 type OfflineValue = {
@@ -91,7 +92,7 @@ export function OfflineProvider({ children }: { children: React.ReactNode }) {
         if (!onlineRef.current) break;       // lost connection mid-drain → resume later
         await updateQueued(m.localQueueId, { status: 'syncing' });
         try {
-          await sendTextMessage(m.conversationId, m.text, m.replyTo ?? null);
+          await sendTextMessage(m.conversationId, m.text, m.replyTo ?? null, m.mentions ?? null);
           await removeQueued(m.localQueueId);   // only after server confirms
           deliveredThisRun[m.conversationId] = (deliveredThisRun[m.conversationId] ?? 0) + 1;
         } catch (e: any) {
@@ -128,6 +129,7 @@ export function OfflineProvider({ children }: { children: React.ReactNode }) {
       conversationType: args.conversationType,
       text:             args.text,
       replyTo:          args.replyTo ?? null,
+      mentions:         args.mentions ?? null,
       clientMessageId:  `c_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     });
   }, []);

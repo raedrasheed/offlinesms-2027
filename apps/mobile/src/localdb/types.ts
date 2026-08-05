@@ -94,6 +94,11 @@ export interface MessageRow {
   deleted_at: number | null;
   reply_to_message_id: string | null;
   reply_to_preview: string | null;
+  // v5 — richer reply snapshot + @mention metadata. Optional for older rows/tests.
+  reply_to_sender_uid?: string | null;
+  reply_to_sender_name?: string | null;
+  reply_to_type?: string | null;
+  mentions_json?: string | null;
   forwarded: number;
   forwarded_from_message_id: string | null;
   status: MessageStatus;
@@ -207,4 +212,8 @@ export type SyncStateKey =
   // Per-conversation message high-water mark (max remote createdAt pulled).
   | `msg_cursor:${string}`
   // Per-conversation "cleared chat" watermark (hide messages at/older than ms).
-  | `chat_cleared:${string}`;
+  | `chat_cleared:${string}`
+  // Full-history backfill: low-water frontier (oldest createdAt fetched so far)
+  // and a "complete" flag, so backfill is resumable across sync runs.
+  | `backfill_before:${string}`
+  | `backfill_done:${string}`;

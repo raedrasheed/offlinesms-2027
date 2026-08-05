@@ -61,6 +61,16 @@ export async function getMaxMessageTime(conversationId: string): Promise<number>
   return row?.t ?? 0;
 }
 
+/** Oldest synced message time (min remote createdAt) for a conversation; 0 when
+ *  none. Used as the starting frontier for the full-history backfill. */
+export async function getMinMessageTime(conversationId: string): Promise<number> {
+  const row = await getDb().first<{ t: number | null }>(
+    `SELECT MIN(remote_created_at) AS t FROM messages WHERE conversation_id = ?`,
+    [conversationId],
+  );
+  return row?.t ?? 0;
+}
+
 /** Phase 23 — delete all local messages for a conversation ("clear chat"). */
 export async function deleteConversationMessages(conversationId: string): Promise<number> {
   const before = await getDb().first<{ n: number }>(
@@ -127,6 +137,10 @@ export interface NewLocalMessage {
   text: string;
   replyToMessageId?: string | null;
   replyToPreview?: string | null;
+  replyToSenderUid?: string | null;
+  replyToSenderName?: string | null;
+  replyToType?: string | null;
+  mentionsJson?: string | null;
   deviceId: string;
   clientSequence: number;
 }
@@ -140,12 +154,15 @@ export async function insertLocalMessage(m: NewLocalMessage): Promise<MessageRow
     `INSERT INTO messages
       (id, local_id, remote_id, conversation_id, sender_uid, sender_display_name, type, text, preview,
        created_at, remote_created_at, updated_at, edited_at, deleted_for_everyone, deleted_for_me, deleted_at,
-       reply_to_message_id, reply_to_preview, forwarded, forwarded_from_message_id,
+       reply_to_message_id, reply_to_preview, reply_to_sender_uid, reply_to_sender_name, reply_to_type,
+       mentions_json, forwarded, forwarded_from_message_id,
        status, error_code, error_message, sync_status, client_sequence, server_version)
-     VALUES (?,?,NULL,?,?,?, 'text', ?, ?, ?, NULL, ?, NULL, 0, 0, NULL, ?, ?, 0, NULL, 'pending', NULL, NULL, 'pending', ?, 0)`,
+     VALUES (?,?,NULL,?,?,?, 'text', ?, ?, ?, NULL, ?, NULL, 0, 0, NULL, ?, ?, ?, ?, ?, ?, 0, NULL, 'pending', NULL, NULL, 'pending', ?, 0)`,
     [
       id, id, m.conversationId, m.senderUid, m.senderDisplayName ?? null, m.text, preview,
-      now, now, m.replyToMessageId ?? null, m.replyToPreview ?? null, m.clientSequence,
+      now, now, m.replyToMessageId ?? null, m.replyToPreview ?? null,
+      m.replyToSenderUid ?? null, m.replyToSenderName ?? null, m.replyToType ?? null,
+      m.mentionsJson ?? null, m.clientSequence,
     ],
   );
   return (await getByLocalId(id))!;
@@ -247,7 +264,21 @@ export async function setError(localId: string, code: string | null, message: st
 export async function reconcileToRemote(localId: string, remote: {
   remoteId: string; remoteCreatedAt: number | null; serverVersion?: number;
 }): Promise<void> {
-  await getDb().run(
+  const db = getDb();
+  // The canonical server message may already be in the table — the realtime feed
+  // can land it (keyed by remote_id) before the outbox reconciles the optimistic
+  // row. Forcing remote_id onto the local row would then violate the UNIQUE
+  // constraint on messages.remote_id, fail the outbox item, and make it re-send
+  // (duplicate) forever. If a *different* row already owns this remote_id, the
+  // optimistic row is a duplicate → drop it and let the canonical row stand.
+  const existing = await db.first<{ local_id: string }>(
+    `SELECT local_id FROM messages WHERE remote_id = ?`, [remote.remoteId],
+  );
+  if (existing && existing.local_id !== localId) {
+    await db.run(`DELETE FROM messages WHERE local_id = ?`, [localId]);
+    return;
+  }
+  await db.run(
     `UPDATE messages SET remote_id = ?, remote_created_at = COALESCE(?, remote_created_at),
        status = 'sent', sync_status = 'synced', server_version = COALESCE(?, server_version), updated_at = ?
      WHERE local_id = ?`,
@@ -279,6 +310,8 @@ export async function upsertRemoteMessage(r: {
   type?: 'text' | 'image' | 'voice'; caption?: string | null;
   text: string | null; remoteCreatedAt: number | null; editedAt?: number | null;
   deletedForEveryone?: boolean; replyToMessageId?: string | null; replyToPreview?: string | null;
+  replyToSenderUid?: string | null; replyToSenderName?: string | null; replyToType?: string | null;
+  mentions?: Array<{ userId: string; displayName: string; startIndex: number; endIndex: number }> | null;
   forwarded?: boolean; serverVersion?: number; status?: MessageStatus;
   reactions?: Record<string, string[]> | null; counts?: RemoteReceiptCounts;
   media?: RemoteMediaInput | null;
@@ -286,6 +319,7 @@ export async function upsertRemoteMessage(r: {
   const existing = await getByRemoteId(r.remoteId);
   const now = Date.now();
   const reactionsJson = r.reactions != null ? JSON.stringify(r.reactions) : null;
+  const mentionsJson = r.mentions != null ? JSON.stringify(r.mentions) : null;
   const c = r.counts ?? {};
   const md = r.media ?? null;
   const waveformJson = md?.waveform != null ? JSON.stringify(md.waveform) : null;
@@ -299,15 +333,18 @@ export async function upsertRemoteMessage(r: {
       'sender_display_name = COALESCE(?, sender_display_name)',
       'remote_created_at = COALESCE(?, remote_created_at)', 'edited_at = ?',
       'deleted_for_everyone = ?', 'reply_to_message_id = ?', 'reply_to_preview = ?',
+      'reply_to_sender_uid = ?', 'reply_to_sender_name = ?', 'reply_to_type = ?',
       'forwarded = ?', 'status = COALESCE(?, status)', "sync_status = 'synced'",
       'server_version = COALESCE(?, server_version)', 'updated_at = ?',
     ];
     const params: any[] = [
       r.type ?? null, r.caption ?? null, r.text, r.senderDisplayName ?? null, r.remoteCreatedAt, r.editedAt ?? null,
       r.deletedForEveryone ? 1 : 0, r.replyToMessageId ?? null, r.replyToPreview ?? null,
+      r.replyToSenderUid ?? null, r.replyToSenderName ?? null, r.replyToType ?? null,
       r.forwarded ? 1 : 0, r.status ?? null, r.serverVersion ?? null, now,
     ];
     if (r.reactions !== undefined) { sets.push('reactions_json = ?'); params.push(reactionsJson); }
+    if (r.mentions !== undefined) { sets.push('mentions_json = ?'); params.push(mentionsJson); }
     if (r.counts !== undefined) {
       sets.push('delivered_count = ?', 'read_count = ?', 'viewed_count = ?', 'played_count = ?');
       params.push(c.delivered ?? 0, c.read ?? 0, c.viewed ?? 0, c.played ?? 0);
@@ -333,18 +370,21 @@ export async function upsertRemoteMessage(r: {
       `INSERT INTO messages
         (id, local_id, remote_id, conversation_id, sender_uid, sender_display_name, type, text, preview, caption,
          created_at, remote_created_at, updated_at, edited_at, deleted_for_everyone, deleted_for_me, deleted_at,
-         reply_to_message_id, reply_to_preview, forwarded, forwarded_from_message_id,
+         reply_to_message_id, reply_to_preview, reply_to_sender_uid, reply_to_sender_name, reply_to_type,
+         mentions_json, forwarded, forwarded_from_message_id,
          status, error_code, error_message, sync_status, client_sequence, server_version,
          reactions_json, delivered_count, read_count, viewed_count, played_count,
          media_mime, media_size, media_width, media_height, media_duration_ms, media_waveform,
          media_storage_path, media_download_url, media_thumb_path, media_thumb_url, media_upload_status)
-       VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, NULL, ?, NULL, NULL, 'synced', 0, ?, ?, ?, ?, ?, ?,
+       VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, NULL, 'synced', 0, ?, ?, ?, ?, ?, ?,
          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         r.remoteId, r.remoteId, r.conversationId, r.senderUid, r.senderDisplayName ?? null,
         type, r.text, (r.text ?? '').slice(0, 200), r.caption ?? null,
         r.remoteCreatedAt ?? now, r.remoteCreatedAt ?? now, now,
         r.editedAt ?? null, r.deletedForEveryone ? 1 : 0, r.replyToMessageId ?? null, r.replyToPreview ?? null,
+        r.replyToSenderUid ?? null, r.replyToSenderName ?? null, r.replyToType ?? null,
+        mentionsJson,
         r.forwarded ? 1 : 0, r.status ?? 'sent', r.serverVersion ?? 0,
         reactionsJson, c.delivered ?? 0, c.read ?? 0, c.viewed ?? 0, c.played ?? 0,
         md?.mimeType ?? null, md?.sizeBytes ?? null, md?.width ?? null, md?.height ?? null,

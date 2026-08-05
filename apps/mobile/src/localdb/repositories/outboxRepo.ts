@@ -46,12 +46,42 @@ export async function getById(id: string): Promise<OutboxRow | null> {
   return getDb().first<OutboxRow>(`SELECT * FROM outbox WHERE id = ?`, [id]);
 }
 
-/** Items that are due to be sent now (pending and next_attempt_at <= now). */
+/**
+ * Recover orphaned items stuck in 'processing': if a push was interrupted (app
+ * backgrounded/killed between markProcessing and markCompleted/markFailed) the
+ * item would otherwise never be re-claimed by claimDue and the message stays
+ * "Sending…" forever. Flip 'processing' rows untouched for `staleMs` back to
+ * 'pending'. The threshold avoids disturbing a genuinely in-flight push.
+ * Returns the number of rows recovered.
+ */
+export async function requeueStaleProcessing(staleMs = 90_000, now = Date.now()): Promise<number> {
+  const res: any = await getDb().run(
+    `UPDATE outbox SET status = 'pending', updated_at = ?
+      WHERE status = 'processing' AND updated_at <= ?`,
+    [now, now - staleMs],
+  );
+  return res?.changes ?? res?.rowsAffected ?? 0;
+}
+
+/** Items that are due to be sent now (pending and next_attempt_at <= now).
+ *  Three priority tiers, then oldest-first within a tier:
+ *    0 — outgoing message sends (never wait behind bookkeeping → no stuck "Sending…")
+ *    1 — other user mutations (group/contact adds, reactions, pins, escalations…)
+ *    2 — read receipts (best-effort bookkeeping)
+ *  Receipts are the LOWEST tier so a large or chronically-failing receipt backlog
+ *  can't starve a real mutation like adding an external contact to a group. */
 export async function claimDue(now = Date.now(), limit = 10): Promise<OutboxRow[]> {
   return getDb().all<OutboxRow>(
     `SELECT * FROM outbox
       WHERE status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
-      ORDER BY created_at ASC LIMIT ?`,
+      ORDER BY
+        CASE
+          WHEN type IN ('send_message','send_image_message','send_voice_message') THEN 0
+          WHEN type = 'mark_receipt' THEN 2
+          ELSE 1
+        END,
+        created_at ASC
+      LIMIT ?`,
     [now, limit],
   );
 }
@@ -99,6 +129,22 @@ export async function retryByEntityId(entityId: string): Promise<void> {
     `UPDATE outbox SET status = 'pending', attempt_count = 0, next_attempt_at = ?, updated_at = ? WHERE entity_id = ? AND status = 'failed'`,
     [Date.now(), Date.now(), entityId],
   );
+}
+
+/**
+ * One-time housekeeping on startup: dead-letter pending read-receipt items that
+ * have already failed at least `minAttempts` times. Read receipts are
+ * best-effort, and a large backlog hard-failing with `internal` (e.g. thousands
+ * enqueued at once) would otherwise churn the queue — and battery — for a long
+ * time and slow every other item behind it. Returns the number cleared.
+ */
+export async function dropStuckReceipts(minAttempts = 2, now = Date.now()): Promise<number> {
+  const res: any = await getDb().run(
+    `UPDATE outbox SET status = 'dead', updated_at = ?
+      WHERE type = 'mark_receipt' AND status = 'pending' AND attempt_count >= ?`,
+    [now, minAttempts],
+  );
+  return res?.changes ?? res?.rowsAffected ?? 0;
 }
 
 export async function deleteCompleted(olderThanMs = 0): Promise<void> {
