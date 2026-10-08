@@ -24,6 +24,12 @@ certify the application: the real-device and deployment gates (§11, §12)
 remain open, and R4/R5 stay **partial** where they depend on them.
 Production verification SMS stays disabled.
 
+**Environment decision (2026-10-08):** the product owner explicitly authorized
+using the existing production environment for validation. Section 12.2 records
+the production procedure and supersedes the separate-project requirement for
+that mode. Authorization is recorded; no production inspection, deployment,
+configuration change or test execution is claimed by this documentation update.
+
 Terms used below: **implemented** = code on this branch; **tested locally** =
 executed in this environment at the layer stated; **deployed** / **verified in
 production** = not done for anything in this document.
@@ -411,7 +417,10 @@ None of the steps below has been run. They need environments or access this
 work did not have. Roles, not people, are named; the product owner assigns them.
 "Fake/emulator" steps can run in CI or locally; "device" steps need an installed
 build; "authorized" steps need separately approved access to a non-production
-or production Firebase project, real SIMs or production data.
+or production Firebase project, real SIMs or production data. The production
+access/test-environment authorization was subsequently given on 2026-10-08;
+use §12.2 for that mode. The table and §12.1 describe the original isolated-project
+procedure. Real SMS/device evidence and general rollout remain separate gates.
 
 | Gate | Environment | Operator (role) | Steps | Expected observations | Evidence to retain | Needs |
 |---|---|---|---|---|---|---|
@@ -461,14 +470,15 @@ counters and proves nothing about budgets.
    `lastHeartbeatAt` (and `status:"active"`) every 30 s, because the reaper marks
    a device offline after 90 s without a heartbeat.
 
-**Independent safeguards against a physical SMS** (any one suffices; all are
-checked before and after the run):
+**Claim-blocking controls** (check both before, during and after the run):
 - No relay identity exists for that business: no custom token is ever minted for
   `g7-synthetic`, and no Auth user carries a `relayDevice` claim in the project —
   `claimRelayJobs` requires one, so nothing can claim.
 - `caps` 0/0/0: relay coverage ignores capacity, but every claim is refused by
   the capacity check (`count >= 0`), even for a hypothetical valid device token.
-- `fcmToken:null`: the post-commit wake-up has no device to notify.
+
+**Additional precautions and cleanup** (not independent send blockers):
+- `fcmToken:null`: prevents a push wake-up; it does not prevent polling.
 - Destination numbers are only numbers the business controls (valid PS mobile
   numbers, required by the number check), so even a misconfiguration could only
   reach the business itself.
@@ -507,3 +517,106 @@ before/after; the tally of refusals by `(reason, scope)` from logs; the job tall
 by status before and after teardown; the synthetic device document; the
 `smsConfig/otp` document used; harness version and runner IPs (redacted to /24).
 
+
+### 12.2 Existing production environment — authorized validation mode (NOT executed)
+
+On 2026-10-08 the product owner confirmed that the existing environment is
+production and explicitly permitted using it for these tests. The repository's
+`.firebaserc` identifies `offlinesms-prod-2027`; confirm that identifier against
+the authenticated project before any operation. No new Firebase project is
+required for this mode. This is permission to perform controlled validation,
+not evidence that a gate has passed or a request to send real SMS to users.
+
+This procedure replaces the isolated-project assumptions in G5, G7a–G7c and
+G9 when those checks use production. It does not authorize weakening production
+App Check, deleting production records or deploying unrelated changes. It
+does not turn the native-device gates into server tests.
+
+1. **Read-only preflight.** Use authenticated Firebase/Google Cloud access to
+   inspect the deployed revision, configuration, required indexes and triggers,
+   effective budget limits, relevant counter window timestamps/counts, active
+   relay routing, and verification queue counts by state. Confirm the built-in
+   Firebase Phone provider remains disabled. Verify the existing
+   `PHONE_HASH_PEPPER` is present; do not rotate it or export its value.
+   Retain a restricted snapshot of the configuration fields that will change.
+   Check the branch-to-deployment gap before any deployment; never assume the
+   reviewed GitHub commit is already live. A required test deployment must have
+   an explicit, reviewed manifest of affected functions/rules/indexes and use
+   the stopped configuration in §8 before admission is temporarily enabled.
+
+2. **Prepare the run.** Complete the emulator rehearsal first. Record the exact
+   harness version, controlled destination numbers (kept out of published
+   evidence), runner addresses, expected counter paths, and test-document IDs.
+   Use a bounded maintenance window: the sender, switches and global/shared
+   counters affect the whole project, so a test business alone is not full
+   isolation. Initial live ceiling: 60 session-start calls plus 60 code-request
+   calls, including retries, at most four concurrent requests, and at most
+   ten minutes total. These are stop limits, not a throughput benchmark.
+   Measure only the scopes actually reached; leave other scopes open.
+   Do not use the low proof difficulty or App Check-off/debug configuration
+   from §12.1 on publicly accessible production endpoints. Use the effective
+   production proof and attestation requirements with legitimate test clients.
+
+3. **G7a and routing safety.** Create a unique test-only business identifier and
+   synthetic device with the routing, heartbeat and zero-capacity settings from
+   §12.1. No real relay, pairing credential or relay Auth identity may belong to
+   this business; production identities for other businesses may remain.
+   Check this before every admission-enabled phase and abort if it changes.
+   Keep physical relay sending unavailable for this test business.
+   With only that synthetic sender selected, run the disabled-policy matrix
+   separately; measure zero new test sessions/challenges/jobs and no budget
+   increments attributable to its requests. Temporary env changes require the
+   deployment manifest above. Exclude uncontrolled traffic from measurements;
+   if it cannot be distinguished or stopped for the window, stop the run and
+   do not claim clean G7 evidence.
+
+4. **G5, then G7b.** Verify the actual ingress source derivation before relying
+   on source-bucket results. Temporarily enable admission only with the test
+   sender and the two checked claim blockers in place; keep phone linking
+   disabled. Use limits derived from the current counter baselines and within
+   the code's bounds. Never reset or delete shared production counters to make
+   a test pass. Account for window rollover, or use a fresh natural window.
+   Exercise each scope in a separate phase so an earlier limit cannot mask the
+   intended one. Source/global/shared scopes that cannot be reached within the
+   bounded run remain open. Monitor policy/config drift, unexpected requests,
+   relay claims, errors and service health; stop immediately on any unexpected
+   claim or loss of either claim blocker. A normal refusal during a phase must
+   be attributable to its expected budget, not policy, coverage or bad proof.
+
+5. **Interpret evidence against the implementation.** Count unique newly
+   accepted requests separately from idempotent replays. Reconcile those
+   acceptances with newly created test jobs and window-aware increases in the
+   global/shared counters. The current shared-budget check reports
+   `scope: 'global'`; distinguish it from the sign-in global budget using
+   phase configuration and counter evidence, not an invented `shared` label.
+   Jobs must never be claimed/sending/sent/delivered. Earlier jobs in a session
+   may be cancelled as `superseded`, and the reaper may cancel expired jobs;
+   do not require every job to remain queued throughout a multi-code run.
+   Keep explicit tallies of those terminal reasons. These evidence
+   interpretations also apply to the isolated-project procedure in §12.1.
+
+6. **G7c and G9.** Use controlled test identities to check signed-token refusal
+   cases against the actual deployed authenticated callables, with sending
+   stopped. Do not enrol a relay identity for the synthetic business.
+   Run the remediation script in counts-only dry-run mode, inspect configuration
+   and relay versions, and record only redacted evidence. Never treat these
+   checks as permission to apply remediation or to send messages.
+
+7. **Stop and restore.** On completion, timeout or interruption, stop the
+   runners, set `emergencyStop:true` and disable sign-in admission. Preserve
+   verification suspension. Wait for all test jobs to be terminal and their
+   message bodies removed; record actual cancellation reasons, including
+   `sending-stopped`, `expired`, `superseded` or `policy-changed`.
+   Compare the current config with the test manifest before restoring touched
+   sender/limit fields, preserving unrelated concurrent edits. Never lower
+   `policyVersion`, restore old queued codes, or redeploy an older vulnerable
+   functions revision. Remove only manifest-listed test documents after
+   evidence capture and ownership checks; retain shared counters and real
+   user records. Remove the synthetic device after its jobs are safe.
+   Verify the stopped state and record any unresolved cleanup explicitly.
+
+**Execution status:** plan only. This documentation change did not access the
+Firebase production project or execute any of these steps. The execution
+session needs an authenticated project connection, the concrete deployment/run
+manifest, controlled test-number inputs and an emulator rehearsal. The owner's
+environment authorization is already recorded and need not be requested again.
