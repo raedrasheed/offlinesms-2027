@@ -48,3 +48,36 @@ describe('phone input helpers', () => {
     expect(formatCountdown(0)).toBe('0:00');
   });
 });
+
+import { phoneLinkRow, secondsLeft } from '../src/lib/phoneLink.helpers';
+
+describe('Settings phone row', () => {
+  const email = { hasEmail: true, phone: null };
+  it('is offered to an email account even while linking is switched off', () => {
+    expect(phoneLinkRow({ available: false }, email)).toBe('unavailable');
+    expect(phoneLinkRow(null, email)).toBe('add');
+  });
+  it('reflects the server status when available', () => {
+    expect(phoneLinkRow({ available: true, linked: false }, email)).toBe('add');
+    expect(phoneLinkRow({ available: true, linked: true }, email)).toBe('linked');
+    expect(phoneLinkRow({ available: true, pendingRecovery: true, linked: false }, email)).toBe('recover');
+  });
+  it('is hidden for phone-first accounts and accounts without email', () => {
+    expect(phoneLinkRow({ available: false }, { hasEmail: true, phone: '+970599000000' })).toBe('hidden');
+    expect(phoneLinkRow(null, { hasEmail: false, phone: null })).toBe('hidden');
+  });
+  it('every row label exists in English and Arabic', () => {
+    for (const k of ['settingsRow', 'settingsRowAdd', 'settingsRowLinked', 'settingsRowRecover', 'settingsRowUnavailable', 'unavailableNote', 'codeExpiresIn', 'changeNumber']) {
+      expect(typeof lookup(en, `phoneLink.${k}`), k).toBe('string');
+      expect(typeof lookup(ar, `phoneLink.${k}`), k).toBe('string');
+    }
+  });
+});
+
+describe('secondsLeft', () => {
+  it('counts down and floors at zero', () => {
+    expect(secondsLeft(10_500, 0)).toBe(11);
+    expect(secondsLeft(1000, 5000)).toBe(0);
+    expect(secondsLeft(null, 0)).toBe(0);
+  });
+});

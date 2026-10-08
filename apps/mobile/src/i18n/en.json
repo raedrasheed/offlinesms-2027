@@ -518,7 +518,11 @@
       "tooManyAttempts": "Too many incorrect codes. Request a new code later.",
       "network": "Network problem. Check your connection and try again.",
       "generic": "Something went wrong. Please try again."
-    }
+    },
+    "settingsRowUnavailable": "Not available yet",
+    "unavailableNote": "You can keep using your account with your email. When adding a number becomes available, you'll find it here.",
+    "codeExpiresIn": "The code expires in {{time}}",
+    "changeNumber": "Use a different number"
   },
   "phoneAuth": {
     "errors": {
