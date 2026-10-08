@@ -8,7 +8,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   db, resetEmulators, seedPolicy, seedRelayDevice, makeEmailUser, req, deviceReq, job, expectHttps,
-  num, linkReq, deliveredCode, BUSINESS, DEVICE, Timestamp,
+  num, linkReq, deliveredCode, BUSINESS, DEVICE, Timestamp, FieldValue,
 } from './harness';
 import { claimRelayJobs, reportRelayDelivery, authorizeRelaySend } from '../src/sms/relayJobs';
 import { relayHeartbeat } from '../src/sms/relayDevices';
@@ -501,5 +501,144 @@ describe('settlement with a real batch + recipient (attempt-bound reports)', () 
     const b2 = (await db().collection('smsBatches').doc(B).get()).data()!;
     expect(b2.relayFinalizedAt.toMillis()).toBe(b1.relayFinalizedAt.toMillis());
     expect(b2).toMatchObject({ status: 'completed', sentCount: 1, failedCount: 0 });
+  });
+});
+
+// ── Q1 (fourth review): only the PROVEN holder of an earlier attempt may reconcile ──
+describe('Q1 — late reports carry write authority only from the server-recorded holder of that attempt', () => {
+  const DEV2 = 'relay-dev-2';
+  const DEV3 = 'relay-dev-3';
+  const claimAs = (deviceId: string) => claimRelayJobs.run(deviceReq({ capacity: 10 }, deviceId)) as Promise<{ jobs: Array<{ jobId: string; attempt: number }> }>;
+  const reportAs = (deviceId: string, jobId: string, status: string, extra: Record<string, unknown> = {}) =>
+    reportRelayDelivery.run(deviceReq({ jobId, status, ...extra }, deviceId)) as Promise<{ applied: boolean; notApplied?: string }>;
+  async function lapse(id: string) {
+    await db().collection('relayJobs').doc(id).update({ leaseExpiresAt: Timestamp.fromMillis(Date.now() - 1000) });
+    await relayReaper.run({} as never);
+    await db().collection('relayJobs').doc(id).update({ nextAttemptAt: null });
+  }
+  /** Everything a forged report must not change. */
+  async function snapshot(id: string) {
+    const j = (await job(id))!;
+    const devs = await Promise.all([DEVICE, DEV2, DEV3].map(async d => (await db().collection('relayDevices').doc(d).get()).get('counters') ?? null));
+    return {
+      status: j.status, attempts: j.attempts, messageBody: j.messageBody ?? null, noRetry: j.noRetry ?? null,
+      lateReports: j.lateReports ?? null, settledByAttempt: j.settledByAttempt ?? null, nextAttemptAt: j.nextAttemptAt?.toMillis?.() ?? null,
+      sentAt: j.sentAt ?? null, deliveredAt: j.deliveredAt ?? null, failedAt: j.failedAt ?? null, devs,
+    };
+  }
+  const POSSIBLY_SENT: Array<[string, Record<string, unknown>]> = [
+    ['sent', {}], ['delivered', {}], ['failed', { reason: 'ambiguous-handoff' }],
+  ];
+  beforeEach(async () => {
+    const base = (await db().collection('relayDevices').doc(DEVICE).get()).data()!;
+    await db().collection('relayDevices').doc(DEV2).set(base);
+    await db().collection('relayDevices').doc(DEV3).set(base);
+  });
+
+  it('a never-leased queued job: a fabricated attempt-99 success/ambiguity changes nothing', async () => {
+    await businessJob('F1');
+    const before = await snapshot('F1');
+    for (const [status, extra] of POSSIBLY_SENT) {
+      expect(await reportAs(DEVICE, 'F1', status, { ...extra, attempt: 99 })).toMatchObject({ applied: false, notApplied: 'unverified' });
+    }
+    expect(await snapshot('F1')).toEqual(before);
+    expect((await claim()).jobs.map(j => j.jobId)).toEqual(['F1']); // still deliverable
+  });
+
+  it("another device's in-flight job: a future attempt from any device changes nothing", async () => {
+    await businessJob('F2');
+    await claimAs(DEV2);
+    const before = await snapshot('F2');
+    for (const reporter of [DEVICE, DEV2]) {
+      for (const [status, extra] of POSSIBLY_SENT) {
+        expect(await reportAs(reporter, 'F2', status, { ...extra, attempt: 5 })).toMatchObject({ applied: false, notApplied: 'unverified' });
+      }
+    }
+    expect(await snapshot('F2')).toEqual(before);
+    // and the real holder's current-attempt report still works
+    expect(await reportAs(DEV2, 'F2', 'failed', { reason: 'no-service', androidResultCode: 4, attempt: 1 })).toMatchObject({ applied: true, requeued: true });
+  });
+
+  it('a real earlier attempt reported by a device that never held it: refused, nothing changes (in flight and between attempts)', async () => {
+    await businessJob('F3');
+    await claimAs(DEVICE);           // attempt 1 held by DEVICE
+    await lapse('F3');
+    await claimAs(DEV2);             // attempt 2 held by DEV2 (in flight)
+    const inFlight = await snapshot('F3');
+    for (const forger of [DEV2, DEV3]) {
+      for (const [status, extra] of POSSIBLY_SENT) {
+        await expectHttps(reportAs(forger, 'F3', status, { ...extra, attempt: 1 }), 'permission-denied', 'not-lease-owner');
+      }
+    }
+    expect(await snapshot('F3')).toEqual(inFlight);
+    await lapse('F3');               // attempt 2 lapsed → queued, waiting for attempt 3
+    const between = await snapshot('F3');
+    for (const [status, extra] of POSSIBLY_SENT) {
+      await expectHttps(reportAs(DEV3, 'F3', status, { ...extra, attempt: 1 }), 'permission-denied', 'not-lease-owner');
+      await expectHttps(reportAs(DEV3, 'F3', status, { ...extra, attempt: 2 }), 'permission-denied', 'not-lease-owner');
+    }
+    expect(await snapshot('F3')).toEqual(between);
+    expect((await claimAs(DEV3)).jobs[0]).toMatchObject({ jobId: 'F3', attempt: 3 });
+  });
+
+  it('legacy history (no attemptOwners on record): an earlier-attempt report is acknowledged with no effect', async () => {
+    await businessJob('F4');
+    await claimAs(DEVICE);
+    await lapse('F4');
+    await claimAs(DEVICE);
+    await db().collection('relayJobs').doc('F4').update({ attemptOwners: FieldValue.delete() }); // as if leased before this revision
+    const before = await snapshot('F4');
+    expect(await reportAs(DEVICE, 'F4', 'delivered', { attempt: 1 })).toMatchObject({ applied: false, notApplied: 'unverified' });
+    expect(await snapshot('F4')).toEqual(before);
+    // the current attempt's holder is still known (attemptDeviceId) → its report applies
+    expect(await reportAs(DEVICE, 'F4', 'sent', { attempt: 2 })).toMatchObject({ applied: true });
+  });
+
+  it('cross-business devices are refused outright', async () => {
+    await businessJob('F5');
+    await claimAs(DEVICE);
+    const other = req('relay-other', { deviceId: 'relay-other', jobId: 'F5', status: 'delivered', attempt: 1 }, {
+      claims: { relayDevice: true, deviceId: 'relay-other', businessId: 'another-business' },
+    });
+    await expectHttps(reportRelayDelivery.run(other), 'permission-denied', 'cross-business');
+    expect((await job('F5'))!.status).toBe('claimed');
+  });
+
+  it('positive controls: the PROVEN holder of an earlier attempt still triggers the documented reconciliation', async () => {
+    // ambiguity from attempt-1 holder after attempt 2 (other device) lapsed → settle as failed, no attempt 3
+    await businessJob('V1');
+    await claimAs(DEVICE); await lapse('V1');
+    await claimAs(DEV2); await lapse('V1');
+    expect(await reportAs(DEVICE, 'V1', 'failed', { reason: 'ambiguous-handoff', attempt: 1 })).toMatchObject({ applied: true });
+    expect(await job('V1')).toMatchObject({ status: 'failed', settledByAttempt: 1 });
+    expect((await claim()).jobs).toEqual([]);
+    // success from attempt-1 holder while attempt 2 is in flight → noRetry (not applied to attempt 2)
+    await businessJob('V2');
+    await claimAs(DEVICE); await lapse('V2');
+    await claimAs(DEV2);
+    expect(await reportAs(DEVICE, 'V2', 'delivered', { attempt: 1 })).toMatchObject({ applied: false, notApplied: 'stale' });
+    expect(await job('V2')).toMatchObject({ status: 'claimed', noRetry: true, attempts: 2 });
+  });
+
+  it('a real batch + recipient: forged attempt evidence changes neither the recipient, the batch nor any counter', async () => {
+    const B = 'batch-q1';
+    await db().collection('smsBatches').doc(B).set({ businessId: BUSINESS, status: 'sending', channel: 'relay' });
+    const rcp = db().collection('smsBatches').doc(B).collection('recipients').doc('r1');
+    await rcp.set({ smsStatus: 'queued' });
+    await businessJob('F6', { batchId: B, recipientUid: 'r1' });
+    await claimAs(DEV2);
+    const before = await snapshot('F6');
+    expect(await reportAs(DEVICE, 'F6', 'delivered', { attempt: 7 })).toMatchObject({ notApplied: 'unverified' });
+    await expectHttps(reportAs(DEVICE, 'F6', 'delivered', { attempt: 1 }), 'permission-denied', 'not-lease-owner');
+    await expectHttps(reportAs(DEV3, 'F6', 'delivered', {}), 'permission-denied', 'not-lease-owner'); // unbound, wrong holder
+    expect(await snapshot('F6')).toEqual(before);
+    expect((await rcp.get()).get('smsStatus')).toBe('queued');
+    const b = (await db().collection('smsBatches').doc(B).get()).data()!;
+    expect(b.status).toBe('sending');
+    expect(b.relayFinalizedAt).toBeUndefined();
+    // the genuine holder settles it
+    expect(await reportAs(DEV2, 'F6', 'sent', { attempt: 1 })).toMatchObject({ applied: true });
+    expect((await rcp.get()).get('smsStatus')).toBe('sent');
+    expect((await db().collection('smsBatches').doc(B).get()).get('status')).toBe('completed');
   });
 });

@@ -6,24 +6,33 @@ import {
 } from '../src/sms/relayLogic';
 
 const job = (jobAttempts: number, attemptDeviceId: string | null = 'd1') => ({ jobAttempts, attemptDeviceId, deviceId: 'd1' });
+const owners = (o: Record<string, string>) => ({ attemptOwners: o });
 
-describe('reportBinding', () => {
-  it('current only for the current attempt from the device holding it', () => {
+describe('reportBinding — server-issued attempt ownership (M2 / Q1)', () => {
+  it('current only for the current attempt from its proven holder', () => {
+    expect(reportBinding({ ...job(2), ...owners({ 1: 'd1', 2: 'd1' }), reportAttempt: 2 })).toBe('current');
+    expect(reportBinding({ ...job(2, 'd2'), ...owners({ 1: 'd1', 2: 'd2' }), reportAttempt: 2 })).toBe('foreign');
+  });
+  it('an earlier attempt counts as stale ONLY when the reporter is on record as its holder', () => {
+    expect(reportBinding({ ...job(2, 'd2'), ...owners({ 1: 'd1', 2: 'd2' }), reportAttempt: 1 })).toBe('stale');
+    expect(reportBinding({ jobAttempts: 2, attemptDeviceId: 'd1', deviceId: 'd3', ...owners({ 1: 'd1', 2: 'd1' }), reportAttempt: 1 })).toBe('foreign');
+  });
+  it('future / never-issued attempts are unverified (never write authority)', () => {
+    expect(reportBinding({ ...job(0, null), reportAttempt: 99 })).toBe('unverified');            // never leased
+    expect(reportBinding({ ...job(2), ...owners({ 1: 'd1', 2: 'd1' }), reportAttempt: 3 })).toBe('unverified');
+    expect(reportBinding({ ...job(2, 'd2'), ...owners({ 1: 'd2', 2: 'd2' }), reportAttempt: 99 })).toBe('unverified');
+  });
+  it('legacy jobs (no attemptOwners): only the current attempt holder is known; history is unverified', () => {
     expect(reportBinding({ ...job(2), reportAttempt: 2 })).toBe('current');
-    expect(reportBinding({ ...job(2), reportAttempt: 1 })).toBe('stale');
-    expect(reportBinding({ ...job(2), reportAttempt: 3 })).toBe('stale');
-    expect(reportBinding({ ...job(2, 'd2'), reportAttempt: 2 })).toBe('foreign');
-    expect(reportBinding({ ...job(2, 'd2'), reportAttempt: 1 })).toBe('stale');
-  });
-  it('falls back to the lease owner for jobs claimed before attemptDeviceId existed', () => {
+    expect(reportBinding({ ...job(2), reportAttempt: 1 })).toBe('unverified');
     expect(reportBinding({ jobAttempts: 1, attemptDeviceId: null, leaseOwnerDeviceId: 'd1', deviceId: 'd1', reportAttempt: 1 })).toBe('current');
-    expect(reportBinding({ jobAttempts: 1, attemptDeviceId: null, leaseOwnerDeviceId: null, deviceId: 'd1', reportAttempt: 1 })).toBe('stale');
+    expect(reportBinding({ jobAttempts: 1, attemptDeviceId: null, leaseOwnerDeviceId: null, deviceId: 'd1', reportAttempt: 1 })).toBe('unverified');
   });
-  it('reports without attempt identity bind only to a never-re-leased job', () => {
-    expect(reportBinding({ ...job(1), reportAttempt: undefined })).toBe('current');
-    expect(reportBinding({ ...job(1, 'd2'), reportAttempt: undefined })).toBe('foreign');
-    expect(reportBinding({ ...job(2), reportAttempt: undefined })).toBe('unbound');
-    expect(reportBinding({ ...job(1, null), reportAttempt: null })).toBe('unbound');
+  it('reports without attempt identity bind only to a never-re-leased job held by the reporter', () => {
+    expect(reportBinding({ ...job(1), ...owners({ 1: 'd1' }), reportAttempt: undefined })).toBe('current');
+    expect(reportBinding({ ...job(1, 'd2'), ...owners({ 1: 'd2' }), reportAttempt: undefined })).toBe('foreign');
+    expect(reportBinding({ ...job(2), ...owners({ 1: 'd1', 2: 'd1' }), reportAttempt: undefined })).toBe('unbound');
+    expect(reportBinding({ ...job(0, null), reportAttempt: null })).toBe('unbound');
   });
   it('garbage attempt values are treated as missing', () => {
     for (const a of [0, -1, 1.5, '2', NaN]) expect(reportBinding({ ...job(2), reportAttempt: a })).toBe('unbound');

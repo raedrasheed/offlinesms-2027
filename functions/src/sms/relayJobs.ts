@@ -168,6 +168,9 @@ export const claimRelayJobs = onCall({ region: REGION }, async (request) => {
         assignedDeviceId: ctx.deviceId,
         leaseOwnerDeviceId: ctx.deviceId,
         attemptDeviceId: ctx.deviceId, // who holds THIS attempt (kept through requeue; binds reports)
+        // Immutable, server-issued record of who held each attempt: the only
+        // basis on which a late report for an EARLIER attempt is believed (Q1).
+        [`attemptOwners.${((fresh.get('attempts') as number | undefined) ?? 0) + 1}`]: ctx.deviceId,
         leaseExpiresAt: Timestamp.fromMillis(leaseExpiryMs(now)),
         attempts: FieldValue.increment(1),
         requiresSendAuth: verification,
@@ -348,6 +351,7 @@ export const reportRelayDelivery = onCall({ region: REGION }, async (request) =>
     // and only if it is still the job's current one.
     const binding = reportBinding({
       reportAttempt: data.attempt, jobAttempts: attempts, deviceId: ctx.deviceId,
+      attemptOwners: (snap.get('attemptOwners') as Record<string, unknown> | undefined) ?? null,
       attemptDeviceId: snap.get('attemptDeviceId') ?? null, leaseOwnerDeviceId: snap.get('leaseOwnerDeviceId') ?? null,
     });
     if (binding === 'foreign') throw new HttpsError('permission-denied', 'not-lease-owner');
@@ -356,8 +360,10 @@ export const reportRelayDelivery = onCall({ region: REGION }, async (request) =>
     let settle = false;
     if (binding !== 'current') {
       // Acknowledged without being treated as the current attempt's outcome.
-      // A BOUND report that says an earlier attempt may have gone out still
-      // matters: no further attempt may be created (that would be a duplicate).
+      // Only a report from the PROVEN holder of an earlier attempt ('stale')
+      // that says it may have gone out has any effect: no further attempt may be
+      // created (that would be a duplicate). 'unverified' / 'unbound' reports
+      // (future or never-issued attempts, holder not on record) change nothing.
       if (binding === 'stale' && possiblySent && !isTerminalJobStatus(current) && current !== 'sent') {
         if (current === 'queued') {
           settle = true; // between attempts: settle with the earlier attempt's outcome instead of sending again

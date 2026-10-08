@@ -177,33 +177,47 @@ export function shouldApplyReport(current: RelayJobStatus, next: RelayReportStat
  *  server attempt. Only such builds are handed a re-lease (attempt ≥ 2). */
 export const ATTEMPT_CAPABILITY = 'attempt-v1';
 
-export type ReportBinding = 'current' | 'stale' | 'unbound' | 'foreign';
+export type ReportBinding = 'current' | 'stale' | 'unverified' | 'unbound' | 'foreign';
 
 /**
- * Which attempt does a delivery report describe (M2)? The job's current
- * attempt is `jobAttempts` (incremented at every lease), held by
- * `attemptDeviceId` (set at claim, kept through requeue; older jobs fall back
- * to the lease owner).
- *   current — this attempt, from the device that held it → may change the job
- *   stale   — an older (or unknown newer) attempt → never applied to the current one
- *   unbound — no attempt identity (old build / pre-upgrade pending report) on a
- *             job that has been re-leased → cannot be attributed; not applied
- *   foreign — the current attempt, reported by a device that does not hold it
+ * Which attempt does a delivery report describe, and is the reporter PROVEN to
+ * have held it (M2/Q1)? Ownership is server-issued: claim records
+ * `attemptOwners[n] = deviceId` for every lease n (immutable, bounded by
+ * maxAttempts). Jobs leased before that field existed only know the holder of
+ * their CURRENT attempt (`attemptDeviceId`, else the lease owner).
+ *   current    — the job's current attempt, from its proven holder → may change the job
+ *   stale      — an EARLIER attempt, from its proven holder → never applied to the
+ *                current attempt; may only trigger the documented late reconciliation
+ *   unverified — a future/never-issued attempt, or an earlier attempt whose holder is
+ *                not on record (legacy) → acknowledged, NO effect at all
+ *   unbound    — no attempt identity on a re-leased job → acknowledged, no effect
+ *   foreign    — an attempt on record as held by a DIFFERENT device → refused
  */
 export function reportBinding(i: {
   reportAttempt: unknown; jobAttempts: number;
+  attemptOwners?: Record<string, unknown> | null;
   attemptDeviceId?: string | null; leaseOwnerDeviceId?: string | null; deviceId: string;
 }): ReportBinding {
-  const owner = i.attemptDeviceId ?? i.leaseOwnerDeviceId ?? null;
+  const ownerOf = (n: number): string | null => {
+    const o = i.attemptOwners?.[String(n)];
+    if (typeof o === 'string' && o) return o;
+    // Legacy fallback: only the CURRENT attempt's holder is known.
+    return n === i.jobAttempts ? (i.attemptDeviceId ?? i.leaseOwnerDeviceId ?? null) : null;
+  };
   const a = typeof i.reportAttempt === 'number' && Number.isInteger(i.reportAttempt) && i.reportAttempt >= 1
     ? i.reportAttempt : null;
   if (a === null) {
     // Without attempt identity only a never-re-leased job is unambiguous.
-    if (i.jobAttempts > 1 || owner === null) return 'unbound';
+    if (i.jobAttempts !== 1) return 'unbound';
+    const owner = ownerOf(1);
+    if (owner === null) return 'unbound';
     return owner === i.deviceId ? 'current' : 'foreign';
   }
-  if (a !== i.jobAttempts || owner === null) return 'stale';
-  return owner === i.deviceId ? 'current' : 'foreign';
+  if (a > i.jobAttempts) return 'unverified'; // future / never issued (incl. never-leased jobs)
+  const owner = ownerOf(a);
+  if (owner === null) return 'unverified';   // holder not on record → no authority
+  if (owner !== i.deviceId) return 'foreign';
+  return a === i.jobAttempts ? 'current' : 'stale';
 }
 
 /** A report saying the message may already have reached the network. */
