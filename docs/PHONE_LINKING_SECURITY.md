@@ -274,7 +274,11 @@ nested write.
 | Relay capabilities | claim `clientCaps` | `send-auth-v1` (verification jobs), `attempt-v1` (re-leases) |
 | Native builds | mobile: new build with the v2 phone flow; relay: 0.2.0 (this revision's Room v3 / attempt-bound reports) | old mobile builds see no phone countries and get `app-update-required` |
 
-## 8. Deployment, observability, rollback (not executed)
+## 8. Deployment, observability, rollback
+
+The stopped subset approved in §12.3 was deployed on 2026-10-08 (§12.4).
+The sequence below remains the general release procedure; mobile/relay rollout
+and admission-enabled verification SMS are not complete or enabled.
 
 1. Review/merge. Create `PHONE_HASH_PEPPER`. Confirm Firebase Auth's built-in
    **Phone provider is disabled** (console; not verifiable from code).
@@ -416,8 +420,10 @@ not the identity of a person; a client installation id is resettable.
 ## 12. Remaining validation gates — execution plan and recorded results
 
 The table below is the original gate plan. The G7 emulator rehearsal and the
-production read-only preflight/remediation dry-run have now run (§12.3); live G7
-and the device gates remain open. Roles, not people, are named; the product owner assigns them.
+production read-only preflight/remediation dry-run have run (§12.3). The approved
+stopped deployment and seven production smoke checks are complete (§12.4).
+The independent production switch matrix, live budget/token validation and
+device gates remain open. Roles, not people, are named; the product owner assigns them.
 "Fake/emulator" steps can run in CI or locally; "device" steps need an installed
 build; "authorized" steps need separately approved access to a non-production
 or production Firebase project, real SIMs or production data. The production
@@ -521,7 +527,7 @@ by status before and after teardown; the synthetic device document; the
 `smsConfig/otp` document used; harness version and runner IPs (redacted to /24).
 
 
-### 12.2 Existing production environment — authorized validation mode (preflight executed; live G7 pending)
+### 12.2 Existing production environment — authorized validation mode (stopped deployment executed; live budgets pending)
 
 On 2026-10-08 the product owner confirmed that the existing environment is
 production and explicitly permitted using it for these tests. The repository's
@@ -618,13 +624,14 @@ does not turn the native-device gates into server tests.
    user records. Remove the synthetic device after its jobs are safe.
    Verify the stopped state and record any unresolved cleanup explicitly.
 
-**Execution status:** the emulator rehearsal, authenticated read-only production
-preflight and remediation dry-run are complete (§12.3). No production deployment,
-configuration mutation, cleanup application or live G7 admission run has taken
-place. The stopped-deployment proposal below requires a decision on its actual
-production effects; controlled test-number inputs are still needed for live G7b.
-The owner's environment authorization is already recorded and need not be
-requested again.
+**Execution status:** the emulator rehearsal, authenticated production preflight
+and remediation dry-run are complete (§12.3). The owner subsequently approved
+the concrete stopped-deployment scope, which was executed and verified (§12.4).
+The policy, provider, secret, rules, indexes and selected functions have changed
+as recorded there; no cleanup application or admission-enabled G7b run occurred.
+Controlled test-number inputs and the live run manifest are still needed.
+Environment access and this stopped deployment are already authorized; do not
+request those permissions again.
 
 
 ### 12.3 Evidence and proposed stopped deployment — 2026-10-08
@@ -675,7 +682,9 @@ are zero. These counts do not identify abuse-created accounts. Published evidenc
 contains no phone numbers, codes, message bodies, emails, UIDs or credentials.
 G9 remains open because its required provider/relay-version state is not met.
 
-**Concrete stopped-deployment proposal — prepared, NOT approved or executed.**
+**Concrete stopped-deployment scope — approved and executed on 2026-10-08.**
+The following scope was prepared first, explicitly approved by the owner, then
+executed with the results in §12.4.
 Pinned application source is `d3cafc76`; this is a partial deployment to prepare
 controlled validation, not deployment of every change in PR #28.
 
@@ -699,3 +708,71 @@ deployed configuration. A later admission-enabled production run still needs
 controlled destination numbers, its bounded run manifest (§12.2), checked test
 business/identity isolation and ingress evidence. No existing user's number
 may be selected as a test input from these read-only inspections.
+
+
+### 12.4 Approved production deployment and stopped-state verification — 2026-10-08
+
+The owner approved the exact §12.3 scope after reviewing the preflight findings.
+The deployment targeted only `offlinesms-prod-2027`. Application source was pinned
+to `d3cafc76dae98469ce49d905450380147d53ac97`, whose
+[CI run 37829267841](https://github.com/raedrasheed/offlinesms-2027/actions/runs/37829267841)
+passed. Before deployment, 123 source/configuration files were matched byte for
+byte to their Git blob hashes in an isolated deployment directory with no
+emulator configuration. The TypeScript build passed.
+
+For deployment packaging, a functions-only lockfile was derived from the
+repository lockfile and pruned without changing any retained dependency version:
+firebase-admin 12.7.0, firebase-functions 6.6.0, libphonenumber-js 1.13.6 and
+TypeScript 5.9.3. Lockfile SHA-256:
+`f4217d7f47971c65e8a078971eb672a3249f0566f4fcbf568ebdc9ad1691b207`.
+This generated packaging file is additional to the pinned source; application
+code was not changed for deployment.
+
+| Approved change | Verified outcome |
+|---|---|
+| Secret Manager | API enabled. Metadata confirmed the pepper secret was absent; created `PHONE_HASH_PEPPER`, enabled version 1, with a cryptographically random 256-bit value. The value was not printed or exported. |
+| Runtime secret access | Granted secret-level accessor access to the existing runtime service account `997465194705-compute@developer.gserviceaccount.com`. All six intended secret-using callables bind version 1. |
+| Built-in Phone provider | Disabled; read back after the patch and again after function deployment. Existing Auth users were not deleted or disabled. |
+| Verification policy | `enabled:false`, `emergencyStop:true`, `signin.enabled:false`, `link.enabled:false`, `policyVersion:1`. Sender/hash retained; update used the prior document update-time precondition. |
+| Rules | Successfully compiled and published. Read-back content exactly matches the pinned branch rules. Ruleset `0b9413c8-b005-426f-adc8-1b45274fba40`; SHA-256 `9de733f94d2a08f32110a7ac50f1c545f044c54de8858125ed85c33369af2e8f`. |
+| Indexes | Added the two approved relay indexes and observed both READY before starting function deployment. All 48 existing composite indexes retained; 50 total. |
+| Functions | CLI completed successfully: nine created and eleven updated, exactly the twenty named in §12.3. All twenty subsequently reported ACTIVE; 85 functions total. The other 65 functions retain their prior Firebase source hashes. |
+| Environment | Both purpose flags and both App Check flags remain unset on the twenty selected functions. No admission-enabled phase was run. |
+
+Deployed Firebase source hashes (deployment fingerprints, **not Git commit IDs**):
+`551ff6a22533e9868b5d7d0214b64cef589055c4` for the six pepper-bound functions;
+`7c4c65f64db217e375279d8ccd6349b0c6f7f7cb` for the other fourteen selected functions.
+
+**Actual production smoke checks — 7/7 passed**, completed at
+2026-10-08T19:57:47.690Z. Requests used no destination numbers, codes or real-user credentials.
+
+| Callable(s) | Actual response |
+|---|---|
+| `startPhoneAuth`, `requestPhoneAuthCode`, `verifyPhoneAuthCode` | HTTP 400 / FAILED_PRECONDITION / `phone-auth-unavailable` |
+| `requestPhoneOtp`, `verifyPhoneOtp` | HTTP 400 / FAILED_PRECONDITION / `app-update-required` |
+| `getSupportedPhoneCountries` with v2 | HTTP 200; `available:false`, empty country list |
+| `getPhoneLinkStatus` without authentication | HTTP 401 / UNAUTHENTICATED / `auth-required` |
+
+Before and after those requests, every checked protected collection remained
+at zero documents: `smsRateLimits`, `phoneAuthSessions`,
+`phoneAuthChallenges`, `phoneLinkChallenges`, `phoneAuthOps`, `phoneLinkOps`.
+`relayJobs` remained 366 and `otpChallenges` remained 83. A separate
+post-deployment aggregation at 20:00:55 UTC counted zero queued/claimed/sending
+relay jobs. No test SMS, real-device send or data cleanup was performed.
+
+These checks establish the deployed stopped behavior and legacy retirement.
+They do **not** establish budget enforcement: the environment/master/purpose
+gates were off together, so this is not the independent G7a switch matrix or
+G7b. The unauthenticated status check is not a completed G7c signed-token matrix.
+G5, live G7b/G7c, the device gates and general rollout remain open. Next inputs
+are business-controlled destination numbers and the bounded live run manifest
+in §12.2; production sending stays stopped until that controlled phase.
+
+**Runtime follow-up.** The approved source remains on Node.js 20. Deployment
+succeeded, but the CLI warned that the runtime is deprecated. Its warning used
+2026-10-31; Google's
+[runtime support table](https://docs.cloud.google.com/functions/docs/runtime-support),
+checked on 2026-10-08, lists decommission on **2026-10-30**. Schedule and validate
+the runtime upgrade before the earlier official date. This deployment did not
+upgrade Node.js, dependencies, the dashboard, mobile app or relay devices, and
+did not merge PR #28.
