@@ -55,6 +55,17 @@ export function redactEmail(email?: string | null): string | null {
   return '•••@' + email.slice(at + 1);
 }
 
+/**
+ * Target ids are stored verbatim, so a raw phone number must never be one.
+ * Phone-typed targets are redacted defensively (callers should already pass an
+ * HMAC tag with type 'phoneHash' instead).
+ */
+export function sanitiseTargetId(target?: AuditTarget | null): string | null {
+  if (!target?.id) return null;
+  if (target.type === 'phone') return redactPhone(target.id);
+  return target.id.length > 200 ? target.id.slice(0, 200) : target.id;
+}
+
 /** Remove forbidden keys and clamp value sizes. Recursive, shallow-typed. */
 export function sanitiseMetadata(raw: Record<string, unknown> | undefined): Record<string, unknown> {
   if (!raw) return {};
@@ -95,7 +106,7 @@ export async function writeAuditLog(params: WriteAuditLogParams): Promise<void> 
       actorUid:    params.actor.uid,
       actorEmail:  params.actor.email ?? null,
       targetType:  params.target?.type ?? null,
-      targetId:    params.target?.id ?? null,
+      targetId:    sanitiseTargetId(params.target),
       result:      params.result ?? 'success',
       metadata:    sanitiseMetadata(params.metadata),
       createdAt:   FieldValue.serverTimestamp(),

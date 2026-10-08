@@ -1,34 +1,31 @@
-// Callable: getSupportedPhoneCountries — the ISO alpha-2 countries that phone
-// sign-in is currently possible for. UNAUTH by design (called from the sign-in
-// screen before the user has an account).
+// Callable: getSupportedPhoneCountries — countries public phone sign-in is
+// available for. UNAUTH (called from the sign-in screen).
 //
-// Sign-in OTP is delivered by the designated OTP organization's relay
-// (smsConfig/otp.businessId), so a country is "supported" iff that org has a
-// live, country-configured relay serving it. The mobile country picker shows
-// ONLY these — a user can never request a code for a country no relay covers
-// (which would otherwise silently fail). Empty list ⇒ the app shows its
-// "no countries available for phone sign-in" state.
+//   • Legacy callers (no `v`) always get [] — old builds can only speak the
+//     retired protocol, so they show their "no countries available" state
+//     instead of offering a flow the server refuses.
+//   • `{ v: 2 }` (current builds) get the live list ONLY while sign-in sending
+//     is allowed by the verification policy (env PHONE_AUTH_ENABLED + smsConfig/otp
+//     master/stop/sender + signin.enabled) and a live relay covers the country.
+//     Any config read failure ⇒ unavailable (fail closed).
 
 import { onCall } from 'firebase-functions/v2/https';
 import { getFirestore } from 'firebase-admin/firestore';
 import { loadActiveRelayDevices } from '../sms/countryRouting';
 import { supportedCountriesForDevices } from '../sms/relayLogic';
 import { appCheckOptions } from '../lib/appCheck';
+import { loadPhoneAuthConfig, phoneAuthSendingAllowed } from '../phoneAuth/config';
 
 const REGION = 'us-central1';
 
-async function otpBusinessId(db: FirebaseFirestore.Firestore): Promise<string | null> {
-  const snap = await db.collection('smsConfig').doc('otp').get();
-  const id = snap.exists ? (snap.data()?.businessId as string | undefined) : undefined;
-  return id ?? null;
-}
-
-export const getSupportedPhoneCountries = onCall({ region: REGION, ...appCheckOptions() }, async () => {
-  const db = getFirestore();
-  const businessId = await otpBusinessId(db);
-  if (!businessId) return { countries: [] as string[] };
-
-  const devices = await loadActiveRelayDevices(businessId);
-  const countries = supportedCountriesForDevices(devices, Date.now());
-  return { countries };
+export const getSupportedPhoneCountries = onCall({ region: REGION, ...appCheckOptions() }, async (request) => {
+  if ((request.data as { v?: unknown } | null)?.v !== 2) return { countries: [] as string[] };
+  try {
+    const cfg = await loadPhoneAuthConfig(getFirestore());
+    if (!phoneAuthSendingAllowed(cfg)) return { available: false, countries: [] as string[] };
+    const countries = supportedCountriesForDevices(await loadActiveRelayDevices(cfg.businessId!), Date.now());
+    return { available: countries.length > 0, countries };
+  } catch {
+    return { available: false, countries: [] as string[] };
+  }
 });

@@ -1,15 +1,22 @@
+import { useEffect, useState } from 'react';
 import { View, Text, Image, Pressable, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { colors, radius } from '../theme';
+import { getPhoneAuthAvailability } from '../lib/phoneAuth';
 
-// Email sign-in (passwordless OTP). The backend gates it on the admin
-// "Email sign-in" flag; if disabled, requestEmailOtp returns a clear error.
-const SHOW_EMAIL_LOGIN = true;
+// Sign-in: phone (protected public flow — offered only while the server says
+// it is open, e.g. not during a suspension) and email (passwordless OTP).
 
 export default function Welcome({ navigation }: any) {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
+  const [phoneOpen, setPhoneOpen] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    getPhoneAuthAvailability().then(a => { if (alive) setPhoneOpen(a.available); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
   return (
     <View style={[s.root, { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 16 }]}>
       <View style={s.brandRow}>
@@ -27,14 +34,14 @@ export default function Welcome({ navigation }: any) {
       </View>
 
       <View style={s.actions}>
-        <Pressable style={s.primaryBtn} onPress={() => navigation.navigate('PhoneEntry')}>
-          <Text style={s.primaryBtnText}>{t('welcome.continuePhone')}</Text>
-        </Pressable>
-        {SHOW_EMAIL_LOGIN ? (
-          <Pressable style={s.secondaryBtn} onPress={() => navigation.navigate('EmailEntry')}>
-            <Text style={s.secondaryBtnText}>{t('welcome.continueEmail')}</Text>
+        {phoneOpen ? (
+          <Pressable style={s.primaryBtn} onPress={() => navigation.navigate('PhoneEntry')}>
+            <Text style={s.primaryBtnText}>{t('welcome.continuePhone')}</Text>
           </Pressable>
         ) : null}
+        <Pressable style={phoneOpen ? s.secondaryBtn : s.primaryBtn} onPress={() => navigation.navigate('EmailEntry')}>
+          <Text style={phoneOpen ? s.secondaryBtnText : s.primaryBtnText}>{t('welcome.continueEmail')}</Text>
+        </Pressable>
         <Text style={s.terms}>
           By continuing you agree to our <Text style={s.termsLink}>Terms</Text> & <Text style={s.termsLink}>Privacy</Text>.
         </Text>

@@ -1,6 +1,7 @@
 // Pure, Firestore-free relay helpers — unit-testable in isolation (mirrors the
 // recipients.ts pattern). No firebase-admin imports here.
 
+import { randomInt } from 'node:crypto';
 import { ADMIN_ROLES } from '../lib/roles';
 import { isSupportedCountry } from 'libphonenumber-js';
 
@@ -20,10 +21,13 @@ export function makeJobId(batchId: string, recipientUid: string): string {
 
 /** Unambiguous pairing code (no 0/O/1/I/L). Not a security token on its own —
  *  it's short-lived, one-time, and scoped to a business server-side. */
-export function generatePairingCode(rand: () => number = Math.random): string {
+export function generatePairingCode(rand?: () => number): string {
   const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
   let out = '';
-  for (let i = 0; i < 8; i++) out += alphabet[Math.floor(rand() * alphabet.length)];
+  // CSPRNG (uniform, no modulo bias); `rand` only for deterministic tests.
+  for (let i = 0; i < 8; i++) {
+    out += alphabet[rand ? Math.floor(rand() * alphabet.length) : randomInt(0, alphabet.length)];
+  }
   return out;
 }
 
@@ -50,8 +54,60 @@ export function isHeartbeatStale(lastHeartbeatMs: number | null | undefined, now
   return nowMs - lastHeartbeatMs > HEARTBEAT_STALE_MS;
 }
 
-/** Remaining daily send capacity for a device (minute/hour pacing is enforced
- *  device-side; the server guards the hard daily cap). */
+// ── Server-owned send-capacity reservations (per device) ────────────────────
+//
+// Accounting unit: one CLAIMED job attempt (a logical message handed to the
+// device), whatever happens afterwards — sent, failed, or ambiguous. That is
+// deliberately conservative: a carrier hand-off can't be "un-sent", so nothing
+// is refunded. It is NOT a count of billed SMS segments (a long or Unicode
+// message may be several parts). Reservations live in relayDevices/{id}.usage
+// and are written in the SAME transaction that leases the job, so concurrent
+// claims serialize on the device doc and can't oversubscribe. Client heartbeat
+// telemetry never touches them.
+
+export interface UsageWindow { s: number; c: number }
+export interface RelayUsage { m?: UsageWindow; h?: UsageWindow; d?: { key: string; c: number } }
+export interface CapsLike { maxPerMinute?: number; maxPerHour?: number; maxPerDay?: number }
+
+const MINUTE_MS = 60_000;
+const HOUR_MS_R = 3_600_000;
+
+function winCount(w: UsageWindow | undefined, now: number, size: number): number {
+  return w && typeof w.s === 'number' && now - w.s < size ? (w.c ?? 0) : 0;
+}
+
+/** Pure: may one more job be reserved for this device right now? */
+export function relayCapacityCheck(
+  caps: CapsLike | undefined, usage: RelayUsage | undefined, now: number,
+): { ok: true } | { ok: false; window: 'minute' | 'hour' | 'day' } {
+  const c = { ...DEFAULT_RELAY_CAPS_LOCAL, ...(caps ?? {}) };
+  const u = usage ?? {};
+  const day = utcDayKey(new Date(now));
+  if (winCount(u.m, now, MINUTE_MS) >= c.maxPerMinute) return { ok: false, window: 'minute' };
+  if (winCount(u.h, now, HOUR_MS_R) >= c.maxPerHour) return { ok: false, window: 'hour' };
+  if ((u.d?.key === day ? u.d.c : 0) >= c.maxPerDay) return { ok: false, window: 'day' };
+  return { ok: true };
+}
+
+/** Pure: usage after reserving one more job at `now` (UTC day rollover aware). */
+export function reserveRelayUsage(usage: RelayUsage | undefined, now: number): RelayUsage {
+  const u = usage ?? {};
+  const bump = (w: UsageWindow | undefined, size: number): UsageWindow =>
+    (w && typeof w.s === 'number' && now - w.s < size) ? { s: w.s, c: (w.c ?? 0) + 1 } : { s: now, c: 1 };
+  const day = utcDayKey(new Date(now));
+  return { m: bump(u.m, MINUTE_MS), h: bump(u.h, HOUR_MS_R), d: { key: day, c: (u.d?.key === day ? u.d.c : 0) + 1 } };
+}
+
+const DEFAULT_RELAY_CAPS_LOCAL = { maxPerMinute: 6, maxPerHour: 100, maxPerDay: 500 };
+
+/** Clamp client-reported heartbeat telemetry (informational only). */
+export function sanitizeTelemetryCount(v: unknown): number | null {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return null;
+  return Math.min(1_000_000, Math.max(0, Math.floor(v)));
+}
+
+/** LEGACY helper kept for compatibility; the claim path uses relayCapacityCheck.
+ *  Remaining daily send capacity from a counter. */
 export function capacityRemaining(
   caps: { maxPerDay: number },
   counters: { sentToday: number },
@@ -113,8 +169,60 @@ export function isTerminalJobStatus(s: RelayJobStatus): boolean {
 /** Idempotency guard: should we apply `next` over the current status? */
 export function shouldApplyReport(current: RelayJobStatus, next: RelayReportStatus): boolean {
   if (isTerminalJobStatus(current)) return false;     // already settled
-  if (current === 'sent' && next === 'sent') return false; // duplicate sent
+  if (current === 'sent' && next !== 'delivered') return false; // duplicate sent; a 'sent' message is never re-queued by a later failure
   return true;
+}
+
+/** Declared by relay builds that bind every report and SMS callback to the
+ *  server attempt. Only such builds are handed a re-lease (attempt ≥ 2). */
+export const ATTEMPT_CAPABILITY = 'attempt-v1';
+
+export type ReportBinding = 'current' | 'stale' | 'unverified' | 'unbound' | 'foreign';
+
+/**
+ * Which attempt does a delivery report describe, and is the reporter PROVEN to
+ * have held it (M2/Q1)? Ownership is server-issued: claim records
+ * `attemptOwners[n] = deviceId` for every lease n (immutable, bounded by
+ * maxAttempts). Jobs leased before that field existed only know the holder of
+ * their CURRENT attempt (`attemptDeviceId`, else the lease owner).
+ *   current    — the job's current attempt, from its proven holder → may change the job
+ *   stale      — an EARLIER attempt, from its proven holder → never applied to the
+ *                current attempt; may only trigger the documented late reconciliation
+ *   unverified — a future/never-issued attempt, or an earlier attempt whose holder is
+ *                not on record (legacy) → acknowledged, NO effect at all
+ *   unbound    — no attempt identity on a re-leased job → acknowledged, no effect
+ *   foreign    — an attempt on record as held by a DIFFERENT device → refused
+ */
+export function reportBinding(i: {
+  reportAttempt: unknown; jobAttempts: number;
+  attemptOwners?: Record<string, unknown> | null;
+  attemptDeviceId?: string | null; leaseOwnerDeviceId?: string | null; deviceId: string;
+}): ReportBinding {
+  const ownerOf = (n: number): string | null => {
+    const o = i.attemptOwners?.[String(n)];
+    if (typeof o === 'string' && o) return o;
+    // Legacy fallback: only the CURRENT attempt's holder is known.
+    return n === i.jobAttempts ? (i.attemptDeviceId ?? i.leaseOwnerDeviceId ?? null) : null;
+  };
+  const a = typeof i.reportAttempt === 'number' && Number.isInteger(i.reportAttempt) && i.reportAttempt >= 1
+    ? i.reportAttempt : null;
+  if (a === null) {
+    // Without attempt identity only a never-re-leased job is unambiguous.
+    if (i.jobAttempts !== 1) return 'unbound';
+    const owner = ownerOf(1);
+    if (owner === null) return 'unbound';
+    return owner === i.deviceId ? 'current' : 'foreign';
+  }
+  if (a > i.jobAttempts) return 'unverified'; // future / never issued (incl. never-leased jobs)
+  const owner = ownerOf(a);
+  if (owner === null) return 'unverified';   // holder not on record → no authority
+  if (owner !== i.deviceId) return 'foreign';
+  return a === i.jobAttempts ? 'current' : 'stale';
+}
+
+/** A report saying the message may already have reached the network. */
+export function isPossiblySentReport(status: RelayReportStatus, reason?: string | null): boolean {
+  return status !== 'failed' || /^ambiguous/i.test(reason ?? '');
 }
 
 // ── Retry classification + backoff + reaper decisions ───────────────────────
@@ -135,7 +243,9 @@ const ANDROID_FDN_CHECK_FAILURE = 6;
  *  Unknown causes default to transient so they retry up to maxAttempts. */
 export function classifyFailure(resultCode?: number | null, reason?: string | null): FailureClass {
   const r = (reason ?? '').toLowerCase();
-  if (/invalid|permission|revoked|disabled|null-pdu|fdn|blocked|forbidden|opt-out/.test(r)) return 'permanent';
+  // 'ambiguous' = the device may already have handed the SMS to the modem
+  // (crash/restart after hand-off): never retried, to avoid a duplicate SMS.
+  if (/ambiguous|invalid|permission|revoked|disabled|null-pdu|fdn|blocked|forbidden|opt-out/.test(r)) return 'permanent';
   if (resultCode === ANDROID_NULL_PDU || resultCode === ANDROID_FDN_CHECK_FAILURE) return 'permanent';
   if (/no-service|radio|network|timeout|unavailable|generic|rate|limit/.test(r)) return 'transient';
   if (resultCode === ANDROID_NO_SERVICE || resultCode === ANDROID_RADIO_OFF
@@ -149,22 +259,76 @@ export function backoffMs(attempts: number): number {
   return Math.min(BACKOFF_MAX_MS, BACKOFF_BASE_MS * Math.pow(2, n - 1));
 }
 
-/** Outcome of a failed send report: requeue (retry) or terminal fail. */
+/** Outcome of a failed send report: requeue (retry) or terminal fail.
+ *  Verification-code jobs (see isVerificationJobKind) NEVER requeue, whatever
+ *  their stored maxAttempts says: a "failed"/timed-out report from a phone is
+ *  ambiguous (the SMS may already have left the device), so an internal retry
+ *  could text the same person twice. The user asks for a new code instead,
+ *  which goes back through every abuse limit. */
 export function failureOutcome(
-  attempts: number, maxAttempts: number, cls: FailureClass,
+  attempts: number, maxAttempts: number, cls: FailureClass, kind?: unknown, noRetry = false,
 ): 'requeue' | 'fail' {
+  if (isVerificationJobKind(kind)) return 'fail';
+  if (noRetry) return 'fail'; // an earlier attempt may already have gone out
   if (cls === 'permanent') return 'fail';
   return attempts < maxAttempts ? 'requeue' : 'fail';
 }
 
-/** Reaper decision for a job whose lease may have lapsed. */
+/** Reaper decision for a job whose lease may have lapsed. A lapsed lease is the
+ *  classic ambiguous timeout (device took the job, then went silent), so
+ *  verification-code jobs are failed, never requeued. */
 export function reapDecision(
-  job: { status: RelayJobStatus; leaseExpiresAtMs: number | null; attempts: number; maxAttempts: number },
+  job: { status: RelayJobStatus; leaseExpiresAtMs: number | null; attempts: number; maxAttempts: number; kind?: unknown; noRetry?: boolean },
   nowMs: number,
 ): 'none' | 'requeue' | 'fail' {
   if (job.status !== 'claimed' && job.status !== 'sending') return 'none';
   if (job.leaseExpiresAtMs == null || job.leaseExpiresAtMs > nowMs) return 'none';
+  if (isVerificationJobKind(job.kind)) return 'fail';
+  if (job.noRetry === true) return 'fail';
   return job.attempts >= job.maxAttempts ? 'fail' : 'requeue';
+}
+
+// ── Verification-code jobs (sign-in OTP — retired; phone linking) ───────────
+/** Legacy PUBLIC sign-in OTP jobs. Public phone sign-in is disabled; any such
+ *  job still queued (e.g. from the abuse) must never be handed to a device. */
+export const PUBLIC_OTP_JOB_KIND = 'otp';
+/** Account phone-linking verification code (authenticated, rate-limited). */
+export const PHONE_LINK_JOB_KIND = 'phone_link_otp';
+/** Protected public phone sign-in / sign-up code (pre-auth session + proof). */
+export const PHONE_AUTH_JOB_KIND = 'phone_auth_otp';
+
+export function isVerificationJobKind(kind: unknown): boolean {
+  return kind === PUBLIC_OTP_JOB_KIND || kind === PHONE_LINK_JOB_KIND || kind === PHONE_AUTH_JOB_KIND;
+}
+
+/** Purpose of a current-generation verification job (null for legacy/other). */
+export function verificationPurposeOf(kind: unknown): 'signin' | 'link' | null {
+  return kind === PHONE_AUTH_JOB_KIND ? 'signin' : kind === PHONE_LINK_JOB_KIND ? 'link' : null;
+}
+
+export type VerificationClaimDecision =
+  | 'allow'
+  | 'cancel-public-otp-disabled'
+  | 'cancel-expired'
+  | 'cancel-sending-stopped';
+
+/**
+ * May a device lease this job right now? Non-verification jobs are always
+ * 'allow' here (their own gates apply). Verification jobs are cancelled —
+ * never delivered — when they are legacy public OTPs, when the code has
+ * expired (or carries no expiry at all), or when verification sending is
+ * stopped (feature off / emergency stop / config unreadable). Pure.
+ */
+export function verificationClaimDecision(
+  job: { kind: unknown; expiresAtMs: number | null | undefined },
+  nowMs: number,
+  phoneLinkSendingAllowed: boolean,
+): VerificationClaimDecision {
+  if (!isVerificationJobKind(job.kind)) return 'allow';
+  if (job.kind === PUBLIC_OTP_JOB_KIND) return 'cancel-public-otp-disabled';
+  if (job.expiresAtMs == null || job.expiresAtMs <= nowMs) return 'cancel-expired';
+  if (!phoneLinkSendingAllowed) return 'cancel-sending-stopped';
+  return 'allow';
 }
 
 /** A job is claimable only once its backoff window (nextAttemptAt) has passed. */

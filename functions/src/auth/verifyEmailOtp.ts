@@ -28,29 +28,30 @@ export const verifyEmailOtp = onCall({ region: REGION, ...appCheckOptions() }, a
   const ref = db.collection('emailOtpChallenges').doc(key);
   const now = Date.now();
 
-  // Atomically validate + consume an attempt to prevent brute-force races.
-  const ok = await db.runTransaction(async tx => {
+  // Atomically validate + consume an attempt to prevent brute-force races. The
+  // transaction RETURNS its verdict instead of throwing, so expiry/lockout
+  // cleanup and wrong-code counting actually commit. Send budgets live in
+  // emailOtpLimits/{key} and are never touched here.
+  const verdict = await db.runTransaction(async tx => {
     const snap = await tx.get(ref);
-    if (!snap.exists) throw new HttpsError('failed-precondition', 'otp-not-requested');
+    if (!snap.exists) return 'otp-not-requested';
     const c = snap.data()!;
-    if (isOtpExpired(c.expiresAt?.toMillis?.() ?? 0, now)) {
-      tx.delete(ref);
-      throw new HttpsError('deadline-exceeded', 'otp-expired');
-    }
+    if (c.status === 'sending' || c.status === 'send-failed') return 'otp-not-requested';
+    if (isOtpExpired(c.expiresAt?.toMillis?.() ?? 0, now)) { tx.delete(ref); return 'otp-expired'; }
     const attempts = (c.attempts as number) ?? 0;
-    if (attempts >= OTP_MAX_ATTEMPTS) {
-      tx.delete(ref);
-      throw new HttpsError('resource-exhausted', 'otp-too-many-attempts');
-    }
+    if (attempts >= OTP_MAX_ATTEMPTS) { tx.delete(ref); return 'otp-too-many-attempts'; }
     if (!verifyOtpHash(code, c.salt as string, c.codeHash as string)) {
       tx.update(ref, { attempts: attempts + 1, updatedAt: FieldValue.serverTimestamp() });
-      return false;
+      return 'otp-incorrect';
     }
     tx.delete(ref); // one-time use
-    return true;
+    return 'ok';
   });
 
-  if (!ok) throw new HttpsError('permission-denied', 'otp-incorrect');
+  if (verdict === 'otp-not-requested') throw new HttpsError('failed-precondition', verdict);
+  if (verdict === 'otp-expired') throw new HttpsError('deadline-exceeded', verdict);
+  if (verdict === 'otp-too-many-attempts') throw new HttpsError('resource-exhausted', verdict);
+  if (verdict !== 'ok') throw new HttpsError('permission-denied', 'otp-incorrect');
 
   // Find-or-create the email user, mark verified, mint a custom token.
   const adminAuth = getAuth();
@@ -58,7 +59,10 @@ export const verifyEmailOtp = onCall({ region: REGION, ...appCheckOptions() }, a
   let created = false;
   try {
     uid = (await adminAuth.getUserByEmail(email)).uid;
-  } catch {
+  } catch (e) {
+    // Only an explicit "no such user" means create; any other Auth error is a
+    // failure, never a reason to mint a second account.
+    if ((e as { code?: string })?.code !== 'auth/user-not-found') throw new HttpsError('unavailable', 'signin-interrupted');
     uid = (await adminAuth.createUser({ email, emailVerified: true })).uid;
     created = true;
   }

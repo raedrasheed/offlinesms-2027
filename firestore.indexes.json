@@ -711,6 +711,42 @@
           "order": "ASCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "relayJobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "kind",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "expiresAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "relayJobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "kind",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "__name__",
+          "order": "ASCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": [

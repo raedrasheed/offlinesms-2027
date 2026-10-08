@@ -1,5 +1,6 @@
 package app.offlinesms.business.data.db
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -17,9 +18,19 @@ data class JobEntity(
     val simSubscriptionId: Int?,
     val traceId: String,
     // local lifecycle: claimed -> sending -> sent -> delivered/failed
+    // (also paused/skipped when stopped before any hand-off)
     val localStatus: String,
     val createdAt: Long,
     val updatedAt: Long,
+    /** Server attempt this row describes (schema v2). 0 = pre-upgrade row. */
+    @ColumnInfo(defaultValue = "0") val attempt: Int = 0,
+    /**
+     * Sticky (schema v3): this logical job may already have reached the network
+     * on this device, so NO later attempt of it may be handed off here. Set
+     * before any report about it is queued; never cleared by a report, a
+     * finalize, a restart or a newer attempt.
+     */
+    @ColumnInfo(defaultValue = "0") val noResend: Boolean = false,
 )
 
 /**
@@ -35,6 +46,10 @@ data class ReportEntity(
     val androidResultCode: Int?,
     val simSubscriptionId: Int?,
     val createdAt: Long,
+    /** Server attempt the report describes (schema v3). null = pre-upgrade row
+     *  or a callback without attempt identity: sent unbound, and the server
+     *  applies it only to a job that was never re-leased. */
+    val attempt: Int? = null,
 )
 
 /** Local operational log — never contains the message body or full phone. */

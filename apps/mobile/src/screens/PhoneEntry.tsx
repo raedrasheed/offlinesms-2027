@@ -5,14 +5,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { colors, radius } from '../theme';
 import KeyboardAwareScreen from '../components/KeyboardAwareScreen';
-import { requestPhoneOtp, otpErrorCopy, getSupportedPhoneCountries, isSupportedSignInLocalNumber } from '../lib/auth';
+import { isSupportedSignInLocalNumber } from '../lib/auth';
+import { phoneAuthFlow, getPhoneAuthAvailability } from '../lib/phoneAuth';
+import { phoneAuthErrorInfo } from '../lib/phoneAuth.flow';
+import { formatCountdown } from '../lib/phoneLink.helpers';
 import { availableCountries, flagEmoji, type Country } from '../lib/countries';
 
 type LoadState = 'loading' | 'ready' | 'error';
-
-// App-review test number's country (+970599999999). Always offered in the picker
-// so reviewers can sign in with the fixed demo phone regardless of relay state.
-const DEMO_COUNTRY = 'PS';
 
 function formatPhone(digits: string): string {
   // Loose grouping for visual rhythm; doesn't enforce any spec.
@@ -37,8 +36,8 @@ export default function PhoneEntry({ navigation }: any) {
   async function loadSupported() {
     setLoadState('loading');
     try {
-      const codes = await getSupportedPhoneCountries();
-      setSupported(new Set(codes));
+      const { countries } = await getPhoneAuthAvailability();
+      setSupported(new Set(countries));
       setLoadState('ready');
     } catch {
       setLoadState('error');
@@ -47,13 +46,8 @@ export default function PhoneEntry({ navigation }: any) {
 
   useEffect(() => { loadSupported(); }, []);
 
-  // The picker shows supported countries, plus the App-review test number's
-  // country (PS / +970) so the fixed demo phone is always selectable even if no
-  // relay currently serves it. The backend skips coverage for the test number.
-  const available = useMemo(
-    () => availableCountries(new Set([...supported, DEMO_COUNTRY])),
-    [supported],
-  );
+  // Only countries the server says phone sign-in is open for right now.
+  const available = useMemo(() => availableCountries(supported), [supported]);
 
   // Default/clamp the selection to a supported country whenever the set changes.
   useEffect(() => {
@@ -88,15 +82,21 @@ export default function PhoneEntry({ navigation }: any) {
     // Only 59/56 mobile numbers are supported — block others up-front so we don't
     // send an SMS that the backend would reject anyway.
     if (!isSupportedSignInLocalNumber(local)) {
-      Alert.alert(t('auth.couldntSendCode'), otpErrorCopy('number-not-supported'));
+      Alert.alert(t('auth.couldntSendCode'), t('phoneAuth.errors.numberNotSupported'));
       return;
     }
     setBusy(true);
     try {
-      await requestPhoneOtp(phoneE164);
-      navigation.navigate('Otp', { phone: phoneE164 });
-    } catch (e: any) {
-      Alert.alert(t('auth.couldntSendCode'), otpErrorCopy(e?.message ?? e?.code));
+      // Opens a pre-auth session, solves the server's proof-of-work for THIS
+      // number (a second or two on-device), then requests the code.
+      const flow = await phoneAuthFlow(true);
+      const r = await flow.sendCode(phoneE164);
+      navigation.navigate('Otp', {
+        phone: phoneE164, challengeId: r.challengeId, maskedPhone: r.maskedPhone, resendAfterSec: r.resendAfterSec,
+      });
+    } catch (e: unknown) {
+      const info = phoneAuthErrorInfo(e);
+      Alert.alert(t('auth.couldntSendCode'), t(info.key, { time: formatCountdown(info.retryAfterSec ?? 0), count: info.attemptsLeft ?? 0 }));
     } finally {
       setBusy(false);
     }
@@ -155,7 +155,7 @@ export default function PhoneEntry({ navigation }: any) {
       )}
 
       <Pressable style={[s.btn, !canSubmit && { opacity: 0.5 }]} onPress={next} disabled={!canSubmit}>
-        <Text style={s.btnText}>{t('auth.sendCode')}</Text>
+        {busy ? <ActivityIndicator color="#fff" /> : <Text style={s.btnText}>{t('auth.sendCode')}</Text>}
       </Pressable>
 
       <Modal visible={picker} animationType="slide" onRequestClose={() => setPicker(false)}>

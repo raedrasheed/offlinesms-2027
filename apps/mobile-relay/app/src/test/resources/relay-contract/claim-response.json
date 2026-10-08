@@ -1,0 +1,27 @@
+{
+  "jobs": [
+    {
+      "jobId": "pauth_0123456789abcdef0123456789abcdef",
+      "phoneE164": "+970599100001",
+      "messageBody": "Your OfflineSMS code is 000000",
+      "assignedSimSubscriptionId": 2,
+      "traceId": "pauth_0123456789abcdef0123456789abcdef",
+      "kind": "phone_auth_otp",
+      "requiresSendAuth": true,
+      "sendWithinMs": 9500,
+      "attempt": 1
+    },
+    {
+      "jobId": "b1",
+      "phoneE164": "+970599100002",
+      "messageBody": "hello",
+      "assignedSimSubscriptionId": null,
+      "traceId": "b1",
+      "kind": null,
+      "requiresSendAuth": false,
+      "sendWithinMs": null,
+      "attempt": 2
+    }
+  ],
+  "capacityExhausted": null
+}

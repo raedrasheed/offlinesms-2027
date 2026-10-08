@@ -15,6 +15,7 @@ import { verifySession, type SessionResult } from './session';
 import { canDo } from './adminPermissions';
 import { getAdminScope, canViewOrganization } from './adminScope';
 import { isSupportedCountry } from 'libphonenumber-js';
+import { randomInt } from 'node:crypto';
 import { normalizePhoneAndCountry } from './phoneCountry';
 import { loadOrgRelayCoverage } from './relayCoverage';
 
@@ -56,8 +57,10 @@ async function audit(action: string, actor: AuthorizedSession, targetId: string,
 }
 
 function genCode(): string {
+  // CSPRNG, uniform (no modulo bias). Pairing codes are one-time, 15-min bearer
+  // secrets for relay enrollment.
   let out = '';
-  for (let i = 0; i < 8; i++) out += ALPHABET[Math.floor(Math.random() * ALPHABET.length)];
+  for (let i = 0; i < 8; i++) out += ALPHABET[randomInt(0, ALPHABET.length)];
   return out;
 }
 
@@ -93,24 +96,82 @@ export async function setRelayModeAction(mode: 'http' | 'relay' | 'hybrid', targ
 
 const E164 = /^\+[1-9]\d{6,14}$/;
 
-/** Platform setting: which org's relay sends sign-in OTP (smsConfig/otp). Only
- *  unrestricted (super/legacy/bootstrap) admins may set it — it's global. */
+/**
+ * Apply an OTP-policy change and advance policyVersion in ONE transaction.
+ * Queued codes from the retired generation are then cancelled by the backend's
+ * generation-conditional sweep (functions: onOtpPolicyWritten + relayReaper),
+ * which re-checks each job's status and generation in its own transaction —
+ * this action never bulk-overwrites job documents. Codes already claimed are
+ * stopped at the relay's final authorization (policyVersion mismatch).
+ */
+async function applyOtpPolicyChange(patch: Record<string, unknown>): Promise<number> {
+  const ref = adminDb.collection('smsConfig').doc('otp');
+  return adminDb.runTransaction(async tx => {
+    const snap = await tx.get(ref);
+    const cur = snap.exists && typeof snap.get('policyVersion') === 'number' ? (snap.get('policyVersion') as number) : 0;
+    const next = cur + 1;
+    if (snap.exists) tx.update(ref, { ...patch, policyVersion: next, updatedAt: FieldValue.serverTimestamp() });
+    else tx.set(ref, { policyVersion: next, updatedAt: FieldValue.serverTimestamp() });
+    if (!snap.exists && Object.keys(patch).length) tx.update(ref, patch);
+    return next;
+  });
+}
+
+function platformOnly(session: AuthorizedSession): string | null {
+  return getAdminScope(session).organizationId !== undefined
+    ? 'Only a platform admin can change the OTP sender settings.' : null;
+}
+
+/** Platform setting: which org's relay sends verification SMS (smsConfig/otp).
+ *  An empty id CLEARS the sender (no verification SMS can be sent). Every change
+ *  bumps policyVersion and cancels queued codes bound to the old policy. */
 export async function setOtpOrgAction(businessId: string): Promise<RelayActionState> {
   const session = await authorize();
   if ('error' in session) return session;
-  if (getAdminScope(session).organizationId !== undefined) {
-    return { error: 'Only a platform admin can set the default OTP organization.' };
-  }
-  if (!businessId.trim()) return { error: 'Select an organization.' };
+  const denied = platformOnly(session);
+  if (denied) return { error: denied };
+  const id = (businessId ?? '').trim() || null;
+  let policyVersion = 0;
   try {
-    await adminDb.collection('smsConfig').doc('otp').set(
-      { businessId: businessId.trim(), updatedAt: FieldValue.serverTimestamp() }, { merge: true },
-    );
+    policyVersion = await applyOtpPolicyChange({ businessId: id });
   } catch {
     return { error: 'Could not save the OTP organization.' };
   }
-  await audit('relay.otp.org.set', session, businessId.trim(), { businessId: businessId.trim() });
+  await audit(id ? 'relay.otp.org.set' : 'relay.otp.org.cleared', session, id ?? 'none', { businessId: id, policyVersion });
+  revalidatePath('/admin/settings');
   revalidatePath('/admin/relay');
+  return { success: true };
+}
+
+export interface OtpPolicyPatch {
+  enabled?: boolean;
+  emergencyStop?: boolean;
+  signinEnabled?: boolean;
+  linkEnabled?: boolean;
+}
+
+/** Master switch, emergency stop, and per-purpose switches for verification SMS.
+ *  These are runtime gates only: each purpose ALSO needs its deploy-time env
+ *  flag (PHONE_AUTH_ENABLED / PHONE_LINK_ENABLED) on the functions. */
+export async function setOtpPolicyAction(patch: OtpPolicyPatch): Promise<RelayActionState> {
+  const session = await authorize();
+  if ('error' in session) return session;
+  const denied = platformOnly(session);
+  if (denied) return { error: denied };
+  const update: Record<string, unknown> = {};
+  if (typeof patch.enabled === 'boolean') update.enabled = patch.enabled;
+  if (typeof patch.emergencyStop === 'boolean') update.emergencyStop = patch.emergencyStop;
+  if (typeof patch.signinEnabled === 'boolean') update['signin.enabled'] = patch.signinEnabled;
+  if (typeof patch.linkEnabled === 'boolean') update['link.enabled'] = patch.linkEnabled;
+  if (Object.keys(update).length === 0) return { error: 'Nothing to change.' };
+  let policyVersion = 0;
+  try {
+    policyVersion = await applyOtpPolicyChange(update);
+  } catch {
+    return { error: 'Could not update the OTP policy.' };
+  }
+  await audit('relay.otp.policy.set', session, 'smsConfig/otp', { ...patch, policyVersion });
+  revalidatePath('/admin/settings');
   return { success: true };
 }
 

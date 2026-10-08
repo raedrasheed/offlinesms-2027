@@ -15,7 +15,7 @@ import { getAuth } from 'firebase-admin/auth';
 import { writeAuditLog } from '../lib/auditLog';
 import {
   generatePairingCode, isPairingCodeUsable, resolveBusinessId, canManageBusiness,
-  normalizeCountryCodes, PAIRING_CODE_TTL_MS,
+  normalizeCountryCodes, PAIRING_CODE_TTL_MS, sanitizeTelemetryCount,
 } from './relayLogic';
 import { DEFAULT_RELAY_CAPS } from './relayTypes';
 
@@ -168,8 +168,16 @@ export const relayHeartbeat = onCall({ region: REGION }, async (request) => {
   if (typeof data.fcmToken === 'string')   patch.fcmToken = data.fcmToken;
   if (typeof data.appVersion === 'string') patch.appVersion = data.appVersion;
   if (Array.isArray(data.simInfo))         patch.simInfo = data.simInfo.slice(0, 4);
-  if (typeof data.sentToday === 'number')   patch['counters.sentToday'] = data.sentToday;
-  if (typeof data.failedToday === 'number') patch['counters.failedToday'] = data.failedToday;
+  // Client-reported numbers are TELEMETRY only, stored apart from the server-
+  // owned delivery metrics (counters.*) and send-capacity reservations (usage).
+  // Older relay builds always sent sentToday=0/failedToday=0 here, which used to
+  // overwrite counters.sentToday and reopen the daily cap.
+  const telemetry: Record<string, unknown> = { reportedAt: FieldValue.serverTimestamp() };
+  for (const k of ['sentToday', 'failedToday', 'queueDepth'] as const) {
+    const v = sanitizeTelemetryCount((data as Record<string, unknown>)[k]);
+    if (v !== null) telemetry[k] = v;
+  }
+  patch.telemetry = telemetry;
   // Revive an 'offline' device that's heartbeating again (don't override pause).
   if (wasOffline) patch.status = 'active';
   await ref.update(patch);

@@ -23,6 +23,7 @@ import EmailEntry from './src/screens/EmailEntry';
 import EmailOtp from './src/screens/EmailOtp';
 import ProfileCompletion from './src/screens/ProfileCompletion';
 import CreatePin from './src/screens/CreatePin';
+import LinkPhone from './src/screens/LinkPhone';
 import Permissions from './src/screens/Permissions';
 import FindFriends from './src/screens/FindFriends';
 import IncomingCall from './src/screens/IncomingCall';
@@ -405,6 +406,7 @@ export default function App() {
             <RootStack.Screen name="SupportTicket" component={SupportTicket} />
             <RootStack.Screen name="EditProfile" component={EditProfile} />
             <RootStack.Screen name="CreatePin" component={CreatePin} />
+            <RootStack.Screen name="LinkPhone" component={LinkPhone} />
             <RootStack.Screen name="Permissions" component={Permissions} />
             <RootStack.Screen name="FindFriends" component={FindFriends} />
             <RootStack.Screen name="IncomingCall" component={IncomingCall} options={{ presentation: 'fullScreenModal' }} />

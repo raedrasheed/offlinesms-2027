@@ -3,17 +3,24 @@ import { View, Text, Pressable, StyleSheet, ActivityIndicator, TextInput, Alert 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius } from '../theme';
-import { verifyPhoneOtpAndSignIn, requestPhoneOtp, otpErrorCopy } from '../lib/auth';
+import { useTranslation } from 'react-i18next';
+import { phoneAuthFlow, verifyPhoneCodeAndSignIn } from '../lib/phoneAuth';
+import { phoneAuthErrorInfo } from '../lib/phoneAuth.flow';
+import { formatCountdown } from '../lib/phoneLink.helpers';
 import { useOtpAutoRead, getAndroidAppHash } from '../hooks/useOtpAutoRead';
 
 const LENGTH = 6;
-const RESEND_SECONDS = 42;
+// The resend wait comes from the server (resendAfterSec / retryAfterSec);
+// this is only the fallback if a response omits it.
+const FALLBACK_RESEND_SECONDS = 60;
 
 export default function Otp({ navigation, route }: any) {
   const insets = useSafeAreaInsets();
+  const { t } = useTranslation();
   const phone: string = route?.params?.phone ?? '';
+  const [challengeId, setChallengeId] = useState<string>(route?.params?.challengeId ?? '');
   const [code, setCode] = useState('');
-  const [remaining, setRemaining] = useState(RESEND_SECONDS);
+  const [remaining, setRemaining] = useState<number>(route?.params?.resendAfterSec ?? FALLBACK_RESEND_SECONDS);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const inputRef = useRef<TextInput>(null);
@@ -39,22 +46,34 @@ export default function Otp({ navigation, route }: any) {
   useEffect(() => {
     if (code.length !== LENGTH || busy) return;
     setBusy(true); setErr(null);
-    verifyPhoneOtpAndSignIn(phone, code)
+    verifyPhoneCodeAndSignIn(challengeId, code)
       // On success the app's auth listener routes onward — nothing to do here.
-      .catch((e: any) => {
-        setErr(otpErrorCopy(e?.message ?? e?.code));
+      .catch((e: unknown) => {
+        const info = phoneAuthErrorInfo(e);
+        setErr(t(info.key, { time: formatCountdown(info.retryAfterSec ?? 0), count: info.attemptsLeft ?? 0 }));
         setCode('');
         // Re-focus so the next attempt can type / autofill again.
         requestAnimationFrame(() => inputRef.current?.focus());
       })
       .finally(() => setBusy(false));
-  }, [code, busy, phone]);
+  }, [code, busy, challengeId, t]);
 
   async function resend() {
     if (remaining > 0 || busy) return;
     setErr(null); setCode('');
-    try { await requestPhoneOtp(phone); setRemaining(RESEND_SECONDS); inputRef.current?.focus(); }
-    catch (e: any) { setErr(otpErrorCopy(e?.message ?? e?.code)); }
+    setBusy(true);
+    try {
+      const r = await (await phoneAuthFlow()).sendCode(phone);
+      setChallengeId(r.challengeId);
+      setRemaining(r.resendAfterSec || FALLBACK_RESEND_SECONDS);
+      inputRef.current?.focus();
+    } catch (e: unknown) {
+      const info = phoneAuthErrorInfo(e);
+      if (info.retryAfterSec) setRemaining(info.retryAfterSec);
+      setErr(t(info.key, { time: formatCountdown(info.retryAfterSec ?? 0), count: info.attemptsLeft ?? 0 }));
+    } finally {
+      setBusy(false);
+    }
   }
 
   // Dev-only: surface this build's SMS Retriever hash so it can be copied into

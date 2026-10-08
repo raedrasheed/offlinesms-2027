@@ -26,6 +26,7 @@ npm run test:rules
 | `sms.rules.test.ts` | `smsBatches/{id}` + `recipients` | sender read, client-write deny |
 | `wallet.rules.test.ts` | `wallets`, `transactions`, `payments`, `pointsTransfers` | own-read, client-write deny, payment server-only |
 | `support.rules.test.ts` | `tickets` | owner create with status=open, admin field protection, admin-only updates |
+| `phoneLink.rules.test.ts` | `phoneLinkChallenges`, `phoneClaims`, `phoneLinkOps`, `smsRateLimits`, phone fields on `users` / `userPrivate`, `smsConfig/phoneLink` | no client (owner or admin) can forge verified-phone state; challenge verifiers unreadable |
 | `system.rules.test.ts` | `auditLogs`, `gatewayHealth`, `smsDeliveryEvents`, `smsQuotaUsage`, `transferQuotaUsage` | all client-write deny; admin-read where applicable |
 
 ## CI
