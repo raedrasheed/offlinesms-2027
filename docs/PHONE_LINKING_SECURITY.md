@@ -421,8 +421,89 @@ or production Firebase project, real SIMs or production data.
 | **G4** Proof-of-work speed on phones | Low-end Android (2–3 GB RAM), mid-range Android, oldest supported iPhone; release build of the mobile app | Mobile engineer | Time `solvePow` at 14/16/18 bits, 30 runs each, cold and warm | p50/p95 per device; pick `powBits` so p95 stays acceptable (threshold set by product) | Raw timings per device/model/OS | Devices (Node timing is not representative) |
 | **G5** Ingress `X-Forwarded-For` trust | Non-production project with the **same** Cloud Functions v2 front end as production | Backend engineer | Call `startPhoneAuth` from 2–3 known client IPs, directly and via a proxy that sets its own XFF; log the header chain (test project only) | The real client IP sits at a fixed position from the right; `sourceHopsFromRight` set to it; spoofed left-side values ignored | Redacted header chains and the derived source bucket | Authorized non-production project; production confirmation needs authorized log access |
 | **G6** Native App Check | Product/security decision; then a mobile build with `@react-native-firebase/app-check` (Play Integrity / App Attest) | Product owner + mobile engineer | Decide; implement; test with the debug provider in non-production; then `signin.attestation: 'required'` there | Requests without a valid token refused; legitimate builds pass | Decision record; non-production enforcement test log | Native build + non-production project |
-| **G7** Real token verification, configuration and load | Non-production project with real Auth (signed tokens) | Backend engineer | Expired/forged/other-project tokens against protected callables; `PHONE_HASH_PEPPER` present; load on `startPhoneAuth` / `requestPhoneAuthCode` with SMS sending disabled (no relay job is handed out) | Invalid tokens refused; budgets hold under parallel load; no relay job claimable while sending is off | Request/response summaries; counter documents; latency percentiles | Authorized non-production project (the emulator cannot check signatures) |
+| **G7a** Disabled-policy rejection | Emulators first, then the isolated non-production project of G7b | Backend engineer | With each switch off in turn — env `PHONE_AUTH_ENABLED` unset, master `enabled:false`, `emergencyStop:true`, `businessId` cleared, `signin.enabled:false` — call `startPhoneAuth` and `requestPhoneAuthCode` | Refused before any budget work: `phone-auth-unavailable` (env, master, `signin.enabled`) or `service-paused` (stop, no sender); **zero** new documents in `smsRateLimits`, `phoneAuthSessions`, `phoneAuthChallenges`, `relayJobs` | Refusal codes per switch; before/after document counts of those collections | Emulators (already covered by handler tests, M block); the project run needs authorization. **Not** evidence that budgets hold (see G7b) |
+| **G7b** Budgets under parallel load, physical SMS impossible | Emulators (dry run), then an **isolated non-production project** with sending policy **ON** (see §12.1) | Backend engineer; product owner approves the low limits | §12.1 | Every refusal during the run is a **budget** refusal (`scope` set); accepted requests never exceed any configured budget; `relayJobs` only ever `queued`, never claimed | Counter documents before/after, refusal log tally, job tally (§12.1) | Fake/emulator for the dry run; **authorized non-production project + a deploy of this branch there** for the real run |
+| **G7c** Real ID-token verification and configuration | Same non-production project, real Auth (signed tokens) | Backend engineer | Expired, forged, other-project and unsigned tokens against authenticated callables (`requestPhoneLinkOtp`, `getPhoneLinkStatus`, relay callables with/without the relay claim); confirm `PHONE_HASH_PEPPER` is set and env flags as intended | Invalid tokens refused by the framework before any handler work; relay callables refuse non-relay tokens | Request/response summaries; deployed config listing (secret **names** only) | Authorized non-production project (the Auth emulator does not check signatures) |
 | **G8** Platform-admin `relayDevices` write boundary | Rules emulator | Backend engineer + product owner | Decide whether admin clients may write `usage`/`caps`/routing; if not, server-only rules plus rules tests | Admin client writes to those fields refused; dashboard still works through callables | Rules diff + emulator test output | Fake/emulator only |
 | **G9** Pre-rollout production read-only checks | Production, **read-only** | Operator with authorized production read access | `remediatePhoneOtpAbuse.ts` dry-run (counts only); read `smsConfig/otp`; list relay `appVersion`s from heartbeats; confirm Firebase Phone provider disabled | Counts only (no PII); suspension still in place; every relay on 0.2.0+ before any enable | Dry-run output; screenshots of settings | **Separately authorized production access** |
 | **G10** Rollout | Production | Product owner (decision) + backend/relay engineers | §8 order; start with tight limits; watch §8 signals; emergency stop ready | Only after G1–G9 sign-off | Change record, dashboards | **Explicit rollout authorization** (not given) |
+
+### 12.1 G7b procedure — reach the budget transaction, make SMS impossible
+
+`requestPhoneAuthCode` only reaches its budget transaction after, in order:
+the sending policy (`requireSigninConfig(…, 'send')`: env + master on +
+`emergencyStop:false` + a sender `businessId` + `signin.enabled`), optional App
+Check, a valid supported number, and **live relay coverage** for the number's
+country (an `active` relay device of that business with a heartbeat younger than
+90 s, country routing on, the country in its allow-list). The transaction then
+checks session → idempotent replay → single-use proof-of-work → session /
+installation / source / destination / global / shared budgets, and only then
+writes counters, the challenge and one `queued` relay job. A run that is
+refused earlier (policy, `no-relay-for-country`, invalid proof) never touches the
+counters and proves nothing about budgets.
+
+**Setup (isolated non-production project, never production):**
+1. A dedicated Firebase project with this branch deployed (deploy separately
+   authorized), its own `PHONE_HASH_PEPPER`, `PHONE_AUTH_ENABLED=true`; no relay
+   app build is ever configured for this project.
+2. `smsConfig/otp`: `enabled:true`, `emergencyStop:false`,
+   `businessId:"g7-test-business"` (a business used for nothing else),
+   `signin.enabled:true`, `signin.attestation:'off'` (or App Check debug
+   tokens), and deliberately **low limits within the clamped bounds** so each
+   budget trips within a few dozen requests — e.g. `destinationPerHour:2`,
+   `destinationCooldownSec:30`, `sessionMaxCodes:2`, `sourcePerHour:6`,
+   `globalPerHour:20`, `powBits:8`, `powMaxBits:8` (low proof cost keeps the
+   load generator simple; proof-of-work speed is G4, not G7).
+3. Relay coverage with a **synthetic** device written by the Admin SDK:
+   `relayDevices/g7-synthetic` = `{businessId:"g7-test-business", status:"active",
+   countryRoutingEnabled:true, allowedCountryCodes:["PS"], fcmToken:null,
+   caps:{maxPerMinute:0, maxPerHour:0, maxPerDay:0}}`. The harness refreshes
+   `lastHeartbeatAt` (and `status:"active"`) every 30 s, because the reaper marks
+   a device offline after 90 s without a heartbeat.
+
+**Independent safeguards against a physical SMS** (any one suffices; all are
+checked before and after the run):
+- No relay identity exists for that business: no custom token is ever minted for
+  `g7-synthetic`, and no Auth user carries a `relayDevice` claim in the project —
+  `claimRelayJobs` requires one, so nothing can claim.
+- `caps` 0/0/0: relay coverage ignores capacity, but every claim is refused by
+  the capacity check (`count >= 0`), even for a hypothetical valid device token.
+- `fcmToken:null`: the post-commit wake-up has no device to notify.
+- Destination numbers are only numbers the business controls (valid PS mobile
+  numbers, required by the number check), so even a misconfiguration could only
+  reach the business itself.
+- Teardown: set `emergencyStop:true` → the policy trigger's sweep cancels every
+  queued code and purges its body; then delete the synthetic device.
+
+**Run:**
+1. Dry run against the Functions + Firestore + Auth emulators with the same
+   harness and limits (validates the harness and the expected counter math; no
+   SMS path exists there; not evidence of real contention).
+2. Real run from 2–3 load runners with distinct egress IPs (source budgets need
+   the `sourceHopsFromRight` value from G5): many sessions (`startPhoneAuth`),
+   each solving the proof and calling `requestPhoneAuthCode` in parallel bursts —
+   the same destination from many sessions (destination budget/cooldown), many
+   destinations from one source (source distinct/hour), one session past its code
+   limit (session), and enough total to exceed `globalPerHour`.
+
+**Validity checks and expected observations:**
+- Policy, `no-relay-for-country` and `proof-invalid` refusals during the run =
+  **0** (otherwise the run did not reach the budget path and is void).
+- Every other refusal carries a budget `scope` (`session`, `installation`,
+  `source`, `destination`, `global`, `shared`) in the response and in the
+  `[phoneAuth] request refused {reason, scope}` log.
+- accepted responses = new `relayJobs` `pauth_*` = increase of
+  `smsRateLimits/global_phoneAuth` window count = increase of
+  `smsRateLimits/global_verification`; no destination's counter exceeds
+  `destinationPerHour`; no source above `sourcePerHour`; global ≤ `globalPerHour`.
+- Every `pauth_*` job stays `queued` (never `claimed`/`sending`/`sent`/`delivered`);
+  `relayDevices/g7-synthetic.usage` absent/unchanged; zero `claimRelayJobs` calls
+  in the logs; after teardown every such job is `failed` with `lastError: sending-stopped`
+  and no `messageBody`.
+
+**Evidence to retain** (no phone numbers, codes or bodies — counter keys are
+HMACs): exports of the `smsRateLimits` documents and `phoneAuthSessions` counts
+before/after; the tally of refusals by `(reason, scope)` from logs; the job tally
+by status before and after teardown; the synthetic device document; the
+`smsConfig/otp` document used; harness version and runner IPs (redacted to /24).
 
