@@ -10,7 +10,19 @@ data class ClaimedJob(
     val body: String,
     val simSubscriptionId: Int?,
     val traceId: String,
+    /** e.g. "phone_auth_otp" / "phone_link_otp" for verification codes; null for business SMS. */
+    val kind: String? = null,
+    /** Must call [RelayApi.authorizeSend] and get ok right before sending. */
+    val requiresSendAuth: Boolean = false,
+    /** Verification jobs: must not be sent later than this many ms after receipt. */
+    val sendWithinMs: Long? = null,
 )
+
+/** Server answer to authorizeRelaySend. */
+data class SendAuthorization(val ok: Boolean, val reason: String?)
+
+/** Declared to the server so it hands this build verification-code jobs. */
+const val SEND_AUTH_CAPABILITY = "send-auth-v1"
 
 data class EnrollResult(val deviceId: String, val businessId: String, val customToken: String)
 
@@ -48,7 +60,10 @@ object RelayApi {
     }
 
     suspend fun claim(deviceId: String, capacity: Int): List<ClaimedJob> {
-        val data = mapOf("deviceId" to deviceId, "capacity" to capacity)
+        val data = mapOf(
+            "deviceId" to deviceId, "capacity" to capacity,
+            "clientCaps" to listOf(SEND_AUTH_CAPABILITY),
+        )
         @Suppress("UNCHECKED_CAST")
         val res = functions.getHttpsCallable("claimRelayJobs").call(data).awaitResult().data as Map<String, Any?>
         val jobs = (res["jobs"] as? List<*>).orEmpty()
@@ -60,8 +75,20 @@ object RelayApi {
                 body = m["messageBody"] as? String ?: "",
                 simSubscriptionId = (m["assignedSimSubscriptionId"] as? Number)?.toInt(),
                 traceId = m["traceId"] as? String ?: "",
+                kind = m["kind"] as? String,
+                requiresSendAuth = m["requiresSendAuth"] as? Boolean ?: false,
+                sendWithinMs = (m["sendWithinMs"] as? Number)?.toLong(),
             )
         }
+    }
+
+    /** Final server check immediately before the SmsManager hand-off. Throws on
+     *  network/server failure — callers must treat that as "do not send". */
+    suspend fun authorizeSend(deviceId: String, jobId: String): SendAuthorization {
+        val data = mapOf("deviceId" to deviceId, "jobId" to jobId)
+        @Suppress("UNCHECKED_CAST")
+        val res = functions.getHttpsCallable("authorizeRelaySend").call(data).awaitResult().data as Map<String, Any?>
+        return SendAuthorization(ok = res["ok"] == true, reason = res["reason"] as? String)
     }
 
     suspend fun report(
@@ -77,15 +104,16 @@ object RelayApi {
         functions.getHttpsCallable("reportRelayDelivery").call(data).awaitResult()
     }
 
+    /** Liveness + informational telemetry. Never carries send counters: the
+     *  server owns capacity accounting (older builds sent 0/0 here, which reset
+     *  the server's daily counter). */
     suspend fun heartbeat(
         deviceId: String, fcmToken: String, appVersion: String,
-        simInfo: List<Map<String, Any?>>, queueDepth: Int,
-        sentToday: Int, failedToday: Int, lastError: String?,
+        simInfo: List<Map<String, Any?>>, queueDepth: Int, lastError: String?,
     ) {
         val data = mapOf(
             "deviceId" to deviceId, "fcmToken" to fcmToken, "appVersion" to appVersion,
-            "simInfo" to simInfo, "queueDepth" to queueDepth,
-            "sentToday" to sentToday, "failedToday" to failedToday, "lastError" to lastError,
+            "simInfo" to simInfo, "queueDepth" to queueDepth, "lastError" to lastError,
         )
         functions.getHttpsCallable("relayHeartbeat").call(data).awaitResult()
     }
