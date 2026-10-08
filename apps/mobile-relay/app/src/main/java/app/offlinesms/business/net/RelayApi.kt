@@ -3,28 +3,12 @@ package app.offlinesms.business.net
 import com.google.firebase.functions.ktx.functions
 import com.google.firebase.ktx.Firebase
 
-/** A relay job handed to this device to send. */
-data class ClaimedJob(
-    val jobId: String,
-    val phoneE164: String,
-    val body: String,
-    val simSubscriptionId: Int?,
-    val traceId: String,
-    /** e.g. "phone_auth_otp" / "phone_link_otp" for verification codes; null for business SMS. */
-    val kind: String? = null,
-    /** Must call [RelayApi.authorizeSend] and get ok right before sending. */
-    val requiresSendAuth: Boolean = false,
-    /** Verification jobs: must not be sent later than this many ms after receipt. */
-    val sendWithinMs: Long? = null,
-)
-
-/** Server answer to authorizeRelaySend. */
-data class SendAuthorization(val ok: Boolean, val reason: String?)
-
-/** Declared to the server so it hands this build verification-code jobs. */
-const val SEND_AUTH_CAPABILITY = "send-auth-v1"
-
 data class EnrollResult(val deviceId: String, val businessId: String, val customToken: String)
+
+/** The callable transport. Production: Firebase Functions; tests: an in-memory fake server. */
+fun interface Callables {
+    suspend fun call(name: String, data: Map<String, Any?>): Any?
+}
 
 /**
  * Thin wrapper over the relay Cloud Function callables (region us-central1),
@@ -32,7 +16,10 @@ data class EnrollResult(val deviceId: String, val businessId: String, val custom
  * has no identity yet); the rest run with the custom-token session.
  */
 object RelayApi {
-    private val functions get() = Firebase.functions("us-central1")
+    /** Swappable for integration tests only (fake transport, no network). */
+    @Volatile var callables: Callables = Callables { name, data ->
+        Firebase.functions("us-central1").getHttpsCallable(name).call(data).awaitResult().data
+    }
 
     suspend fun enroll(
         pairingCode: String,
@@ -51,7 +38,7 @@ object RelayApi {
             "simInfo" to simInfo,
         )
         @Suppress("UNCHECKED_CAST")
-        val res = functions.getHttpsCallable("enrollRelayDevice").call(data).awaitResult().data as Map<String, Any?>
+        val res = callables.call("enrollRelayDevice", data) as Map<String, Any?>
         return EnrollResult(
             deviceId = res["deviceId"] as String,
             businessId = res["businessId"] as String,
@@ -64,31 +51,14 @@ object RelayApi {
             "deviceId" to deviceId, "capacity" to capacity,
             "clientCaps" to listOf(SEND_AUTH_CAPABILITY),
         )
-        @Suppress("UNCHECKED_CAST")
-        val res = functions.getHttpsCallable("claimRelayJobs").call(data).awaitResult().data as Map<String, Any?>
-        val jobs = (res["jobs"] as? List<*>).orEmpty()
-        return jobs.mapNotNull { raw ->
-            val m = raw as? Map<*, *> ?: return@mapNotNull null
-            ClaimedJob(
-                jobId = m["jobId"] as? String ?: return@mapNotNull null,
-                phoneE164 = m["phoneE164"] as? String ?: return@mapNotNull null,
-                body = m["messageBody"] as? String ?: "",
-                simSubscriptionId = (m["assignedSimSubscriptionId"] as? Number)?.toInt(),
-                traceId = m["traceId"] as? String ?: "",
-                kind = m["kind"] as? String,
-                requiresSendAuth = m["requiresSendAuth"] as? Boolean ?: false,
-                sendWithinMs = (m["sendWithinMs"] as? Number)?.toLong(),
-            )
-        }
+        return parseClaimedJobs(callables.call("claimRelayJobs", data))
     }
 
     /** Final server check immediately before the SmsManager hand-off. Throws on
      *  network/server failure — callers must treat that as "do not send". */
     suspend fun authorizeSend(deviceId: String, jobId: String): SendAuthorization {
         val data = mapOf("deviceId" to deviceId, "jobId" to jobId)
-        @Suppress("UNCHECKED_CAST")
-        val res = functions.getHttpsCallable("authorizeRelaySend").call(data).awaitResult().data as Map<String, Any?>
-        return SendAuthorization(ok = res["ok"] == true, reason = res["reason"] as? String)
+        return parseSendAuthorization(callables.call("authorizeRelaySend", data))
     }
 
     suspend fun report(
@@ -101,7 +71,7 @@ object RelayApi {
             "simSubscriptionId" to simSubscriptionId,
             "timestamp" to java.time.Instant.now().toString(),
         )
-        functions.getHttpsCallable("reportRelayDelivery").call(data).awaitResult()
+        callables.call("reportRelayDelivery", data)
     }
 
     /** Liveness + informational telemetry. Never carries send counters: the
@@ -115,6 +85,6 @@ object RelayApi {
             "deviceId" to deviceId, "fcmToken" to fcmToken, "appVersion" to appVersion,
             "simInfo" to simInfo, "queueDepth" to queueDepth, "lastError" to lastError,
         )
-        functions.getHttpsCallable("relayHeartbeat").call(data).awaitResult()
+        callables.call("relayHeartbeat", data)
     }
 }

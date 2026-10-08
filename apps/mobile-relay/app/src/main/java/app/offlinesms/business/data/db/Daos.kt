@@ -10,6 +10,10 @@ interface JobDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(job: JobEntity): Long
 
+    /** Insert, or replace the row for a newer server attempt (decided by SendPipeline.dedup). */
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(job: JobEntity): Long
+
     @Query("UPDATE jobs SET localStatus = :status, updatedAt = :now WHERE jobId = :jobId")
     suspend fun setStatus(jobId: String, status: String, now: Long)
 

@@ -12,7 +12,7 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import app.offlinesms.business.R
 import app.offlinesms.business.data.SecureStore
-import app.offlinesms.business.data.db.JobEntity
+import app.offlinesms.business.net.ClaimedJob
 import app.offlinesms.business.data.db.RelayDb
 import app.offlinesms.business.net.RelayApi
 import app.offlinesms.business.sms.SmsEngine
@@ -84,65 +84,40 @@ class RelayService : Service() {
         if (store.paused || Firebase.auth.currentUser == null) return
         if (!sendLock.tryLock()) return
         try {
-            val jobs = RelayApi.claim(deviceId, CLAIM_CAPACITY)
-            val receivedAt = SystemClock.elapsedRealtime()
-            if (jobs.isEmpty()) return
-            RelayLog.info(this, "claim", "n=${jobs.size}")
-            val dao = RelayDb.get(this).jobs()
-            for (job in jobs) {
-                val cand = SendGate.Candidate(job.jobId, job.requiresSendAuth, job.sendWithinMs, receivedAt)
-                val now = System.currentTimeMillis()
-                // Persist BEFORE any send. -1 = this job is already known locally
-                // (re-claim / duplicate wake / restart) → never hand it off again.
-                val inserted = dao.insert(JobEntity(job.jobId, RelayLog.maskPhone(job.phoneE164), job.body,
-                    job.simSubscriptionId, job.traceId, "claimed", now, now)) != -1L
-                var decision = SendGate.beforeSend(store.paused, inserted, cand, SystemClock.elapsedRealtime())
-                if (decision is SendGate.Decision.NeedsAuthorization) {
-                    val auth = try { RelayApi.authorizeSend(deviceId, job.jobId) } catch (e: Exception) {
-                        RelayLog.warn(this, "authorize", "job=${job.jobId} err: ${e.message?.take(60)}")
-                        null
-                    }
-                    decision = SendGate.afterAuthorization(auth?.ok, auth?.reason, store.paused, cand, SystemClock.elapsedRealtime())
-                }
-                when (decision) {
-                    is SendGate.Decision.StopBatch -> {
-                        // Paused mid-batch: leave the rest unsent. Their server leases
-                        // lapse; verification codes are failed there (never resent).
-                        if (inserted) dao.finalize(job.jobId, "paused", System.currentTimeMillis())
-                        RelayLog.info(this, "paused", "stopped batch at job=${job.jobId}")
-                        break
-                    }
-                    is SendGate.Decision.Skip -> {
-                        if (inserted) dao.finalize(job.jobId, "skipped", System.currentTimeMillis())
-                        RelayLog.info(this, "skip", "job=${job.jobId} ${decision.reason}")
-                        continue
-                    }
-                    is SendGate.Decision.Fail -> {
-                        app.offlinesms.business.work.Reporter.enqueue(this, job.jobId, "failed", decision.reason, null)
-                        continue
-                    }
-                    is SendGate.Decision.NeedsAuthorization -> continue // unreachable
-                    is SendGate.Decision.Send -> {
-                        // Mark 'sending' durably before the hand-off: after a crash the
-                        // job is ambiguous and is never resent (no local resend path).
-                        dao.setStatus(job.jobId, "sending", System.currentTimeMillis())
-                        try {
-                            SmsEngine.send(this, job)
-                            RelayLog.info(this, "send", "job=${job.jobId} to=${RelayLog.maskPhone(job.phoneE164)}")
-                        } catch (e: Exception) {
-                            RelayLog.error(this, "failed", "job=${job.jobId} ${e.message?.take(60)}")
-                            app.offlinesms.business.work.Reporter.enqueue(this, job.jobId, "failed", e.message?.take(120), null)
-                        }
-                    }
-                }
-                delay(PACING_MS) // carrier-friendly spacing (server also enforces minute/hour/day caps)
+            val outcomes = pipeline(deviceId).runOnce(CLAIM_CAPACITY)
+            if (outcomes.isNotEmpty()) {
+                RelayLog.info(this, "claim", "n=${outcomes.size}")
+                updateNotification()
             }
-            updateNotification()
         } catch (e: Exception) {
             RelayLog.warn(this, "claim", "err: ${e.message?.take(80)}")
         } finally {
             sendLock.unlock()
         }
+    }
+
+    /** Production send loop (see relayPipeline): Room + RelayApi + SmsManager + Reporter. */
+    private fun pipeline(deviceId: String): SendPipeline {
+        val ctx = this
+        return relayPipeline(
+            deviceId = deviceId,
+            dao = RelayDb.get(this).jobs(),
+            transport = object : SendPipeline.Transport {
+                override fun send(job: ClaimedJob) {
+                    SmsEngine.send(ctx, job)
+                    RelayLog.info(ctx, "send", "job=${job.jobId} to=${RelayLog.maskPhone(job.phoneE164)}")
+                }
+            },
+            reports = object : SendPipeline.Reports {
+                override fun failed(jobId: String, reason: String) {
+                    RelayLog.info(ctx, "not-sent", "job=$jobId $reason")
+                    app.offlinesms.business.work.Reporter.enqueue(ctx, jobId, "failed", reason, null)
+                }
+            },
+            clock = object : SendPipeline.Clock { override fun elapsedMs() = SystemClock.elapsedRealtime() },
+            pause = object : SendPipeline.Pause { override val paused get() = store.paused },
+            pacer = { delay(PACING_MS) }, // carrier-friendly spacing; server enforces minute/hour/day caps
+        )
     }
 
     private suspend fun heartbeatOnce() {

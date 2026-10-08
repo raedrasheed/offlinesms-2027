@@ -55,3 +55,9 @@ apps/mobile-relay/sendgate-jvm-test/build/
 apps/mobile-relay/sendgate-jvm-test/.gradle/
 apps/mobile-relay/sendgate-jvm-test/.kotlin/
 functions/.secret.local
+# Relay Android build outputs / machine-local SDK path
+apps/mobile-relay/.gradle/
+apps/mobile-relay/.kotlin/
+apps/mobile-relay/build/
+apps/mobile-relay/app/build/
+apps/mobile-relay/local.properties

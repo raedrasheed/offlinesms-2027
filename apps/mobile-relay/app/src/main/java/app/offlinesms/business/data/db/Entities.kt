@@ -1,5 +1,6 @@
 package app.offlinesms.business.data.db
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -17,9 +18,12 @@ data class JobEntity(
     val simSubscriptionId: Int?,
     val traceId: String,
     // local lifecycle: claimed -> sending -> sent -> delivered/failed
+    // (also paused/skipped when stopped before any hand-off)
     val localStatus: String,
     val createdAt: Long,
     val updatedAt: Long,
+    /** Server attempt this row describes (schema v2). 0 = pre-upgrade row. */
+    @ColumnInfo(defaultValue = "0") val attempt: Int = 0,
 )
 
 /**
