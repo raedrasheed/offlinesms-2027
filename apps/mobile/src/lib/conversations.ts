@@ -5,6 +5,7 @@
 // module re-exports a subset of these helpers for screens that haven't
 // migrated yet.
 
+import type { StickerRef, PollData } from './pollModel';
 import {
   collection, doc, onSnapshot, orderBy, query, where, limit,
   setDoc, serverTimestamp, Timestamp,
@@ -104,7 +105,7 @@ export type PinnedMessage = {
   pinnedBy:           string;
 } | null;
 
-export type MessageType = 'text' | 'image' | 'voice';
+export type MessageType = 'text' | 'image' | 'voice' | 'sticker' | 'poll';
 
 export type MediaUploadStatus = 'pending' | 'uploading' | 'uploaded' | 'failed';
 
@@ -163,6 +164,9 @@ export type Message = {
   // error code), surfaced in MessageInfo so it isn't logcat-only.
   errorCode?:          string | null;
   errorMessage?:       string | null;
+  // Stickers / polls (type 'sticker' | 'poll'); `text` holds a short fallback.
+  sticker?:            StickerRef | null;
+  poll?:               PollData | null;
 };
 
 export type UserState = {
@@ -684,6 +688,28 @@ export async function reactToMessage(
     { ok: true; emoji: string; toggledOff: boolean }
   >('reactToMessage')({ conversationId, messageId, emoji });
   return { toggledOff: res.data.toggledOff };
+}
+
+/** Vote in a poll (direct callable; the local-first path queues it instead).
+ *  `seq` orders this voter's votes so a late retry never overrides a newer one. */
+export async function votePoll(conversationId: string, messageId: string, optionIds: string[]): Promise<void> {
+  await fn<{ conversationId: string; messageId: string; optionIds: string[]; seq: number }, { ok: true }>('votePoll')({
+    conversationId, messageId, optionIds, seq: Date.now(),
+  });
+}
+
+/** End a poll (creator only). */
+export async function closePoll(conversationId: string, messageId: string): Promise<void> {
+  await fn<{ conversationId: string; messageId: string }, { ok: true }>('closePoll')({ conversationId, messageId });
+}
+
+/** Send a sticker or a poll when the local-first path is off (legacy path). */
+export async function sendRichMessage(
+  conversationId: string,
+  rich: { kind: 'sticker'; sticker: { packId: string; stickerId: string } } | { kind: 'poll'; poll: { question: string; options: string[]; multiple: boolean } },
+): Promise<string> {
+  const res = await fn<Record<string, unknown>, { messageId: string }>('sendTextMessage')({ conversationId, ...rich });
+  return res.data.messageId;
 }
 
 export async function starMessage(conversationId: string, messageId: string, starred: boolean): Promise<void> {

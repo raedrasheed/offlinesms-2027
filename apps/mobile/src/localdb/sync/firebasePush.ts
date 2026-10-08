@@ -93,6 +93,7 @@ export async function pushOutboxItem(item: OutboxRow): Promise<PushResult> {
         localId: payload.localId,
         idempotencyKey: item.idempotency_key,
         clientCreatedAt: payload.clientCreatedAt ?? null,
+        ...(payload.kind ? { kind: payload.kind, sticker: payload.sticker ?? null, poll: payload.poll ?? null } : {}),
       });
       return { ok: true, remoteId: res?.messageId, idempotent: res?.idempotent };
     }
@@ -176,6 +177,9 @@ export async function pushOutboxItem(item: OutboxRow): Promise<PushResult> {
         throw err;
       }
     }
+    case 'vote_poll':
+      await call('votePoll', { conversationId: payload.conversationId, messageId: payload.messageId, optionIds: payload.optionIds, seq: payload.seq });
+      return { ok: true };
     case 'edit_message':
       await call('editMessage', { conversationId: payload.conversationId, messageId: payload.messageId, text: payload.text });
       return { ok: true };

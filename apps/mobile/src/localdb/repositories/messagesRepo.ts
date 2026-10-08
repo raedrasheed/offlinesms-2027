@@ -164,6 +164,9 @@ export interface NewLocalMessage {
   mentionsJson?: string | null;
   deviceId: string;
   clientSequence: number;
+  /** Sticker / poll messages (text holds the fallback). */
+  type?: 'text' | 'sticker' | 'poll';
+  payloadJson?: string | null;
 }
 
 /** Insert an optimistic outgoing message (status `pending`). Returns the row. */
@@ -177,13 +180,13 @@ export async function insertLocalMessage(m: NewLocalMessage): Promise<MessageRow
        created_at, remote_created_at, updated_at, edited_at, deleted_for_everyone, deleted_for_me, deleted_at,
        reply_to_message_id, reply_to_preview, reply_to_sender_uid, reply_to_sender_name, reply_to_type,
        mentions_json, forwarded, forwarded_from_message_id,
-       status, error_code, error_message, sync_status, client_sequence, server_version)
-     VALUES (?,?,NULL,?,?,?, 'text', ?, ?, ?, NULL, ?, NULL, 0, 0, NULL, ?, ?, ?, ?, ?, ?, 0, NULL, 'pending', NULL, NULL, 'pending', ?, 0)`,
+       status, error_code, error_message, sync_status, client_sequence, server_version, payload_json)
+     VALUES (?,?,NULL,?,?,?, ?, ?, ?, ?, NULL, ?, NULL, 0, 0, NULL, ?, ?, ?, ?, ?, ?, 0, NULL, 'pending', NULL, NULL, 'pending', ?, 0, ?)`,
     [
-      id, id, m.conversationId, m.senderUid, m.senderDisplayName ?? null, m.text, preview,
+      id, id, m.conversationId, m.senderUid, m.senderDisplayName ?? null, m.type ?? 'text', m.text, preview,
       now, now, m.replyToMessageId ?? null, m.replyToPreview ?? null,
       m.replyToSenderUid ?? null, m.replyToSenderName ?? null, m.replyToType ?? null,
-      m.mentionsJson ?? null, m.clientSequence,
+      m.mentionsJson ?? null, m.clientSequence, m.payloadJson ?? null,
     ],
   );
   return (await getByLocalId(id))!;
@@ -328,7 +331,9 @@ export interface RemoteMediaInput {
 
 export interface RemoteMessageInput {
   remoteId: string; conversationId: string; senderUid: string; senderDisplayName?: string | null;
-  type?: 'text' | 'image' | 'voice'; caption?: string | null;
+  type?: 'text' | 'image' | 'voice' | 'sticker' | 'poll'; caption?: string | null;
+  /** Sticker / poll payload JSON; undefined = leave as is. */
+  payload?: string | null;
   text: string | null; remoteCreatedAt: number | null; editedAt?: number | null;
   deletedForEveryone?: boolean; replyToMessageId?: string | null; replyToPreview?: string | null;
   replyToSenderUid?: string | null; replyToSenderName?: string | null; replyToType?: string | null;
@@ -353,7 +358,7 @@ export async function applyRemoteMessages(batch: RemoteMessageInput[]): Promise<
     for (const r of batch) {
       // A deleted-for-everyone message keeps its row (it renders as "deleted"
       // in place, preserving order) but never keeps its content.
-      if (r.deletedForEveryone) await upsertRemoteMessage({ ...r, text: null, caption: null, media: null });
+      if (r.deletedForEveryone) await upsertRemoteMessage({ ...r, text: null, caption: null, media: null, payload: null });
       else await upsertRemoteMessage(r);
     }
   });
@@ -399,6 +404,7 @@ export async function upsertRemoteMessage(r: RemoteMessageInput): Promise<void> 
     ];
     if (r.reactions !== undefined) { sets.push('reactions_json = ?'); params.push(reactionsJson); }
     if (r.mentions !== undefined) { sets.push('mentions_json = ?'); params.push(mentionsJson); }
+    if (r.payload !== undefined) { sets.push('payload_json = ?'); params.push(r.payload); }
     if (r.counts !== undefined) {
       sets.push('delivered_count = ?', 'read_count = ?', 'viewed_count = ?', 'played_count = ?');
       params.push(c.delivered ?? 0, c.read ?? 0, c.viewed ?? 0, c.played ?? 0);
@@ -433,9 +439,9 @@ export async function upsertRemoteMessage(r: RemoteMessageInput): Promise<void> 
          status, error_code, error_message, sync_status, client_sequence, server_version,
          reactions_json, delivered_count, read_count, viewed_count, played_count,
          media_mime, media_size, media_width, media_height, media_duration_ms, media_waveform,
-         media_storage_path, media_download_url, media_thumb_path, media_thumb_url, media_upload_status)
+         media_storage_path, media_download_url, media_thumb_path, media_thumb_url, media_upload_status, payload_json)
        VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, NULL, 'synced', 0, ?, ?, ?, ?, ?, ?,
-         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         r.remoteId, r.remoteId, r.conversationId, r.senderUid, r.senderDisplayName ?? null,
         type, r.text, (r.text ?? '').slice(0, 200), r.caption ?? null,
@@ -448,6 +454,7 @@ export async function upsertRemoteMessage(r: RemoteMessageInput): Promise<void> 
         md?.mimeType ?? null, md?.sizeBytes ?? null, md?.width ?? null, md?.height ?? null,
         md?.durationMs ?? null, waveformJson, md?.storagePath ?? null, md?.downloadURL ?? null,
         md?.thumbnailPath ?? null, md?.thumbnailURL ?? null, md?.uploadStatus ?? null,
+        r.payload ?? null,
       ],
     );
   }
@@ -484,4 +491,20 @@ export async function nextClientSequence(conversationId: string): Promise<number
   const row = await getDb().first<{ m: number }>(
     `SELECT MAX(client_sequence) AS m FROM messages WHERE conversation_id = ?`, [conversationId]);
   return (row?.m ?? 0) + 1;
+}
+
+/** Optimistic local poll vote: rewrite this message's payload (the next
+ *  snapshot from the server replaces it with the authoritative tally). */
+export async function setPayload(remoteOrLocalId: string, payloadJson: string | null): Promise<void> {
+  await getDb().run(
+    `UPDATE messages SET payload_json = ?, updated_at = ? WHERE remote_id = ? OR local_id = ?`,
+    [payloadJson, Date.now(), remoteOrLocalId, remoteOrLocalId],
+  );
+}
+
+export async function getPayload(remoteOrLocalId: string): Promise<string | null> {
+  const r = await getDb().first<{ payload_json: string | null }>(
+    `SELECT payload_json FROM messages WHERE remote_id = ? OR local_id = ?`, [remoteOrLocalId, remoteOrLocalId],
+  );
+  return r?.payload_json ?? null;
 }

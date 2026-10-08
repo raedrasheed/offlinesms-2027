@@ -15,6 +15,7 @@ import * as outboxRepo from './repositories/outboxRepo';
 import * as externalMembersRepo from './repositories/externalMembersRepo';
 import { getDeviceId, getCursor, setCursor } from './repositories/syncStateRepo';
 import { idempotencyKey, localId } from './sync/ids';
+import { sanitizePoll, parsePoll, applyLocalVote } from '../lib/pollModel';
 import { toggleReaction } from './sync/reactionLogic';
 import { phoneDigits } from '../lib/phone';
 import { isOnline, onConnectivityChange } from './sync/networkState';
@@ -85,6 +86,26 @@ export interface QueueSendInput {
   text: string;
   replyTo?: { messageId: string; senderUid?: string; senderDisplayName?: string; preview?: string; type?: string } | null;
   mentions?: Array<{ userId: string; displayName: string; startIndex: number; endIndex: number }> | null;
+  /** Sticker / poll messages ride the same send path (server: sendTextMessage kind). */
+  kind?: 'text' | 'sticker' | 'poll';
+  sticker?: { packId: string; stickerId: string; alt: string } | null;
+  poll?: { question: string; options: string[]; multiple: boolean } | null;
+}
+
+function kindPayload(input: QueueSendInput): { text: string; payloadJson: string | null } {
+  if (input.kind === 'sticker' && input.sticker) {
+    return { text: input.sticker.alt, payloadJson: JSON.stringify(input.sticker) };
+  }
+  if (input.kind === 'poll' && input.poll) {
+    const options = input.poll.options.map(o => o.replace(/\s+/g, ' ').trim()).filter(Boolean)
+      .map((text, i) => ({ id: `o${i + 1}`, text }));
+    const question = input.poll.question.replace(/\s+/g, ' ').trim();
+    return {
+      text: `📊 ${question}`,
+      payloadJson: JSON.stringify(sanitizePoll({ question, options, multiple: input.poll.multiple, closed: false, votes: {} })),
+    };
+  }
+  return { text: input.text, payloadJson: null };
 }
 
 /**
@@ -97,12 +118,16 @@ export async function queueSendMessage(input: QueueSendInput): Promise<MessageRo
   const deviceId = await getDeviceId();
   const clientSequence = await messagesRepo.nextClientSequence(input.conversationId);
 
-  const mentions = input.mentions && input.mentions.length > 0 ? input.mentions : null;
+  const kind = input.kind ?? 'text';
+  const { text, payloadJson } = kindPayload(input);
+  const mentions = kind === 'text' && input.mentions && input.mentions.length > 0 ? input.mentions : null;
   const row = await messagesRepo.insertLocalMessage({
     conversationId: input.conversationId,
     senderUid: input.senderUid,
     senderDisplayName: input.senderDisplayName ?? null,
-    text: input.text,
+    text,
+    type: kind,
+    payloadJson,
     replyToMessageId: input.replyTo?.messageId ?? null,
     replyToPreview: input.replyTo?.preview ?? null,
     replyToSenderUid: input.replyTo?.senderUid ?? null,
@@ -121,16 +146,45 @@ export async function queueSendMessage(input: QueueSendInput): Promise<MessageRo
     idempotencyKey: idempotencyKey(['send', deviceId, row.local_id]),
     payload: {
       conversationId: input.conversationId,
-      text: input.text,
-      replyTo: input.replyTo ?? null,
+      text,
+      replyTo: kind === 'poll' ? null : (input.replyTo ?? null),
       mentions,
       localId: row.local_id,
       clientCreatedAt: row.created_at,
+      ...(kind !== 'text' ? { kind } : {}),
+      ...(kind === 'sticker' && input.sticker ? { sticker: { packId: input.sticker.packId, stickerId: input.sticker.stickerId } } : {}),
+      ...(kind === 'poll' && input.poll ? { poll: input.poll } : {}),
     },
   });
 
   kick('outbox');
   return row;
+}
+
+let lastVoteSeq = 0;
+
+/**
+ * Vote in a poll: optimistic local tally + an outbox item. Each vote carries a
+ * strictly increasing `seq`, so the server ignores a late retry of an older
+ * vote; retries of the same vote are no-ops server-side (no double counting).
+ */
+export async function queueVotePoll(args: { conversationId: string; messageId: string; uid: string; optionIds: string[] }): Promise<ActionResult> {
+  if (!getCurrentUid()) return { ok: false, reason: 'not-initialised' };
+  const msg = await messagesRepo.getByRemoteId(args.messageId);
+  if (!msg) return { ok: false, reason: 'not-delivered' };
+  const poll = parsePoll(msg.payload_json);
+  if (!poll || poll.closed) return { ok: false, reason: 'not-a-poll' };
+  await messagesRepo.setPayload(args.messageId, JSON.stringify(applyLocalVote(poll, args.uid, args.optionIds)));
+  const seq = lastVoteSeq = Math.max(Date.now(), lastVoteSeq + 1);
+  const deviceId = await getDeviceId();
+  await outboxRepo.enqueue({
+    type: 'vote_poll', entityType: 'message', entityId: args.messageId,
+    conversationId: args.conversationId,
+    idempotencyKey: idempotencyKey(['vote', deviceId, args.messageId, String(seq)]),
+    payload: { conversationId: args.conversationId, messageId: args.messageId, optionIds: args.optionIds, seq },
+  });
+  kick('outbox');
+  return { ok: true };
 }
 
 export interface QueueSendImageInput {
@@ -283,7 +337,7 @@ export async function getChatClearedAt(conversationId: string): Promise<number> 
   return getCursor(`chat_cleared:${conversationId}`);
 }
 
-export interface ActionResult { ok: boolean; reason?: 'not-initialised' | 'not-delivered' }
+export interface ActionResult { ok: boolean; reason?: 'not-initialised' | 'not-delivered' | 'not-a-poll' }
 
 function parseReactions(json: string | null): Record<string, string[]> | null {
   if (!json) return null;

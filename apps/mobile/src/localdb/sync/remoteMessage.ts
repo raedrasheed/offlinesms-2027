@@ -5,6 +5,7 @@
 // which turned older photos and voice notes into empty text rows.
 
 import type { RemoteMessageInput } from '../repositories/messagesRepo';
+import { payloadFromRemote } from '../../lib/pollModel';
 
 function ms(ts: any): number | null {
   if (ts == null) return null;
@@ -13,7 +14,7 @@ function ms(ts: any): number | null {
 }
 
 function messageType(t: unknown): RemoteMessageInput['type'] {
-  return t === 'image' || t === 'voice' ? t : 'text';
+  return t === 'image' || t === 'voice' || t === 'sticker' || t === 'poll' ? t : 'text';
 }
 
 export function remoteMessageInput(remoteId: string, conversationId: string, m: Record<string, any>): RemoteMessageInput {
@@ -58,5 +59,6 @@ export function remoteMessageInput(remoteId: string, conversationId: string, m: 
     } : null,
     status: 'sent',
     clientLocalId: typeof m.clientLocalId === 'string' ? m.clientLocalId : null,
+    payload: payloadFromRemote(m.type, m),
   };
 }

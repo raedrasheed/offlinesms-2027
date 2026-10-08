@@ -162,3 +162,56 @@ describe('v6 read-path indexes', () => {
     expect(c.join(' ')).not.toContain('TEMP B-TREE');
   });
 });
+
+describe('sticker and poll messages (v7 payload)', () => {
+  const poll = (votes: Record<string, string[]>) => ({
+    question: 'Lunch?', multiple: false, closed: false,
+    options: [{ id: 'o1', text: 'Pizza' }, { id: 'o2', text: 'Falafel' }], votes, counts: {}, voterCount: 0,
+  });
+
+  it('live vote updates reach the open conversation as a new poll object (only that bubble re-renders)', async () => {
+    const { createMessageMapper } = await import('../../src/hooks/messageModel');
+    const map = createMessageMapper();
+    const stop = startConversationFeeder(C, () => {});
+    fakeWrite(`conversations/${C}/messages/p1`, msg(1, { type: 'poll', text: '📊 Lunch?', poll: poll({}) }));
+    fakeWrite(`conversations/${C}/messages/t2`, msg(2));
+    await flush(); await flush();
+    const before = map(await messagesRepo.listMessages(C, 50));
+    expect(before.find(m => m.id === 'p1')?.poll?.voterCount).toBe(0);
+
+    fakeWrite(`conversations/${C}/messages/p1`, msg(1, { type: 'poll', text: '📊 Lunch?', poll: poll({ u_peer: ['o2'] }) }));
+    await flush(); await flush();
+    const after = map(await messagesRepo.listMessages(C, 50));
+    const p = after.find(m => m.id === 'p1')!;
+    expect(p.type).toBe('poll');
+    expect(p.poll).toMatchObject({ voterCount: 1, counts: { o1: 0, o2: 1 } });
+    expect(after.find(m => m.id === 't2')).toBe(before.find(m => m.id === 't2'));
+    expect(p).not.toBe(before.find(m => m.id === 'p1'));
+    stop();
+  });
+
+  it('stickers round-trip; delete-for-everyone drops the payload', async () => {
+    const stop = startConversationFeeder(C, () => {});
+    fakeWrite(`conversations/${C}/messages/s1`, msg(1, { type: 'sticker', text: '👋', sticker: { packId: 'simsim', stickerId: 'hi', alt: '👋' } }));
+    await flush(); await flush();
+    let rows = mapAndOrderMessages(await messagesRepo.listMessages(C, 50));
+    expect(rows[0]).toMatchObject({ type: 'sticker', sticker: { packId: 'simsim', stickerId: 'hi' } });
+    fakeWrite(`conversations/${C}/messages/s1`, msg(1, { type: 'sticker', text: '', deletedForEveryone: true }));
+    await flush(); await flush();
+    rows = mapAndOrderMessages(await messagesRepo.listMessages(C, 50));
+    expect(rows[0].deletedForEveryone).toBe(true);
+    expect(rows[0].sticker).toBeNull();
+    expect((await messagesRepo.getByRemoteId('s1'))?.payload_json).toBeNull();
+    stop();
+  });
+
+  it('an optimistic local vote is stored in the payload and replaced by the server tally', async () => {
+    await messagesRepo.applyRemoteMessages([remoteMessageInput('p9', C, msg(1, { type: 'poll', poll: poll({}) }))]);
+    const { applyLocalVote, parsePoll } = await import('../../src/lib/pollModel');
+    const local = applyLocalVote(parsePoll(await messagesRepo.getPayload('p9'))!, 'u_me', ['o1']);
+    await messagesRepo.setPayload('p9', JSON.stringify(local));
+    expect(parsePoll(await messagesRepo.getPayload('p9'))?.votes).toEqual({ u_me: ['o1'] });
+    await messagesRepo.applyRemoteMessages([remoteMessageInput('p9', C, msg(1, { type: 'poll', poll: poll({ u_me: ['o1'], u_peer: ['o1'] }) }))]);
+    expect(parsePoll(await messagesRepo.getPayload('p9'))).toMatchObject({ voterCount: 2, counts: { o1: 2, o2: 0 } });
+  });
+});
