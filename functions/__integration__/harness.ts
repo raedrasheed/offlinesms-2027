@@ -170,7 +170,7 @@ export async function authUserCount(): Promise<number> {
  *  relay builds declare the send-authorization capability; pass `caps: []` to
  *  act as an older build. */
 export function deviceReq(data: Record<string, unknown>, deviceId = DEVICE): CallableRequest<unknown> {
-  return req(deviceId, { deviceId, clientCaps: ['send-auth-v1'], ...data }, {
+  return req(deviceId, { deviceId, clientCaps: ['send-auth-v1', 'attempt-v1'], ...data }, {
     claims: { relayDevice: true, deviceId, businessId: BUSINESS },
   });
 }

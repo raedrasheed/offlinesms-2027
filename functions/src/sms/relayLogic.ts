@@ -169,8 +169,46 @@ export function isTerminalJobStatus(s: RelayJobStatus): boolean {
 /** Idempotency guard: should we apply `next` over the current status? */
 export function shouldApplyReport(current: RelayJobStatus, next: RelayReportStatus): boolean {
   if (isTerminalJobStatus(current)) return false;     // already settled
-  if (current === 'sent' && next === 'sent') return false; // duplicate sent
+  if (current === 'sent' && next !== 'delivered') return false; // duplicate sent; a 'sent' message is never re-queued by a later failure
   return true;
+}
+
+/** Declared by relay builds that bind every report and SMS callback to the
+ *  server attempt. Only such builds are handed a re-lease (attempt ≥ 2). */
+export const ATTEMPT_CAPABILITY = 'attempt-v1';
+
+export type ReportBinding = 'current' | 'stale' | 'unbound' | 'foreign';
+
+/**
+ * Which attempt does a delivery report describe (M2)? The job's current
+ * attempt is `jobAttempts` (incremented at every lease), held by
+ * `attemptDeviceId` (set at claim, kept through requeue; older jobs fall back
+ * to the lease owner).
+ *   current — this attempt, from the device that held it → may change the job
+ *   stale   — an older (or unknown newer) attempt → never applied to the current one
+ *   unbound — no attempt identity (old build / pre-upgrade pending report) on a
+ *             job that has been re-leased → cannot be attributed; not applied
+ *   foreign — the current attempt, reported by a device that does not hold it
+ */
+export function reportBinding(i: {
+  reportAttempt: unknown; jobAttempts: number;
+  attemptDeviceId?: string | null; leaseOwnerDeviceId?: string | null; deviceId: string;
+}): ReportBinding {
+  const owner = i.attemptDeviceId ?? i.leaseOwnerDeviceId ?? null;
+  const a = typeof i.reportAttempt === 'number' && Number.isInteger(i.reportAttempt) && i.reportAttempt >= 1
+    ? i.reportAttempt : null;
+  if (a === null) {
+    // Without attempt identity only a never-re-leased job is unambiguous.
+    if (i.jobAttempts > 1 || owner === null) return 'unbound';
+    return owner === i.deviceId ? 'current' : 'foreign';
+  }
+  if (a !== i.jobAttempts || owner === null) return 'stale';
+  return owner === i.deviceId ? 'current' : 'foreign';
+}
+
+/** A report saying the message may already have reached the network. */
+export function isPossiblySentReport(status: RelayReportStatus, reason?: string | null): boolean {
+  return status !== 'failed' || /^ambiguous/i.test(reason ?? '');
 }
 
 // ── Retry classification + backoff + reaper decisions ───────────────────────
@@ -214,9 +252,10 @@ export function backoffMs(attempts: number): number {
  *  could text the same person twice. The user asks for a new code instead,
  *  which goes back through every abuse limit. */
 export function failureOutcome(
-  attempts: number, maxAttempts: number, cls: FailureClass, kind?: unknown,
+  attempts: number, maxAttempts: number, cls: FailureClass, kind?: unknown, noRetry = false,
 ): 'requeue' | 'fail' {
   if (isVerificationJobKind(kind)) return 'fail';
+  if (noRetry) return 'fail'; // an earlier attempt may already have gone out
   if (cls === 'permanent') return 'fail';
   return attempts < maxAttempts ? 'requeue' : 'fail';
 }
@@ -225,12 +264,13 @@ export function failureOutcome(
  *  classic ambiguous timeout (device took the job, then went silent), so
  *  verification-code jobs are failed, never requeued. */
 export function reapDecision(
-  job: { status: RelayJobStatus; leaseExpiresAtMs: number | null; attempts: number; maxAttempts: number; kind?: unknown },
+  job: { status: RelayJobStatus; leaseExpiresAtMs: number | null; attempts: number; maxAttempts: number; kind?: unknown; noRetry?: boolean },
   nowMs: number,
 ): 'none' | 'requeue' | 'fail' {
   if (job.status !== 'claimed' && job.status !== 'sending') return 'none';
   if (job.leaseExpiresAtMs == null || job.leaseExpiresAtMs > nowMs) return 'none';
   if (isVerificationJobKind(job.kind)) return 'fail';
+  if (job.noRetry === true) return 'fail';
   return job.attempts >= job.maxAttempts ? 'fail' : 'requeue';
 }
 

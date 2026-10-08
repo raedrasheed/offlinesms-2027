@@ -35,7 +35,7 @@ export const relayReaper = onSchedule(
       const attempts = (doc.get('attempts') as number) ?? 1;
       const maxAttempts = (doc.get('maxAttempts') as number) ?? 3;
       const status = (doc.get('status') ?? 'claimed') as RelayJobStatus;
-      const decision = reapDecision({ status, leaseExpiresAtMs: leaseMs, attempts, maxAttempts, kind: doc.get('kind') }, now);
+      const decision = reapDecision({ status, leaseExpiresAtMs: leaseMs, attempts, maxAttempts, kind: doc.get('kind'), noRetry: doc.get('noRetry') === true }, now);
       if (decision === 'none') continue;
 
       const businessId = doc.get('businessId') as string;
@@ -49,7 +49,7 @@ export const relayReaper = onSchedule(
         const lm = (fresh.get('leaseExpiresAt') as Timestamp | undefined)?.toMillis?.() ?? null;
         const at = (fresh.get('attempts') as number) ?? 1;
         const max = (fresh.get('maxAttempts') as number) ?? 3;
-        const d = reapDecision({ status: s, leaseExpiresAtMs: lm, attempts: at, maxAttempts: max, kind: fresh.get('kind') }, now);
+        const d = reapDecision({ status: s, leaseExpiresAtMs: lm, attempts: at, maxAttempts: max, kind: fresh.get('kind'), noRetry: fresh.get('noRetry') === true }, now);
         if (d === 'requeue') {
           tx.update(doc.ref, {
             status: 'queued', leaseOwnerDeviceId: null, leaseExpiresAt: null, assignedDeviceId: null,
@@ -59,7 +59,7 @@ export const relayReaper = onSchedule(
         } else if (d === 'fail') {
           tx.update(doc.ref, {
             status: 'failed', failedAt: FieldValue.serverTimestamp(),
-            lastError: 'lease-expired-max-attempts', messageBody: FieldValue.delete(),
+            lastError: fresh.get('noRetry') === true ? 'lease-expired-no-retry' : 'lease-expired-max-attempts', messageBody: FieldValue.delete(),
             updatedAt: FieldValue.serverTimestamp(),
           });
         }

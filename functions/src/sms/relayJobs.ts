@@ -17,7 +17,7 @@ import {
   classifyFailure, failureOutcome, backoffMs, utcDayKey,
   isVerificationJobKind, verificationClaimDecision, verificationPurposeOf, PUBLIC_OTP_JOB_KIND,
   relayCapacityCheck, reserveRelayUsage, type CapsLike, type RelayUsage,
-  type RelayJobStatus,
+  type RelayJobStatus, reportBinding, isPossiblySentReport, isTerminalJobStatus, ATTEMPT_CAPABILITY,
 } from './relayLogic';
 import { maybeFinalizeRelayBatch } from './relaySettlement';
 import { loadPolicyDoc, verificationJobStillValid, OTP_POLICY_DOC } from '../verification/policy';
@@ -75,6 +75,9 @@ export const claimRelayJobs = onCall({ region: REGION }, async (request) => {
   const want = Math.max(0, Math.min(MAX_CLAIM, Math.floor(Number(data.capacity) || 0)));
   if (want === 0) return { jobs: [] };
   const sendAuthCapable = Array.isArray(data.clientCaps) && data.clientCaps.includes(SEND_AUTH_CAPABILITY);
+  // Re-leases (attempt ≥ 2) go only to builds that bind reports to attempts, so
+  // a report without attempt identity can only ever describe attempt 1.
+  const attemptCapable = Array.isArray(data.clientCaps) && data.clientCaps.includes(ATTEMPT_CAPABILITY);
 
   const db = getFirestore();
   const devRef = db.collection('relayDevices').doc(ctx.deviceId);
@@ -148,6 +151,7 @@ export const claimRelayJobs = onCall({ region: REGION }, async (request) => {
 
       const a = fresh.get('assignedDeviceId') as string | undefined;
       if (a && a !== ctx.deviceId) return null;
+      if (!attemptCapable && ((fresh.get('attempts') as number | undefined) ?? 0) >= 1) return null;
       // Country: a tagged job needs a device with country routing ENABLED that
       // serves the country (the switch is re-read here, not cached).
       if (!deviceRoutingAllows(dev.data() ?? {}, fresh.get('recipientCountryCode'))) return null;
@@ -163,6 +167,7 @@ export const claimRelayJobs = onCall({ region: REGION }, async (request) => {
         status: 'claimed',
         assignedDeviceId: ctx.deviceId,
         leaseOwnerDeviceId: ctx.deviceId,
+        attemptDeviceId: ctx.deviceId, // who holds THIS attempt (kept through requeue; binds reports)
         leaseExpiresAt: Timestamp.fromMillis(leaseExpiryMs(now)),
         attempts: FieldValue.increment(1),
         requiresSendAuth: verification,
@@ -315,7 +320,7 @@ export const authorizeRelaySend = onCall({ region: REGION }, async (request) => 
 export const reportRelayDelivery = onCall({ region: REGION }, async (request) => {
   const data = (request.data ?? {}) as {
     deviceId?: string; jobId?: string; status?: unknown; reason?: string;
-    androidResultCode?: number; simSubscriptionId?: number;
+    androidResultCode?: number; simSubscriptionId?: number; attempt?: unknown;
   };
   const ctx = deviceCtx(request, data.deviceId);
   if (typeof data.jobId !== 'string' || !data.jobId) throw new HttpsError('invalid-argument', 'jobId-required');
@@ -326,19 +331,55 @@ export const reportRelayDelivery = onCall({ region: REGION }, async (request) =>
   const jobRef = db.collection('relayJobs').doc(data.jobId);
 
   const devRef = db.collection('relayDevices').doc(ctx.deviceId);
+  const possiblySent = isPossiblySentReport(report, data.reason);
 
   const applied = await db.runTransaction(async tx => {
     const snap = await tx.get(jobRef);
     if (!snap.exists) throw new HttpsError('not-found', 'job-not-found');
     if (snap.get('businessId') !== ctx.businessId) throw new HttpsError('permission-denied', 'cross-business');
-    const leaseOwner = snap.get('leaseOwnerDeviceId') as string | undefined;
-    if (leaseOwner !== ctx.deviceId) throw new HttpsError('permission-denied', 'not-lease-owner');
 
+    const attempts = (snap.get('attempts') as number | undefined) ?? 0;
     const current = (snap.get('status') ?? 'queued') as RelayJobStatus;
-    const base = { changed: false, requeued: false, batchId: snap.get('batchId'), recipientUid: snap.get('recipientUid') };
-    if (!shouldApplyReport(current, report)) return base;
+    const base = {
+      changed: false, requeued: false, finalStatus: report as RelayJobStatus, stale: null as string | null,
+      jobAttempt: attempts, batchId: snap.get('batchId'), recipientUid: snap.get('recipientUid'),
+    };
+    // M2: a report describes ONE attempt. It is applied only to that attempt,
+    // and only if it is still the job's current one.
+    const binding = reportBinding({
+      reportAttempt: data.attempt, jobAttempts: attempts, deviceId: ctx.deviceId,
+      attemptDeviceId: snap.get('attemptDeviceId') ?? null, leaseOwnerDeviceId: snap.get('leaseOwnerDeviceId') ?? null,
+    });
+    if (binding === 'foreign') throw new HttpsError('permission-denied', 'not-lease-owner');
 
-    const attempts = (snap.get('attempts') as number) ?? 1;
+    // `settle` = this report ends the job now, never re-queues it.
+    let settle = false;
+    if (binding !== 'current') {
+      // Acknowledged without being treated as the current attempt's outcome.
+      // A BOUND report that says an earlier attempt may have gone out still
+      // matters: no further attempt may be created (that would be a duplicate).
+      if (binding === 'stale' && possiblySent && !isTerminalJobStatus(current) && current !== 'sent') {
+        if (current === 'queued') {
+          settle = true; // between attempts: settle with the earlier attempt's outcome instead of sending again
+        } else {
+          tx.update(jobRef, {
+            noRetry: true, lateReports: FieldValue.arrayUnion(`${data.attempt}:${report}`), updatedAt: FieldValue.serverTimestamp(),
+          });
+          return { ...base, stale: binding };
+        }
+      } else {
+        return { ...base, stale: binding };
+      }
+    } else if (current === 'queued') {
+      // This attempt was already resolved as a retry (an earlier copy of this
+      // report whose response was lost, or a lapsed lease). A duplicate failure
+      // changes nothing; a success means it did go out → settle, don't resend.
+      if (!possiblySent) return { ...base, stale: 'duplicate' };
+      settle = true;
+    } else if (!shouldApplyReport(current, report)) {
+      return base;
+    }
+
     const maxAttempts = (snap.get('maxAttempts') as number) ?? 3;
     const now = Date.now();
 
@@ -346,9 +387,9 @@ export const reportRelayDelivery = onCall({ region: REGION }, async (request) =>
     // body for resend); otherwise the report is terminal (purge body).
     let finalStatus: RelayJobStatus = report;
     let requeued = false;
-    if (report === 'failed') {
+    if (report === 'failed' && !settle) {
       const cls = classifyFailure(data.androidResultCode, data.reason);
-      if (failureOutcome(attempts, maxAttempts, cls, snap.get('kind')) === 'requeue') { finalStatus = 'queued'; requeued = true; }
+      if (failureOutcome(attempts, maxAttempts, cls, snap.get('kind'), snap.get('noRetry') === true) === 'requeue') { finalStatus = 'queued'; requeued = true; }
     }
 
     // Firestore transactions require ALL reads before ANY writes — so read the
@@ -368,6 +409,7 @@ export const reportRelayDelivery = onCall({ region: REGION }, async (request) =>
       if (report === 'delivered') patch.deliveredAt = FieldValue.serverTimestamp();
       if (report === 'failed')   { patch.failedAt = FieldValue.serverTimestamp(); patch.lastError = (data.reason ?? '').slice(0, 200); patch.lastErrorCode = String(data.androidResultCode ?? ''); }
       patch.messageBody = FieldValue.delete();        // privacy: purge on terminal
+      if (settle) { patch.nextAttemptAt = null; patch.settledByAttempt = typeof data.attempt === 'number' ? data.attempt : attempts; }
     }
     if (report === 'delivered' && current !== 'sent') patch.sentAt = FieldValue.serverTimestamp();
     tx.update(jobRef, patch);
@@ -395,9 +437,16 @@ export const reportRelayDelivery = onCall({ region: REGION }, async (request) =>
       tx.set(devRef, { counters: next, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
     }
 
-    return { changed: true, requeued, batchId: base.batchId, recipientUid: base.recipientUid };
+    return { ...base, changed: true, requeued, finalStatus };
   });
 
+  if (applied.stale) {
+    await writeAuditLog({
+      action: 'relay.report.notApplied', actor: { uid: ctx.deviceId },
+      target: { type: 'relayJob', id: data.jobId }, result: 'success',
+      metadata: { businessId: ctx.businessId, why: applied.stale, status: report, reportedAttempt: typeof data.attempt === 'number' ? data.attempt : null, currentAttempt: applied.jobAttempt },
+    });
+  }
   if (applied.changed && applied.requeued) {
     await writeAuditLog({
       action: 'relay.job.requeued', actor: { uid: ctx.deviceId },
@@ -418,5 +467,5 @@ export const reportRelayDelivery = onCall({ region: REGION }, async (request) =>
     // Finalize the batch once all relay jobs are terminal → existing settlement.
     if (applied.batchId) { try { await maybeFinalizeRelayBatch(applied.batchId); } catch { /* reaper retries */ } }
   }
-  return { ok: true, applied: applied.changed, requeued: applied.requeued };
+  return { ok: true, applied: applied.changed, requeued: applied.requeued, ...(applied.stale ? { notApplied: applied.stale } : {}) };
 });

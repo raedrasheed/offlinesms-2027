@@ -7,7 +7,7 @@
 
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
-  db, resetEmulators, seedPolicy, seedRelayDevice, makeEmailUser, req, deviceReq, job,
+  db, resetEmulators, seedPolicy, seedRelayDevice, makeEmailUser, req, deviceReq, job, expectHttps,
   num, linkReq, deliveredCode, BUSINESS, DEVICE, Timestamp,
 } from './harness';
 import { claimRelayJobs, reportRelayDelivery, authorizeRelaySend } from '../src/sms/relayJobs';
@@ -311,7 +311,7 @@ describe('N5 — server attempt identity and ambiguous hand-offs', () => {
     // retry consumed a second reservation; the job settles once when reported.
     const usage = (await db().collection('relayDevices').doc(DEVICE).get()).get('usage');
     expect([usage.m.c, usage.h.c, usage.d.c]).toEqual([2, 2, 2]);
-    await report('a1', 'sent');
+    await report('a1', 'sent', { attempt: 2 }); // the relay binds every report to its attempt (M2)
     expect(await job('a1')).toMatchObject({ status: 'sent', attempts: 2 });
   });
 
@@ -346,5 +346,160 @@ describe('relay app contract — real handler responses match the fixtures the A
     const { jobId } = await linkJob(81);
     await claim();
     expect(shape(await authorize(jobId) as Record<string, unknown>)).toEqual(shape(fixture('authorize-response.json')));
+  });
+});
+
+// ── M1 / M2 (third review): every report is bound to ONE attempt ──────────
+describe('M2 — reports are bound to the attempt they describe', () => {
+  const DEV2 = 'relay-dev-2';
+  const claimAs = (deviceId: string, extra: Record<string, unknown> = {}) =>
+    claimRelayJobs.run(deviceReq({ capacity: 10, ...extra }, deviceId)) as Promise<{ jobs: Array<{ jobId: string; attempt: number }> }>;
+  const reportAs = (deviceId: string, jobId: string, status: string, extra: Record<string, unknown> = {}) =>
+    reportRelayDelivery.run(deviceReq({ jobId, status, ...extra }, deviceId)) as Promise<{ applied: boolean; requeued: boolean; notApplied?: string }>;
+  const ready = (id: string) => db().collection('relayJobs').doc(id).update({ nextAttemptAt: null }); // skip backoff
+  async function lapse(id: string) {
+    await db().collection('relayJobs').doc(id).update({ leaseExpiresAt: Timestamp.fromMillis(Date.now() - 1000) });
+    await relayReaper.run({} as never);
+    await ready(id);
+  }
+  const counters = async (dev = DEVICE) => (await db().collection('relayDevices').doc(dev).get()).get('counters') ?? {};
+  const usage = async (dev = DEVICE) => {
+    const u = (await db().collection('relayDevices').doc(dev).get()).get('usage');
+    return [u?.m?.c ?? 0, u?.h?.c ?? 0, u?.d?.c ?? 0];
+  };
+  const TRANSIENT = { reason: 'no-service', androidResultCode: 4 };
+
+  it('lost acknowledgment: the old attempt-1 failure, retried while attempt 2 is in flight on the SAME device, changes nothing', async () => {
+    await businessJob('L1');
+    expect((await claim()).jobs[0]).toMatchObject({ jobId: 'L1', attempt: 1 });
+    expect(await report('L1', 'failed', { ...TRANSIENT, attempt: 1 })).toMatchObject({ applied: true, requeued: true });
+    // …response lost; the device keeps the report and retries it later.
+    await ready('L1');
+    expect((await claim()).jobs[0]).toMatchObject({ jobId: 'L1', attempt: 2 });
+    const before = await counters();
+    expect(await report('L1', 'failed', { ...TRANSIENT, attempt: 1 })).toMatchObject({ applied: false, notApplied: 'stale' });
+    expect(await job('L1')).toMatchObject({ status: 'claimed', attempts: 2, leaseOwnerDeviceId: DEVICE });
+    expect(await counters()).toEqual(before);
+    expect(await report('L1', 'sent', { attempt: 2 })).toMatchObject({ applied: true });
+    expect(await job('L1')).toMatchObject({ status: 'sent', attempts: 2 });
+    expect(await usage()).toEqual([2, 2, 2]); // one reservation per claimed attempt
+  });
+
+  it('a duplicate of an already-applied failure (lost ack, before any re-lease) is a no-op', async () => {
+    await businessJob('L2');
+    await claim();
+    await report('L2', 'failed', { ...TRANSIENT, attempt: 1 });
+    const j1 = await job('L2');
+    const c1 = await counters();
+    expect(await report('L2', 'failed', { ...TRANSIENT, attempt: 1 })).toMatchObject({ applied: false, notApplied: 'duplicate' });
+    const j2 = await job('L2');
+    expect(j2.status).toBe('queued');
+    expect(j2.nextAttemptAt.toMillis()).toBe(j1.nextAttemptAt.toMillis());
+    expect(await counters()).toEqual(c1);
+  });
+
+  it('a late SUCCESS for the attempt whose lease lapsed settles the job instead of sending it again', async () => {
+    await businessJob('L3');
+    await claim();
+    await lapse('L3'); // reaper re-queued attempt 1
+    expect((await job('L3'))!.status).toBe('queued');
+    expect(await report('L3', 'sent', { attempt: 1 })).toMatchObject({ applied: true });
+    expect(await job('L3')).toMatchObject({ status: 'sent', settledByAttempt: 1 });
+    expect((await claim()).jobs).toEqual([]);
+  });
+
+  it('a late success for an OLDER attempt while a newer one is in flight: not applied to it, but no further attempt is ever created', async () => {
+    await businessJob('L4');
+    await claim();
+    await lapse('L4');
+    await claim(); // attempt 2
+    expect(await report('L4', 'sent', { attempt: 1 })).toMatchObject({ applied: false, notApplied: 'stale' });
+    expect(await job('L4')).toMatchObject({ status: 'claimed', attempts: 2, noRetry: true });
+    // attempt 2 then fails transiently → NOT re-queued (attempt 1 already went out)
+    expect(await report('L4', 'failed', { ...TRANSIENT, attempt: 2 })).toMatchObject({ applied: true, requeued: false });
+    expect((await job('L4'))!.status).toBe('failed');
+  });
+
+  it('different-device re-lease: the first device\'s report for attempt 1 is not applied to attempt 2; reporting the current attempt from the wrong device is refused', async () => {
+    await db().collection('relayDevices').doc(DEV2).set((await db().collection('relayDevices').doc(DEVICE).get()).data()!);
+    await businessJob('L5');
+    await claimAs(DEVICE);
+    await lapse('L5');
+    expect((await claimAs(DEV2)).jobs[0]).toMatchObject({ jobId: 'L5', attempt: 2 });
+    expect(await reportAs(DEVICE, 'L5', 'failed', { ...TRANSIENT, attempt: 1 })).toMatchObject({ applied: false, notApplied: 'stale' });
+    expect(await job('L5')).toMatchObject({ status: 'claimed', attempts: 2, leaseOwnerDeviceId: DEV2 });
+    await expectHttps(reportAs(DEVICE, 'L5', 'sent', { attempt: 2 }), 'permission-denied', 'not-lease-owner');
+    expect(await reportAs(DEV2, 'L5', 'delivered', { attempt: 2 })).toMatchObject({ applied: true });
+  });
+
+  it('reports without attempt identity (old builds, pre-upgrade pending reports): applied only to a never-re-leased job', async () => {
+    await businessJob('L6');
+    await claim();
+    expect(await report('L6', 'failed', TRANSIENT)).toMatchObject({ applied: true, requeued: true }); // attempt 1: unambiguous
+    await ready('L6');
+    await claim(); // attempt 2
+    expect(await report('L6', 'failed', TRANSIENT)).toMatchObject({ applied: false, notApplied: 'unbound' });
+    expect(await job('L6')).toMatchObject({ status: 'claimed', attempts: 2 });
+  });
+
+  it('a build that does not bind reports to attempts is never handed a re-lease', async () => {
+    await businessJob('L7');
+    const oldCaps = { clientCaps: ['send-auth-v1'] };
+    expect((await claim(10, oldCaps)).jobs.map(j => j.jobId)).toEqual(['L7']); // first attempt: fine
+    await lapse('L7');
+    expect((await claim(10, oldCaps)).jobs).toEqual([]);
+    expect((await claim()).jobs[0]).toMatchObject({ jobId: 'L7', attempt: 2 });
+  });
+});
+
+describe('M1 (server side) — an ambiguous hand-off reported late still stops every further attempt', () => {
+  it('ambiguity for attempt 2 delivered after two lease expiries and a third lease: no attempt 4; reservations count the 3 leases', async () => {
+    await businessJob('A1', { maxAttempts: 5 });
+    const lapse = async () => {
+      await db().collection('relayJobs').doc('A1').update({ leaseExpiresAt: Timestamp.fromMillis(Date.now() - 1000) });
+      await relayReaper.run({} as never);
+      await db().collection('relayJobs').doc('A1').update({ nextAttemptAt: null });
+    };
+    await claim();          // attempt 1 — may have been handed off, then the device went quiet
+    await lapse();
+    await claim();          // attempt 2 — the device refuses it as ambiguous; its report is held offline
+    await lapse();
+    await claim();          // attempt 3
+    expect((await job('A1'))!.attempts).toBe(3);
+    // the delayed attempt-2 report arrives now
+    const late = await report('A1', 'failed', { reason: 'ambiguous-handoff', attempt: 2 }) as { notApplied?: string };
+    expect(late.notApplied).toBe('stale');
+    expect((await job('A1'))!.noRetry).toBe(true);
+    // attempt 3's lease lapses too → failed, never re-queued
+    await lapse();
+    expect(await job('A1')).toMatchObject({ status: 'failed', lastError: 'lease-expired-no-retry' });
+    expect((await claim()).jobs).toEqual([]);
+    const u = (await db().collection('relayDevices').doc(DEVICE).get()).get('usage');
+    expect([u.m.c, u.h.c, u.d.c]).toEqual([3, 3, 3]);
+  });
+});
+
+describe('settlement with a real batch + recipient (attempt-bound reports)', () => {
+  it('retry then success settles the recipient and finalizes the batch once; a stale duplicate afterwards changes nothing', async () => {
+    const B = 'batch-m2';
+    await db().collection('smsBatches').doc(B).set({ businessId: BUSINESS, status: 'sending', channel: 'relay' });
+    await db().collection('smsBatches').doc(B).collection('recipients').doc('r1').set({ smsStatus: 'queued' });
+    await businessJob('S1', { batchId: B, recipientUid: 'r1' });
+    await claim();
+    await report('S1', 'failed', { reason: 'no-service', androidResultCode: 4, attempt: 1 });
+    expect((await db().collection('smsBatches').doc(B).get()).get('status')).toBe('sending'); // not final while re-queued
+    await db().collection('relayJobs').doc('S1').update({ nextAttemptAt: null });
+    await claim();
+    await report('S1', 'sent', { attempt: 2 });
+    const rcp = db().collection('smsBatches').doc(B).collection('recipients').doc('r1');
+    expect((await rcp.get()).get('smsStatus')).toBe('sent');
+    const b1 = (await db().collection('smsBatches').doc(B).get()).data()!;
+    expect(b1).toMatchObject({ status: 'completed', sentCount: 1, failedCount: 0 });
+    // the attempt-1 failure retried after a lost acknowledgment
+    expect(await report('S1', 'failed', { reason: 'no-service', androidResultCode: 4, attempt: 1 })).toMatchObject({ applied: false, notApplied: 'stale' });
+    expect((await rcp.get()).get('smsStatus')).toBe('sent');
+    const b2 = (await db().collection('smsBatches').doc(B).get()).data()!;
+    expect(b2.relayFinalizedAt.toMillis()).toBe(b1.relayFinalizedAt.toMillis());
+    expect(b2).toMatchObject({ status: 'completed', sentCount: 1, failedCount: 0 });
   });
 });
