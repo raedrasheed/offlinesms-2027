@@ -38,41 +38,52 @@ export const requestEmailOtp = onCall({ region: REGION, ...appCheckOptions() }, 
 
   const key = emailKey(email);
   const ref = db.collection('emailOtpChallenges').doc(key);
+  const limRef = db.collection('emailOtpLimits').doc(key);
   const now = Date.now();
-
-  const prev = await ref.get();
-  const p = prev.exists ? prev.data()! : {};
-  if (!canResend(p.lastSentAt?.toMillis?.() ?? null, now)) {
-    throw new HttpsError('resource-exhausted', 'otp-cooldown');
-  }
-  const win = nextSendWindow(p.windowStartAt?.toMillis?.() ?? null, p.sendCount ?? 0, now);
-  if (!win.allowed) throw new HttpsError('resource-exhausted', 'otp-rate-limited');
-
   const code = generateOtp();
   const salt = newSalt();
 
-  // Send first; only persist the challenge (and advance the rate-limit window)
-  // once delivery succeeds, so a provider outage doesn't lock the user out.
+  // Reserve the send atomically BEFORE delivering: cooldown + hourly window
+  // live in emailOtpLimits/{key}, separate from the short-lived challenge, so
+  // verification, expiry or cleanup never reset them. Concurrent requests
+  // serialize on the limits doc, so they can't share one allowance.
+  const verdict = await db.runTransaction(async tx => {
+    const lim = await tx.get(limRef);
+    const p = lim.exists ? lim.data()! : {};
+    if (!canResend(p.lastSentAt?.toMillis?.() ?? null, now)) return 'otp-cooldown';
+    const win = nextSendWindow(p.windowStartAt?.toMillis?.() ?? null, p.sendCount ?? 0, now);
+    if (!win.allowed) return 'otp-rate-limited';
+    tx.set(limRef, {
+      lastSentAt: Timestamp.fromMillis(now),
+      windowStartAt: Timestamp.fromMillis(win.windowStartMs),
+      sendCount: win.count,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    // Overwriting the challenge invalidates any previously active code.
+    tx.set(ref, {
+      email,
+      codeHash: hashOtp(code, salt),
+      salt,
+      expiresAt: Timestamp.fromMillis(now + EMAIL_OTP_TTL_MS),
+      attempts: 0,
+      status: 'sending',
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    return 'ok';
+  });
+  if (verdict !== 'ok') throw new HttpsError('resource-exhausted', verdict);
+
+  // Deliver after the reservation committed (never inside a retryable tx).
   const { subject, html, text } = renderOtpEmail({ code, ttlMinutes: TTL_MINUTES, supportEmail });
   try {
     await sendEmail({ to: email, subject, html, text });
   } catch {
-    // Never include the provider error detail (the request carried the code).
+    // A failed provider call may or may not have delivered; the reservation is
+    // kept (conservative) and the code is voided. Never include provider detail.
+    await ref.update({ status: 'send-failed', updatedAt: FieldValue.serverTimestamp() }).catch(() => {});
     throw new HttpsError('unavailable', 'email-send-failed');
   }
-
-  // Overwriting the doc invalidates any previously active code for this email.
-  await ref.set({
-    email,
-    codeHash: hashOtp(code, salt),
-    salt,
-    expiresAt: Timestamp.fromMillis(now + EMAIL_OTP_TTL_MS),
-    attempts: 0,
-    lastSentAt: Timestamp.fromMillis(now),
-    windowStartAt: Timestamp.fromMillis(win.windowStartMs),
-    sendCount: win.count,
-    updatedAt: FieldValue.serverTimestamp(),
-  });
+  await ref.update({ status: 'pending', updatedAt: FieldValue.serverTimestamp() }).catch(() => {});
 
   await writeAuditLog({
     action: 'auth.email-otp.requested', actor: { uid: 'anonymous' },
