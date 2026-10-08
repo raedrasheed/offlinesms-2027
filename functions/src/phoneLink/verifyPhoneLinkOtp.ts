@@ -49,6 +49,18 @@ type VerifyTx =
   | { kind: 'proceed' }
   | { kind: 'error'; code: string; attemptsLeft?: number };
 
+async function runAcceptTx<T>(
+  db: FirebaseFirestore.Firestore, uid: string, fn: (tx: FirebaseFirestore.Transaction) => Promise<T>,
+): Promise<T> {
+  try {
+    return await db.runTransaction(fn);
+  } catch (e) {
+    if (e instanceof HttpsError) throw e;
+    console.warn('[phoneLink] verify transaction failed; reporting link-interrupted', { uid, err: (e as Error)?.message?.slice(0, 80) });
+    throw new HttpsError('unavailable', 'link-interrupted');
+  }
+}
+
 export async function handleVerifyPhoneLinkOtp(request: CallableRequest<unknown>) {
   if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'auth-required');
   const db = getFirestore();
@@ -82,7 +94,11 @@ export async function handleVerifyPhoneLinkOtp(request: CallableRequest<unknown>
   const now = Date.now();
   const L = cfg.limits;
 
-  const res = await db.runTransaction<VerifyTx>(async tx => {
+  // An infrastructure failure of this transaction (contention retries
+  // exhausted, a commit whose response was lost) leaves it unknown whether the
+  // code was accepted. Report the retryable `link-interrupted`: resume then
+  // completes a committed link, or finds nothing and the code is still usable.
+  const res = await runAcceptTx<VerifyTx>(db, uid, async tx => {
     const [chS, acctS, opS] = await tx.getAll(chRef, acctRef, opRef);
     const op = opS.exists ? opS.data()! : null;
     // A retry of THIS challenge after the code was accepted (lost response,

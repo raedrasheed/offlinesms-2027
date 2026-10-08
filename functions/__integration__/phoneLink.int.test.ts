@@ -296,6 +296,21 @@ describe('scenario 5 — guessing, expiry, replay, simultaneous verification', (
     await expect(verify(u.uid, r2.challengeId, c2)).resolves.toMatchObject({ linked: true });
   });
 
+  it('an infrastructure failure of the acceptance transaction is reported as retryable link-interrupted, never a raw error', async () => {
+    const u = await makeEmailUser();
+    const r = await request(u.uid, num(87));
+    const code = await deliveredCode(r.challengeId);
+    // Exactly what the Firestore emulator returned to a losing concurrent verify in CI.
+    const spy = vi.spyOn(db(), 'runTransaction')
+      .mockRejectedValueOnce(new Error('3 INVALID_ARGUMENT: Transaction is invalid or closed.'));
+    await expectHttps(verify(u.uid, r.challengeId, code), 'unavailable', 'link-interrupted');
+    spy.mockRestore();
+    // Nothing was committed: resume finds no accepted op, and the same code still links once.
+    await expectHttps(handleResumePhoneLink(req(u.uid, {})), 'not-found', 'challenge-not-found');
+    await expect(verify(u.uid, r.challengeId, code)).resolves.toMatchObject({ linked: true });
+    expect(await sideEffectSnapshot(u.uid)).toMatchObject({ claims: 1, privatePhone: num(87), phoneVerified: true });
+  });
+
   it('simultaneous correct verifications link once, consistently', async () => {
     const u = await makeEmailUser();
     const r = await request(u.uid, num(86));
@@ -457,24 +472,29 @@ describe('J (R6) — a late worker can never downgrade a completed link', () => 
     phoneLinkDeps.setAuthPhone = async () => { throw Object.assign(new Error('x'), { code: 'auth/internal-error' }); };
     await expectHttps(verify(u.uid, r.challengeId, c), 'unavailable', 'link-interrupted');
 
+    // Whichever worker reaches the Auth step SECOND is held there (it keeps the
+    // pre-completion state in memory) while the other finishes; it then resumes
+    // and crashes before finalizing. Order-independent: the scheduler decides
+    // which call gets there first (the old version assumed A always did and
+    // deadlocked when B won).
     let calls = 0;
-    let releaseB!: () => void;
-    const bGate = new Promise<void>(res => { releaseB = res; });
+    let releaseLate!: () => void;
+    const lateGate = new Promise<void>(res => { releaseLate = res; });
     phoneLinkDeps.setAuthPhone = async (uid, e164) => {
       const me = ++calls;
       await origSetAuthPhone(uid, e164);
-      if (me === 2) await bGate; // B holds the old number in memory, A races ahead
+      if (me === 2) await lateGate;
     };
     let finals = 0;
-    phoneLinkDeps.beforeFinalize = async () => { if (finals++ === 1) throw new Error('worker B crashed'); };
+    phoneLinkDeps.beforeFinalize = async () => { if (finals++ === 1) throw new Error('late worker crashed'); };
 
-    const A = handleResumePhoneLink(req(u.uid, {}));
-    const B = handleResumePhoneLink(req(u.uid, {}));
-    await expect(A).resolves.toMatchObject({ linked: true });
-    const opAfterA = (await db().collection('phoneLinkOps').doc(u.uid).get()).data()!;
-    expect(opAfterA.stage).toBe('done');
-    releaseB();
-    await B.catch(() => undefined); // B's crash is reported as link-interrupted
+    const settle = (p: Promise<unknown>) => p.then(v => ({ ok: true as const, v }), (e: Error) => ({ ok: false as const, e }));
+    const workers = [settle(handleResumePhoneLink(req(u.uid, {}))), settle(handleResumePhoneLink(req(u.uid, {})))];
+    const first = await Promise.race(workers); // the gated late worker cannot finish first
+    expect(first).toMatchObject({ ok: true, v: { linked: true } });
+    expect((await db().collection('phoneLinkOps').doc(u.uid).get()).get('stage')).toBe('done');
+    releaseLate();
+    await Promise.all(workers); // the late worker's crash is reported as link-interrupted
     const op = (await db().collection('phoneLinkOps').doc(u.uid).get()).data()!;
     expect(op.stage).toBe('done');            // not downgraded to auth-updated
     expect(op.phoneE164).toBeUndefined();     // and still terminal/cleaned
