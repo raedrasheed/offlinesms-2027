@@ -183,7 +183,30 @@ export async function flushOutbox(): Promise<void> {
   finally { pushing = false; }
 }
 
+// Targeted catch-up for ONE conversation (opening a chat, a notification tap).
+// Runs immediately under its own per-conversation guard — never skipped because
+// a boot/foreground pull or a long history backfill holds the `running` lock
+// (that skip is what left a freshly-notified message missing on open).
+const targeted = new Map<string, Promise<void>>();
+export function pullConversationNow(conversationId: string): Promise<void> {
+  const inFlight = targeted.get(conversationId);
+  if (inFlight) return inFlight;
+  const p = (async () => {
+    if (!isOnline()) return;
+    try { await pullMessages(conversationId); } catch { /* the feeder still delivers */ }
+    try { await pullMembers(conversationId); } catch { /* best-effort */ }
+  })().finally(() => { targeted.delete(conversationId); });
+  targeted.set(conversationId, p);
+  return p;
+}
+
 export async function syncNow(reason: SyncReason, activeConversationId?: string): Promise<void> {
+  if (reason === 'active-change' && activeConversationId) {
+    // Opening a chat: don't make its catch-up wait behind an outbox drain.
+    void flushOutbox();
+    await pullConversationNow(activeConversationId);
+    return;
+  }
   // Always flush the outbox first, regardless of any in-flight pull/backfill.
   await flushOutbox();
   if (!PULL_REASONS.has(reason)) return;

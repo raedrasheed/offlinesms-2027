@@ -12,6 +12,7 @@ import {
   UserState,
 } from '../lib/conversations';
 import { subscribeToPresence, type ChatPresence } from '../services/presenceService';
+import { createKeyedSubscriptions } from '../lib/keyedSubscriptions';
 import { useTheme } from '../context/ThemeContext';
 import { useLocalChatList } from '../hooks/useLocalChatList';
 import { isRTL } from '../i18n';
@@ -73,30 +74,42 @@ export default function ChatsList({ navigation }: any) {
     return subscribeConversations(setRows);
   }, [useLocal]);
 
-  // Per-conversation subscriptions: userState + peer display name.
+  // Per-conversation subscriptions: userState + peer display name (Firestore
+  // path only). Diffed by key like presence below, so a conversation update no
+  // longer re-creates every listener.
   // (typing/recording/online come from the unified presence effect below.)
-  useEffect(() => {
-    if (useLocal || !me || !rows) return;
-    const unsubs: Array<() => void> = [];
+  const legacySubs = useMemo(() => {
+    if (useLocal || !me) return null;
+    return createKeyedSubscriptions(key => {
+      const [kind, cid, peerUid] = key.split('|');
+      if (kind === 'state') {
+        return onSnapshot(doc(db, 'conversations', cid, 'userState', me), snap => {
+          setStates(prev => ({ ...prev, [cid]: snap.exists() ? ({ uid: me, ...snap.data() } as UserState) : undefined }));
+        });
+      }
+      return onSnapshot(doc(db, 'users', peerUid), snap => {
+        const data = snap.data() as { displayName?: string; username?: string; photoURL?: string | null } | undefined;
+        const name = data?.displayName || (data?.username ? `@${data.username}` : peerUid.slice(0, 6));
+        setPeers(prev => ({ ...prev, [cid]: { name, photoURL: data?.photoURL ?? null } }));
+      });
+    });
+  }, [me, useLocal]);
+  const legacyKeys = useMemo(() => {
+    if (!rows || !me) return '';
+    const keys: string[] = [];
     for (const c of rows) {
-      // user state
-      unsubs.push(onSnapshot(doc(db, 'conversations', c.id, 'userState', me), snap => {
-        setStates(prev => ({ ...prev, [c.id]: snap.exists() ? ({ uid: me, ...snap.data() } as UserState) : undefined }));
-      }));
-      // peer profile (direct conversations only)
+      keys.push(`state|${c.id}`);
       if (c.type === 'direct' && c.participantUids?.length === 2) {
         const peerUid = c.participantUids.find(u => u !== me);
-        if (peerUid && !peers[peerUid]) {
-          unsubs.push(onSnapshot(doc(db, 'users', peerUid), snap => {
-            const data = snap.data() as { displayName?: string; username?: string; photoURL?: string | null } | undefined;
-            const name = data?.displayName || (data?.username ? `@${data.username}` : peerUid.slice(0, 6));
-            setPeers(prev => ({ ...prev, [c.id]: { name, photoURL: data?.photoURL ?? null } }));
-          }));
-        }
+        if (peerUid) keys.push(`peer|${c.id}|${peerUid}`);
       }
     }
-    return () => { for (const u of unsubs) try { u(); } catch {} };
-  }, [me, rows, useLocal]);
+    return keys.sort().join(',');
+  }, [rows, me]);
+  useEffect(() => {
+    legacySubs?.sync(legacyKeys ? legacyKeys.split(',') : []);
+  }, [legacySubs, legacyKeys]);
+  useEffect(() => () => legacySubs?.clear(), [legacySubs]);
 
   const enriched: Row[] = useMemo(() => {
     if (useLocal) return local.items as unknown as Row[];
@@ -127,20 +140,25 @@ export default function ChatsList({ navigation }: any) {
     return null;
   };
 
-  // Unified presence: subscribe to online + typing/recording for visible chats
-  // (both local-first and Firestore paths). Keyed on a stable id+peer signature
-  // so it only re-subscribes when the set of chats changes.
-  const presenceKey = enriched.map(e => `${e.id}:${peerUidOf(e) ?? ''}`).join(',');
+  // Unified presence: online + typing/recording for the listed chats (both
+  // local-first and Firestore paths). Subscriptions are kept by `id|peer` and
+  // updated by diff, so re-ordering the list (every new message) or an unrelated
+  // row change starts/stops nothing; an update that changes nothing is dropped
+  // before it re-renders the list.
+  const presenceSubs = useMemo(() => {
+    if (!me) return null;
+    return createKeyedSubscriptions(key => {
+      const [chatId, peer] = key.split('|');
+      return subscribeToPresence(chatId, { peerUid: peer || null }, p =>
+        setPresence(prev => (samePresence(prev[chatId], p) ? prev : { ...prev, [chatId]: p })),
+      );
+    });
+  }, [me]);
+  const presenceKeys = enriched.map(e => `${e.id}|${peerUidOf(e) ?? ''}`).sort().join(',');
   useEffect(() => {
-    if (!me || enriched.length === 0) return;
-    const unsubs = enriched.map(item =>
-      subscribeToPresence(item.id, { peerUid: peerUidOf(item) }, p =>
-        setPresence(prev => ({ ...prev, [item.id]: p })),
-      ),
-    );
-    return () => { for (const u of unsubs) try { u(); } catch { /* noop */ } };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [me, presenceKey]);
+    presenceSubs?.sync(presenceKeys ? presenceKeys.split(',') : []);
+  }, [presenceSubs, presenceKeys]);
+  useEffect(() => () => presenceSubs?.clear(), [presenceSubs]);
 
   // Archived chats are always hidden from every filter now (no archive tab).
   const visible = useMemo(() => enriched.filter(c => c.state?.archived !== true), [enriched]);
@@ -364,4 +382,11 @@ function buildStyles(colors: any, rtl: boolean) {
     fab:         { position: 'absolute', right: 18, bottom: 108, width: 60, height: 60, borderRadius: 20, backgroundColor: colors.action.primary, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 6 },
     fabText:     { color: colors.action.primaryFg, fontSize: 28, fontWeight: '700', marginTop: -2 },
   });
+}
+
+function samePresence(a: ChatPresence | undefined, b: ChatPresence): boolean {
+  if (!a) return false;
+  const eq = (x: string[], y: string[]) => x.length === y.length && x.every((v, i) => v === y[i]);
+  return a.online === b.online && a.lastSeenAt === b.lastSeenAt
+    && eq(a.typingUids, b.typingUids) && eq(a.recordingUids, b.recordingUids);
 }

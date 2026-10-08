@@ -3,6 +3,7 @@ import { applyMigrations, LATEST_VERSION, MIGRATIONS } from '../../src/localdb/m
 import {
   ALL_TABLE_STATEMENTS, CREATE_INDEXES,
   MESSAGES_V2_COLUMNS, MESSAGES_V3_COLUMNS, EXTERNAL_MEMBERS_V4, MESSAGES_V5_COLUMNS,
+  READ_PATH_INDEXES_V6,
 } from '../../src/localdb/schema';
 
 async function record() {
@@ -17,12 +18,12 @@ describe('applyMigrations', () => {
     expect(version).toBe(LATEST_VERSION);
   });
 
-  it('creates every table and index, then applies v2 + v3 columns + v4 table + v5 columns', async () => {
+  it('creates every table and index, then applies v2 + v3 columns + v4 table + v5 columns + v6 indexes', async () => {
     const { sqls } = await record();
     expect(sqls.length).toBe(
       ALL_TABLE_STATEMENTS.length + CREATE_INDEXES.length
       + MESSAGES_V2_COLUMNS.length + MESSAGES_V3_COLUMNS.length + EXTERNAL_MEMBERS_V4.length
-      + MESSAGES_V5_COLUMNS.length,
+      + MESSAGES_V5_COLUMNS.length + READ_PATH_INDEXES_V6.length,
     );
     for (const table of ['conversations', 'messages', 'outbox', 'sync_state', 'tombstones', 'message_receipts', 'message_reactions', 'group_members', 'external_members']) {
       expect(sqls.some(s => s.includes(`CREATE TABLE IF NOT EXISTS ${table}`))).toBe(true);
@@ -37,27 +38,37 @@ describe('applyMigrations', () => {
     // v5 reply-snapshot + mentions columns.
     expect(sqls.some(s => s.includes('ADD COLUMN mentions_json'))).toBe(true);
     expect(sqls.some(s => s.includes('ADD COLUMN reply_to_sender_uid'))).toBe(true);
+    // v6 read-path indexes (conversation open / chat list without a temp sort).
+    expect(sqls.some(s => s.includes('idx_messages_conv_visible_order'))).toBe(true);
+    expect(sqls.some(s => s.includes('idx_conversations_archived_last'))).toBe(true);
   });
 
-  it('upgrades from v1 to latest by applying v2, v3, v4, then v5', async () => {
+  it('upgrades from v1 to latest by applying v2, v3, v4, v5, then v6', async () => {
     const sqls: string[] = [];
     const version = await applyMigrations(1, async (sql) => { sqls.push(sql); });
     expect(version).toBe(LATEST_VERSION);
-    expect(sqls).toEqual([...MESSAGES_V2_COLUMNS, ...MESSAGES_V3_COLUMNS, ...EXTERNAL_MEMBERS_V4, ...MESSAGES_V5_COLUMNS]);
+    expect(sqls).toEqual([...MESSAGES_V2_COLUMNS, ...MESSAGES_V3_COLUMNS, ...EXTERNAL_MEMBERS_V4, ...MESSAGES_V5_COLUMNS, ...READ_PATH_INDEXES_V6]);
   });
 
-  it('upgrades from v2 to latest by applying v3, v4, then v5', async () => {
+  it('upgrades from v2 to latest by applying v3, v4, v5, then v6', async () => {
     const sqls: string[] = [];
     const version = await applyMigrations(2, async (sql) => { sqls.push(sql); });
     expect(version).toBe(LATEST_VERSION);
-    expect(sqls).toEqual([...MESSAGES_V3_COLUMNS, ...EXTERNAL_MEMBERS_V4, ...MESSAGES_V5_COLUMNS]);
+    expect(sqls).toEqual([...MESSAGES_V3_COLUMNS, ...EXTERNAL_MEMBERS_V4, ...MESSAGES_V5_COLUMNS, ...READ_PATH_INDEXES_V6]);
   });
 
-  it('upgrades from v4 to latest by applying only v5', async () => {
+  it('upgrades from v4 to latest by applying v5 then v6', async () => {
     const sqls: string[] = [];
     const version = await applyMigrations(4, async (sql) => { sqls.push(sql); });
     expect(version).toBe(LATEST_VERSION);
-    expect(sqls).toEqual(MESSAGES_V5_COLUMNS);
+    expect(sqls).toEqual([...MESSAGES_V5_COLUMNS, ...READ_PATH_INDEXES_V6]);
+  });
+
+  it('upgrades from v5 to latest by applying only the v6 indexes', async () => {
+    const sqls: string[] = [];
+    const version = await applyMigrations(5, async (sql) => { sqls.push(sql); });
+    expect(version).toBe(LATEST_VERSION);
+    expect(sqls).toEqual(READ_PATH_INDEXES_V6);
   });
 
   it('is a no-op when already at the latest version', async () => {

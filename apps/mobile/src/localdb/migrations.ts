@@ -6,7 +6,7 @@
 // whose version is greater than the database's current version, in order, and
 // returns the resulting version.
 
-import { ALL_TABLE_STATEMENTS, CREATE_INDEXES, MESSAGES_V2_COLUMNS, MESSAGES_V3_COLUMNS, EXTERNAL_MEMBERS_V4, MESSAGES_V5_COLUMNS, SCHEMA_VERSION } from './schema';
+import { ALL_TABLE_STATEMENTS, CREATE_INDEXES, MESSAGES_V2_COLUMNS, MESSAGES_V3_COLUMNS, EXTERNAL_MEMBERS_V4, MESSAGES_V5_COLUMNS, READ_PATH_INDEXES_V6, SCHEMA_VERSION } from './schema';
 
 export type SqlExec = (sql: string) => Promise<void>;
 
@@ -49,6 +49,13 @@ export const MIGRATIONS: Migration[] = [
     version: 5,
     up: async (exec) => {
       for (const stmt of MESSAGES_V5_COLUMNS) await exec(stmt);
+    },
+  },
+  {
+    // Performance — indexes matching the conversation / chat-list ORDER BYs.
+    version: 6,
+    up: async (exec) => {
+      for (const stmt of READ_PATH_INDEXES_V6) await exec(stmt);
     },
   },
 ];

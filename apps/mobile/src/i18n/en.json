@@ -540,5 +540,13 @@
       "network": "Network problem. Check your connection and try again.",
       "generic": "Something went wrong. Please try again."
     }
+  },
+  "sync": {
+    "loading-message": "Loading this message…",
+    "waiting-network": "Waiting for connection — the message will appear when you're back online",
+    "missing": "This message is no longer available",
+    "error": "Couldn't load this message",
+    "offline": "Offline — showing saved messages",
+    "connecting": "Connecting…"
   }
 }

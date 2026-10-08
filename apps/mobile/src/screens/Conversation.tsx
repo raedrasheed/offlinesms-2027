@@ -43,6 +43,8 @@ import { LoadingState, EmptyState, ErrorState } from '../components/state';
 import { avatarColor, initials } from '../lib/avatar';
 import { useOffline } from '../context/OfflineContext';
 import { OfflineNotice, SyncSuccessChip } from '../components/OfflineBanners';
+import { SyncStatusBanner } from '../components/chat/SyncStatusBanner';
+import { perfMark } from '../lib/perf';
 import { getDraft, setDraft as persistDraft, clearDraft } from '../lib/drafts';
 import { useLocalConversation } from '../hooks/useLocalConversation';
 import { useMessagePersistence } from '../hooks/useLocalPersistence';
@@ -120,7 +122,7 @@ export default function Conversation({ route, navigation }: any) {
   const { t } = useTranslation();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
-  const { id, sharedText } = route.params as { id: string; sharedText?: string };
+  const { id, sharedText, messageId: focusMessageId } = route.params as { id: string; sharedText?: string; messageId?: string };
   const me = auth.currentUser?.uid ?? '';
   const { isOffline, enqueue, queuedFor, deliveredFor, deliveredNonce } = useOffline();
   const wallpaper = useWallpaper(id);
@@ -129,7 +131,7 @@ export default function Conversation({ route, navigation }: any) {
   // Phase 22C — local-first conversation (flag-gated). `useLocal` is true only
   // when the flag is on AND the local DB initialised; otherwise the Firestore +
   // OfflineContext path below runs unchanged (including as a fallback).
-  const local = useLocalConversation(id, me);
+  const local = useLocalConversation(id, me, focusMessageId);
   const useLocal = local.source === 'local';
 
   // Mirror this conversation's messages into the local SQLite DB while it's open.
@@ -811,9 +813,32 @@ export default function Conversation({ route, navigation }: any) {
   }, []);
 
   // Pagination: onEndReached fires near the visual TOP in an inverted list.
+  // Depends on the STABLE loadOlder (not the whole `local` object), so the
+  // memoised list body isn't rebuilt on every render.
+  const loadOlder = local.loadOlder;
   const onReachOlder = useCallback(() => {
-    if (useLocal) void local.loadOlder();
-  }, [useLocal, local]);
+    if (useLocal) loadOlder();
+  }, [useLocal, loadOlder]);
+
+  // Notification deep link: once the target message is on screen, scroll to it
+  // and briefly highlight it. Runs once per target.
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const focusedRef = useRef<string | null>(null);
+  useEffect(() => {
+    const f = local.focus;
+    if (!f || f.state !== 'ready' || focusedRef.current === f.messageId) return;
+    const idx = invData.findIndex((m: any) => m.id === f.messageId);
+    if (idx < 0) return;
+    focusedRef.current = f.messageId;
+    perfMark('push:targetVisible', { index: idx });
+    setHighlightId(f.messageId);
+    requestAnimationFrame(() => {
+      if (idx === 0) listRef.current?.scrollToOffset?.({ offset: 0, animated: true });
+      else listRef.current?.scrollToIndex?.({ index: idx, animated: true, viewPosition: 0.5 });
+    });
+    const h = setTimeout(() => setHighlightId(null), 2500);
+    return () => clearTimeout(h);
+  }, [local.focus, invData]);
 
   const scrollToBottom = useCallback(() => {
     // One reliable jump — offset 0 is the latest message in an inverted list.
@@ -972,19 +997,20 @@ export default function Conversation({ route, navigation }: any) {
             />
             </SwipeToReply>
           );
-          if (!showDate) return bubble;
+          const cell = item.id === highlightId ? <View style={s.focusHighlight}>{bubble}</View> : bubble;
+          if (!showDate) return cell;
           return (
             <>
               <View style={s.dateSep}>
                 <View style={s.datePill}><Text style={s.datePillText}>{daySeparatorLabel(ts, t as any)}</Text></View>
               </View>
-              {bubble}
+              {cell}
             </>
           );
         }}
       />
     );
-  }, [invData, visibleMsgs, queuedItems, me, isGroup, id, myRoleIsAdmin, starred, convo?.pinnedMessage, convo?.memberCount, reactorNames, useLocal, startReply, startEdit, startForward, jumpTo, openInfo, openImage, retryMedia, onPlayedVoice, onSendViaSms, onAvatarPress, onListScroll, onReachOlder, t, isOffline, retrySend]);
+  }, [invData, visibleMsgs, queuedItems, me, isGroup, id, myRoleIsAdmin, starred, convo?.pinnedMessage, convo?.memberCount, reactorNames, useLocal, startReply, startEdit, startForward, jumpTo, openInfo, openImage, retryMedia, onPlayedVoice, onSendViaSms, onAvatarPress, onListScroll, onReachOlder, t, isOffline, retrySend, highlightId]);
 
   return (
     <KeyboardAvoidingView behavior="padding" style={s.root}>
@@ -1087,7 +1113,9 @@ export default function Conversation({ route, navigation }: any) {
       ) : null}
 
       {deliveredChip > 0 ? <SyncSuccessChip count={deliveredChip} /> : null}
-      {isOffline ? <OfflineNotice /> : null}
+      {useLocal
+        ? <SyncStatusBanner focus={local.focus} live={isOffline ? 'offline' : local.live} onRetry={local.retryFocus} />
+        : (isOffline ? <OfflineNotice /> : null)}
 
       {err ? <ErrorState compact title="Couldn't send" description={err} /> : null}
 
@@ -1344,6 +1372,8 @@ function buildStyles(colors: any, rtl: boolean) {
     subtitle: { fontSize: 12, color: colors.action.primary, marginTop: 1, textAlign: rtl ? 'right' : 'left' },
     listHeader: { alignItems: 'center', gap: 10, paddingTop: 6, paddingBottom: 8 },
     dateSep:    { alignItems: 'center', marginVertical: 6 },
+    // Notification deep-link target, highlighted briefly after the jump.
+    focusHighlight: { backgroundColor: 'rgba(31,123,168,0.16)', borderRadius: 12 },
     datePill:   { backgroundColor: colors.background.surface, paddingHorizontal: 14, paddingVertical: 5, borderRadius: 999, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 3, shadowOffset: { width: 0, height: 1 }, elevation: 1 },
     datePillText: { fontSize: 12, fontWeight: '700', color: colors.text.muted },
     e2eBanner:  { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FBEFD0', paddingHorizontal: 14, paddingVertical: 9, borderRadius: 14, maxWidth: '88%' },

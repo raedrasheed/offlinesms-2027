@@ -17,6 +17,9 @@ import { getDeviceId, getCursor, setCursor } from './repositories/syncStateRepo'
 import { idempotencyKey, localId } from './sync/ids';
 import { toggleReaction } from './sync/reactionLogic';
 import { phoneDigits } from '../lib/phone';
+import { isOnline, onConnectivityChange } from './sync/networkState';
+import { pullMessageById } from './sync/firebasePull';
+import { createNotificationTargets } from './sync/notificationTarget';
 import type { MessageRow } from './types';
 
 export * from './types';
@@ -28,7 +31,21 @@ export * as externalMembersRepo from './repositories/externalMembersRepo';
 export * as receiptsRepo from './repositories/receiptsRepo';
 export * as membersRepo from './repositories/membersRepo';
 export * as syncStateRepo from './repositories/syncStateRepo';
-export { syncNow, pushOutbox, pullRemoteChanges, retryFailedOutboxItem, isSyncing } from './sync/syncEngine';
+export { syncNow, pushOutbox, pullRemoteChanges, retryFailedOutboxItem, isSyncing, pullConversationNow } from './sync/syncEngine';
+export type { TargetState } from './sync/notificationTarget';
+
+/**
+ * The message a notification points at — fetched directly (one document read),
+ * independently of the boot sync / history backfill / realtime listener, and
+ * queued until the local DB opens on a cold start or the network returns.
+ */
+export const notificationTargets = createNotificationTargets({
+  isDbOpen: () => getCurrentUid() != null,
+  isOnline,
+  hasLocal: async (messageId) => (await messagesRepo.getByRemoteId(messageId)) != null,
+  fetchOne: (conversationId, messageId) => pullMessageById(conversationId, messageId),
+  onConnectivity: onConnectivityChange,
+});
 export { setActiveConversation, kick as kickSync } from './sync/syncScheduler';
 
 let started = false;
@@ -37,6 +54,7 @@ let started = false;
  *  where the chat-list feeder drives writes. */
 export async function openLocalDb(uid: string): Promise<void> {
   await openForUser(uid);
+  notificationTargets.onDbOpened();
 }
 
 export async function initLocalDb(uid: string): Promise<void> {
@@ -46,6 +64,7 @@ export async function initLocalDb(uid: string): Promise<void> {
   // safe and keeps the outbox from churning + starving real mutations.
   try { const n = await outboxRepo.dropStuckReceipts(); if (n) console.log(`[outbox] cleared ${n} stuck receipt(s)`); } catch { /* best-effort */ }
   if (!started) { startScheduler(); started = true; }
+  notificationTargets.onDbOpened();
 }
 
 export async function teardownLocalDb(): Promise<void> {

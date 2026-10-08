@@ -4,6 +4,8 @@
 
 export type PushRoute = {
   conversationId?: string;
+  /** The message the push is about (chat_message) — opened and focused. */
+  messageId?: string;
   requestId?: string;
   broadcastId?: string;
   type?: string;
@@ -25,6 +27,7 @@ export function routeFromNotification(data: unknown): PushRoute | null {
   if (!hasTarget) return null;
   return {
     conversationId: typeof d.conversationId === 'string' ? d.conversationId : undefined,
+    messageId:      typeof d.messageId      === 'string' && d.messageId ? d.messageId : undefined,
     requestId:      typeof d.requestId      === 'string' ? d.requestId      : undefined,
     broadcastId:    typeof d.broadcastId    === 'string' ? d.broadcastId    : undefined,
     type:           typeof d.type           === 'string' ? d.type           : undefined,
@@ -37,7 +40,7 @@ export function routeFromNotification(data: unknown): PushRoute | null {
 // ─── Tap-dispatch decision (pure) ──────────────────────────────────────────
 
 export type PushDispatch =
-  | { kind: 'screen'; name: 'Conversation'; params: { id: string } }
+  | { kind: 'screen'; name: 'Conversation'; params: { id: string; messageId?: string } }
   | { kind: 'screen'; name: 'JoinRequests'; params: { id: string } }
   | { kind: 'screen'; name: 'Tabs' }
   | { kind: 'url';    href: string }
@@ -53,6 +56,16 @@ export type PushDispatch =
  *      / open_group → matching screen or URL; open_app/none → home tab).
  *   3. Any other payload with a conversationId → Conversation.
  */
+/** The (conversation, message) a push wants on screen, for prefetching. */
+export function pushTarget(route: PushRoute | null): { conversationId: string; messageId?: string } | null {
+  if (!route) return null;
+  if (route.conversationId) return { conversationId: route.conversationId, messageId: route.messageId };
+  if (route.actionType === 'open_chat' || route.actionType === 'open_group') {
+    return route.actionTarget ? { conversationId: route.actionTarget } : null;
+  }
+  return null;
+}
+
 export function dispatchForRoute(route: PushRoute | null): PushDispatch {
   if (!route) return { kind: 'none' };
 
@@ -82,7 +95,10 @@ export function dispatchForRoute(route: PushRoute | null): PushDispatch {
   }
 
   if (route.conversationId) {
-    return { kind: 'screen', name: 'Conversation', params: { id: route.conversationId } };
+    return {
+      kind: 'screen', name: 'Conversation',
+      params: route.messageId ? { id: route.conversationId, messageId: route.messageId } : { id: route.conversationId },
+    };
   }
   return { kind: 'none' };
 }

@@ -68,8 +68,10 @@ import { inviteCodeFromUrl, setPendingInvite, takePendingInvite } from './src/li
 import * as Notifications from 'expo-notifications';
 import { installForegroundHandler, registerForPush, routeFromNotification } from './src/lib/notifications';
 import { initAppCheck } from './src/lib/appCheck';
-import { dispatchForRoute } from './src/lib/pushRouting';
-import { syncNow } from './src/localdb';
+import { dispatchForRoute, pushTarget } from './src/lib/pushRouting';
+import { perfMark } from './src/lib/perf';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { notificationTargets, pullConversationNow } from './src/localdb';
 import { ShareIntentProvider, useShareIntentContext } from 'expo-share-intent';
 import ShareToChat from './src/screens/ShareToChat';
 import { Linking as RNLinking } from 'react-native';
@@ -83,23 +85,17 @@ installForegroundHandler();
 // no-op on native until a native attestation module is added. Never throws.
 initAppCheck();
 
-// The conversation a notification points at (direct message or open_chat/group
-// broadcast), or undefined.
-function conversationIdFromData(data: unknown): string | undefined {
-  const r = routeFromNotification(data);
-  if (!r) return undefined;
-  if (r.conversationId) return r.conversationId;
-  if (r.actionType === 'open_chat' || r.actionType === 'open_group') return r.actionTarget;
-  return undefined;
-}
-
-// Pull the target chat's newest messages NOW (on push arrival / tap) so the
-// chat is already up to date by the time it opens. Targeted pull only — does
-// NOT change the "active conversation", so it never suppresses other banners.
-// Best-effort: a no-op until the local DB/scheduler are ready.
+// Fetch the message a notification points at NOW (on arrival and on tap): one
+// document read straight into the local DB, independent of the boot sync /
+// history backfill / realtime listener — so the chat already shows it when it
+// opens. Queued until the local DB is open (cold start) or the network returns.
+// Never changes the "active conversation", so it never suppresses other banners.
 function prefetchFromData(data: unknown) {
-  const cid = conversationIdFromData(data);
-  if (cid) void syncNow('active-change', cid);
+  const target = pushTarget(routeFromNotification(data));
+  if (!target) return;
+  perfMark('push:prefetch', { hasMessage: !!target.messageId });
+  if (target.messageId) void notificationTargets.request(target.conversationId, target.messageId);
+  else void pullConversationNow(target.conversationId).catch(() => {});
 }
 
 // Try to navigate to a tapped notification's destination. Returns false when it
@@ -248,15 +244,29 @@ export default function App() {
   const [userTheme, setUserTheme] = useState<ThemePreference | null>(null);
 
   useEffect(() => onAuthStateChanged(auth, u => {
+    perfMark('auth:resolved', { signedIn: !!u });
     setUser(u);
     setReady(true);
     if (!u) { setProfileCompleted(null); setUserTheme(null); }
   }), []);
 
+  // Startup: the main UI used to wait for the users/{uid} snapshot — a network
+  // round-trip on every launch (React Native has no persistent Firestore cache)
+  // and a blank screen when starting offline. A user who completed onboarding
+  // before goes straight to the (locally cached) chat list; the live snapshot
+  // still runs and corrects the state if it changed.
   useEffect(() => {
     if (!user) return;
+    const key = `profileCompleted.v1:${user.uid}`;
+    let live = false;
+    AsyncStorage.getItem(key).then(v => {
+      if (!live && v === '1') { setProfileCompleted(prev => (prev === null ? true : prev)); perfMark('profile:fromCache'); }
+    }).catch(() => {});
     return onSnapshot(doc(db, 'users', user.uid), snap => {
-      setProfileCompleted(snap.exists() ? snap.data()?.profileCompleted === true : false);
+      live = true;
+      const done = snap.exists() ? snap.data()?.profileCompleted === true : false;
+      setProfileCompleted(done);
+      void AsyncStorage.setItem(key, done ? '1' : '0').catch(() => {});
       const pref = snap.data()?.preferredTheme as ThemePreference | undefined;
       if (pref) setUserTheme(pref);
     });
@@ -301,6 +311,7 @@ export default function App() {
     const handled = new Set<string>();
     const handleTap = (resp: Notifications.NotificationResponse | null) => {
       if (!resp) return;
+      perfMark('push:tap');
       const id = resp.notification.request.identifier;
       if (id && handled.has(id)) return;
       if (id) handled.add(id);

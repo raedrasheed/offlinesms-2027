@@ -30,6 +30,27 @@ export async function listMessages(conversationId: string, limit = PAGE, beforeC
   return rows;
 }
 
+/**
+ * How many visible messages are at least as new as the given message — the
+ * window size the conversation screen needs to include it (notification deep
+ * link to a message that is no longer among the newest). Uses the v6 order
+ * index. Returns null when the message isn't stored locally.
+ */
+export async function positionFromNewest(conversationId: string, remoteOrLocalId: string): Promise<number | null> {
+  const row = await getDb().first<{ t: number | null }>(
+    `SELECT COALESCE(remote_created_at, created_at) AS t FROM messages
+      WHERE conversation_id = ? AND (remote_id = ? OR local_id = ?) AND deleted_for_me = 0`,
+    [conversationId, remoteOrLocalId, remoteOrLocalId],
+  );
+  if (!row || row.t == null) return null;
+  const n = await getDb().first<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM messages
+      WHERE conversation_id = ? AND deleted_for_me = 0 AND COALESCE(remote_created_at, created_at) >= ?`,
+    [conversationId, row.t],
+  );
+  return n?.n ?? null;
+}
+
 /** Count stored messages, optionally scoped to a single conversation. Excludes
  *  rows deleted for me, matching what the conversation screen renders. */
 export async function countMessages(conversationId?: string): Promise<number> {
@@ -305,7 +326,7 @@ export interface RemoteMediaInput {
   uploadStatus?: 'pending' | 'uploading' | 'uploaded' | 'failed' | null;
 }
 
-export async function upsertRemoteMessage(r: {
+export interface RemoteMessageInput {
   remoteId: string; conversationId: string; senderUid: string; senderDisplayName?: string | null;
   type?: 'text' | 'image' | 'voice'; caption?: string | null;
   text: string | null; remoteCreatedAt: number | null; editedAt?: number | null;
@@ -315,8 +336,41 @@ export async function upsertRemoteMessage(r: {
   forwarded?: boolean; serverVersion?: number; status?: MessageStatus;
   reactions?: Record<string, string[]> | null; counts?: RemoteReceiptCounts;
   media?: RemoteMediaInput | null;
-}): Promise<void> {
-  const existing = await getByRemoteId(r.remoteId);
+  /** The sender's optimistic local id (server field `clientLocalId`). */
+  clientLocalId?: string | null;
+}
+
+/**
+ * Apply a batch of remote messages in ONE transaction (realtime snapshot
+ * changes, catch-up pages, a notification's target message). On a device each
+ * statement is a native round-trip and each autocommit a WAL commit, so batching
+ * is what keeps applying a snapshot off the user's critical path. Deleted-for-
+ * everyone messages are tombstoned in the same transaction.
+ */
+export async function applyRemoteMessages(batch: RemoteMessageInput[]): Promise<void> {
+  if (batch.length === 0) return;
+  await getDb().transaction(async () => {
+    for (const r of batch) {
+      // A deleted-for-everyone message keeps its row (it renders as "deleted"
+      // in place, preserving order) but never keeps its content.
+      if (r.deletedForEveryone) await upsertRemoteMessage({ ...r, text: null, caption: null, media: null });
+      else await upsertRemoteMessage(r);
+    }
+  });
+}
+
+export async function upsertRemoteMessage(r: RemoteMessageInput): Promise<void> {
+  let existing = await getByRemoteId(r.remoteId);
+  if (!existing && r.clientLocalId) {
+    // Our own message, delivered by the realtime feed before the send call
+    // returned: adopt the optimistic row instead of inserting a second copy
+    // (it used to show twice until the outbox reconciled it).
+    await getDb().run(
+      `UPDATE messages SET remote_id = ? WHERE local_id = ? AND conversation_id = ? AND remote_id IS NULL`,
+      [r.remoteId, r.clientLocalId, r.conversationId],
+    );
+    existing = await getByRemoteId(r.remoteId);
+  }
   const now = Date.now();
   const reactionsJson = r.reactions != null ? JSON.stringify(r.reactions) : null;
   const mentionsJson = r.mentions != null ? JSON.stringify(r.mentions) : null;
@@ -350,11 +404,15 @@ export async function upsertRemoteMessage(r: {
       params.push(c.delivered ?? 0, c.read ?? 0, c.viewed ?? 0, c.played ?? 0);
     }
     if (r.media !== undefined) {
+      // Keep a known URL across snapshots that omit it — except when the
+      // message was deleted for everyone: then nothing of the media may stay.
+      const keep = r.deletedForEveryone ? '' : 'COALESCE(?, media_download_url)';
+      const keepThumb = r.deletedForEveryone ? '' : 'COALESCE(?, media_thumb_url)';
       sets.push(
         'media_mime = ?', 'media_size = ?', 'media_width = ?', 'media_height = ?',
         'media_duration_ms = ?', 'media_waveform = ?', 'media_storage_path = ?',
-        'media_download_url = COALESCE(?, media_download_url)', 'media_thumb_path = ?',
-        'media_thumb_url = COALESCE(?, media_thumb_url)', 'media_upload_status = ?',
+        `media_download_url = ${keep || '?'}`, 'media_thumb_path = ?',
+        `media_thumb_url = ${keepThumb || '?'}`, 'media_upload_status = ?',
       );
       params.push(
         md?.mimeType ?? null, md?.sizeBytes ?? null, md?.width ?? null, md?.height ?? null,

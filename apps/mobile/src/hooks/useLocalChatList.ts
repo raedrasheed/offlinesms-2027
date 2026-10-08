@@ -5,7 +5,9 @@
 // the local DB can't initialise it reports `firestoreFallback` so ChatsList can
 // keep using the legacy Firestore path. When the flag is off it is a no-op.
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { coalescing } from '../lib/coalesce';
+import { perfMark } from '../lib/perf';
 import { LOCAL_FIRST_CHAT_LIST_ENABLED } from '../config/features';
 import { openLocalDb, conversationsRepo } from '../localdb';
 import { startChatListFeeder } from '../localdb/sync/chatListFeeder';
@@ -27,24 +29,27 @@ export function useLocalChatList(uid: string | undefined): LocalChatList {
   const [loading, setLoading] = useState<boolean>(enabled);
   const [error, setError] = useState<string | null>(null);
   const [source, setSource] = useState<ChatListSource>(enabled ? 'local' : 'disabled');
-  const refreshing = useRef(false);
-
-  const refresh = useCallback(async () => {
-    if (!enabled || refreshing.current) return;
-    refreshing.current = true;
-    try {
-      const rows = await conversationsRepo.listConversations({ includeArchived: false });
-      setItems(rows.map(mapConversationRow));
-      setSource('local');
-      setError(null);
-    } catch (e: any) {
-      setError(e?.message ?? 'local-read-failed');
-      setSource('firestoreFallback');
-    } finally {
-      refreshing.current = false;
-      setLoading(false);
-    }
+  // Coalesced (never dropped): a feeder change during a running refresh triggers
+  // one more pass instead of being lost until the next unrelated change.
+  const runner = useMemo(() => {
+    if (!enabled) return null;
+    let first = true;
+    return coalescing(async () => {
+      try {
+        const rows = await conversationsRepo.listConversations({ includeArchived: false });
+        setItems(rows.map(mapConversationRow));
+        setSource('local');
+        setError(null);
+        if (first) { first = false; perfMark('chatList:firstLocalRender', { rows: rows.length }); }
+      } catch (e: any) {
+        setError(e?.message ?? 'local-read-failed');
+        setSource('firestoreFallback');
+      } finally {
+        setLoading(false);
+      }
+    });
   }, [enabled]);
+  const refresh = useCallback(async () => { await runner?.(); }, [runner]);
 
   useEffect(() => {
     if (!enabled || !uid) { setLoading(false); setSource('disabled'); return; }
@@ -69,5 +74,6 @@ export function useLocalChatList(uid: string | undefined): LocalChatList {
     return () => { cancelled = true; stopFeeder?.(); };
   }, [enabled, uid, refresh]);
 
-  return { items, loading, error, source, refresh: () => { void refresh(); } };
+  const refreshVoid = useCallback(() => { void refresh(); }, [refresh]);
+  return useMemo(() => ({ items, loading, error, source, refresh: refreshVoid }), [items, loading, error, source, refreshVoid]);
 }
