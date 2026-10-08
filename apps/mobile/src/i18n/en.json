@@ -519,5 +519,26 @@
       "network": "Network problem. Check your connection and try again.",
       "generic": "Something went wrong. Please try again."
     }
+  },
+  "phoneAuth": {
+    "errors": {
+      "unavailable": "Phone sign-in isn't available right now. Please continue with email.",
+      "servicePaused": "Verification messages are paused right now. Please try again later.",
+      "serviceBusy": "We're sending too many codes right now. Please try again in {{time}}.",
+      "numberNotSupported": "This number isn't supported. Enter a mobile number starting with 59 or 56.",
+      "countryUnavailable": "Sign-in by SMS isn't available for this country yet.",
+      "sessionExpired": "Your sign-in session expired. Please start again.",
+      "sessionExhausted": "Too many codes for this attempt. Please start again later.",
+      "cooldown": "Please wait {{time}} before requesting another code.",
+      "rateLimited": "Too many codes requested. Try again in {{time}}.",
+      "tooManyNumbers": "Too many different numbers tried. Try again in {{time}}.",
+      "codeInvalid": "That code isn't right. Attempts left: {{count}}.",
+      "codeExpired": "That code has expired. Request a new one.",
+      "tooManyAttempts": "Too many incorrect codes. Request a new code later.",
+      "accountDisabled": "This account can't sign in. Contact support.",
+      "interrupted": "Signing in was interrupted. Your code was accepted — tap the code again to retry.",
+      "network": "Network problem. Check your connection and try again.",
+      "generic": "Something went wrong. Please try again."
+    }
   }
 }

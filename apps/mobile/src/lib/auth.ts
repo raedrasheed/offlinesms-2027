@@ -1,10 +1,10 @@
 // Auth helpers (mobile).
 //
-// Public phone sign-in/registration is DISABLED on the server: requestPhoneOtp /
-// verifyPhoneOtp always answer `phone-signin-disabled`. The former Firebase
-// native phone-auth path (signInWithPhoneNumber + reCAPTCHA verifier) was dead
-// code and has been removed so no client path can trigger a Firebase-sent SMS.
-// Existing accounts add a phone number from Settings (lib/phoneLink.ts).
+// Public phone sign-in / sign-up: lib/phoneAuth.ts (protected protocol). The
+// former Firebase native phone-auth path (signInWithPhoneNumber + reCAPTCHA
+// verifier) was dead code and has been removed so no client path can trigger a
+// Firebase-sent SMS. Existing accounts add a phone number from Settings
+// (lib/phoneLink.ts).
 //
 // SECURITY: all callable error codes are mapped to product-friendly strings so
 // low-level SDK error messages never leak into the UI.
@@ -15,33 +15,11 @@ import { auth, app } from './firebase';
 import { setOffline } from '../services/presenceService';
 import { unregisterForPush } from './notifications';
 
-// ── OTP over relay (custom-token phone sign-in; no Firebase phone auth) ──
 const fns = () => getFunctions(app, 'us-central1');
 
-/** Request a sign-in OTP, sent via the OfflineSMS relay. */
-export async function requestPhoneOtp(phoneE164: string): Promise<void> {
-  await httpsCallable<{ phoneE164: string }, { ok: boolean }>(fns(), 'requestPhoneOtp')({ phoneE164 });
-}
-
-/**
- * The ISO alpha-2 countries phone sign-in is currently possible for (the OTP
- * org has a live relay serving them). The sign-in country picker shows ONLY
- * these — empty means no country is available right now.
- */
-export async function getSupportedPhoneCountries(): Promise<string[]> {
-  const res = await httpsCallable<Record<string, never>, { countries: string[] }>(
-    fns(), 'getSupportedPhoneCountries',
-  )({});
-  return Array.isArray(res.data?.countries) ? res.data.countries : [];
-}
-
-/** Verify the OTP and sign in with the returned custom token. */
-export async function verifyPhoneOtpAndSignIn(phoneE164: string, code: string): Promise<void> {
-  const res = await httpsCallable<{ phoneE164: string; code: string }, { customToken: string }>(
-    fns(), 'verifyPhoneOtp',
-  )({ phoneE164, code });
-  await signInWithCustomToken(auth, res.data.customToken);
-}
+// Public phone sign-in / sign-up now uses the protected protocol in
+// ./phoneAuth.ts (pre-auth session + proof + server-side budgets). The old
+// requestPhoneOtp/verifyPhoneOtp callables are retired on the server.
 
 // Sign-in is limited to the mobile prefixes the relay serves. The national
 // (significant) number — trunk "0" stripped — must start with one of these.

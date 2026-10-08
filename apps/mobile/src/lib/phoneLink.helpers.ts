@@ -74,3 +74,29 @@ export function formatCountdown(sec: number): string {
   const s = Math.max(0, Math.ceil(sec));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
+
+export type LinkStep = 'unavailable' | 'linked' | 'recover' | 'reauth' | 'number';
+
+/** Minimal status shape (mirrors PhoneLinkStatus without importing Firebase). */
+export interface LinkStatusLike {
+  available: boolean;
+  linked?: boolean;
+  pendingRecovery?: boolean;
+  eligible?: boolean;
+  sendingPaused?: boolean;
+  reauthRequired?: boolean;
+}
+
+/**
+ * Which screen to show for a server status. Recovery of an already-accepted
+ * link always wins — even while new sending is paused, and before asking for
+ * re-authentication (the recovery call itself will ask if it needs it), so an
+ * interrupted link can never strand the user on a blocked number-entry screen.
+ */
+export function stepForStatus(st: LinkStatusLike): LinkStep {
+  if (!st.available) return 'unavailable';
+  if (st.pendingRecovery) return 'recover';
+  if (st.linked) return 'linked';
+  if (!st.eligible || st.sendingPaused) return 'unavailable';
+  return st.reauthRequired ? 'reauth' : 'number';
+}

@@ -20,7 +20,7 @@ import {
   getPhoneLinkStatus, requestPhoneLinkCode, verifyPhoneLinkCode, resumePhoneLink,
   sendReauthEmailCode, reauthenticateWithEmailCode, type PhoneLinkStatus,
 } from '../lib/phoneLink';
-import { phoneLinkErrorInfo, toE164, formatCountdown } from '../lib/phoneLink.helpers';
+import { phoneLinkErrorInfo, toE164, formatCountdown, stepForStatus } from '../lib/phoneLink.helpers';
 
 type Step = 'loading' | 'unavailable' | 'linked' | 'recover' | 'reauth' | 'number' | 'code' | 'done';
 const CODE_LEN = 6;
@@ -71,11 +71,8 @@ export default function LinkPhone({ navigation }: any) {
     try {
       const st = await getPhoneLinkStatus();
       setStatus(st);
-      if (!st.available) { setStep('unavailable'); return; }
-      if (st.pendingRecovery) { setStep('recover'); return; }
-      if (st.linked) { setMasked(st.maskedPhone ?? ''); setStep('linked'); return; }
-      if (!st.eligible || st.sendingPaused) { setStep('unavailable'); return; }
-      setStep(st.reauthRequired ? 'reauth' : 'number');
+      if (st.available && st.linked) setMasked(st.maskedPhone ?? '');
+      setStep(stepForStatus(st));
     } catch (e) {
       setStep('unavailable'); showError(e);
     }
@@ -98,10 +95,16 @@ export default function LinkPhone({ navigation }: any) {
   }
 
   const sendReauth = () => run(async () => { await sendReauthEmailCode(); setReauthSent(true); });
+  // After re-authenticating, ask the server where we are (R7): a pending
+  // recovery resumes; otherwise continue to number entry if sending is allowed.
   const confirmReauth = () => run(async () => {
     await reauthenticateWithEmailCode(reauthCode);
     setReauthCode('');
-    setStep('number');
+    setReauthSent(false);
+    const st = await getPhoneLinkStatus();
+    setStatus(st);
+    const next = stepForStatus({ ...st, reauthRequired: false } as typeof st);
+    setStep(next);
   });
 
   const sendCode = () => run(async () => {
