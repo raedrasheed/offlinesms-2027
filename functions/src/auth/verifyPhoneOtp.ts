@@ -1,22 +1,19 @@
-// Callable: verifyPhoneOtp — PUBLIC phone sign-in / registration. DISABLED.
+// Callable: verifyPhoneOtp — the ORIGINAL public phone verification endpoint. RETIRED.
 //
-// This endpoint used to accept any (phone, code) pair, find-or-CREATE a Firebase
-// Auth user for the number (plus a 50-point welcome wallet), and return a custom
-// token. It also accepted a fixed code for a hard-coded test number with no
-// challenge at all.
-//
-// It now refuses before reading the payload or touching Firestore/Auth: no
-// account creation, no custom token, no wallet credit, and no test-number
-// bypass. Outstanding `otpChallenges` documents are therefore inert; see
-// docs/PHONE_LINKING_SECURITY.md for the (manual, dry-run-first) cleanup.
+// It accepted (phone, code) without any session binding, deleted the shared
+// rate-limit state on success, treated any Auth lookup error as "no account",
+// and honoured a fixed review credential with no challenge at all. It now
+// refuses before reading the payload: no account creation, no custom token, no
+// wallet credit, no test-number bypass. Outstanding legacy `otpChallenges`
+// documents are inert. Use functions/src/phoneAuth/verifyPhoneAuthCode.ts.
 
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { appCheckOptions } from '../lib/appCheck';
-import { PHONE_SIGNIN_DISABLED } from './requestPhoneOtp';
+import { LEGACY_PHONE_OTP_ERROR } from './requestPhoneOtp';
 
 const REGION = 'us-central1';
 
 export const verifyPhoneOtp = onCall({ region: REGION, ...appCheckOptions() }, async () => {
-  console.warn('[verifyPhoneOtp] refused: public phone sign-in is disabled');
-  throw new HttpsError('failed-precondition', PHONE_SIGNIN_DISABLED);
+  console.warn('[verifyPhoneOtp] refused: legacy endpoint retired');
+  throw new HttpsError('failed-precondition', LEGACY_PHONE_OTP_ERROR);
 });

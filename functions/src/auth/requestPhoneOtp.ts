@@ -1,32 +1,27 @@
-// Callable: requestPhoneOtp — PUBLIC phone sign-in / registration. DISABLED.
+// Callable: requestPhoneOtp — the ORIGINAL public phone sign-in endpoint. RETIRED.
 //
-// This unauthenticated endpoint used to mint a sign-in OTP for ANY caller-
-// supplied number and queue it on the relay. It had no account binding, no
-// per-source or global limit, and its per-number limit was a non-transactional
-// read-then-write, so a single anonymous caller could make the relay text
-// arbitrary people (the reported abuse).
+// It minted a sign-in OTP for any caller-supplied number and queued a relay SMS
+// with no requester binding, no proof, and a non-transactional per-number limit
+// only (the reported SMS-spraying mechanism). Public phone sign-in / sign-up is
+// still a supported product flow, but it now runs ONLY through the protected
+// protocol in functions/src/phoneAuth/ (startPhoneAuth → requestPhoneAuthCode →
+// verifyPhoneAuthCode), which old app builds cannot speak.
 //
-// Public phone registration is now shut down ON THE SERVER. The handler refuses
-// before reading the payload or touching Firestore, so no challenge, relay job,
-// audit row, or SMS can be produced by any client version, any payload shape
-// (including the old app-review test number), or any caller-supplied flag. It
-// stays exported (rather than deleted) so the deployed function is replaced by
-// this refusal instead of lingering with the old code, and old app builds get a
-// stable, mappable error.
-//
-// Adding a phone to an EXISTING, email-verified account is a separate,
-// authenticated flow: functions/src/phoneLink/.
+// This handler refuses before reading the payload or touching Firestore, so no
+// challenge, relay job, audit row or SMS can be produced through it by any
+// client version or payload (including the former fixed review number). It
+// stays exported so the deployed function is REPLACED by this refusal rather
+// than left running the old code; old builds get a stable "update the app".
 
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { appCheckOptions } from '../lib/appCheck';
 
 const REGION = 'us-central1';
 
-/** The single error every public phone sign-in call receives. */
-export const PHONE_SIGNIN_DISABLED = 'phone-signin-disabled';
+/** The single error every legacy public phone OTP call receives. */
+export const LEGACY_PHONE_OTP_ERROR = 'app-update-required';
 
 export const requestPhoneOtp = onCall({ region: REGION, ...appCheckOptions() }, async () => {
-  // No PII in the log line: the payload is never read.
-  console.warn('[requestPhoneOtp] refused: public phone sign-in is disabled');
-  throw new HttpsError('failed-precondition', PHONE_SIGNIN_DISABLED);
+  console.warn('[requestPhoneOtp] refused: legacy endpoint retired');
+  throw new HttpsError('failed-precondition', LEGACY_PHONE_OTP_ERROR);
 });
