@@ -15,9 +15,11 @@ import {
   leaseExpiryMs, capacityRemaining, isClaimable, canDeviceClaimJobCountry,
   normalizeReportStatus, recipientStatusFor, shouldApplyReport,
   classifyFailure, failureOutcome, backoffMs, utcDayKey,
+  isVerificationJobKind, verificationClaimDecision,
   type RelayJobStatus,
 } from './relayLogic';
 import { maybeFinalizeRelayBatch } from './relaySettlement';
+import { loadPhoneLinkConfig, phoneLinkSendingAllowed } from '../phoneLink/config';
 
 const REGION = 'us-central1';
 const MAX_CLAIM = 50;
@@ -69,17 +71,48 @@ export const claimRelayJobs = onCall({ region: REGION }, async (request) => {
   const now = Date.now();
   const claimed: Array<{ jobId: string; phoneE164: string; messageBody: string; assignedSimSubscriptionId?: number | null; traceId: string }> = [];
 
+  // Verification-code jobs carry an extra, server-side gate (public sign-in OTP
+  // retired; phone-link codes only while sending is allowed and unexpired).
+  // The config is loaded lazily, at most once per claim, and an unreadable
+  // config means "stopped" (fail closed).
+  let sendingAllowed: boolean | null = null;
+  const verificationSendingAllowed = async (): Promise<boolean> => {
+    if (sendingAllowed === null) {
+      try { sendingAllowed = phoneLinkSendingAllowed(await loadPhoneLinkConfig(db)); }
+      catch { sendingAllowed = false; }
+    }
+    return sendingAllowed;
+  };
+  let cancelledVerification = 0;
+
   for (const doc of candSnap.docs) {
     if (claimed.length >= budget) break;
     const assigned = doc.get('assignedDeviceId') as string | undefined;
     if (assigned && assigned !== ctx.deviceId) continue;
     if (!servesJobCountry(doc.get('recipientCountryCode'))) continue; // unsupported country
 
+    const kind = doc.get('kind');
+    const allowVerification = isVerificationJobKind(kind) ? await verificationSendingAllowed() : true;
+
     // Per-job transaction so two devices never claim the same job.
     const ok = await db.runTransaction(async tx => {
       const fresh = await tx.get(doc.ref);
       if (!fresh.exists) return null;
       if (fresh.get('status') !== 'queued') return null;
+      // Never deliver a cancelled verification job: fail it terminally and
+      // purge the code from the body, under the same transaction.
+      const decision = verificationClaimDecision(
+        { kind: fresh.get('kind'), expiresAtMs: (fresh.get('expiresAt') as Timestamp | undefined)?.toMillis?.() ?? null },
+        now, allowVerification,
+      );
+      if (decision !== 'allow') {
+        tx.update(doc.ref, {
+          status: 'failed', failedAt: FieldValue.serverTimestamp(),
+          lastError: decision.replace(/^cancel-/, ''),
+          messageBody: FieldValue.delete(), updatedAt: FieldValue.serverTimestamp(),
+        });
+        return 'cancelled' as const;
+      }
       const a = fresh.get('assignedDeviceId') as string | undefined;
       if (a && a !== ctx.deviceId) return null;
       if (!servesJobCountry(fresh.get('recipientCountryCode'))) return null; // re-check under txn
@@ -103,7 +136,16 @@ export const claimRelayJobs = onCall({ region: REGION }, async (request) => {
         traceId: fresh.get('traceId') ?? doc.id,
       };
     });
+    if (ok === 'cancelled') { cancelledVerification++; continue; }
     if (ok) claimed.push(ok);
+  }
+
+  if (cancelledVerification > 0) {
+    await writeAuditLog({
+      action: 'relay.verification.cancelled', actor: { uid: ctx.deviceId },
+      target: { type: 'relayDevice', id: ctx.deviceId }, result: 'success',
+      metadata: { businessId: ctx.businessId, count: cancelledVerification },
+    });
   }
 
   if (claimed.length > 0) {
@@ -152,7 +194,7 @@ export const reportRelayDelivery = onCall({ region: REGION }, async (request) =>
     let requeued = false;
     if (report === 'failed') {
       const cls = classifyFailure(data.androidResultCode, data.reason);
-      if (failureOutcome(attempts, maxAttempts, cls) === 'requeue') { finalStatus = 'queued'; requeued = true; }
+      if (failureOutcome(attempts, maxAttempts, cls, snap.get('kind')) === 'requeue') { finalStatus = 'queued'; requeued = true; }
     }
 
     // Firestore transactions require ALL reads before ANY writes — so read the

@@ -121,3 +121,10 @@ export { getSupportedPhoneCountries } from './auth/getSupportedPhoneCountries';
 export { requestEmailOtp } from './auth/requestEmailOtp';
 export { verifyEmailOtp } from './auth/verifyEmailOtp';
 export { deleteMyAccount } from './auth/deleteAccount';
+
+// Phone linking for existing email accounts (authenticated; never sign-in or
+// registration). Disabled unless PHONE_LINK_ENABLED=true AND smsConfig/phoneLink
+// says so. See docs/PHONE_LINKING_SECURITY.md.
+export { requestPhoneLinkOtp } from './phoneLink/requestPhoneLinkOtp';
+export { verifyPhoneLinkOtp, resumePhoneLink } from './phoneLink/verifyPhoneLinkOtp';
+export { getPhoneLinkStatus } from './phoneLink/getPhoneLinkStatus';

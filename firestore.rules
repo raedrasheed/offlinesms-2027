@@ -156,9 +156,13 @@ service cloud.firestore {
       return changedKeys().hasOnly(allowedProfileFields())
           && !changedKeys().hasAny(bannedProfileFields());
     }
+    // phoneNumber / email / phoneVerified are never client-writable, on create
+    // either: they come only from the server's verified OTP/link flows (and
+    // the PII lives in userPrivate). The profile is normally created by the
+    // backend (onUserCreate / verifyEmailOtp) before the client could.
     function safeUserProfileCreate() {
       return changedKeysOnCreate().hasOnly([
-        'displayName', 'phoneNumber', 'email', 'createdAt', 'status'
+        'displayName', 'createdAt', 'status'
       ]);
     }
 
@@ -471,6 +475,30 @@ service cloud.firestore {
     // never read or write these; only trusted Cloud Functions (admin) touch them.
     match /emailOtpChallenges/{emailKey} {
       allow read, write: if isAdmin();
+    }
+
+    // Phone linking (existing email accounts) — ALL state is server-owned and
+    // written only by the phone-link callables (Admin SDK, bypasses rules).
+    // No client — owner or admin — may create, change or delete it, so
+    // verified-phone state can't be forged from a client.
+    //   phoneLinkChallenges/{uid}  — code verifiers: unreadable by anyone.
+    //   phoneClaims/{phoneHmac}    — number ownership: admin read-only.
+    //   phoneLinkOps/{uid}         — link progress / recovery: admin read-only.
+    //   smsRateLimits/{key}        — abuse counters: admin read-only.
+    match /phoneLinkChallenges/{uid} {
+      allow read, write: if false;
+    }
+    match /phoneClaims/{phoneKey} {
+      allow read:  if isAdmin();
+      allow write: if false;
+    }
+    match /phoneLinkOps/{uid} {
+      allow read:  if isAdmin();
+      allow write: if false;
+    }
+    match /smsRateLimits/{key} {
+      allow read:  if isAdmin();
+      allow write: if false;
     }
 
     // ════════════════════════════════════════════════════════════

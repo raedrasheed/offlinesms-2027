@@ -1,7 +1,7 @@
 // Pure-ish OTP helpers (Phase 24 — OTP over relay). Code generation + hashing
 // are deterministic and unit-testable; no Firestore here.
 
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 
 export const OTP_TTL_MS = 5 * 60 * 1000;          // code lifetime
 export const OTP_MAX_ATTEMPTS = 5;                // verify attempts per code
@@ -9,16 +9,10 @@ export const OTP_RESEND_COOLDOWN_MS = 60 * 1000;  // min gap between sends
 export const OTP_MAX_PER_HOUR = 5;                // sends per phone per hour
 export const OTP_CODE_LENGTH = 6;
 
-// App-review test account (Apple App Store / Google Play reviewers can't
-// receive a real SMS). For this exact number no SMS is sent and verifyPhoneOtp
-// accepts only TEST_PHONE_OTP. Keep this in sync with store review notes.
-export const TEST_PHONE_E164 = '+970599999999';
-export const TEST_PHONE_OTP = '123456';
-
-/** True for the fixed App-review test phone number (compared in E.164 form). */
-export function isTestPhone(e164: string): boolean {
-  return e164 === TEST_PHONE_E164;
-}
+// NOTE: the former App-review test number with a fixed code (+970599999999 /
+// 123456) was removed together with public phone sign-in. A fixed credential
+// shipped in the server code is a production bypass; app review now uses an
+// email account (see docs/PHONE_LINKING_SECURITY.md).
 
 // Sign-in is restricted to the mobile prefixes the relay serves. The national
 // (significant) number must start with one of these — for EVERY number. A
@@ -53,10 +47,16 @@ export function phoneKey(e164: string): string {
   return e164.replace(/\D/g, '');
 }
 
-/** Random numeric OTP. */
-export function generateOtp(len = OTP_CODE_LENGTH, rnd: () => number = Math.random): string {
+/**
+ * Random numeric OTP from the CSPRNG (crypto.randomInt — uniform, no modulo
+ * bias). `rnd` exists only so unit tests can make the output deterministic;
+ * production callers must not pass it.
+ */
+export function generateOtp(len = OTP_CODE_LENGTH, rnd?: () => number): string {
   let out = '';
-  for (let i = 0; i < len; i++) out += Math.floor(rnd() * 10).toString();
+  for (let i = 0; i < len; i++) {
+    out += (rnd ? Math.floor(rnd() * 10) : randomInt(0, 10)).toString();
+  }
   return out;
 }
 

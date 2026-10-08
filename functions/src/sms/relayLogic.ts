@@ -149,22 +149,67 @@ export function backoffMs(attempts: number): number {
   return Math.min(BACKOFF_MAX_MS, BACKOFF_BASE_MS * Math.pow(2, n - 1));
 }
 
-/** Outcome of a failed send report: requeue (retry) or terminal fail. */
+/** Outcome of a failed send report: requeue (retry) or terminal fail.
+ *  Verification-code jobs (see isVerificationJobKind) NEVER requeue, whatever
+ *  their stored maxAttempts says: a "failed"/timed-out report from a phone is
+ *  ambiguous (the SMS may already have left the device), so an internal retry
+ *  could text the same person twice. The user asks for a new code instead,
+ *  which goes back through every abuse limit. */
 export function failureOutcome(
-  attempts: number, maxAttempts: number, cls: FailureClass,
+  attempts: number, maxAttempts: number, cls: FailureClass, kind?: unknown,
 ): 'requeue' | 'fail' {
+  if (isVerificationJobKind(kind)) return 'fail';
   if (cls === 'permanent') return 'fail';
   return attempts < maxAttempts ? 'requeue' : 'fail';
 }
 
-/** Reaper decision for a job whose lease may have lapsed. */
+/** Reaper decision for a job whose lease may have lapsed. A lapsed lease is the
+ *  classic ambiguous timeout (device took the job, then went silent), so
+ *  verification-code jobs are failed, never requeued. */
 export function reapDecision(
-  job: { status: RelayJobStatus; leaseExpiresAtMs: number | null; attempts: number; maxAttempts: number },
+  job: { status: RelayJobStatus; leaseExpiresAtMs: number | null; attempts: number; maxAttempts: number; kind?: unknown },
   nowMs: number,
 ): 'none' | 'requeue' | 'fail' {
   if (job.status !== 'claimed' && job.status !== 'sending') return 'none';
   if (job.leaseExpiresAtMs == null || job.leaseExpiresAtMs > nowMs) return 'none';
+  if (isVerificationJobKind(job.kind)) return 'fail';
   return job.attempts >= job.maxAttempts ? 'fail' : 'requeue';
+}
+
+// ── Verification-code jobs (sign-in OTP — retired; phone linking) ───────────
+/** Legacy PUBLIC sign-in OTP jobs. Public phone sign-in is disabled; any such
+ *  job still queued (e.g. from the abuse) must never be handed to a device. */
+export const PUBLIC_OTP_JOB_KIND = 'otp';
+/** Account phone-linking verification code (authenticated, rate-limited). */
+export const PHONE_LINK_JOB_KIND = 'phone_link_otp';
+
+export function isVerificationJobKind(kind: unknown): boolean {
+  return kind === PUBLIC_OTP_JOB_KIND || kind === PHONE_LINK_JOB_KIND;
+}
+
+export type VerificationClaimDecision =
+  | 'allow'
+  | 'cancel-public-otp-disabled'
+  | 'cancel-expired'
+  | 'cancel-sending-stopped';
+
+/**
+ * May a device lease this job right now? Non-verification jobs are always
+ * 'allow' here (their own gates apply). Verification jobs are cancelled —
+ * never delivered — when they are legacy public OTPs, when the code has
+ * expired (or carries no expiry at all), or when verification sending is
+ * stopped (feature off / emergency stop / config unreadable). Pure.
+ */
+export function verificationClaimDecision(
+  job: { kind: unknown; expiresAtMs: number | null | undefined },
+  nowMs: number,
+  phoneLinkSendingAllowed: boolean,
+): VerificationClaimDecision {
+  if (!isVerificationJobKind(job.kind)) return 'allow';
+  if (job.kind === PUBLIC_OTP_JOB_KIND) return 'cancel-public-otp-disabled';
+  if (job.expiresAtMs == null || job.expiresAtMs <= nowMs) return 'cancel-expired';
+  if (!phoneLinkSendingAllowed) return 'cancel-sending-stopped';
+  return 'allow';
 }
 
 /** A job is claimable only once its backoff window (nextAttemptAt) has passed. */

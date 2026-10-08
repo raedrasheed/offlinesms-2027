@@ -86,7 +86,9 @@ export const deleteMyAccount = onCall({ region: REGION }, async (request) => {
   } catch { /* best-effort */ }
 
   // 3. Delete private subcollections + per-user docs.
-  for (const sub of ['devices', 'notifications', 'notificationSettings', 'blockedUsers']) {
+  // userPrivate holds the phone number / email (PII) and must not outlive the
+  // account; leaving it behind would also keep the number looking "taken".
+  for (const sub of ['devices', 'notifications', 'notificationSettings', 'blockedUsers', 'userPrivate']) {
     try { await deleteAllDocs(db, userRef.collection(sub)); } catch { /* best-effort */ }
   }
   for (const path of [
@@ -97,6 +99,17 @@ export const deleteMyAccount = onCall({ region: REGION }, async (request) => {
     try { await path.delete(); } catch { /* best-effort */ }
   }
   try { await userRef.delete(); } catch { /* best-effort */ }
+
+  // Phone linking: release the number claim and drop link/challenge state so
+  // the number can be linked again (by its owner, to a new account).
+  try {
+    const claims = await db.collection('phoneClaims').where('uid', '==', uid).limit(10).get();
+    const batch = db.batch();
+    claims.docs.forEach(d => batch.delete(d.ref));
+    batch.delete(db.collection('phoneLinkOps').doc(uid));
+    batch.delete(db.collection('phoneLinkChallenges').doc(uid));
+    await batch.commit();
+  } catch { /* best-effort; a dead owner's claim is treated as stale */ }
 
   // 4. Delete the Auth user — the critical step (frees the phone number).
   try {
