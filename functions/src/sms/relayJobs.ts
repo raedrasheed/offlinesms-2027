@@ -48,8 +48,25 @@ export interface ClaimedRelayJob {
   kind: string | null;
   /** Device must call authorizeRelaySend and get ok before handing to SmsManager. */
   requiresSendAuth: boolean;
-  /** Verification jobs: the device must not send after this many ms from receipt. */
+  /** Verification jobs: remaining lifetime (ms) measured when the response is
+   *  built. The device starts it at the moment it SENT the request (a
+   *  conservative origin: response latency only shortens it, never extends). */
   sendWithinMs: number | null;
+  /** Server attempt number for this lease (1, 2, …) — identifies this hand-out. */
+  attempt: number;
+}
+
+/** Max age of a send authorization on the device (bounds stale "ok"s). */
+export const SEND_AUTH_VALID_MS = 15_000;
+
+/** Pure: does the device's CURRENT routing still allow this job's country? */
+export function deviceRoutingAllows(
+  dev: { countryRoutingEnabled?: unknown; allowedCountryCodes?: unknown },
+  jobCountry: unknown,
+): boolean {
+  if (typeof jobCountry !== 'string' || !jobCountry) return true; // untagged
+  if (dev.countryRoutingEnabled !== true) return false;
+  return canDeviceClaimJobCountry(Array.isArray(dev.allowedCountryCodes) ? dev.allowedCountryCodes as string[] : [], jobCountry);
 }
 
 export const claimRelayJobs = onCall({ region: REGION }, async (request) => {
@@ -88,6 +105,7 @@ export const claimRelayJobs = onCall({ region: REGION }, async (request) => {
   };
   let cancelledVerification = 0;
   let capacityExhausted: string | null = null;
+  const expiries = new Map<string, number | null>();
 
   for (const doc of candSnap.docs) {
     if (claimed.length >= want) break;
@@ -132,16 +150,12 @@ export const claimRelayJobs = onCall({ region: REGION }, async (request) => {
       if (a && a !== ctx.deviceId) return null;
       // Country: a tagged job needs a device with country routing ENABLED that
       // serves the country (the switch is re-read here, not cached).
-      const jobCountry = fresh.get('recipientCountryCode');
-      if (typeof jobCountry === 'string' && jobCountry) {
-        if (dev.get('countryRoutingEnabled') !== true) return null;
-        if (!canDeviceClaimJobCountry((dev.get('allowedCountryCodes') as string[] | undefined) ?? [], jobCountry)) return null;
-      }
+      if (!deviceRoutingAllows(dev.data() ?? {}, fresh.get('recipientCountryCode'))) return null;
       const nextAt = (fresh.get('nextAttemptAt') as Timestamp | undefined)?.toMillis?.() ?? null;
       if (!isClaimable(nextAt, now)) return null;
 
       const cap = relayCapacityCheck(dev.get('caps') as CapsLike | undefined, dev.get('usage') as RelayUsage | undefined, now);
-      if (!cap.ok) return { capacity: cap.window } as const;
+      if (!cap.ok) return { capacity: cap.window as string } as const;
 
       const verification = isVerificationJobKind(fresh.get('kind'));
       tx.update(devRef, { usage: reserveRelayUsage(dev.get('usage') as RelayUsage | undefined, now), updatedAt: FieldValue.serverTimestamp() });
@@ -164,14 +178,15 @@ export const claimRelayJobs = onCall({ region: REGION }, async (request) => {
         traceId: fresh.get('traceId') ?? doc.id,
         kind: (fresh.get('kind') as string | undefined) ?? null,
         requiresSendAuth: verification,
-        sendWithinMs: verification && expiresAtMs != null ? Math.max(0, expiresAtMs - now) : null,
+        sendWithinMs: null, // filled right before the response is sent
+        attempt: ((fresh.get('attempts') as number | undefined) ?? 0) + 1,
       };
-      return job;
+      return { job, expiresAtMs: verification ? expiresAtMs : null };
     });
     if (ok === 'device-blocked') break;
     if (ok === 'cancelled') { cancelledVerification++; continue; }
-    if (ok && 'capacity' in ok) { capacityExhausted = ok.capacity; break; }
-    if (ok) claimed.push(ok as ClaimedRelayJob);
+    if (ok && 'capacity' in ok) { capacityExhausted = ok.capacity ?? null; break; }
+    if (ok && 'job' in ok) { claimed.push(ok.job); expiries.set(ok.job.jobId, ok.expiresAtMs); }
   }
 
   if (cancelledVerification > 0) {
@@ -188,6 +203,13 @@ export const claimRelayJobs = onCall({ region: REGION }, async (request) => {
       target: { type: 'relayDevice', id: ctx.deviceId }, result: 'success',
       metadata: { businessId: ctx.businessId, count: claimed.length, capacityExhausted },
     });
+  }
+  // Remaining lifetime computed as late as possible (after every transaction
+  // and audit write), so server processing time is never granted twice.
+  const t = Date.now();
+  for (const j of claimed) {
+    const e = expiries.get(j.jobId);
+    if (j.requiresSendAuth) j.sendWithinMs = e != null ? Math.max(0, e - t) : 0;
   }
   return { jobs: claimed, capacityExhausted };
 });
@@ -213,9 +235,12 @@ export const authorizeRelaySend = onCall({ region: REGION }, async (request) => 
   const jobRef = db.collection('relayJobs').doc(data.jobId);
   const devRef = db.collection('relayDevices').doc(ctx.deviceId);
   const policyRef = db.collection(OTP_POLICY_DOC.collection).doc(OTP_POLICY_DOC.doc);
-  const now = Date.now();
 
-  const result = await db.runTransaction(async tx => {
+  type AuthResult = { ok: boolean; reason?: string; expiresAtMs?: number | null };
+  const result = await db.runTransaction<AuthResult>(async tx => {
+    // Time is taken INSIDE the callback so a transaction retry re-evaluates
+    // expiry/lease at the moment of the attempt that commits.
+    const now = Date.now();
     const [job, dev, pol] = await tx.getAll(jobRef, devRef, policyRef);
     if (!job.exists) return { ok: false, reason: 'job-not-found' };
     if (job.get('businessId') !== ctx.businessId) return { ok: false, reason: 'cross-business' };
@@ -230,9 +255,29 @@ export const authorizeRelaySend = onCall({ region: REGION }, async (request) => 
       return { ok: false, reason: `device-${devStatus}` };
     }
 
+    const verificationJob = isVerificationJobKind(job.get('kind'));
+    // Country routing is re-evaluated at the final boundary too (N3): a switch
+    // or country removal after the claim stops the hand-off.
+    if (!deviceRoutingAllows(dev.data() ?? {}, job.get('recipientCountryCode'))) {
+      if (verificationJob) {
+        tx.update(jobRef, {
+          status: 'failed', failedAt: FieldValue.serverTimestamp(), lastError: 'country-not-allowed',
+          messageBody: FieldValue.delete(), updatedAt: FieldValue.serverTimestamp(),
+        });
+      } else {
+        // Business SMS: nothing was handed off, so give it back to the queue
+        // for a device that still serves the country.
+        tx.update(jobRef, {
+          status: 'queued', leaseOwnerDeviceId: null, leaseExpiresAt: null, assignedDeviceId: null,
+          lastError: 'country-not-allowed', updatedAt: FieldValue.serverTimestamp(),
+        });
+      }
+      return { ok: false, reason: 'country-not-allowed' };
+    }
+
     let refuse: string | null = null;
-    if (isVerificationJobKind(job.get('kind'))) {
-      const expiresAtMs = (job.get('expiresAt') as Timestamp | undefined)?.toMillis?.() ?? null;
+    const expiresAtMs = (job.get('expiresAt') as Timestamp | undefined)?.toMillis?.() ?? null;
+    if (verificationJob) {
       const purpose = verificationPurposeOf(job.get('kind'));
       const v = purpose ? verificationJobStillValid({
         purpose, businessId: job.get('businessId'), policyVersion: job.get('policyVersion'), expiresAtMs,
@@ -254,12 +299,17 @@ export const authorizeRelaySend = onCall({ region: REGION }, async (request) => 
       return { ok: false, reason: refuse };
     }
     tx.update(jobRef, { status: 'sending', sendAuthorizedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
-    return { ok: true };
+    return { ok: true, expiresAtMs: verificationJob ? expiresAtMs : null };
   });
   if (!result.ok) {
     console.warn('[relay] send not authorized', { device: ctx.deviceId, reason: result.reason });
+    return { ok: false, reason: result.reason };
   }
-  return result;
+  // The device must hand off before BOTH budgets run out, measured from when
+  // it sent THIS request: the code's remaining lifetime (computed now, after
+  // the transaction) and a short maximum authorization age.
+  const remaining = result.expiresAtMs != null ? Math.max(0, result.expiresAtMs - Date.now()) : SEND_AUTH_VALID_MS;
+  return { ok: true, sendWithinMs: Math.min(remaining, SEND_AUTH_VALID_MS) };
 });
 
 export const reportRelayDelivery = onCall({ region: REGION }, async (request) => {

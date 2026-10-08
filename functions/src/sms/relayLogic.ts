@@ -191,7 +191,9 @@ const ANDROID_FDN_CHECK_FAILURE = 6;
  *  Unknown causes default to transient so they retry up to maxAttempts. */
 export function classifyFailure(resultCode?: number | null, reason?: string | null): FailureClass {
   const r = (reason ?? '').toLowerCase();
-  if (/invalid|permission|revoked|disabled|null-pdu|fdn|blocked|forbidden|opt-out/.test(r)) return 'permanent';
+  // 'ambiguous' = the device may already have handed the SMS to the modem
+  // (crash/restart after hand-off): never retried, to avoid a duplicate SMS.
+  if (/ambiguous|invalid|permission|revoked|disabled|null-pdu|fdn|blocked|forbidden|opt-out/.test(r)) return 'permanent';
   if (resultCode === ANDROID_NULL_PDU || resultCode === ANDROID_FDN_CHECK_FAILURE) return 'permanent';
   if (/no-service|radio|network|timeout|unavailable|generic|rate|limit/.test(r)) return 'transient';
   if (resultCode === ANDROID_NO_SERVICE || resultCode === ANDROID_RADIO_OFF

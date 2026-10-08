@@ -1,8 +1,9 @@
 // Relay enforcement (R2–R5) through the real relay callables on the emulators.
 // Layer: direct handler invocation of claimRelayJobs / authorizeRelaySend /
 // reportRelayDelivery / relayHeartbeat / relayReaper. The Android side of the
-// same boundary (pause per job, duplicate local job, fail-closed authorization)
-// is covered by SendGateTest (JVM). No SMS is sent anywhere.
+// same boundary is covered by SendPipelineTest (JVM) and RelayIntegrationTest
+// (Robolectric: Room + RelayApi over a fake transport), which parse the contract
+// fixtures checked against the real handlers below. No SMS is sent anywhere.
 
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -15,6 +16,8 @@ import { relayReaper } from '../src/sms/relayReaper';
 import { handleRequestPhoneLinkOtp } from '../src/phoneLink/requestPhoneLinkOtp';
 import { handleVerifyPhoneLinkOtp } from '../src/phoneLink/verifyPhoneLinkOtp';
 import { utcDayKey } from '../src/sms/relayLogic';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 const claim = (capacity = 10, extra: Record<string, unknown> = {}) =>
   claimRelayJobs.run(deviceReq({ capacity, ...extra })) as Promise<{ jobs: Array<{ jobId: string; kind: string | null; requiresSendAuth: boolean; sendWithinMs: number | null }>; capacityExhausted: string | null }>;
@@ -164,7 +167,7 @@ describe('G (R4) — stop / expiry / supersession / pause after claim, before ha
   it('authorization is single-use (no duplicate hand-off) and needs the lease and an active device', async () => {
     const { jobId } = await linkJob(30);
     await claim();
-    expect(await authorize(jobId)).toEqual({ ok: true });
+    expect(await authorize(jobId)).toMatchObject({ ok: true });
     expect((await job(jobId))!.status).toBe('sending');
     expect(await authorize(jobId)).toEqual({ ok: false, reason: 'already-authorized' });
 
@@ -244,5 +247,97 @@ describe('H (R5) — sender, routing and capability changes', () => {
     expect((await job('ok1'))!.status).toBe('sent');
     await relayReaper.run({} as never);
     expect((await job('ok1'))!.status).toBe('sent');
+  });
+});
+
+describe('N3 — country routing is re-checked at final authorization', () => {
+  it('routing switched off AFTER claim → refused, code purged', async () => {
+    const { jobId } = await linkJob(60);
+    await claim();
+    await db().collection('relayDevices').doc(DEVICE).update({ countryRoutingEnabled: false });
+    expect(await authorize(jobId)).toEqual({ ok: false, reason: 'country-not-allowed' });
+    expect((await job(jobId))!).toMatchObject({ status: 'failed', lastError: 'country-not-allowed' });
+    expect((await job(jobId))!.messageBody).toBeUndefined();
+  });
+
+  it('country removed AFTER claim (switch still on) → refused', async () => {
+    const { jobId } = await linkJob(61);
+    await claim();
+    await db().collection('relayDevices').doc(DEVICE).update({ allowedCountryCodes: ['JO'] });
+    expect(await authorize(jobId)).toEqual({ ok: false, reason: 'country-not-allowed' });
+  });
+
+  it('control: a still-authorized country is authorized', async () => {
+    const { jobId } = await linkJob(62);
+    await claim();
+    await db().collection('relayDevices').doc(DEVICE).update({ allowedCountryCodes: ['JO', 'PS'] });
+    expect(await authorize(jobId)).toMatchObject({ ok: true });
+  });
+});
+
+describe('N4 — server deadlines are computed late and bounded', () => {
+  it('claim reports the remaining lifetime at response time; authorization returns a short, bounded budget', async () => {
+    const { jobId } = await linkJob(70);
+    const exp = (await job(jobId))!.expiresAt.toMillis();
+    const before = Date.now();
+    const c = await claim();
+    const after = Date.now();
+    expect(c.jobs[0].sendWithinMs!).toBeLessThanOrEqual(exp - before);
+    expect(c.jobs[0].sendWithinMs!).toBeGreaterThanOrEqual(exp - after - 50);
+    const a = await authorize(jobId) as { ok: boolean; sendWithinMs: number };
+    expect(a.ok).toBe(true);
+    expect(a.sendWithinMs).toBeLessThanOrEqual(15_000);
+    expect(a.sendWithinMs).toBeGreaterThan(0);
+  });
+
+  it('authorization budget never exceeds the code’s remaining lifetime', async () => {
+    const { jobId } = await linkJob(71);
+    await claim();
+    await db().collection('relayJobs').doc(jobId).update({ expiresAt: Timestamp.fromMillis(Date.now() + 3_000) });
+    const a = await authorize(jobId) as { ok: boolean; sendWithinMs: number };
+    expect(a.ok).toBe(true);
+    expect(a.sendWithinMs).toBeLessThanOrEqual(3_000);
+  });
+});
+
+describe('N5 — server attempt identity and ambiguous hand-offs', () => {
+  it('each lease carries its attempt number; a transient failure re-queues as the next attempt', async () => {
+    await businessJob('a1');
+    expect((await claim()).jobs[0]).toMatchObject({ jobId: 'a1', attempt: 1 });
+    await report('a1', 'failed', { reason: 'no-service', androidResultCode: 4 });
+    await db().collection('relayJobs').doc('a1').update({ nextAttemptAt: null }); // skip backoff for the test
+    expect((await claim()).jobs[0]).toMatchObject({ jobId: 'a1', attempt: 2 });
+  });
+
+  it("a device-reported 'ambiguous-handoff' is permanent: never re-queued", async () => {
+    await businessJob('a2');
+    await claim();
+    const r = await report('a2', 'failed', { reason: 'ambiguous-handoff' }) as { requeued: boolean };
+    expect(r.requeued).toBe(false);
+    expect((await job('a2'))!.status).toBe('failed');
+  });
+});
+
+describe('relay app contract — real handler responses match the fixtures the Android tests parse', () => {
+  const fixture = (f: string) => JSON.parse(readFileSync(join(__dirname, '../../apps/mobile-relay/app/src/test/resources/relay-contract', f), 'utf-8'));
+  const shape = (o: Record<string, unknown>) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, v === null ? 'null' : typeof v]));
+
+  it('claimRelayJobs: same keys and value types for a verification and a business job', async () => {
+    const want = fixture('claim-response.json');
+    const { jobId } = await linkJob(80);
+    await businessJob('b1');
+    const got = await claim() as unknown as { jobs: Array<Record<string, unknown>>; capacityExhausted: unknown };
+    expect(Object.keys(got).sort()).toEqual(Object.keys(want).sort());
+    const otp = got.jobs.find(j => j.jobId === jobId)!;
+    const biz = got.jobs.find(j => j.jobId === 'b1')!;
+    // assignedSimSubscriptionId is a number when the dispatcher pinned a SIM, else null.
+    expect({ ...shape(otp), assignedSimSubscriptionId: 'number|null' }).toEqual({ ...shape(want.jobs[0]), assignedSimSubscriptionId: 'number|null' });
+    expect(shape(biz)).toEqual(shape(want.jobs[1]));
+  });
+
+  it('authorizeRelaySend: same keys and value types', async () => {
+    const { jobId } = await linkJob(81);
+    await claim();
+    expect(shape(await authorize(jobId) as Record<string, unknown>)).toEqual(shape(fixture('authorize-response.json')));
   });
 });
