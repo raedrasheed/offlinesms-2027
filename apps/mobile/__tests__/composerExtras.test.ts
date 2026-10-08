@@ -162,3 +162,17 @@ describe('poll model', () => {
     expect(validatePollDraft('وين؟', ['هنا', 'هناك', ''])).toBeNull();
   });
 });
+
+describe('Arabic plurals', () => {
+  it('poll counts use the Arabic CLDR plural forms', async () => {
+    const i18next = (await import('i18next')).default.createInstance();
+    await i18next.init({ lng: 'ar', resources: { ar: { translation: ar }, en: { translation: en } }, fallbackLng: 'en' });
+    expect(i18next.t('poll.voters', { count: 0 })).toBe('لم يصوّت أحد بعد');
+    expect(i18next.t('poll.voters', { count: 2 })).toBe('صوّت شخصان');
+    expect(i18next.t('poll.voters', { count: 5 })).toBe('صوّت 5 أشخاص');
+    expect(i18next.t('poll.voters', { count: 25 })).toBe('صوّت 25 شخصًا');
+    expect(i18next.t('poll.votes', { count: 1 })).toBe('صوت واحد');
+    await i18next.changeLanguage('en');
+    expect(i18next.t('poll.voters', { count: 5 })).toBe('5 people voted');
+  });
+});

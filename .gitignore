@@ -5,6 +5,7 @@ node_modules/
 
 # Builds
 dist/
+dist-gallery/
 build/
 .next/
 out/

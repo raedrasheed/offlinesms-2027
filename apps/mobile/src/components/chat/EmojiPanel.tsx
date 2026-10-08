@@ -29,7 +29,7 @@ function recentStore(uid: string) {
   return s;
 }
 
-export function EmojiPanel({ uid, onPick }: { uid: string; onPick: (emoji: string) => void }) {
+export function EmojiPanel({ uid, onPick, initialQuery = '' }: { uid: string; onPick: (emoji: string) => void; initialQuery?: string }) {
   const { t } = useTranslation();
   const { colors } = useTheme();
   const s = useMemo(() => styles(colors), [colors]);
@@ -38,7 +38,7 @@ export function EmojiPanel({ uid, onPick }: { uid: string; onPick: (emoji: strin
   const listRef = useRef<FlatList<PickerRow>>(null);
 
   const [recents, setRecents] = useState<string[]>([]);
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(initialQuery);
   useEffect(() => { void recentStore(uid).load().then(setRecents); }, [uid]);
 
   const groups = useMemo(() => emojiGroups(MAX_VERSION), []);

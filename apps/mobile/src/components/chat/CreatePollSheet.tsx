@@ -17,18 +17,19 @@ import {
 
 export interface PollDraft { question: string; options: string[]; multiple: boolean }
 
-export function CreatePollSheet({ visible, onClose, onCreate }: {
+export function CreatePollSheet({ visible, onClose, onCreate, initial }: {
   visible: boolean;
   onClose: () => void;
   onCreate: (poll: PollDraft) => void;
+  initial?: PollDraft;
 }) {
   const { t } = useTranslation();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const s = useMemo(() => styles(colors), [colors]);
-  const [question, setQuestion] = useState('');
-  const [options, setOptions] = useState<string[]>(['', '']);
-  const [multiple, setMultiple] = useState(false);
+  const [question, setQuestion] = useState(initial?.question ?? '');
+  const [options, setOptions] = useState<string[]>(initial ? [...initial.options, ''] : ['', '']);
+  const [multiple, setMultiple] = useState(initial?.multiple ?? false);
   const [touched, setTouched] = useState(false);
 
   const error = validatePollDraft(question, options);

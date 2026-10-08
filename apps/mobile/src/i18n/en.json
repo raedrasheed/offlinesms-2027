@@ -608,6 +608,8 @@
       "tooMany": "Use at most 12 options.",
       "duplicate": "Each option must be different.",
       "tooLong": "The question or an option is too long."
-    }
+    },
+    "votes_zero": "No votes",
+    "voters_zero": "No votes yet"
   }
 }

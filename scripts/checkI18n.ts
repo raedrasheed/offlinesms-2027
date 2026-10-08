@@ -67,7 +67,12 @@ function main() {
 
     const localeKeys = new Set(flattenKeys(localeObj));
     const missing  = [...enKeys].filter(k => !localeKeys.has(k));
-    const orphaned = [...localeKeys].filter(k => !enKeys.has(k));
+    // CLDR plural forms differ per language (Arabic: zero/one/two/few/many/
+    // other; English: one/other). A locale may add plural variants of a key EN
+    // pluralizes (EN has `<base>_other`); anything else extra is orphaned.
+    const PLURAL = /_(zero|one|two|few|many|other)$/;
+    const orphaned = [...localeKeys].filter(k =>
+      !enKeys.has(k) && !(PLURAL.test(k) && enKeys.has(k.replace(PLURAL, '_other'))));
 
     if (missing.length === 0 && orphaned.length === 0) {
       console.log(`✓ ${locale}: ${localeKeys.size} keys — parity OK`);
