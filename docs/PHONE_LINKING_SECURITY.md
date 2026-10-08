@@ -10,14 +10,17 @@ current production suspension is preserved until an explicitly authorized rollou
 | First review head (PR #28) | `8011ab4531774eead4ab1ab3db5e4bc3b009eba6` |
 | Second review head (findings N1–N7) | `430dcfcbdc123ead8042d699635e93737c622754` |
 | Third review head (findings M1–M3) | `0e90b7a14ddfdc18b01e9999878f2b40d3b3a1a6` |
+| Fourth review head (findings Q1–Q2) | `538e67202c2123d2682e0b3dc9be7f21a3735701` |
 | This revision | see the PR description (head of the branch) |
 
-**Current review status:** the independent third review of `0e90b7a` (CI green
-there, including the full relay Android build) accepted N2, N3, N4, N6 and N7 for
-their reviewed scenarios, found N1 substantially corrected but for M3, and N5
-partial because of M1/M2. It requested a focused round on M1–M3. This revision
-addresses M1–M3 (§4c); it has **not** been re-reviewed. Production verification
-SMS stays disabled pending review and the deployment/device gates (§11).
+**Current review status:** the independent fourth review of `538e672` (CI green
+there) closed M3 and accepted the original M1/M2 sequences, with two focused
+defects left in those changes: Q1 (late-report reconciliation trusted an
+unverified attempt identity) and Q2 (a check-then-REPLACE could erase a
+committed no-resend mark). This revision addresses Q1–Q2 (§4d); it has **not**
+been re-reviewed. N2, N3, N4, N6, N7 and M3 stay accepted as reviewed.
+Production verification SMS stays disabled pending review and the
+deployment/device gates (§11).
 
 Terms used below: **implemented** = code on this branch; **tested locally** =
 executed in this environment at the layer stated; **deployed** / **verified in
@@ -63,7 +66,7 @@ limits apply to the link purpose. Source identity and installation ids are
 | `claimRelayJobs` | device token → per-job tx re-reads job **and** device: status, pause/revoke, `countryRoutingEnabled` + countries, **capacity reservation (minute/hour/day)**; verification jobs: capability `send-auth-v1` required, legacy `otp` cancelled, expiry + sender + policyVersion bound |
 | `authorizeRelaySend` (new; **verification jobs only** — business SMS never call it) | lease owner, job `claimed` (single use), device active, **device country routing re-checked** (`countryRoutingEnabled` + allow-list), verification: policy/sender/version/expiry + challenge still current & pending → job `sending`; returns a budget ≤ 15 s and ≤ the code's remaining lifetime, computed inside the transaction |
 | Android `RelayService` → `SendPipeline` | per job: local pause → local de-dup by (jobId, **server attempt**) → claim deadline measured from the claim **request** start (monotonic) → authorization (fail closed) → deadline = min(claim, authorization budget from its request start) − 1.5 s → durable `sending` in Room → **final pause + deadline check after the write** → `SmsManager`; refusals of a possibly-handed-off job write the sticky `noResend` mark and the attempt-bound report in one awaited Room transaction (M1) |
-| `reportRelayDelivery` | bound to ONE attempt (M2): applied only to the job's current attempt from the device holding it; stale/duplicate/unbound reports are acknowledged and never applied to a newer attempt; a stale report that the message may already have gone out stops further attempts (`noRetry`) or settles a job waiting between attempts; verification never requeues; metrics only (not capacity) |
+| `reportRelayDelivery` | bound to ONE attempt (M2): applied only to the job's current attempt from the device holding it; stale/duplicate/unbound reports are acknowledged and never applied to a newer attempt; only a report from the server-recorded holder of an earlier attempt (`attemptOwners`, Q1) that the message may already have gone out stops further attempts (`noRetry`) or settles a job waiting between attempts — future/never-issued attempts and unrecorded holders have no effect; verification never requeues; metrics only (not capacity) |
 | `relayReaper` | lapsed lease: verification or `noRetry` ⇒ fail (no resend); bounded run of the stale-code sweep |
 | Stale-code sweep (`verification/staleJobSweep.ts`; on every `smsConfig/otp` change + each reaper run) | paginated by document id over every queued verification kind; per job a transaction re-reads the job **and the current policy** and cancels only if still `queued` and invalid now (legacy, expired, stopped, other sender, other generation) |
 | `relayHeartbeat` | liveness + **telemetry only** (clamped); never touches `counters` or `usage` |
@@ -139,6 +142,25 @@ closed and reopened to simulate a process restart.
   stale/unbound, never applied).
 * The flush drops a report only on a definitive refusal (not-found / wrong
   business or device / invalid); everything else is retried.
+
+
+## 4d. Fourth-review findings Q1–Q2 (review of `538e672`)
+
+Evidence layers: **U** pure helper; **H** emulator handler; **R** Robolectric
+with the real Room database and the production `ReportStore`/admission code;
+**SQL model** was the reviewer's own probe (not repeated here); no **device**
+evidence. "Neg" = the test was run against the `538e672` code and failed there.
+
+| # | Finding | Fix | Regression (layer) · negative control |
+|---|---|---|---|
+| **Q1** | `stale` was not proof of a legitimate earlier attempt: a future/never-issued attempt, or an earlier attempt from a device that never held it, could settle a queued job or set `noRetry` | Claim records an immutable, server-issued `attemptOwners[n] = deviceId` for every lease. `reportBinding` now distinguishes: **current** (current attempt, proven holder); **stale** (earlier attempt, reporter is its RECORDED holder) — the only category with late-reconciliation authority; **unverified** (attempt > current, incl. never-leased jobs, or an earlier attempt whose holder is not on record) — acknowledged, no effect; **unbound** (no attempt identity on a re-leased job) — acknowledged, no effect; **foreign** (an attempt recorded as held by another device) — refused. Legacy jobs leased before `attemptOwners` existed only know their current attempt's holder, so their earlier-attempt reports are `unverified`: legacy late-report reconciliation is deliberately given up | **H**: never-leased job + attempt 99 sent/delivered/ambiguous → nothing changes and it is still claimable; another device's in-flight job + future attempt from any device → nothing changes; a real earlier attempt reported by a device that never held it, in flight and between attempts → refused, nothing changes; legacy history → no effect; cross-business → refused; a **real batch + recipient** with forged evidence → recipient, batch finalization and all device counters unchanged, then the genuine holder settles it. Positive controls: the recorded holder's late ambiguity settles a job between attempts; its late success while a newer attempt is in flight sets `noRetry`. **U**: binding table. **Neg**: 5 of 5 forged/legacy cases failed on `538e672` (the attempt-99 report was **applied** to a never-leased job); the 2 controls pass on both |
+| **Q2** | `get` → `dedup` → `put` (REPLACE) were separate steps; a no-resend mark committed in between was overwritten with `noResend=false` | Admission is **one Room transaction** (`RoomLocalJobs.admit`): fresh read → `dedup` → write. The REPLACE upsert is **removed**: a new job is an insert, a newer attempt takes the row over with `UPDATE … WHERE attempt < :new AND noResend = 0`, which never writes `noResend` (0 rows ⇒ refused as ambiguous). The durable `sending` write is conditional too (`… AND noResend = 0`) and is the **local decision point**: a mark committed after admission but before it refuses the hand-off; a mark committed after it is kept (the hand-off already happened) and refuses every later attempt | **R**: a real `ReportStore.record` committed exactly between admission's read and its write (seam inside the production path) → mark kept, attempt refused, never reaches the fake transport; database closed/reopened and a further attempt offered → still refused. Inverse orderings: report after admission, before the `sending` write → hand-off refused; report after the `sending` write → guard stays true and refuses every later attempt after reopen. Positive control: no late report → the retryable attempt is sent once. Pre-hand-off pause and definitive carrier failure controls unchanged. **Neg**: on `538e672` the same seam erased the committed mark ("noResend erased") |
+
+Note on the Q2 seam: with admission in one transaction, a writer on another
+coroutine waits for the transaction's lock and commits after it (the inverse
+orderings). The only way any write can land between the read and the write is
+on the transaction's own coroutine, which the seam does; the conditional
+takeover is what refuses it.
 
 ## 5. Original audit F01–F16
 
@@ -270,13 +292,13 @@ commands also in the PR description).
 
 | Layer | Command | Result |
 |---|---|---|
-| Helper/unit | `npm test` | 695 / 695 (64 files) |
+| Helper/unit | `npm test` | 697 / 697 (64 files) |
 | Firestore rules (emulator) | `npm run test:rules` (with the Firestore emulator) | 143 / 143 (14 files) |
-| Handler + Firestore/Auth emulators | `npm run test:integration` | 165 / 165 (7 files) |
+| Handler + Firestore/Auth emulators | `npm run test:integration` | 172 / 172 (7 files) |
 | Wire-level HTTP + real triggers (Functions emulator) | `npm run test:callable` | 7 / 7 |
 | Relay send pipeline (plain JVM, no Android SDK) | `gradle -p apps/mobile-relay/sendgate-jvm-test test` | 16 / 16 |
 | Relay **Android app**: compile + package | `gradle -p apps/mobile-relay :app:assembleDebug` (placeholder `google-services.json` via `scripts/ci/relay-google-services.sh`) | BUILD SUCCESSFUL (debug APK) |
-| Relay app unit + Robolectric integration | `gradle -p apps/mobile-relay :app:testDebugUnitTest` | 34 / 34 (`SendPipelineTest` 16, `RelayIntegrationTest` 13, `SendResultAggregatorTest` 5) |
+| Relay app unit + Robolectric integration | `gradle -p apps/mobile-relay :app:testDebugUnitTest` | 38 / 38 (`SendPipelineTest` 16, `RelayIntegrationTest` 17, `SendResultAggregatorTest` 5) |
 | Typecheck / lint / i18n / build | `npm run typecheck|lint|build --workspaces`, mobile typecheck, `npm run i18n:check` | clean |
 
 `RelayIntegrationTest` exercises the production send wiring (`relayPipeline`:
@@ -315,7 +337,7 @@ reported as the retryable `link-interrupted` (resume completes a committed link,
 or finds nothing and the code stays usable). Regression injects that exact error
 and **fails on the `526c96a` handler**.
 
-Negative controls: M1–M3 as listed in §4c; N1–N7 as listed in §4b; R6 tests fail on the PR #28 file and
+Negative controls: Q1–Q2 as listed in §4d; M1–M3 as listed in §4c; N1–N7 as listed in §4b; R6 tests fail on the PR #28 file and
 pass now; the rules tests fail on the base rules for the profile-create gap; the
 original abuse was reproduced on the base commit (25/25 anonymous SMS queued; 14
 SMS from 20 parallel requests to one number; fixed credential minted an account).
@@ -365,7 +387,9 @@ not the identity of a person; a client installation id is resettable.
   final authorization re-check every job). A persisted continuation is a
   follow-up.
 * Relay report compatibility: unbound pre-upgrade reports for a re-leased job
-  are acknowledged but not applied (§4c); a business job whose earlier attempt
+  are acknowledged but not applied (§4c); late reports for an EARLIER attempt of
+  a job leased before `attemptOwners` existed are acknowledged with no effect
+  (§4d) — legacy late reconciliation is given up rather than trusted; a business job whose earlier attempt
   went out unreported can still be duplicated by a different device (§6.2).
 * Release gates before enabling verification SMS: independent re-review of this
   revision; relay 0.2.0+ on every relay phone and a supervised device run
