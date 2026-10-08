@@ -27,11 +27,11 @@ export interface AccountCounter {
   n30?: DistinctSet;    // distinct destination keys per 30 days
   vf?: Win;             // wrong codes per day (all challenges)
 }
-export interface DestinationCounter { lastAt?: number; h?: Win; d?: Win }
+export interface DestinationCounter { lastAt?: number; h?: Win; d?: Win; vf?: Win }
 export interface WindowCounter { h?: Win; d?: Win }
 
-export type LimitScope = 'account' | 'destination' | 'source' | 'global';
-export type LimitCode = 'cooldown' | 'rate-limited' | 'too-many-numbers' | 'service-busy';
+export type LimitScope = 'account' | 'session' | 'installation' | 'destination' | 'source' | 'global';
+export type LimitCode = 'cooldown' | 'rate-limited' | 'too-many-numbers' | 'service-busy' | 'session-exhausted';
 export interface LimitRejection { code: LimitCode; scope: LimitScope; retryAfterSec: number }
 
 function asWin(w: unknown): Win | undefined {
@@ -135,7 +135,9 @@ export function applyVerifyFailure(a: AccountCounter, now: number): AccountCount
 }
 
 // ── Destination number ───────────────────────────────────────────────────────
-export function checkDestination(d: DestinationCounter, now: number, L: PhoneLinkLimits): LimitRejection | null {
+export type DestinationLimits = Pick<PhoneLinkLimits, 'destinationCooldownSec' | 'destinationPerHour' | 'destinationPerDay'>;
+
+export function checkDestination(d: DestinationCounter, now: number, L: DestinationLimits): LimitRejection | null {
   const cd = cooldownLeft(d.lastAt, now, L.destinationCooldownSec);
   if (cd > 0) return { code: 'cooldown', scope: 'destination', retryAfterSec: cd };
   if (windowCount(d.h, now, HOUR_MS) >= L.destinationPerHour) return { code: 'rate-limited', scope: 'destination', retryAfterSec: windowRetry(d.h, now, HOUR_MS) };
@@ -149,13 +151,37 @@ export function applyDestination(d: DestinationCounter, now: number): Destinatio
 
 // ── Source bucket & global budget ───────────────────────────────────────────
 export function checkWindows(
-  w: WindowCounter, now: number, perHour: number, perDay: number, scope: 'source' | 'global',
+  w: WindowCounter, now: number, perHour: number, perDay: number, scope: LimitScope,
+  code: LimitCode = 'service-busy',
 ): LimitRejection | null {
-  if (windowCount(w.h, now, HOUR_MS) >= perHour) return { code: 'service-busy', scope, retryAfterSec: windowRetry(w.h, now, HOUR_MS) };
-  if (windowCount(w.d, now, DAY_MS) >= perDay) return { code: 'service-busy', scope, retryAfterSec: windowRetry(w.d, now, DAY_MS) };
+  if (windowCount(w.h, now, HOUR_MS) >= perHour) return { code, scope, retryAfterSec: windowRetry(w.h, now, HOUR_MS) };
+  if (windowCount(w.d, now, DAY_MS) >= perDay) return { code, scope, retryAfterSec: windowRetry(w.d, now, DAY_MS) };
   return null;
 }
 
-export function applyWindows(w: WindowCounter, now: number): WindowCounter {
+/** Distinct destinations per day for a source/installation bucket. */
+export interface DistinctCounter extends WindowCounter { nd?: DistinctSet }
+
+export function checkDistinctPerDay(
+  w: DistinctCounter, key: string, now: number, limit: number, scope: LimitScope,
+): LimitRejection | null {
+  if (distinctAllows(w.nd, key, now, DAY_MS, limit)) return null;
+  return { code: 'too-many-numbers', scope, retryAfterSec: setRetry(w.nd, now, DAY_MS) };
+}
+
+export function applyDistinctPerDay<T extends DistinctCounter>(w: T, key: string, now: number): T {
+  return { ...applyWindows(w, now), nd: addDistinct(w.nd, key, now, DAY_MS) };
+}
+
+/** Per-destination wrong-code cap across challenges/sessions (public sign-in). */
+export function destinationVerifyExhausted(d: DestinationCounter, now: number, limit: number): boolean {
+  return windowCount(d.vf, now, DAY_MS) >= limit;
+}
+
+export function applyDestinationVerifyFailure(d: DestinationCounter, now: number): DestinationCounter {
+  return { ...d, vf: bumpWindow(d.vf, now, DAY_MS) };
+}
+
+export function applyWindows<T extends WindowCounter>(w: T, now: number): T {
   return { ...w, h: bumpWindow(w.h, now, HOUR_MS), d: bumpWindow(w.d, now, DAY_MS) };
 }

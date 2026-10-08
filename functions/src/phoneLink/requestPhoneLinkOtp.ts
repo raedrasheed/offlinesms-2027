@@ -40,6 +40,8 @@ import {
 
 const COUNTER_TTL_MS = 31 * 24 * 60 * 60 * 1000;
 export const GLOBAL_COUNTER_ID = 'global_phoneLink';
+/** Budget shared by every verification purpose (sign-in + link). */
+export const SHARED_COUNTER_ID = 'global_verification';
 
 export function buildLinkMessage(code: string, androidAppHash: string | null): string {
   const base = `OfflineSMS: ${code} is your code to add this number to your account. `
@@ -110,14 +112,15 @@ export async function handleRequestPhoneLinkOtp(request: CallableRequest<unknown
   const destRef = db.collection(C.limits).doc(`dest_${destKey}`);
   const srcRef = db.collection(C.limits).doc(`src_${srcKey}`);
   const globRef = db.collection(C.limits).doc(GLOBAL_COUNTER_ID);
+  const sharedRef = db.collection(C.limits).doc(SHARED_COUNTER_ID);
   const chRef = db.collection(C.challenges).doc(uid);
   const claimRef = db.collection(C.claims).doc(destKey);
   const opRef = db.collection(C.ops).doc(uid);
   const jobRef = db.collection('relayJobs').doc(jobId);
 
   const outcome = await db.runTransaction<TxOutcome>(async tx => {
-    const [acctS, destS, srcS, globS, chS, claimS, opS] =
-      await tx.getAll(acctRef, destRef, srcRef, globRef, chRef, claimRef, opRef);
+    const [acctS, destS, srcS, globS, sharedS, chS, claimS, opS] =
+      await tx.getAll(acctRef, destRef, srcRef, globRef, sharedRef, chRef, claimRef, opRef);
     const prevJobId = chS.exists ? (chS.get('jobId') as string | undefined) : undefined;
     const prevJobS = prevJobId ? await tx.get(db.collection('relayJobs').doc(prevJobId)) : null;
 
@@ -140,15 +143,18 @@ export async function handleRequestPhoneLinkOtp(request: CallableRequest<unknown
     const dest = (destS.data() ?? {}) as DestinationCounter;
     const src = (srcS.data() ?? {}) as WindowCounter;
     const glob = (globS.data() ?? {}) as WindowCounter;
+    const shared = (sharedS.data() ?? {}) as WindowCounter;
     const rej = checkDestination(dest, now, L)
       ?? checkWindows(src, now, L.sourcePerHour, L.sourcePerDay, 'source')
-      ?? checkWindows(glob, now, L.globalPerHour, L.globalPerDay, 'global');
+      ?? checkWindows(glob, now, L.globalPerHour, L.globalPerDay, 'global')
+      ?? checkWindows(shared, now, cfg.sharedPerHour, cfg.sharedPerDay, 'global');
     if (rej) return { kind: 'limit', rejection: rej };
 
     tx.set(acctRef, { ...applyAccount(acct, destKey, now), ...meta });
     tx.set(destRef, { ...applyDestination(dest, now), ...meta });
     tx.set(srcRef, { ...applyWindows(src, now), ...meta });
     tx.set(globRef, { ...applyWindows(glob, now), ...meta });
+    tx.set(sharedRef, { ...applyWindows(shared, now), ...meta });
 
     // A new code supersedes the previous one: its verifier is overwritten
     // below, and its SMS is cancelled if no device has taken it yet.
@@ -176,6 +182,8 @@ export async function handleRequestPhoneLinkOtp(request: CallableRequest<unknown
     // Deterministic id + create(): at most one SMS per challenge, ever.
     tx.create(jobRef, {
       jobId, businessId: cfg.businessId, kind: PHONE_LINK_JOB_KIND,
+      purpose: 'link', policyVersion: cfg.policyVersion,
+      challengePath: chRef.path,
       batchId: null, recipientUid: null, challengeId,
       phoneE164: num.e164, recipientCountryCode: num.countryCode,
       messageBody: buildLinkMessage(code, cfg.androidAppHash),

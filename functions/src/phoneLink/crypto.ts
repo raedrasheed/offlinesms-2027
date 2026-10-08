@@ -55,9 +55,20 @@ export function newChallengeId(): string {
 
 export interface CodeBinding {
   challengeId: string;
+  /** Account uid (link) or pre-auth session key (public sign-in). */
   uid: string;
-  purpose: typeof PHONE_LINK_PURPOSE;
+  purpose: typeof PHONE_LINK_PURPOSE | 'signin';
   phoneKey: string;
+}
+
+/** 256-bit opaque bearer token (base64url) — e.g. a pre-auth session token. */
+export function newOpaqueToken(): string {
+  return randomBytes(32).toString('base64url');
+}
+
+/** Keyed id under which a bearer token is stored (the token itself never is). */
+export function tokenKey(pepper: string, label: string, token: string): string {
+  return hmacHex(pepper, `token:${label}:v1`, token);
 }
 
 /** Verifier stored instead of the code, bound to its full context. */

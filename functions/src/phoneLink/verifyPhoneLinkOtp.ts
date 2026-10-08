@@ -28,7 +28,7 @@ import { writeAuditLog } from '../lib/auditLog';
 import { userPrivateProfileRef } from '../lib/userPrivate';
 import { requireConfig, requireEligibleCaller, PHONE_LINK_COLLECTIONS as C } from './gates';
 import { REGION, PHONE_HASH_PEPPER, requirePepper, staleClaimOwner, authErrorCode } from './shared';
-import { PHONE_LINK_PURPOSE, verifyCode, auditTag, maskPhone } from './crypto';
+import { PHONE_LINK_PURPOSE, verifyCode, auditTag, maskPhone, phoneHmac } from './crypto';
 import { verifyFailuresExhausted, applyVerifyFailure, type AccountCounter } from './limits';
 
 /**
@@ -162,7 +162,7 @@ export async function handleVerifyPhoneLinkOtp(request: CallableRequest<unknown>
     if (res.code === 'code-expired') throw new HttpsError('deadline-exceeded', 'code-expired');
     throw new HttpsError('not-found', res.code);
   }
-  return completeLink(uid);
+  return completeLink(uid, pepper);
 }
 
 /**
@@ -170,7 +170,45 @@ export async function handleVerifyPhoneLinkOtp(request: CallableRequest<unknown>
  * from any stage; never sends an SMS and never touches anything but the phone
  * fields, the claim and the op.
  */
-export async function completeLink(uid: string): Promise<{ linked: true; maskedPhone: string }> {
+const NONTERMINAL = new Set(['claimed', 'auth-updated']);
+
+/**
+ * Recover the number for a non-terminal op whose `phoneE164` is missing (an op
+ * corrupted by the pre-fix late-writer race). Only values whose keyed hash
+ * equals the op's `phoneKey` are accepted: the live challenge (same id), the
+ * Auth user's number, or the private profile. Never asks for a new code.
+ */
+async function reconstructNumber(uid: string, op: FirebaseFirestore.DocumentSnapshot, pepper: string): Promise<string | null> {
+  const db = getFirestore();
+  const key = op.get('phoneKey') as string;
+  const candidates: Array<string | undefined> = [];
+  const ch = await db.collection(C.challenges).doc(uid).get();
+  if (ch.exists && ch.get('challengeId') === op.get('challengeId')) candidates.push(ch.get('phoneE164'));
+  try { candidates.push((await getAuth().getUser(uid)).phoneNumber); } catch { /* ignore */ }
+  candidates.push((await userPrivateProfileRef(db, uid).get()).get('phoneNumber'));
+  return candidates.find(c => typeof c === 'string' && phoneHmac(pepper, c) === key) ?? null;
+}
+
+/** Monotonic op transition: only from an allowed stage, for the same challenge. */
+async function advanceOp(uid: string, challengeId: string, from: string[], patch: Record<string, unknown>): Promise<boolean> {
+  const db = getFirestore();
+  const opRef = db.collection(C.ops).doc(uid);
+  return db.runTransaction(async tx => {
+    const s = await tx.get(opRef);
+    if (!s.exists || s.get('challengeId') !== challengeId || !from.includes(s.get('stage'))) return false;
+    tx.update(opRef, { ...patch, updatedAt: FieldValue.serverTimestamp() });
+    return true;
+  });
+}
+
+/**
+ * Drive phoneLinkOps/{uid} to `done`. Safe to call any number of times, from any
+ * stage, by concurrent workers: every stage write is conditional on the current
+ * stage and challenge (a late worker can never downgrade `done`/`failed`), and
+ * it never sends an SMS or touches anything but the phone fields, the claim and
+ * the op.
+ */
+export async function completeLink(uid: string, pepper?: string): Promise<{ linked: true; maskedPhone: string }> {
   const db = getFirestore();
   const opRef = db.collection(C.ops).doc(uid);
   const op = await opRef.get();
@@ -182,9 +220,18 @@ export async function completeLink(uid: string): Promise<{ linked: true; maskedP
   }
   if (stage === 'failed') throw new HttpsError('already-exists', 'phone-unavailable');
 
-  const e164 = op.get('phoneE164') as string;
   const phoneKey = op.get('phoneKey') as string;
   const challengeId = op.get('challengeId') as string;
+  let e164 = op.get('phoneE164') as string | undefined;
+  if (!e164) {
+    const rebuilt = pepper ? await reconstructNumber(uid, op, pepper) : null;
+    if (!rebuilt) {
+      console.error('[phoneLink] op missing number and not reconstructable', { uid });
+      throw new HttpsError('unavailable', 'link-interrupted');
+    }
+    e164 = rebuilt;
+    await advanceOp(uid, challengeId, [...NONTERMINAL], { phoneE164: e164 });
+  }
   const claimRef = db.collection(C.claims).doc(phoneKey);
 
   // Step 1 → auth-updated. Auth enforces global phone uniqueness itself, which
@@ -202,12 +249,13 @@ export async function completeLink(uid: string): Promise<{ linked: true; maskedP
         throw new HttpsError('already-exists', 'phone-unavailable');
       }
     } else {
-      await opRef.update({ lastError: code || 'auth-update-failed', updatedAt: FieldValue.serverTimestamp() }).catch(() => {});
+      await advanceOp(uid, challengeId, [...NONTERMINAL], { lastError: code || 'auth-update-failed' }).catch(() => false);
       console.warn('[phoneLink] auth update interrupted', { uid, code });
       throw new HttpsError('unavailable', 'link-interrupted');
     }
   }
-  await opRef.update({ stage: 'auth-updated', updatedAt: FieldValue.serverTimestamp() }).catch(() => {});
+  // Only claimed → auth-updated; never overwrite done/failed (R6).
+  await advanceOp(uid, challengeId, ['claimed'], { stage: 'auth-updated' }).catch(() => false);
 
   // Step 2 → done, atomically.
   try {
@@ -216,6 +264,7 @@ export async function completeLink(uid: string): Promise<{ linked: true; maskedP
       const [opS, claimS] = await tx.getAll(opRef, claimRef);
       if (!opS.exists || opS.get('challengeId') !== challengeId) throw new Error('op-changed');
       if (opS.get('stage') === 'done') return;
+      if (!NONTERMINAL.has(opS.get('stage'))) throw new Error('op-terminal');
       if (!claimS.exists || claimS.get('uid') !== uid) throw new Error('claim-lost');
       tx.set(userPrivateProfileRef(db, uid), {
         phoneNumber: e164, phoneVerifiedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
@@ -244,10 +293,10 @@ async function releaseFailedLink(uid: string, phoneKey: string, challengeId: str
   const claimRef = db.collection(C.claims).doc(phoneKey);
   await db.runTransaction(async tx => {
     const [opS, claimS] = await tx.getAll(opRef, claimRef);
+    // Never undo a completed link (a late worker could reach here).
+    if (!opS.exists || opS.get('challengeId') !== challengeId || !NONTERMINAL.has(opS.get('stage'))) return;
     if (claimS.exists && claimS.get('uid') === uid && claimS.get('challengeId') === challengeId) tx.delete(claimRef);
-    if (opS.exists && opS.get('challengeId') === challengeId) {
-      tx.update(opRef, { stage: 'failed', reason: 'unavailable', phoneE164: FieldValue.delete(), updatedAt: FieldValue.serverTimestamp() });
-    }
+    tx.update(opRef, { stage: 'failed', reason: 'unavailable', phoneE164: FieldValue.delete(), updatedAt: FieldValue.serverTimestamp() });
   });
 }
 
@@ -257,7 +306,9 @@ export async function handleResumePhoneLink(request: CallableRequest<unknown>) {
   const cfg = await requireConfig(db);
   if (!cfg.enabled) throw new HttpsError('failed-precondition', 'phone-link-disabled');
   const caller = await requireEligibleCaller(request, db, cfg.limits.reauthMaxAgeSec);
-  return completeLink(caller.uid);
+  let pepper: string | undefined;
+  try { pepper = requirePepper(); } catch { pepper = undefined; }
+  return completeLink(caller.uid, pepper);
 }
 
 export const verifyPhoneLinkOtp = onCall(
@@ -266,6 +317,6 @@ export const verifyPhoneLinkOtp = onCall(
 );
 
 export const resumePhoneLink = onCall(
-  { region: REGION, ...appCheckOptions() },
+  { region: REGION, secrets: [PHONE_HASH_PEPPER], ...appCheckOptions() },
   handleResumePhoneLink,
 );

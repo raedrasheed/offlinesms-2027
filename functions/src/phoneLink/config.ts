@@ -1,24 +1,20 @@
-// Phone-linking configuration: feature gate, emergency stop, abuse thresholds.
+// Phone-linking configuration — the `link` purpose of the shared verification
+// policy (smsConfig/otp; see functions/src/verification/policy.ts).
 //
-// Two independent switches must BOTH be on before a single verification SMS can
-// be queued, and either one can stop it:
+// Sending link codes requires ALL of: deploy-time env PHONE_LINK_ENABLED=true,
+// policy `enabled: true`, `emergencyStop: false` (explicit), a sender
+// `businessId`, and `link.enabled: true`. Any one of them stops new codes, and
+// the relay refuses queued/claimed link codes whose businessId/policyVersion no
+// longer match. Missing doc ⇒ off; unreadable doc ⇒ callers fail closed.
 //
-//   1. Deploy-time env var  PHONE_LINK_ENABLED=true   (default: off)
-//      Lives in functions/.env.<project> — changing it needs a deploy, so it
-//      is the "rollout explicitly authorized" switch.
-//   2. Runtime Firestore doc smsConfig/phoneLink      (admin-only via rules)
-//        { enabled: true, emergencyStop: false, businessId: '<relay org>',
-//          androidAppHash?: '<11 chars>', limits?: { ...overrides } }
-//      Flipping `emergencyStop: true` (or `enabled: false`) takes effect on the
-//      next request with no deploy. Missing doc ⇒ disabled. Unreadable doc ⇒
-//      the caller gets `service-paused` (fail closed).
-//
-// Limits are clamped to hard bounds so a typo in the runtime doc cannot remove
-// a control (a limit can be tightened to 0 but never raised above its ceiling).
+// Limits (`link.limits`) are clamped to hard bounds so a typo in the runtime doc
+// cannot remove a control (a limit can be tightened to 0 but never raised above
+// its ceiling).
 
 import type { Firestore } from 'firebase-admin/firestore';
-
-export const PHONE_LINK_CONFIG_DOC = { collection: 'smsConfig', doc: 'phoneLink' } as const;
+import {
+  loadPolicyDoc, resolveShared, purposeSection, purposeEnvEnabled, clampInt, resolveBounded,
+} from '../verification/policy';
 
 export interface PhoneLinkLimits {
   /** Lifetime of a verification code. */
@@ -90,16 +86,21 @@ export const LIMIT_BOUNDS: Record<keyof PhoneLinkLimits, [number, number]> = {
 };
 
 export interface PhoneLinkConfig {
-  /** Env gate AND doc gate both on. */
+  /** Env gate AND policy master AND `link.enabled`. */
   enabled: boolean;
   /** Runtime kill switch (or doc missing/unreadable). */
   emergencyStop: boolean;
   /** Relay organization that sends the codes. */
   businessId: string | null;
   androidAppHash: string | null;
+  /** Policy generation recorded on every job (see verification/policy.ts). */
+  policyVersion: number;
   limits: PhoneLinkLimits;
   /** Which X-Forwarded-For entry (counted from the right) is the client. */
   sourceHopsFromRight: number;
+  /** Budget shared with public phone sign-in. */
+  sharedPerHour: number;
+  sharedPerDay: number;
   /** Consent text version the client must echo back. */
   consentVersion: string;
 }
@@ -108,47 +109,36 @@ export const CONSENT_VERSION = 'phone-link-v1';
 
 /** The env gate. Anything but the exact string "true" is off. */
 export function phoneLinkEnvEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.PHONE_LINK_ENABLED === 'true';
-}
-
-function clampInt(v: unknown, [lo, hi]: [number, number], fallback: number): number {
-  if (typeof v !== 'number' || !Number.isFinite(v)) return fallback;
-  return Math.min(hi, Math.max(lo, Math.floor(v)));
+  return purposeEnvEnabled('link', env);
 }
 
 /** Pure: merge runtime overrides onto defaults, clamping each into bounds. */
 export function resolveLimits(overrides: unknown): PhoneLinkLimits {
-  const o = (overrides && typeof overrides === 'object' ? overrides : {}) as Record<string, unknown>;
-  const out = { ...DEFAULT_LIMITS };
-  for (const k of Object.keys(DEFAULT_LIMITS) as Array<keyof PhoneLinkLimits>) {
-    out[k] = clampInt(o[k], LIMIT_BOUNDS[k], DEFAULT_LIMITS[k]);
-  }
-  return out;
+  return resolveBounded(DEFAULT_LIMITS, LIMIT_BOUNDS, overrides);
 }
 
-/** Pure: build the effective config from the env gate + the raw doc (or null). */
+/** Pure: build the effective config from the env gate + the raw policy doc (or null). */
 export function resolvePhoneLinkConfig(
   envEnabled: boolean,
   doc: Record<string, unknown> | null,
 ): PhoneLinkConfig {
-  const d = doc ?? {};
-  const businessId = typeof d.businessId === 'string' && d.businessId.trim() ? d.businessId.trim() : null;
-  const hash = typeof d.androidAppHash === 'string' && /^[A-Za-z0-9+/]{11}$/.test(d.androidAppHash.trim())
-    ? d.androidAppHash.trim() : null;
-  const hops = clampInt(d.sourceHopsFromRight, [1, 3], 1);
+  const shared = resolveShared(doc);
+  const link = purposeSection(doc, 'link');
   return {
-    enabled: envEnabled && doc !== null && d.enabled === true,
-    // Missing doc, or anything other than an explicit `false`, is a stop.
-    emergencyStop: doc === null || d.emergencyStop !== false,
-    businessId,
-    androidAppHash: hash,
-    limits: resolveLimits(d.limits),
-    sourceHopsFromRight: hops,
+    enabled: envEnabled && shared.masterEnabled && link.enabled === true,
+    emergencyStop: shared.emergencyStop,
+    businessId: shared.businessId,
+    androidAppHash: shared.androidAppHash,
+    policyVersion: shared.policyVersion,
+    limits: resolveLimits(link.limits),
+    sourceHopsFromRight: shared.sourceHopsFromRight,
+    sharedPerHour: shared.sharedPerHour,
+    sharedPerDay: shared.sharedPerDay,
     consentVersion: CONSENT_VERSION,
   };
 }
 
-/** True when verification codes may be queued AND handed to a device. */
+/** True when link codes may be queued AND handed to a device. */
 export function phoneLinkSendingAllowed(cfg: PhoneLinkConfig): boolean {
   return cfg.enabled && !cfg.emergencyStop && cfg.businessId !== null;
 }
@@ -158,6 +148,7 @@ export function phoneLinkSendingAllowed(cfg: PhoneLinkConfig): boolean {
  * fail closed; a missing doc is not an error (it simply means "off").
  */
 export async function loadPhoneLinkConfig(db: Firestore): Promise<PhoneLinkConfig> {
-  const snap = await db.collection(PHONE_LINK_CONFIG_DOC.collection).doc(PHONE_LINK_CONFIG_DOC.doc).get();
-  return resolvePhoneLinkConfig(phoneLinkEnvEnabled(), snap.exists ? (snap.data() ?? {}) : null);
+  return resolvePhoneLinkConfig(phoneLinkEnvEnabled(), await loadPolicyDoc(db));
 }
+
+export { clampInt };
