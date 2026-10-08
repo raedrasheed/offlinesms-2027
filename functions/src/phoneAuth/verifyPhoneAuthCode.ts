@@ -44,6 +44,8 @@ export const phoneAuthDeps = {
   getUser: (uid: string) => getAuth().getUser(uid),
   mintToken: (uid: string) => getAuth().createCustomToken(uid),
   beforeBootstrap: async (_challengeId: string): Promise<void> => { /* no-op */ },
+  /** Test seam: runs at the final mint gate, before its fresh policy read. */
+  beforeMintGate: async (_challengeId: string): Promise<void> => { /* no-op */ },
 };
 
 /** Constant-time check of a store-review code (salted SHA-256). */
@@ -203,21 +205,32 @@ export function isDemoReviewAccount(user: { customClaims?: Record<string, unknow
 
 /**
  * The ONE gate in front of every token mint (first completion, resume, or a
- * lost-response replay of an accepted op). Re-checks, at mint time:
- *   • the completion window from acceptance (explicit server deadline)
- *   • review ops: the CURRENT review access is enabled, unexpired, the same
- *     generation, the same demo uid, and that uid is a designated demo account
+ * lost-response replay of an accepted op). It decides from CURRENT state, never
+ * from the configuration the request loaded when it started (M3):
+ *   • sign-in purpose: re-read now (a sign-in suspension stops minting; the SMS
+ *     emergency stop does not — it stops sending, by design)
+ *   • the completion window from acceptance, at the current time
+ *   • review ops: the review access re-read now is enabled, not expired at the
+ *     current time, the same generation and the same demo uid, and that uid is
+ *     a designated demo account
  *   • Auth: user exists and is not disabled
  *   • profile: not suspended (setUserStatus only writes the profile)
+ * Decision point: these reads happen immediately before createCustomToken; a
+ * change committed after them and before the token is created is not seen (an
+ * unavoidable race of a few milliseconds). Tokens already issued are not
+ * revoked by this gate.
  */
-async function assertMintAllowed(op: FirebaseFirestore.DocumentSnapshot, cfg: PhoneAuthConfig): Promise<UserRecord> {
-  if (!withinCompletionWindow(op.get('acceptedAtMs'), Date.now(), cfg.limits.tokenRetryWindowSec)) {
+async function assertMintAllowed(op: FirebaseFirestore.DocumentSnapshot): Promise<UserRecord> {
+  await phoneAuthDeps.beforeMintGate(op.id);
+  const cur = await requireSigninConfig(getFirestore(), 'verify'); // fresh: throws if sign-in is suspended
+  const now = Date.now();
+  if (!withinCompletionWindow(op.get('acceptedAtMs'), now, cur.limits.tokenRetryWindowSec)) {
     throw new HttpsError('not-found', 'challenge-not-found');
   }
   const uid = op.get('uid') as string;
   if (op.get('review') === true) {
-    const r = cfg.review;
-    if (!r || reviewGeneration(r) !== op.get('reviewGen') || r.uid !== uid) {
+    const r = cur.review;
+    if (!r || !(r.expiresAtMs > now) || reviewGeneration(r) !== op.get('reviewGen') || r.uid !== uid) {
       throw new HttpsError('not-found', 'challenge-not-found');
     }
   }
@@ -243,7 +256,7 @@ export async function completeSignin(challengeId: string, cfg: PhoneAuthConfig):
 
   try {
     if (op.get('stage') === 'review-ready') {
-      await assertMintAllowed(op, cfg); // demo eligibility before marking done
+      await assertMintAllowed(op); // current review access + demo eligibility before marking done
       await db.runTransaction(async tx => {
         const s = await tx.get(opRef);
         if (s.get('stage') !== 'review-ready') return;
@@ -309,7 +322,7 @@ export async function completeSignin(challengeId: string, cfg: PhoneAuthConfig):
   if (op.get('stage') !== 'done') throw new HttpsError('unavailable', 'signin-interrupted');
   const uid = op.get('uid') as string;
   let customToken: string;
-  await assertMintAllowed(op, cfg);
+  await assertMintAllowed(op);
   try {
     customToken = await phoneAuthDeps.mintToken(uid);
   } catch (e) {

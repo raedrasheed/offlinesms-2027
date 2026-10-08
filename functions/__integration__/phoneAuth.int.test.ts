@@ -532,6 +532,83 @@ describe('A17 + N2 — store-review access: designated demo only, no phone side 
     expect(review.codeHash).toMatch(/^[0-9a-f]{64}$/);
     expect(JSON.stringify(review)).not.toMatch(/"code"/);
   }, 120_000);
+
+  // ── M3: an already-running request decides at its FINAL gate from current
+  // policy, not from the configuration it loaded when it started. The seam
+  // pauses the handler after its initial config load (and after acceptance),
+  // right before the gate's fresh read; the change lands during the pause.
+  async function midRequest(change: () => Promise<void>, atGateCall = 1) {
+    const demo = await demoAccount();
+    await enableReview(demo, { expiresAtMs: Date.now() + 120_000 });
+    const s = await start();
+    const r = await send(s, REVIEW);
+    let gateCalls = 0;
+    phoneAuthDeps.beforeMintGate = async () => { if (++gateCalls === atGateCall) await change(); };
+    let minted = 0;
+    phoneAuthDeps.mintToken = async uid => { minted++; return deps.mintToken(uid); };
+    const out = verify(s, r.challengeId, CODE);
+    return { demo, s, r, out, minted: () => minted };
+  }
+  const mutations: Array<[string, (demo: string) => Promise<void>]> = [
+    ['review disabled', async () => { await enableReview('x', { enabled: false }); }],
+    ['code rotated', async demo => { await enableReview(demo, { code: '135790', expiresAtMs: Date.now() + 120_000 }); }],
+    ['demo uid changed', async () => { await enableReview(await demoAccount(), { expiresAtMs: Date.now() + 120_000 }); }],
+    ['review expired', async () => { await advance(121_000); }],
+    ['sign-in purpose suspended', async () => { await seedPolicy({ signin: { enabled: false, limits: FAST, review: reviewCfg } }); }],
+  ];
+  for (const [name, mutate] of mutations) {
+    it(`M3: ${name} while the request is in flight → no token is minted`, async () => {
+      let demo = '';
+      const m = await midRequest(() => mutate(demo));
+      demo = m.demo;
+      await expect(m.out).rejects.toBeInstanceOf(HttpsError);
+      expect(m.minted()).toBe(0);
+    });
+  }
+
+  it('M3: the gate in front of the token itself (after review completion) also reads current policy', async () => {
+    const m = await midRequest(() => enableReview('x', { enabled: false }), 2);
+    await expect(m.out).rejects.toBeInstanceOf(HttpsError);
+    expect(m.minted()).toBe(0);
+  });
+
+  it('M3: a normal phone sign-in in flight is refused when the sign-in purpose is suspended mid-request', async () => {
+    const s = await start();
+    const r = await send(s, num(150));
+    const c = await code(r.challengeId);
+    const users = await authUserCount();
+    phoneAuthDeps.beforeMintGate = async () => { await seedPolicy({ signin: { enabled: false, limits: FAST } }); };
+    let minted = 0;
+    phoneAuthDeps.mintToken = async uid => { minted++; return deps.mintToken(uid); };
+    await expectHttps(verify(s, r.challengeId, c), 'failed-precondition', 'phone-auth-unavailable');
+    expect(minted).toBe(0);
+    // The account work already done is kept (no rollback); re-enabling lets the same op finish once.
+    phoneAuthDeps.beforeMintGate = deps.beforeMintGate;
+    await seedPolicy({ signin: { enabled: true, limits: FAST } });
+    const res = await verify(s, r.challengeId, c);
+    expect(minted).toBe(1);
+    expect(await authUserCount()).toBe(users + 1);
+    expect(res.isNewUser).toBe(true);
+  });
+
+  it('M3 positive control: unchanged policy mints once; an immediate lost-response retry mints again with no new SMS/account', async () => {
+    const m = await midRequest(async () => { /* nothing changes */ });
+    expect((await m.out).uid).toBe(m.demo);
+    const users = await authUserCount();
+    const jobs = await authJobs();
+    expect((await verify(m.s, m.r.challengeId, CODE)).uid).toBe(m.demo);
+    expect(m.minted()).toBe(2);
+    expect(await authUserCount()).toBe(users);
+    expect(await authJobs()).toBe(jobs);
+  });
+
+  it('M3 control: the SMS emergency stop alone does not block completing an accepted sign-in (send-stop ≠ sign-in suspension)', async () => {
+    const m = await midRequest(async () => {
+      await seedPolicy({ emergencyStop: true, signin: { enabled: true, limits: FAST, review: reviewCfg } });
+    });
+    expect((await m.out).uid).toBe(m.demo);
+    expect(m.minted()).toBe(1);
+  });
 });
 
 describe('N1 — every token mint re-checks eligibility inside a bounded window', () => {
