@@ -12,14 +12,15 @@ import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore, FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { writeAuditLog } from '../lib/auditLog';
 import {
-  leaseExpiryMs, capacityRemaining, isClaimable, canDeviceClaimJobCountry,
+  leaseExpiryMs, isClaimable, canDeviceClaimJobCountry,
   normalizeReportStatus, recipientStatusFor, shouldApplyReport,
   classifyFailure, failureOutcome, backoffMs, utcDayKey,
-  isVerificationJobKind, verificationClaimDecision,
+  isVerificationJobKind, verificationClaimDecision, verificationPurposeOf, PUBLIC_OTP_JOB_KIND,
+  relayCapacityCheck, reserveRelayUsage, type CapsLike, type RelayUsage,
   type RelayJobStatus,
 } from './relayLogic';
 import { maybeFinalizeRelayBatch } from './relaySettlement';
-import { loadPhoneLinkConfig, phoneLinkSendingAllowed } from '../phoneLink/config';
+import { loadPolicyDoc, verificationJobStillValid, OTP_POLICY_DOC } from '../verification/policy';
 
 const REGION = 'us-central1';
 const MAX_CLAIM = 50;
@@ -36,11 +37,27 @@ function deviceCtx(request: { auth?: { token?: Record<string, unknown> } }, devi
   return { deviceId, businessId: token.businessId };
 }
 
+/** Capability a relay app declares when it calls authorizeRelaySend right
+ *  before every verification-code SMS. Older builds don't, so they are never
+ *  handed verification work (it stays queued for a capable device or expires). */
+export const SEND_AUTH_CAPABILITY = 'send-auth-v1';
+
+export interface ClaimedRelayJob {
+  jobId: string; phoneE164: string; messageBody: string;
+  assignedSimSubscriptionId?: number | null; traceId: string;
+  kind: string | null;
+  /** Device must call authorizeRelaySend and get ok before handing to SmsManager. */
+  requiresSendAuth: boolean;
+  /** Verification jobs: the device must not send after this many ms from receipt. */
+  sendWithinMs: number | null;
+}
+
 export const claimRelayJobs = onCall({ region: REGION }, async (request) => {
-  const data = (request.data ?? {}) as { deviceId?: string; capacity?: number };
+  const data = (request.data ?? {}) as { deviceId?: string; capacity?: number; clientCaps?: unknown };
   const ctx = deviceCtx(request, data.deviceId);
   const want = Math.max(0, Math.min(MAX_CLAIM, Math.floor(Number(data.capacity) || 0)));
   if (want === 0) return { jobs: [] };
+  const sendAuthCapable = Array.isArray(data.clientCaps) && data.clientCaps.includes(SEND_AUTH_CAPABILITY);
 
   const db = getFirestore();
   const devRef = db.collection('relayDevices').doc(ctx.deviceId);
@@ -49,95 +66,112 @@ export const claimRelayJobs = onCall({ region: REGION }, async (request) => {
   const status = devSnap.get('status') as string;
   if (status === 'revoked' || status === 'paused') throw new HttpsError('permission-denied', `device-${status}`);
 
-  const caps = (devSnap.get('caps') ?? { maxPerDay: 0 }) as { maxPerDay: number };
-  const counters = (devSnap.get('counters') ?? { sentToday: 0 }) as { sentToday: number };
-  const budget = capacityRemaining(caps, counters, want);
-  if (budget === 0) return { jobs: [] };
-
-  // Country enforcement: a device may only claim jobs for countries it serves.
-  // Country-tagged jobs (recipientCountryCode set) are gated; untagged jobs
-  // (e.g. sign-in OTP) keep their existing behavior.
-  const allowedCountryCodes = (devSnap.get('allowedCountryCodes') as string[] | undefined) ?? [];
-  const servesJobCountry = (jobCountry: unknown): boolean =>
-    canDeviceClaimJobCountry(allowedCountryCodes, jobCountry);
-
   // Candidate queued jobs for THIS business (assigned to this device or unassigned).
   const candSnap = await db.collection('relayJobs')
     .where('businessId', '==', ctx.businessId)
     .where('status', '==', 'queued')
-    .limit(budget * 2)
+    .limit(want * 3)
     .get();
 
   const now = Date.now();
-  const claimed: Array<{ jobId: string; phoneE164: string; messageBody: string; assignedSimSubscriptionId?: number | null; traceId: string }> = [];
+  const claimed: ClaimedRelayJob[] = [];
 
-  // Verification-code jobs carry an extra, server-side gate (public sign-in OTP
-  // retired; phone-link codes only while sending is allowed and unexpired).
-  // The config is loaded lazily, at most once per claim, and an unreadable
-  // config means "stopped" (fail closed).
-  let sendingAllowed: boolean | null = null;
-  const verificationSendingAllowed = async (): Promise<boolean> => {
-    if (sendingAllowed === null) {
-      try { sendingAllowed = phoneLinkSendingAllowed(await loadPhoneLinkConfig(db)); }
-      catch { sendingAllowed = false; }
+  // Current verification policy, read at most once per claim. An unreadable
+  // policy means verification work is SKIPPED (left queued; it expires) —
+  // never handed out, and never cancelled on a transient read error.
+  let policy: { ok: boolean; doc: Record<string, unknown> | null } | null = null;
+  const loadPolicy = async () => {
+    if (!policy) {
+      try { policy = { ok: true, doc: await loadPolicyDoc(db) }; } catch { policy = { ok: false, doc: null }; }
     }
-    return sendingAllowed;
+    return policy;
   };
   let cancelledVerification = 0;
+  let capacityExhausted: string | null = null;
 
   for (const doc of candSnap.docs) {
-    if (claimed.length >= budget) break;
+    if (claimed.length >= want) break;
     const assigned = doc.get('assignedDeviceId') as string | undefined;
     if (assigned && assigned !== ctx.deviceId) continue;
-    if (!servesJobCountry(doc.get('recipientCountryCode'))) continue; // unsupported country
-
     const kind = doc.get('kind');
-    const allowVerification = isVerificationJobKind(kind) ? await verificationSendingAllowed() : true;
+    const isVerification = isVerificationJobKind(kind);
+    if (isVerification && !sendAuthCapable && kind !== PUBLIC_OTP_JOB_KIND) continue; // old relay build
+    const pol = isVerification ? await loadPolicy() : null;
+    if (pol && !pol.ok) continue;
 
-    // Per-job transaction so two devices never claim the same job.
+    // Per-job transaction: re-reads the job AND the device so status, pause,
+    // revocation, country routing and capacity are enforced at claim time, and
+    // the capacity reservation commits atomically with the lease.
     const ok = await db.runTransaction(async tx => {
-      const fresh = await tx.get(doc.ref);
-      if (!fresh.exists) return null;
-      if (fresh.get('status') !== 'queued') return null;
-      // Never deliver a cancelled verification job: fail it terminally and
-      // purge the code from the body, under the same transaction.
-      const decision = verificationClaimDecision(
-        { kind: fresh.get('kind'), expiresAtMs: (fresh.get('expiresAt') as Timestamp | undefined)?.toMillis?.() ?? null },
-        now, allowVerification,
-      );
-      if (decision !== 'allow') {
-        tx.update(doc.ref, {
-          status: 'failed', failedAt: FieldValue.serverTimestamp(),
-          lastError: decision.replace(/^cancel-/, ''),
-          messageBody: FieldValue.delete(), updatedAt: FieldValue.serverTimestamp(),
-        });
-        return 'cancelled' as const;
+      const [fresh, dev] = await tx.getAll(doc.ref, devRef);
+      if (!fresh.exists || fresh.get('status') !== 'queued') return null;
+      if (!dev.exists) return null;
+      const devStatus = dev.get('status') as string;
+      if (devStatus === 'revoked' || devStatus === 'paused') return 'device-blocked' as const;
+
+      // Verification jobs: cancel (never deliver) legacy public OTPs and any job
+      // that is expired or no longer matches the current sender/policy.
+      if (isVerificationJobKind(fresh.get('kind'))) {
+        const expiresAtMs = (fresh.get('expiresAt') as Timestamp | undefined)?.toMillis?.() ?? null;
+        const legacy = verificationClaimDecision({ kind: fresh.get('kind'), expiresAtMs }, now, true);
+        const verdict = legacy === 'cancel-public-otp-disabled' ? 'public-otp-disabled'
+          : verificationJobStillValid({
+            purpose: verificationPurposeOf(fresh.get('kind')),
+            businessId: fresh.get('businessId'), policyVersion: fresh.get('policyVersion'), expiresAtMs,
+          }, pol?.doc ?? null, now);
+        if (verdict !== 'ok') {
+          tx.update(doc.ref, {
+            status: 'failed', failedAt: FieldValue.serverTimestamp(), lastError: verdict,
+            messageBody: FieldValue.delete(), updatedAt: FieldValue.serverTimestamp(),
+          });
+          return 'cancelled' as const;
+        }
       }
+
       const a = fresh.get('assignedDeviceId') as string | undefined;
       if (a && a !== ctx.deviceId) return null;
-      if (!servesJobCountry(fresh.get('recipientCountryCode'))) return null; // re-check under txn
-      // Respect exponential-backoff window for requeued jobs.
+      // Country: a tagged job needs a device with country routing ENABLED that
+      // serves the country (the switch is re-read here, not cached).
+      const jobCountry = fresh.get('recipientCountryCode');
+      if (typeof jobCountry === 'string' && jobCountry) {
+        if (dev.get('countryRoutingEnabled') !== true) return null;
+        if (!canDeviceClaimJobCountry((dev.get('allowedCountryCodes') as string[] | undefined) ?? [], jobCountry)) return null;
+      }
       const nextAt = (fresh.get('nextAttemptAt') as Timestamp | undefined)?.toMillis?.() ?? null;
       if (!isClaimable(nextAt, now)) return null;
+
+      const cap = relayCapacityCheck(dev.get('caps') as CapsLike | undefined, dev.get('usage') as RelayUsage | undefined, now);
+      if (!cap.ok) return { capacity: cap.window } as const;
+
+      const verification = isVerificationJobKind(fresh.get('kind'));
+      tx.update(devRef, { usage: reserveRelayUsage(dev.get('usage') as RelayUsage | undefined, now), updatedAt: FieldValue.serverTimestamp() });
       tx.update(doc.ref, {
         status: 'claimed',
         assignedDeviceId: ctx.deviceId,
         leaseOwnerDeviceId: ctx.deviceId,
         leaseExpiresAt: Timestamp.fromMillis(leaseExpiryMs(now)),
         attempts: FieldValue.increment(1),
+        requiresSendAuth: verification,
         claimedAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
       });
-      return {
+      const expiresAtMs = (fresh.get('expiresAt') as Timestamp | undefined)?.toMillis?.() ?? null;
+      const job: ClaimedRelayJob = {
         jobId: fresh.get('jobId') ?? doc.id,
         phoneE164: fresh.get('phoneE164'),
         messageBody: fresh.get('messageBody'),
         assignedSimSubscriptionId: fresh.get('assignedSimSubscriptionId') ?? null,
         traceId: fresh.get('traceId') ?? doc.id,
+        kind: (fresh.get('kind') as string | undefined) ?? null,
+        requiresSendAuth: verification,
+        sendWithinMs: verification && expiresAtMs != null ? Math.max(0, expiresAtMs - now) : null,
       };
+      return job;
     });
+    if (ok === 'device-blocked') break;
     if (ok === 'cancelled') { cancelledVerification++; continue; }
-    if (ok) claimed.push(ok);
+    if (ok && 'capacity' in ok) { capacityExhausted = ok.capacity; break; }
+    if (ok) claimed.push(ok as ClaimedRelayJob);
   }
 
   if (cancelledVerification > 0) {
@@ -152,10 +186,80 @@ export const claimRelayJobs = onCall({ region: REGION }, async (request) => {
     await writeAuditLog({
       action: 'relay.jobs.claimed', actor: { uid: ctx.deviceId },
       target: { type: 'relayDevice', id: ctx.deviceId }, result: 'success',
-      metadata: { businessId: ctx.businessId, count: claimed.length },
+      metadata: { businessId: ctx.businessId, count: claimed.length, capacityExhausted },
     });
   }
-  return { jobs: claimed };
+  return { jobs: claimed, capacityExhausted };
+});
+
+/**
+ * authorizeRelaySend — the LAST server check before the device hands a job to
+ * SmsManager. Required for verification-code jobs (requiresSendAuth). Atomically
+ * re-validates: lease owner, device not paused/revoked, job still `claimed`
+ * (a second authorization for the same job is refused — duplicate hand-off),
+ * and for verification jobs the current policy (on, not stopped, same sender
+ * and policyVersion), expiry, and that the challenge is still the live,
+ * unconsumed one. On success the job moves to `sending`.
+ *
+ * Remaining, unavoidable window: between this response and the SmsManager call
+ * on the device (milliseconds in normal operation). A message already handed to
+ * the modem/carrier cannot be recalled.
+ */
+export const authorizeRelaySend = onCall({ region: REGION }, async (request) => {
+  const data = (request.data ?? {}) as { deviceId?: string; jobId?: string };
+  const ctx = deviceCtx(request, data.deviceId);
+  if (typeof data.jobId !== 'string' || !data.jobId) throw new HttpsError('invalid-argument', 'jobId-required');
+  const db = getFirestore();
+  const jobRef = db.collection('relayJobs').doc(data.jobId);
+  const devRef = db.collection('relayDevices').doc(ctx.deviceId);
+  const policyRef = db.collection(OTP_POLICY_DOC.collection).doc(OTP_POLICY_DOC.doc);
+  const now = Date.now();
+
+  const result = await db.runTransaction(async tx => {
+    const [job, dev, pol] = await tx.getAll(jobRef, devRef, policyRef);
+    if (!job.exists) return { ok: false, reason: 'job-not-found' };
+    if (job.get('businessId') !== ctx.businessId) return { ok: false, reason: 'cross-business' };
+    if (job.get('leaseOwnerDeviceId') !== ctx.deviceId) return { ok: false, reason: 'not-lease-owner' };
+    const st = job.get('status') as string;
+    if (st === 'sending' || st === 'sent' || st === 'delivered') return { ok: false, reason: 'already-authorized' };
+    if (st !== 'claimed') return { ok: false, reason: `job-${st}` };
+    const leaseMs = (job.get('leaseExpiresAt') as Timestamp | undefined)?.toMillis?.() ?? 0;
+    if (leaseMs <= now) return { ok: false, reason: 'lease-expired' };
+    const devStatus = dev.exists ? (dev.get('status') as string) : 'missing';
+    if (devStatus === 'revoked' || devStatus === 'paused' || devStatus === 'missing') {
+      return { ok: false, reason: `device-${devStatus}` };
+    }
+
+    let refuse: string | null = null;
+    if (isVerificationJobKind(job.get('kind'))) {
+      const expiresAtMs = (job.get('expiresAt') as Timestamp | undefined)?.toMillis?.() ?? null;
+      const purpose = verificationPurposeOf(job.get('kind'));
+      const v = purpose ? verificationJobStillValid({
+        purpose, businessId: job.get('businessId'), policyVersion: job.get('policyVersion'), expiresAtMs,
+      }, pol.exists ? (pol.data() ?? {}) : null, now) : 'public-otp-disabled';
+      if (v !== 'ok') refuse = v;
+      else {
+        const path = job.get('challengePath') as string | undefined;
+        const ch = path ? await tx.get(db.doc(path)) : null;
+        if (!ch?.exists || ch.get('challengeId') !== job.get('challengeId') || ch.get('status') !== 'pending') {
+          refuse = 'challenge-not-current';
+        }
+      }
+    }
+    if (refuse) {
+      tx.update(jobRef, {
+        status: 'failed', failedAt: FieldValue.serverTimestamp(), lastError: refuse,
+        messageBody: FieldValue.delete(), updatedAt: FieldValue.serverTimestamp(),
+      });
+      return { ok: false, reason: refuse };
+    }
+    tx.update(jobRef, { status: 'sending', sendAuthorizedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
+    return { ok: true };
+  });
+  if (!result.ok) {
+    console.warn('[relay] send not authorized', { device: ctx.deviceId, reason: result.reason });
+  }
+  return result;
 });
 
 export const reportRelayDelivery = onCall({ region: REGION }, async (request) => {
@@ -215,25 +319,30 @@ export const reportRelayDelivery = onCall({ region: REGION }, async (request) =>
       if (report === 'failed')   { patch.failedAt = FieldValue.serverTimestamp(); patch.lastError = (data.reason ?? '').slice(0, 200); patch.lastErrorCode = String(data.androidResultCode ?? ''); }
       patch.messageBody = FieldValue.delete();        // privacy: purge on terminal
     }
+    if (report === 'delivered' && current !== 'sent') patch.sentAt = FieldValue.serverTimestamp();
     tx.update(jobRef, patch);
 
-    // Device counters (daily-rolling, UTC) — only on a terminal report.
+    // Delivery METRICS (daily, UTC) — reporting only. Send-capacity enforcement
+    // uses the reservation in relayDevices.usage (claim time), never these.
+    // A 'delivered' that arrives before its 'sent' (out-of-order intents) also
+    // counts the send, because the later 'sent' will be ignored as stale.
     if (!requeued && devSnap?.exists) {
-      const counterField = report === 'sent' ? 'sentToday' : report === 'delivered' ? 'deliveredToday' : 'failedToday';
       const day = utcDayKey();
       const c = (devSnap.get('counters') as Record<string, unknown>) ?? {};
       const sameDay = c.date === day;
-      const cur = sameDay ? (c[counterField] as number) ?? 0 : 0;
-      tx.set(devRef, {
-        counters: {
-          sentToday: sameDay ? (c.sentToday as number) ?? 0 : 0,
-          failedToday: sameDay ? (c.failedToday as number) ?? 0 : 0,
-          deliveredToday: sameDay ? (c.deliveredToday as number) ?? 0 : 0,
-          date: day,
-          [counterField]: cur + 1,
-        },
-        updatedAt: FieldValue.serverTimestamp(),
-      }, { merge: true });
+      const next = {
+        sentToday: sameDay ? (c.sentToday as number) ?? 0 : 0,
+        failedToday: sameDay ? (c.failedToday as number) ?? 0 : 0,
+        deliveredToday: sameDay ? (c.deliveredToday as number) ?? 0 : 0,
+        date: day,
+      };
+      if (report === 'sent') next.sentToday++;
+      else if (report === 'failed') next.failedToday++;
+      else {
+        next.deliveredToday++;
+        if (current !== 'sent') next.sentToday++;
+      }
+      tx.set(devRef, { counters: next, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
     }
 
     return { changed: true, requeued, batchId: base.batchId, recipientUid: base.recipientUid };

@@ -10,7 +10,7 @@ import { getFirestore, FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { writeAuditLog } from '../lib/auditLog';
 import {
   reapDecision, backoffMs, isHeartbeatStale, recipientStatusFor, type RelayJobStatus,
-  PUBLIC_OTP_JOB_KIND, PHONE_LINK_JOB_KIND,
+  PUBLIC_OTP_JOB_KIND, PHONE_LINK_JOB_KIND, PHONE_AUTH_JOB_KIND,
 } from './relayLogic';
 import { maybeFinalizeRelayBatch } from './relaySettlement';
 
@@ -81,8 +81,8 @@ export const relayReaper = onSchedule(
     }
 
     // 1a) Cancel QUEUED verification jobs that must never be delivered: every
-    //     legacy public sign-in OTP (public phone sign-in is disabled) and any
-    //     phone-link code past its expiry. claimRelayJobs enforces the same
+    //     legacy public sign-in OTP (the retired unprotected protocol) and any
+    //     sign-in / link code past its expiry. claimRelayJobs enforces the same
     //     rule at claim time; this sweep also purges the code from the body of
     //     jobs no device ever polls for.
     const cancelled = await cancelQueuedVerificationJobs(db, now);
@@ -140,8 +140,10 @@ async function cancelQueuedVerificationJobs(db: FirebaseFirestore.Firestore, now
   try {
     await sweep(db.collection('relayJobs').where('kind', '==', PUBLIC_OTP_JOB_KIND).where('status', '==', 'queued'),
       'public-otp-disabled', false);
-    await sweep(db.collection('relayJobs').where('kind', '==', PHONE_LINK_JOB_KIND).where('status', '==', 'queued')
-      .where('expiresAt', '<=', Timestamp.fromMillis(now)), 'expired', true);
+    for (const kind of [PHONE_LINK_JOB_KIND, PHONE_AUTH_JOB_KIND]) {
+      await sweep(db.collection('relayJobs').where('kind', '==', kind).where('status', '==', 'queued')
+        .where('expiresAt', '<=', Timestamp.fromMillis(now)), 'expired', true);
+    }
   } catch (e) {
     // A missing composite index must not stop the lease sweep above; the claim-
     // time gate still blocks delivery. Logged without any job content.

@@ -15,6 +15,7 @@ import { verifySession, type SessionResult } from './session';
 import { canDo } from './adminPermissions';
 import { getAdminScope, canViewOrganization } from './adminScope';
 import { isSupportedCountry } from 'libphonenumber-js';
+import { randomInt } from 'node:crypto';
 import { normalizePhoneAndCountry } from './phoneCountry';
 import { loadOrgRelayCoverage } from './relayCoverage';
 
@@ -56,8 +57,10 @@ async function audit(action: string, actor: AuthorizedSession, targetId: string,
 }
 
 function genCode(): string {
+  // CSPRNG, uniform (no modulo bias). Pairing codes are one-time, 15-min bearer
+  // secrets for relay enrollment.
   let out = '';
-  for (let i = 0; i < 8; i++) out += ALPHABET[Math.floor(Math.random() * ALPHABET.length)];
+  for (let i = 0; i < 8; i++) out += ALPHABET[randomInt(0, ALPHABET.length)];
   return out;
 }
 
@@ -93,24 +96,94 @@ export async function setRelayModeAction(mode: 'http' | 'relay' | 'hybrid', targ
 
 const E164 = /^\+[1-9]\d{6,14}$/;
 
-/** Platform setting: which org's relay sends sign-in OTP (smsConfig/otp). Only
- *  unrestricted (super/legacy/bootstrap) admins may set it — it's global. */
+/** Verification-SMS job kinds (mirror of functions/src/sms/relayLogic.ts). */
+const VERIFICATION_KINDS = ['otp', 'phone_auth_otp', 'phone_link_otp'];
+
+/**
+ * Cancel every QUEUED verification job (codes not yet handed to a device) and
+ * purge its body. Called whenever the OTP policy changes so stale codes never
+ * drain later. Jobs already claimed are stopped by the relay's final
+ * authorization (policyVersion mismatch); an SMS already handed to a phone's
+ * modem cannot be recalled.
+ */
+async function cancelQueuedVerificationJobs(reason: string): Promise<number> {
+  let n = 0;
+  for (const kind of VERIFICATION_KINDS) {
+    const snap = await adminDb.collection('relayJobs').where('kind', '==', kind).where('status', '==', 'queued').limit(450).get();
+    if (snap.empty) continue;
+    const batch = adminDb.batch();
+    snap.docs.forEach(d => batch.update(d.ref, {
+      status: 'failed', failedAt: FieldValue.serverTimestamp(), lastError: reason,
+      messageBody: FieldValue.delete(), updatedAt: FieldValue.serverTimestamp(),
+    }));
+    await batch.commit();
+    n += snap.size;
+  }
+  return n;
+}
+
+function platformOnly(session: AuthorizedSession): string | null {
+  return getAdminScope(session).organizationId !== undefined
+    ? 'Only a platform admin can change the OTP sender settings.' : null;
+}
+
+/** Platform setting: which org's relay sends verification SMS (smsConfig/otp).
+ *  An empty id CLEARS the sender (no verification SMS can be sent). Every change
+ *  bumps policyVersion and cancels queued codes bound to the old policy. */
 export async function setOtpOrgAction(businessId: string): Promise<RelayActionState> {
   const session = await authorize();
   if ('error' in session) return session;
-  if (getAdminScope(session).organizationId !== undefined) {
-    return { error: 'Only a platform admin can set the default OTP organization.' };
-  }
-  if (!businessId.trim()) return { error: 'Select an organization.' };
+  const denied = platformOnly(session);
+  if (denied) return { error: denied };
+  const id = (businessId ?? '').trim() || null;
+  let cancelled = 0;
   try {
     await adminDb.collection('smsConfig').doc('otp').set(
-      { businessId: businessId.trim(), updatedAt: FieldValue.serverTimestamp() }, { merge: true },
+      { businessId: id, policyVersion: FieldValue.increment(1), updatedAt: FieldValue.serverTimestamp() }, { merge: true },
     );
+    cancelled = await cancelQueuedVerificationJobs('policy-changed');
   } catch {
     return { error: 'Could not save the OTP organization.' };
   }
-  await audit('relay.otp.org.set', session, businessId.trim(), { businessId: businessId.trim() });
+  await audit(id ? 'relay.otp.org.set' : 'relay.otp.org.cleared', session, id ?? 'none', { businessId: id, cancelled });
+  revalidatePath('/admin/settings');
   revalidatePath('/admin/relay');
+  return { success: true };
+}
+
+export interface OtpPolicyPatch {
+  enabled?: boolean;
+  emergencyStop?: boolean;
+  signinEnabled?: boolean;
+  linkEnabled?: boolean;
+}
+
+/** Master switch, emergency stop, and per-purpose switches for verification SMS.
+ *  These are runtime gates only: each purpose ALSO needs its deploy-time env
+ *  flag (PHONE_AUTH_ENABLED / PHONE_LINK_ENABLED) on the functions. */
+export async function setOtpPolicyAction(patch: OtpPolicyPatch): Promise<RelayActionState> {
+  const session = await authorize();
+  if ('error' in session) return session;
+  const denied = platformOnly(session);
+  if (denied) return { error: denied };
+  const update: Record<string, unknown> = { policyVersion: FieldValue.increment(1), updatedAt: FieldValue.serverTimestamp() };
+  if (typeof patch.enabled === 'boolean') update.enabled = patch.enabled;
+  if (typeof patch.emergencyStop === 'boolean') update.emergencyStop = patch.emergencyStop;
+  if (typeof patch.signinEnabled === 'boolean') update['signin.enabled'] = patch.signinEnabled;
+  if (typeof patch.linkEnabled === 'boolean') update['link.enabled'] = patch.linkEnabled;
+  if (Object.keys(update).length === 2) return { error: 'Nothing to change.' };
+  let cancelled = 0;
+  try {
+    const ref = adminDb.collection('smsConfig').doc('otp');
+    // update() needs the doc to exist and keeps dotted paths nested.
+    await ref.set({ updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    await ref.update(update);
+    cancelled = await cancelQueuedVerificationJobs('policy-changed');
+  } catch {
+    return { error: 'Could not update the OTP policy.' };
+  }
+  await audit('relay.otp.policy.set', session, 'smsConfig/otp', { ...patch, cancelled });
+  revalidatePath('/admin/settings');
   return { success: true };
 }
 

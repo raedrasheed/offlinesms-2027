@@ -1,6 +1,7 @@
 // Pure, Firestore-free relay helpers — unit-testable in isolation (mirrors the
 // recipients.ts pattern). No firebase-admin imports here.
 
+import { randomInt } from 'node:crypto';
 import { ADMIN_ROLES } from '../lib/roles';
 import { isSupportedCountry } from 'libphonenumber-js';
 
@@ -20,10 +21,13 @@ export function makeJobId(batchId: string, recipientUid: string): string {
 
 /** Unambiguous pairing code (no 0/O/1/I/L). Not a security token on its own —
  *  it's short-lived, one-time, and scoped to a business server-side. */
-export function generatePairingCode(rand: () => number = Math.random): string {
+export function generatePairingCode(rand?: () => number): string {
   const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
   let out = '';
-  for (let i = 0; i < 8; i++) out += alphabet[Math.floor(rand() * alphabet.length)];
+  // CSPRNG (uniform, no modulo bias); `rand` only for deterministic tests.
+  for (let i = 0; i < 8; i++) {
+    out += alphabet[rand ? Math.floor(rand() * alphabet.length) : randomInt(0, alphabet.length)];
+  }
   return out;
 }
 
@@ -50,8 +54,60 @@ export function isHeartbeatStale(lastHeartbeatMs: number | null | undefined, now
   return nowMs - lastHeartbeatMs > HEARTBEAT_STALE_MS;
 }
 
-/** Remaining daily send capacity for a device (minute/hour pacing is enforced
- *  device-side; the server guards the hard daily cap). */
+// ── Server-owned send-capacity reservations (per device) ────────────────────
+//
+// Accounting unit: one CLAIMED job attempt (a logical message handed to the
+// device), whatever happens afterwards — sent, failed, or ambiguous. That is
+// deliberately conservative: a carrier hand-off can't be "un-sent", so nothing
+// is refunded. It is NOT a count of billed SMS segments (a long or Unicode
+// message may be several parts). Reservations live in relayDevices/{id}.usage
+// and are written in the SAME transaction that leases the job, so concurrent
+// claims serialize on the device doc and can't oversubscribe. Client heartbeat
+// telemetry never touches them.
+
+export interface UsageWindow { s: number; c: number }
+export interface RelayUsage { m?: UsageWindow; h?: UsageWindow; d?: { key: string; c: number } }
+export interface CapsLike { maxPerMinute?: number; maxPerHour?: number; maxPerDay?: number }
+
+const MINUTE_MS = 60_000;
+const HOUR_MS_R = 3_600_000;
+
+function winCount(w: UsageWindow | undefined, now: number, size: number): number {
+  return w && typeof w.s === 'number' && now - w.s < size ? (w.c ?? 0) : 0;
+}
+
+/** Pure: may one more job be reserved for this device right now? */
+export function relayCapacityCheck(
+  caps: CapsLike | undefined, usage: RelayUsage | undefined, now: number,
+): { ok: true } | { ok: false; window: 'minute' | 'hour' | 'day' } {
+  const c = { ...DEFAULT_RELAY_CAPS_LOCAL, ...(caps ?? {}) };
+  const u = usage ?? {};
+  const day = utcDayKey(new Date(now));
+  if (winCount(u.m, now, MINUTE_MS) >= c.maxPerMinute) return { ok: false, window: 'minute' };
+  if (winCount(u.h, now, HOUR_MS_R) >= c.maxPerHour) return { ok: false, window: 'hour' };
+  if ((u.d?.key === day ? u.d.c : 0) >= c.maxPerDay) return { ok: false, window: 'day' };
+  return { ok: true };
+}
+
+/** Pure: usage after reserving one more job at `now` (UTC day rollover aware). */
+export function reserveRelayUsage(usage: RelayUsage | undefined, now: number): RelayUsage {
+  const u = usage ?? {};
+  const bump = (w: UsageWindow | undefined, size: number): UsageWindow =>
+    (w && typeof w.s === 'number' && now - w.s < size) ? { s: w.s, c: (w.c ?? 0) + 1 } : { s: now, c: 1 };
+  const day = utcDayKey(new Date(now));
+  return { m: bump(u.m, MINUTE_MS), h: bump(u.h, HOUR_MS_R), d: { key: day, c: (u.d?.key === day ? u.d.c : 0) + 1 } };
+}
+
+const DEFAULT_RELAY_CAPS_LOCAL = { maxPerMinute: 6, maxPerHour: 100, maxPerDay: 500 };
+
+/** Clamp client-reported heartbeat telemetry (informational only). */
+export function sanitizeTelemetryCount(v: unknown): number | null {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return null;
+  return Math.min(1_000_000, Math.max(0, Math.floor(v)));
+}
+
+/** LEGACY helper kept for compatibility; the claim path uses relayCapacityCheck.
+ *  Remaining daily send capacity from a counter. */
 export function capacityRemaining(
   caps: { maxPerDay: number },
   counters: { sentToday: number },
@@ -182,9 +238,16 @@ export function reapDecision(
 export const PUBLIC_OTP_JOB_KIND = 'otp';
 /** Account phone-linking verification code (authenticated, rate-limited). */
 export const PHONE_LINK_JOB_KIND = 'phone_link_otp';
+/** Protected public phone sign-in / sign-up code (pre-auth session + proof). */
+export const PHONE_AUTH_JOB_KIND = 'phone_auth_otp';
 
 export function isVerificationJobKind(kind: unknown): boolean {
-  return kind === PUBLIC_OTP_JOB_KIND || kind === PHONE_LINK_JOB_KIND;
+  return kind === PUBLIC_OTP_JOB_KIND || kind === PHONE_LINK_JOB_KIND || kind === PHONE_AUTH_JOB_KIND;
+}
+
+/** Purpose of a current-generation verification job (null for legacy/other). */
+export function verificationPurposeOf(kind: unknown): 'signin' | 'link' | null {
+  return kind === PHONE_AUTH_JOB_KIND ? 'signin' : kind === PHONE_LINK_JOB_KIND ? 'link' : null;
 }
 
 export type VerificationClaimDecision =

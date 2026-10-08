@@ -109,14 +109,20 @@ export { adminSetOrgRole } from './admin/adminSetOrgRole';
 // Additive only: the HTTP provider path (escalateSms/gateway) is unchanged and
 // relay is gated by smsConfig/providers (default 'http').
 export { createRelayPairingCode, enrollRelayDevice, relayHeartbeat, revokeRelayDevice, setRelayCountries } from './sms/relayDevices';
-export { claimRelayJobs, reportRelayDelivery } from './sms/relayJobs';
+export { claimRelayJobs, reportRelayDelivery, authorizeRelaySend } from './sms/relayJobs';
 // Relay-only reaper (Phase 3): lease expiry/requeue + stale-device offline +
 // metrics. Touches relay* collections only; no production SMS impact.
 export { relayReaper } from './sms/relayReaper';
 
 // Phase 24 — OTP over relay (custom-token phone sign-in; no Firebase phone auth).
+// The original requestPhoneOtp/verifyPhoneOtp are retired (always refuse); the
+// protected public phone sign-in/sign-up protocol lives in ./phoneAuth and is
+// OFF unless PHONE_AUTH_ENABLED=true AND smsConfig/otp allows it.
 export { requestPhoneOtp } from './auth/requestPhoneOtp';
 export { verifyPhoneOtp } from './auth/verifyPhoneOtp';
+export { startPhoneAuth } from './phoneAuth/startPhoneAuth';
+export { requestPhoneAuthCode } from './phoneAuth/requestPhoneAuthCode';
+export { verifyPhoneAuthCode } from './phoneAuth/verifyPhoneAuthCode';
 export { getSupportedPhoneCountries } from './auth/getSupportedPhoneCountries';
 export { requestEmailOtp } from './auth/requestEmailOtp';
 export { verifyEmailOtp } from './auth/verifyEmailOtp';
