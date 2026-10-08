@@ -1,0 +1,1804 @@
+{
+  "runId": "g7_20261008201333355_3b048c81",
+  "project": "offlinesms-prod-2027",
+  "sourceCommit": "d3cafc76dae98469ce49d905450380147d53ac97",
+  "startedAt": "2026-10-08T20:24:21.434Z",
+  "g7a": [
+    {
+      "gate": "environment",
+      "results": [
+        {
+          "function": "startPhoneAuth",
+          "status": 400,
+          "reason": "phone-auth-unavailable"
+        },
+        {
+          "function": "requestPhoneAuthCode",
+          "status": 400,
+          "reason": "phone-auth-unavailable"
+        }
+      ],
+      "before": {
+        "smsRateLimits": 0,
+        "phoneAuthSessions": 0,
+        "phoneAuthChallenges": 0,
+        "phoneAuthOps": 0,
+        "relayJobs": 366
+      },
+      "after": {
+        "smsRateLimits": 0,
+        "phoneAuthSessions": 0,
+        "phoneAuthChallenges": 0,
+        "phoneAuthOps": 0,
+        "relayJobs": 366
+      },
+      "passed": true
+    },
+    {
+      "gate": "master",
+      "results": [
+        {
+          "function": "startPhoneAuth",
+          "status": 400,
+          "reason": "phone-auth-unavailable"
+        },
+        {
+          "function": "requestPhoneAuthCode",
+          "status": 400,
+          "reason": "phone-auth-unavailable"
+        }
+      ],
+      "countsUnchanged": true
+    },
+    {
+      "gate": "emergency-stop",
+      "results": [
+        {
+          "function": "startPhoneAuth",
+          "status": 503,
+          "reason": "service-paused"
+        },
+        {
+          "function": "requestPhoneAuthCode",
+          "status": 503,
+          "reason": "service-paused"
+        }
+      ],
+      "countsUnchanged": true
+    },
+    {
+      "gate": "sender",
+      "results": [
+        {
+          "function": "startPhoneAuth",
+          "status": 503,
+          "reason": "service-paused"
+        },
+        {
+          "function": "requestPhoneAuthCode",
+          "status": 503,
+          "reason": "service-paused"
+        }
+      ],
+      "countsUnchanged": true
+    },
+    {
+      "gate": "signin",
+      "results": [
+        {
+          "function": "startPhoneAuth",
+          "status": 400,
+          "reason": "phone-auth-unavailable"
+        },
+        {
+          "function": "requestPhoneAuthCode",
+          "status": 400,
+          "reason": "phone-auth-unavailable"
+        }
+      ],
+      "countsUnchanged": true
+    }
+  ],
+  "phases": [
+    {
+      "name": "destination-concurrency",
+      "configuration": {
+        "limitOverrides": {
+          "sessionMaxCodes": 1
+        },
+        "otherLimits": "unchanged production defaults",
+        "shared": {
+          "perHour": 150,
+          "perDay": 700
+        },
+        "policyVersion": 9
+      },
+      "results": [
+        {
+          "kind": "refused",
+          "reason": "cooldown",
+          "scope": "destination",
+          "status": 429
+        },
+        {
+          "kind": "accepted"
+        },
+        {
+          "kind": "refused",
+          "reason": "cooldown",
+          "scope": "destination",
+          "status": 429
+        },
+        {
+          "kind": "refused",
+          "reason": "cooldown",
+          "scope": "destination",
+          "status": 429
+        }
+      ],
+      "jobs": [
+        {
+          "status": "queued",
+          "attempts": 0,
+          "reason": null,
+          "bodyPresent": true
+        }
+      ],
+      "sessionCount": 4,
+      "counts": {
+        "smsRateLimits": 6,
+        "phoneAuthSessions": 4,
+        "phoneAuthChallenges": 1,
+        "phoneAuthOps": 0,
+        "relayJobs": 367
+      },
+      "counters": [
+        {
+          "counter": "ainst_1",
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        },
+        {
+          "counter": "asess_1",
+          "d": {
+            "s": 1791491297997,
+            "c": 4
+          },
+          "h": {
+            "s": 1791491297997,
+            "c": 4
+          }
+        },
+        {
+          "counter": "asrc_1",
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        },
+        {
+          "counter": "dest_1",
+          "lastAt": 1791491315213,
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        },
+        {
+          "counter": "global_phoneAuth",
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        },
+        {
+          "counter": "global_verification",
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "idempotent-replay",
+      "configuration": {
+        "limitOverrides": {
+          "sessionMaxCodes": 1
+        },
+        "otherLimits": "unchanged production defaults",
+        "shared": {
+          "perHour": 150,
+          "perDay": 700
+        },
+        "policyVersion": 9
+      },
+      "results": [
+        {
+          "kind": "replay"
+        }
+      ],
+      "jobs": [
+        {
+          "status": "queued",
+          "attempts": 0,
+          "reason": null,
+          "bodyPresent": true
+        }
+      ],
+      "sessionCount": 4,
+      "counts": {
+        "smsRateLimits": 6,
+        "phoneAuthSessions": 4,
+        "phoneAuthChallenges": 1,
+        "phoneAuthOps": 0,
+        "relayJobs": 367
+      },
+      "counters": [
+        {
+          "counter": "ainst_1",
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        },
+        {
+          "counter": "asess_1",
+          "d": {
+            "s": 1791491297997,
+            "c": 4
+          },
+          "h": {
+            "s": 1791491297997,
+            "c": 4
+          }
+        },
+        {
+          "counter": "asrc_1",
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        },
+        {
+          "counter": "dest_1",
+          "lastAt": 1791491315213,
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        },
+        {
+          "counter": "global_phoneAuth",
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        },
+        {
+          "counter": "global_verification",
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "session-cooldown",
+      "configuration": {
+        "limitOverrides": {
+          "sessionMaxCodes": 1
+        },
+        "otherLimits": "unchanged production defaults",
+        "shared": {
+          "perHour": 150,
+          "perDay": 700
+        },
+        "policyVersion": 9
+      },
+      "results": [
+        {
+          "kind": "refused",
+          "reason": "cooldown",
+          "scope": "session",
+          "status": 429
+        }
+      ],
+      "jobs": [
+        {
+          "status": "queued",
+          "attempts": 0,
+          "reason": null,
+          "bodyPresent": true
+        }
+      ],
+      "sessionCount": 4,
+      "counts": {
+        "smsRateLimits": 6,
+        "phoneAuthSessions": 4,
+        "phoneAuthChallenges": 1,
+        "phoneAuthOps": 0,
+        "relayJobs": 367
+      },
+      "counters": [
+        {
+          "counter": "ainst_1",
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        },
+        {
+          "counter": "asess_1",
+          "d": {
+            "s": 1791491297997,
+            "c": 4
+          },
+          "h": {
+            "s": 1791491297997,
+            "c": 4
+          }
+        },
+        {
+          "counter": "asrc_1",
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        },
+        {
+          "counter": "dest_1",
+          "lastAt": 1791491315213,
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        },
+        {
+          "counter": "global_phoneAuth",
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        },
+        {
+          "counter": "global_verification",
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "installation",
+      "configuration": {
+        "limitOverrides": {
+          "sessionMaxCodes": 1,
+          "installPerDay": 1
+        },
+        "otherLimits": "unchanged production defaults",
+        "shared": {
+          "perHour": 150,
+          "perDay": 700
+        },
+        "policyVersion": 10
+      },
+      "results": [
+        {
+          "kind": "refused",
+          "reason": "rate-limited",
+          "scope": "installation",
+          "status": 429
+        }
+      ],
+      "jobs": [
+        {
+          "status": "failed",
+          "attempts": 0,
+          "reason": "policy-changed",
+          "bodyPresent": false
+        }
+      ],
+      "sessionCount": 5,
+      "counts": {
+        "smsRateLimits": 6,
+        "phoneAuthSessions": 5,
+        "phoneAuthChallenges": 1,
+        "phoneAuthOps": 0,
+        "relayJobs": 367
+      },
+      "counters": [
+        {
+          "counter": "ainst_1",
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        },
+        {
+          "counter": "asess_1",
+          "d": {
+            "s": 1791491297997,
+            "c": 5
+          },
+          "h": {
+            "s": 1791491297997,
+            "c": 5
+          }
+        },
+        {
+          "counter": "asrc_1",
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        },
+        {
+          "counter": "dest_1",
+          "lastAt": 1791491315213,
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        },
+        {
+          "counter": "global_phoneAuth",
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        },
+        {
+          "counter": "global_verification",
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "signin-global",
+      "configuration": {
+        "limitOverrides": {
+          "sessionMaxCodes": 1,
+          "globalPerHour": 1
+        },
+        "otherLimits": "unchanged production defaults",
+        "shared": {
+          "perHour": 150,
+          "perDay": 700
+        },
+        "policyVersion": 11
+      },
+      "results": [
+        {
+          "kind": "refused",
+          "reason": "service-busy",
+          "scope": "global",
+          "status": 429
+        },
+        {
+          "kind": "refused",
+          "reason": "service-busy",
+          "scope": "global",
+          "status": 429
+        },
+        {
+          "kind": "refused",
+          "reason": "service-busy",
+          "scope": "global",
+          "status": 429
+        }
+      ],
+      "jobs": [
+        {
+          "status": "failed",
+          "attempts": 0,
+          "reason": "policy-changed",
+          "bodyPresent": false
+        }
+      ],
+      "sessionCount": 5,
+      "counts": {
+        "smsRateLimits": 6,
+        "phoneAuthSessions": 5,
+        "phoneAuthChallenges": 1,
+        "phoneAuthOps": 0,
+        "relayJobs": 367
+      },
+      "counters": [
+        {
+          "counter": "ainst_1",
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        },
+        {
+          "counter": "asess_1",
+          "d": {
+            "s": 1791491297997,
+            "c": 5
+          },
+          "h": {
+            "s": 1791491297997,
+            "c": 5
+          }
+        },
+        {
+          "counter": "asrc_1",
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        },
+        {
+          "counter": "dest_1",
+          "lastAt": 1791491315213,
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        },
+        {
+          "counter": "global_phoneAuth",
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        },
+        {
+          "counter": "global_verification",
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "shared-global",
+      "configuration": {
+        "limitOverrides": {
+          "sessionMaxCodes": 1
+        },
+        "otherLimits": "unchanged production defaults",
+        "shared": {
+          "perHour": 1,
+          "perDay": 700
+        },
+        "policyVersion": 12
+      },
+      "results": [
+        {
+          "kind": "refused",
+          "reason": "service-busy",
+          "scope": "global",
+          "status": 429
+        },
+        {
+          "kind": "refused",
+          "reason": "service-busy",
+          "scope": "global",
+          "status": 429
+        },
+        {
+          "kind": "refused",
+          "reason": "service-busy",
+          "scope": "global",
+          "status": 429
+        }
+      ],
+      "jobs": [
+        {
+          "status": "failed",
+          "attempts": 0,
+          "reason": "policy-changed",
+          "bodyPresent": false
+        }
+      ],
+      "sessionCount": 5,
+      "counts": {
+        "smsRateLimits": 6,
+        "phoneAuthSessions": 5,
+        "phoneAuthChallenges": 1,
+        "phoneAuthOps": 0,
+        "relayJobs": 367
+      },
+      "counters": [
+        {
+          "counter": "ainst_1",
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        },
+        {
+          "counter": "asess_1",
+          "d": {
+            "s": 1791491297997,
+            "c": 5
+          },
+          "h": {
+            "s": 1791491297997,
+            "c": 5
+          }
+        },
+        {
+          "counter": "asrc_1",
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        },
+        {
+          "counter": "dest_1",
+          "lastAt": 1791491315213,
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        },
+        {
+          "counter": "global_phoneAuth",
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        },
+        {
+          "counter": "global_verification",
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "session-exhaustion",
+      "configuration": {
+        "limitOverrides": {
+          "sessionMaxCodes": 1
+        },
+        "otherLimits": "unchanged production defaults",
+        "shared": {
+          "perHour": 1,
+          "perDay": 700
+        },
+        "policyVersion": 12
+      },
+      "results": [
+        {
+          "kind": "refused",
+          "reason": "session-exhausted",
+          "scope": "session",
+          "status": 429
+        }
+      ],
+      "jobs": [
+        {
+          "status": "failed",
+          "attempts": 0,
+          "reason": "policy-changed",
+          "bodyPresent": false
+        }
+      ],
+      "sessionCount": 5,
+      "counts": {
+        "smsRateLimits": 6,
+        "phoneAuthSessions": 5,
+        "phoneAuthChallenges": 1,
+        "phoneAuthOps": 0,
+        "relayJobs": 367
+      },
+      "counters": [
+        {
+          "counter": "ainst_1",
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        },
+        {
+          "counter": "asess_1",
+          "d": {
+            "s": 1791491297997,
+            "c": 5
+          },
+          "h": {
+            "s": 1791491297997,
+            "c": 5
+          }
+        },
+        {
+          "counter": "asrc_1",
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        },
+        {
+          "counter": "dest_1",
+          "lastAt": 1791491315213,
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        },
+        {
+          "counter": "global_phoneAuth",
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        },
+        {
+          "counter": "global_verification",
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "destination-hour-repeated-after-interruption",
+      "configuration": {
+        "limitOverrides": {
+          "sessionMaxCodes": 1,
+          "destinationPerHour": 1
+        },
+        "otherLimits": "unchanged production defaults",
+        "shared": {
+          "perHour": 150,
+          "perDay": 700
+        },
+        "policyVersion": 15
+      },
+      "results": [
+        {
+          "kind": "refused",
+          "reason": "rate-limited",
+          "scope": "destination",
+          "status": 429
+        },
+        {
+          "kind": "refused",
+          "reason": "rate-limited",
+          "scope": "destination",
+          "status": 429
+        },
+        {
+          "kind": "refused",
+          "reason": "rate-limited",
+          "scope": "destination",
+          "status": 429
+        }
+      ],
+      "jobs": [
+        {
+          "status": "failed",
+          "attempts": 0,
+          "reason": "policy-changed",
+          "bodyPresent": false
+        }
+      ],
+      "counters": [
+        {
+          "counter": "ainst_1",
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        },
+        {
+          "counter": "asess_1",
+          "d": {
+            "s": 1791491297997,
+            "c": 8
+          },
+          "h": {
+            "s": 1791491297997,
+            "c": 8
+          }
+        },
+        {
+          "counter": "asrc_1",
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        },
+        {
+          "counter": "dest_1",
+          "lastAt": 1791491315213,
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        },
+        {
+          "counter": "global_phoneAuth",
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        },
+        {
+          "counter": "global_verification",
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        }
+      ],
+      "counts": {
+        "smsRateLimits": 6,
+        "phoneAuthSessions": 8,
+        "phoneAuthChallenges": 1,
+        "phoneAuthOps": 0,
+        "relayJobs": 367
+      },
+      "sessionCount": 8
+    },
+    {
+      "name": "second-unique-acceptance",
+      "configuration": {
+        "limitOverrides": {
+          "sessionMaxCodes": 1
+        },
+        "otherLimits": "unchanged production defaults",
+        "shared": {
+          "perHour": 150,
+          "perDay": 700
+        },
+        "policyVersion": 16
+      },
+      "results": [
+        {
+          "kind": "accepted"
+        }
+      ],
+      "jobs": [
+        {
+          "status": "queued",
+          "attempts": 0,
+          "reason": null,
+          "bodyPresent": true
+        },
+        {
+          "status": "failed",
+          "attempts": 0,
+          "reason": "policy-changed",
+          "bodyPresent": false
+        }
+      ],
+      "counters": [
+        {
+          "counter": "ainst_1",
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        },
+        {
+          "counter": "ainst_2",
+          "d": {
+            "s": 1791491807411,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491807411,
+            "c": 1
+          }
+        },
+        {
+          "counter": "asess_1",
+          "d": {
+            "s": 1791491297997,
+            "c": 8
+          },
+          "h": {
+            "s": 1791491297997,
+            "c": 8
+          }
+        },
+        {
+          "counter": "asrc_1",
+          "d": {
+            "s": 1791491315213,
+            "c": 2
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 2
+          }
+        },
+        {
+          "counter": "dest_1",
+          "lastAt": 1791491807411,
+          "d": {
+            "s": 1791491315213,
+            "c": 2
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 2
+          }
+        },
+        {
+          "counter": "global_phoneAuth",
+          "d": {
+            "s": 1791491315213,
+            "c": 2
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 2
+          }
+        },
+        {
+          "counter": "global_verification",
+          "d": {
+            "s": 1791491315213,
+            "c": 2
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 2
+          }
+        }
+      ],
+      "counts": {
+        "smsRateLimits": 7,
+        "phoneAuthSessions": 8,
+        "phoneAuthChallenges": 2,
+        "phoneAuthOps": 0,
+        "relayJobs": 368
+      },
+      "sessionCount": 8
+    },
+    {
+      "name": "second-idempotent-replay",
+      "configuration": {
+        "limitOverrides": {
+          "sessionMaxCodes": 1
+        },
+        "otherLimits": "unchanged production defaults",
+        "shared": {
+          "perHour": 150,
+          "perDay": 700
+        },
+        "policyVersion": 16
+      },
+      "results": [
+        {
+          "kind": "replay"
+        }
+      ],
+      "jobs": [
+        {
+          "status": "queued",
+          "attempts": 0,
+          "reason": null,
+          "bodyPresent": true
+        },
+        {
+          "status": "failed",
+          "attempts": 0,
+          "reason": "policy-changed",
+          "bodyPresent": false
+        }
+      ],
+      "counters": [
+        {
+          "counter": "ainst_1",
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        },
+        {
+          "counter": "ainst_2",
+          "d": {
+            "s": 1791491807411,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491807411,
+            "c": 1
+          }
+        },
+        {
+          "counter": "asess_1",
+          "d": {
+            "s": 1791491297997,
+            "c": 8
+          },
+          "h": {
+            "s": 1791491297997,
+            "c": 8
+          }
+        },
+        {
+          "counter": "asrc_1",
+          "d": {
+            "s": 1791491315213,
+            "c": 2
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 2
+          }
+        },
+        {
+          "counter": "dest_1",
+          "lastAt": 1791491807411,
+          "d": {
+            "s": 1791491315213,
+            "c": 2
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 2
+          }
+        },
+        {
+          "counter": "global_phoneAuth",
+          "d": {
+            "s": 1791491315213,
+            "c": 2
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 2
+          }
+        },
+        {
+          "counter": "global_verification",
+          "d": {
+            "s": 1791491315213,
+            "c": 2
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 2
+          }
+        }
+      ],
+      "counts": {
+        "smsRateLimits": 7,
+        "phoneAuthSessions": 8,
+        "phoneAuthChallenges": 2,
+        "phoneAuthOps": 0,
+        "relayJobs": 368
+      },
+      "sessionCount": 8
+    }
+  ],
+  "claimsObserved": 0,
+  "sourceIngressGate": "not verified; source scope not claimed",
+  "realSmsSent": false,
+  "lastIsolation": {
+    "syntheticDevices": 1,
+    "relayIdentities": 0,
+    "pairingCredentials": 0,
+    "capacity": [
+      0,
+      0,
+      0
+    ],
+    "pushToken": false,
+    "phoneProvider": false
+  },
+  "countersBefore": [],
+  "interruption": {
+    "beforePhase": "destination-hour",
+    "runnerSessionLost": true,
+    "priorAdmissionMs": 308009,
+    "priorStoppedAt": "2026-10-08T20:33:15.509Z",
+    "requestsWithUnavailableResponses": 3,
+    "phaseEvidenceDiscarded": true,
+    "recoveryBaseline": {
+      "jobs": [
+        {
+          "status": "failed",
+          "attempts": 0,
+          "reason": "policy-changed",
+          "bodyPresent": false
+        }
+      ],
+      "counters": [
+        {
+          "counter": "ainst_1",
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        },
+        {
+          "counter": "asess_1",
+          "d": {
+            "s": 1791491297997,
+            "c": 5
+          },
+          "h": {
+            "s": 1791491297997,
+            "c": 5
+          }
+        },
+        {
+          "counter": "asrc_1",
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        },
+        {
+          "counter": "dest_1",
+          "lastAt": 1791491315213,
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        },
+        {
+          "counter": "global_phoneAuth",
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        },
+        {
+          "counter": "global_verification",
+          "d": {
+            "s": 1791491315213,
+            "c": 1
+          },
+          "h": {
+            "s": 1791491315213,
+            "c": 1
+          }
+        }
+      ],
+      "counts": {
+        "smsRateLimits": 6,
+        "phoneAuthSessions": 5,
+        "phoneAuthChallenges": 1,
+        "phoneAuthOps": 0,
+        "relayJobs": 367
+      },
+      "sessionCount": 5
+    },
+    "serverLogReconciliation": {
+      "refusals": 3,
+      "reason": "rate-limited",
+      "scope": "destination",
+      "http429": 3,
+      "entries": [
+        {
+          "timestamp": "2026-10-08T20:32:07.158814Z",
+          "reason": "rate-limited",
+          "scope": "destination"
+        },
+        {
+          "timestamp": "2026-10-08T20:32:07.239121Z",
+          "reason": "rate-limited",
+          "scope": "destination"
+        },
+        {
+          "timestamp": "2026-10-08T20:32:07.300414Z",
+          "reason": "rate-limited",
+          "scope": "destination"
+        }
+      ]
+    }
+  },
+  "replays": 2,
+  "budgetPhasesPassed": true,
+  "admissionMilliseconds": 390191,
+  "teardownJobs": [
+    {
+      "status": "failed",
+      "attempts": 0,
+      "reason": "sending-stopped",
+      "bodyPresent": false
+    },
+    {
+      "status": "failed",
+      "attempts": 0,
+      "reason": "policy-changed",
+      "bodyPresent": false
+    }
+  ],
+  "jobsSafe": true,
+  "accepted": 2,
+  "calls": {
+    "start": 13,
+    "code": 27
+  },
+  "countersAfter": [
+    {
+      "counter": "ainst_1",
+      "d": {
+        "s": 1791491315213,
+        "c": 1
+      },
+      "h": {
+        "s": 1791491315213,
+        "c": 1
+      }
+    },
+    {
+      "counter": "ainst_2",
+      "d": {
+        "s": 1791491807411,
+        "c": 1
+      },
+      "h": {
+        "s": 1791491807411,
+        "c": 1
+      }
+    },
+    {
+      "counter": "asess_1",
+      "d": {
+        "s": 1791491297997,
+        "c": 8
+      },
+      "h": {
+        "s": 1791491297997,
+        "c": 8
+      }
+    },
+    {
+      "counter": "asrc_1",
+      "d": {
+        "s": 1791491315213,
+        "c": 2
+      },
+      "h": {
+        "s": 1791491315213,
+        "c": 2
+      }
+    },
+    {
+      "counter": "dest_1",
+      "lastAt": 1791491807411,
+      "d": {
+        "s": 1791491315213,
+        "c": 2
+      },
+      "h": {
+        "s": 1791491315213,
+        "c": 2
+      }
+    },
+    {
+      "counter": "global_phoneAuth",
+      "d": {
+        "s": 1791491315213,
+        "c": 2
+      },
+      "h": {
+        "s": 1791491315213,
+        "c": 2
+      }
+    },
+    {
+      "counter": "global_verification",
+      "d": {
+        "s": 1791491315213,
+        "c": 2
+      },
+      "h": {
+        "s": 1791491315213,
+        "c": 2
+      }
+    }
+  ],
+  "policyStopped": true,
+  "finishedAt": "2026-10-08T20:37:25.186Z",
+  "preAdmissionAbort": {
+    "at": "2026-10-08T20:22:07.170Z",
+    "reason": "synthetic heartbeat became stale during deployment wait; runner aborted before admission",
+    "accepted": 0,
+    "jobsCreated": 0,
+    "stopped": true
+  },
+  "cleanup": {
+    "at": "2026-10-08T20:41:24.824Z",
+    "deleted": {
+      "phoneAuthChallenges": 2,
+      "phoneAuthSessions": 8,
+      "relayJobs": 2,
+      "relayDevices": 1
+    },
+    "counts": {
+      "smsRateLimits": 7,
+      "phoneAuthSessions": 0,
+      "phoneAuthChallenges": 0,
+      "phoneAuthOps": 0,
+      "relayJobs": 366
+    },
+    "sharedCountersRetained": true,
+    "originalSenderRestored": true,
+    "originalLimitsRestored": true,
+    "policyVersion": 21,
+    "conditionalDeleteRetry": {
+      "reason": "reaper marked owned synthetic device offline after heartbeat ended",
+      "firstAtomicDeleteApplied": false,
+      "reReadOwnershipBeforeRetry": true
+    }
+  },
+  "environmentRestore": {
+    "at": "2026-10-08T20:45:27.733Z",
+    "completed": true,
+    "functions": [
+      "startPhoneAuth",
+      "requestPhoneAuthCode",
+      "verifyPhoneAuthCode",
+      "getSupportedPhoneCountries",
+      "claimRelayJobs",
+      "authorizeRelaySend",
+      "relayReaper",
+      "onOtpPolicyWritten"
+    ],
+    "allOperationsDone": true,
+    "sourceCommit": "d3cafc76dae98469ce49d905450380147d53ac97"
+  },
+  "manifest": {
+    "runId": "g7_20261008201333355_3b048c81",
+    "project": "offlinesms-prod-2027",
+    "sourceCommit": "d3cafc76dae98469ce49d905450380147d53ac97",
+    "functions": [
+      "startPhoneAuth",
+      "requestPhoneAuthCode",
+      "verifyPhoneAuthCode",
+      "getSupportedPhoneCountries",
+      "claimRelayJobs",
+      "authorizeRelaySend",
+      "relayReaper",
+      "onOtpPolicyWritten"
+    ],
+    "temporaryVariable": "PHONE_AUTH_ENABLED=true",
+    "restore": "remove temporary variable after stop",
+    "ceilings": {
+      "sessionStarts": 60,
+      "codeRequests": 60,
+      "concurrency": 4,
+      "admissionSeconds": 600
+    },
+    "ownedDestinationCount": 1,
+    "isolation": {
+      "syntheticDevices": 1,
+      "relayIdentities": 0,
+      "pairingCredentials": 0,
+      "capacity": [
+        0,
+        0,
+        0
+      ],
+      "pushToken": false,
+      "phoneProvider": false
+    },
+    "environmentOff": {
+      "results": [
+        {
+          "function": "startPhoneAuth",
+          "status": 400,
+          "reason": "phone-auth-unavailable"
+        },
+        {
+          "function": "requestPhoneAuthCode",
+          "status": 400,
+          "reason": "phone-auth-unavailable"
+        }
+      ],
+      "before": {
+        "smsRateLimits": 0,
+        "phoneAuthSessions": 0,
+        "phoneAuthChallenges": 0,
+        "phoneAuthOps": 0,
+        "relayJobs": 366
+      },
+      "after": {
+        "smsRateLimits": 0,
+        "phoneAuthSessions": 0,
+        "phoneAuthChallenges": 0,
+        "phoneAuthOps": 0,
+        "relayJobs": 366
+      },
+      "passed": true
+    },
+    "sourceIngressGate": "open; no source-security claim",
+    "proof": {
+      "base": 14,
+      "max": 18
+    },
+    "phoneLinkEnabled": false,
+    "harnessFiles": [
+      {
+        "name": "g7-core.cjs",
+        "sha256": "54958638e4e9e46a09890044128175e1f6fc4f44698c105cafe55ee733248ebc"
+      },
+      {
+        "name": "g7-ops.cjs",
+        "sha256": "be39eee7bcd94e83a7741e6c31933fe2ddf2845bc8ea11c392b1e46894183ec8"
+      },
+      {
+        "name": "g7-run.cjs",
+        "sha256": "9c19c99fb4a2f6229bdb6e790eca759a98e2c05f3098fa0ce338141b69208b61"
+      },
+      {
+        "name": "g7-cleanup.cjs",
+        "sha256": "f354a836a65cc7278f0c4a1bebd909424cd746d6ee7a944016e9b15c749f5b73"
+      }
+    ],
+    "restorationHarness": {
+      "name": "g7-ops.cjs",
+      "sha256": "52c2090b0a8d7d9791a56990bb0792aa36cc786775ed9532f3266aa4f42e9317"
+    },
+    "resumeHarness": {
+      "name": "g7-resume.cjs",
+      "sha256": "0262f125e6f29cbfbd34f489b7db60d2643302e4dccc0f077f9be8319f346e5a"
+    },
+    "cleanupHarness": {
+      "name": "g7-cleanup.cjs",
+      "sha256": "3615ccf0caad16fd05f5a01c832441737a621b7b6e06fe716a4e1196f4b885dd"
+    },
+    "finalVerificationHarness": {
+      "name": "g7-final-verify.cjs",
+      "sha256": "f890d4e266068a82cd1efa457a03960d7fafbe998d70227366c1c04a0eb4c33e"
+    }
+  },
+  "counterAliases": "Snapshot-local aliases; raw HMAC document paths and observed ingress address retained only in restricted evidence.",
+  "summary": {
+    "g7a": {
+      "gates": 5,
+      "refusals": 10,
+      "protectedCountsUnchanged": true
+    },
+    "g7b": {
+      "sessionStartsAccepted": 8,
+      "uniqueCodeAcceptances": 2,
+      "idempotentReplays": 2,
+      "confirmedBudgetRefusals": 18,
+      "codeRequests": 22,
+      "scopeTallies": {
+        "destination": 9,
+        "session": 2,
+        "installation": 1,
+        "signinGlobal": 3,
+        "sharedGlobal": 3
+      },
+      "maxConcurrentCalls": 4,
+      "admissionMilliseconds": 390191,
+      "sourceScopeVerified": false,
+      "multiDestinationAdmissionRaceVerified": false
+    }
+  },
+  "finalVerification": {
+    "at": "2026-10-08T20:49:15.319Z",
+    "passed": true,
+    "project": "offlinesms-prod-2027",
+    "functionsVerified": 85,
+    "sourceAndEnvironmentRestored": true,
+    "archiveProof": [
+      {
+        "function": "requestPhoneLinkOtp",
+        "generation": "1791489303457201",
+        "md5": "2t2B7AptbQsi3Ahx1Is/6g==",
+        "crc32c": "oqFbIg==",
+        "size": 515513
+      },
+      {
+        "function": "verifyPhoneAuthCode",
+        "generation": "1791492172901717",
+        "md5": "2t2B7AptbQsi3Ahx1Is/6g==",
+        "crc32c": "oqFbIg==",
+        "size": 515513
+      },
+      {
+        "function": "claimRelayJobs",
+        "generation": "1791492198272315",
+        "md5": "2t2B7AptbQsi3Ahx1Is/6g==",
+        "crc32c": "oqFbIg==",
+        "size": 515513
+      },
+      {
+        "function": "authorizeRelaySend",
+        "generation": "1791492210533709",
+        "md5": "2t2B7AptbQsi3Ahx1Is/6g==",
+        "crc32c": "oqFbIg==",
+        "size": 515513
+      },
+      {
+        "function": "getSupportedPhoneCountries",
+        "generation": "1791492185075185",
+        "md5": "2t2B7AptbQsi3Ahx1Is/6g==",
+        "crc32c": "oqFbIg==",
+        "size": 515513
+      },
+      {
+        "function": "requestPhoneAuthCode",
+        "generation": "1791492160309403",
+        "md5": "2t2B7AptbQsi3Ahx1Is/6g==",
+        "crc32c": "oqFbIg==",
+        "size": 515513
+      },
+      {
+        "function": "startPhoneAuth",
+        "generation": "1791492148299069",
+        "md5": "2t2B7AptbQsi3Ahx1Is/6g==",
+        "crc32c": "oqFbIg==",
+        "size": 515513
+      },
+      {
+        "function": "onOtpPolicyWritten",
+        "generation": "1791492235669562",
+        "md5": "2t2B7AptbQsi3Ahx1Is/6g==",
+        "crc32c": "oqFbIg==",
+        "size": 515513
+      },
+      {
+        "function": "relayReaper",
+        "generation": "1791492222628724",
+        "md5": "2t2B7AptbQsi3Ahx1Is/6g==",
+        "crc32c": "oqFbIg==",
+        "size": 515513
+      }
+    ],
+    "archiveReference": "untouched requestPhoneLinkOtp from the same pinned single-archive deployment",
+    "secretBindingsUnchanged": true,
+    "policy": {
+      "enabled": false,
+      "emergencyStop": true,
+      "signinEnabled": false,
+      "linkEnabled": false,
+      "policyVersion": 21
+    },
+    "phoneProviderEnabled": false,
+    "senderAndLimitsRestored": true,
+    "syntheticDeviceRemoved": true,
+    "testJobsRemaining": 0,
+    "queuedClaimedSending": 0,
+    "counts": {
+      "smsRateLimits": 7,
+      "phoneAuthSessions": 0,
+      "phoneAuthChallenges": 0,
+      "phoneAuthOps": 0,
+      "relayJobs": 366
+    },
+    "global": {
+      "h": {
+        "c": 2,
+        "s": 1791491315213
+      },
+      "d": {
+        "c": 2,
+        "s": 1791491315213
+      }
+    },
+    "shared": {
+      "h": {
+        "s": 1791491315213,
+        "c": 2
+      },
+      "d": {
+        "s": 1791491315213,
+        "c": 2
+      }
+    },
+    "probes": [
+      {
+        "function": "startPhoneAuth",
+        "status": 400,
+        "reason": "phone-auth-unavailable",
+        "passed": true
+      },
+      {
+        "function": "requestPhoneAuthCode",
+        "status": 400,
+        "reason": "phone-auth-unavailable",
+        "passed": true
+      }
+    ],
+    "countsUnchanged": true
+  },
+  "totalCallableRequestsIncludingFinalSmoke": {
+    "sessionStarts": 14,
+    "codeRequests": 28
+  },
+  "completedAt": "2026-10-08T20:49:15.319Z"
+}

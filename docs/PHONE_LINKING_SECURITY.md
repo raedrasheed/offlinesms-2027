@@ -527,7 +527,7 @@ by status before and after teardown; the synthetic device document; the
 `smsConfig/otp` document used; harness version and runner IPs (redacted to /24).
 
 
-### 12.2 Existing production environment — authorized validation mode (stopped deployment executed; live budgets pending)
+### 12.2 Existing production environment — authorized validation mode (bounded live validation recorded)
 
 On 2026-10-08 the product owner confirmed that the existing environment is
 production and explicitly permitted using it for these tests. The repository's
@@ -627,11 +627,13 @@ does not turn the native-device gates into server tests.
 **Execution status:** the emulator rehearsal, authenticated production preflight
 and remediation dry-run are complete (§12.3). The owner subsequently approved
 the concrete stopped-deployment scope, which was executed and verified (§12.4).
-The policy, provider, secret, rules, indexes and selected functions have changed
-as recorded there; no cleanup application or admission-enabled G7b run occurred.
-Controlled test-number inputs and the live run manifest are still needed.
-Environment access and this stopped deployment are already authorized; do not
-request those permissions again.
+The policy, provider, secret, rules, indexes and selected functions changed as
+recorded there. The owner then supplied one controlled destination and the
+bounded production checks in §12.5 were executed. G7a passed; G7b has evidence
+for the explicitly listed scopes, with the remaining scopes and gates still
+open. Test-only cleanup is complete; production remediation was not applied.
+Production is stopped again. Environment access and the documented validation
+scope are already authorized; do not request those permissions again.
 
 
 ### 12.3 Evidence and proposed stopped deployment — 2026-10-08
@@ -764,9 +766,9 @@ These checks establish the deployed stopped behavior and legacy retirement.
 They do **not** establish budget enforcement: the environment/master/purpose
 gates were off together, so this is not the independent G7a switch matrix or
 G7b. The unauthenticated status check is not a completed G7c signed-token matrix.
-G5, live G7b/G7c, the device gates and general rollout remain open. Next inputs
-are business-controlled destination numbers and the bounded live run manifest
-in §12.2; production sending stays stopped until that controlled phase.
+At the end of this deployment, G5, live G7b/G7c, the device gates and general
+rollout remained open. The owner subsequently supplied a controlled destination;
+§12.5 records the bounded live checks and the restored stopped state.
 
 **Runtime follow-up.** The approved source remains on Node.js 20. Deployment
 succeeded, but the CLI warned that the runtime is deprecated. Its warning used
@@ -776,3 +778,108 @@ checked on 2026-10-08, lists decommission on **2026-10-30**. Schedule and valida
 the runtime upgrade before the earlier official date. This deployment did not
 upgrade Node.js, dependencies, the dashboard, mobile app or relay devices, and
 did not merge PR #28.
+
+
+### 12.5 Bounded production validation and restored stop — 2026-10-08
+
+**Result:** the independent G7a matrix passed. The bounded G7b phases below
+reached the budget path and passed their stated checks. This is partial G7b
+coverage, not throughput certification or release approval. No SMS was sent.
+Final production verification passed at **20:49:15 UTC**.
+
+The [sanitized evidence](evidence/G7_PRODUCTION_2026-10-08.json) contains the
+manifest, harness hashes, phase configuration, projected counter windows,
+refusal tallies, job states, interruption reconciliation, cleanup and final
+verification. It excludes the controlled number, codes, message text, bearer
+tokens, raw counter HMAC paths and ingress address. Restricted evidence retained
+the counter paths and observed ingress address; that observation does not
+establish G5.
+
+**Scope and isolation.** Source stayed pinned to
+`d3cafc76dae98469ce49d905450380147d53ac97`, following the successful emulator
+rehearsal in §12.3. One owner-supplied destination was used. A unique test-only
+business had one synthetic coverage device, capacity **0/0/0**, no push token,
+no pairing credential and no relay Auth identity. Isolation was checked before
+each admission-enabled phase; heartbeat and job-state monitoring ran during
+the tests. Real relays were not enrolled, enabled or upgraded. Phone linking
+and the built-in Phone provider remained disabled. Production proof settings
+remained at base 14 / maximum 18 bits; attestation was not weakened.
+
+Only `PHONE_AUTH_ENABLED` was temporarily enabled, then removed, on
+`startPhoneAuth`, `requestPhoneAuthCode`, `verifyPhoneAuthCode`,
+`getSupportedPhoneCountries`, `claimRelayJobs`, `authorizeRelaySend`,
+`relayReaper` and `onOtpPolicyWritten`. Policy stayed stopped during these
+configuration deployments. Cloud Functions generated new builds and source
+object generations. All eight resulting archives matched the untouched
+`requestPhoneLinkOtp` archive from the same pinned, single-archive deployment:
+**515,513 bytes**, MD5 `2t2B7AptbQsi3Ahx1Is/6g==`, CRC32C `oqFbIg==`.
+Final checks also matched source labels, environment maps and secret bindings
+for all **85** functions. Changed generation IDs are not counted as code changes.
+
+**G7a.** Environment, master, emergency stop, sender and sign-in were each
+switched off independently. Both `startPhoneAuth` and `requestPhoneAuthCode`
+refused in every case: ten refusals with the expected `phone-auth-unavailable`
+or `service-paused` reason, with protected document counts unchanged.
+This is separate from the budget evidence.
+
+**G7b.** At most four callables ran concurrently. Limits were adjusted against
+existing counters without resetting or deleting them. Installation, global,
+shared and destination-hour boundary checks used a limit of one after one
+acceptance; destination cooldown had elapsed before the later-scope checks.
+Session maximum codes was one. Other limits stayed at production defaults;
+per-phase overrides are retained in the evidence.
+
+| Check | Observed result |
+|---|---|
+| Four simultaneous requests to the controlled destination | 1 accepted; 3 `cooldown` refusals, `scope: destination` |
+| Replay of each accepted request | 2 replays; no new job or counter increment |
+| Session cooldown and exhaustion | 1 `cooldown` and 1 `session-exhausted`, `scope: session` |
+| Fresh session using the exhausted installation | 1 `rate-limited`, `scope: installation` |
+| Sign-in global budget at its limit | 3 concurrent `service-busy`, `scope: global` |
+| Shared budget at its limit, sign-in global budget restored to default | 3 concurrent `service-busy`, `scope: global`; phase configuration identifies the shared check |
+| Destination hourly budget | 3 refusals recovered from server logs, then 3 in a clean repeat; all `rate-limited`, `scope: destination` |
+| Second unique request with default hourly limits restored | 1 accepted; exactly one new job and counter increment |
+
+The harness made **13 session-start and 27 code-request calls**, including
+G7a, replays and the repeated phase. Eight sessions were created. The 22 budget
+code calls reconcile as **2 unique acceptances + 2 replays + 18 budget
+refusals**. Both `global_phoneAuth` and `global_verification` increased from
+absent/zero to **2** in their hour and day windows, matching two new relay jobs.
+Destination/source counters stayed within configured limits, without window
+rollover. Source counts alone do not verify trusted derivation or enforcement.
+
+**Interruptions retained in the evidence.** A pre-admission attempt stopped
+when the synthetic heartbeat became stale during the deployment wait; it
+created no sessions or jobs. The device was refreshed while policy was stopped.
+Later, the runner session ended before saving the destination-hour phase.
+Admission was explicitly stopped and jobs/counters reconciled. Bounded Cloud
+Run logs confirmed all three affected requests returned HTTP 429 with
+`rate-limited / destination`. The phase was repeated after fresh isolation
+checks. The two admission-enabled windows totaled **390.191 seconds** (about
+6 minutes 30 seconds), within the 600-second ceiling. No counter was reset,
+and no unavailable client response alone was treated as proof.
+
+**Teardown.** Both jobs always had zero attempts, no assigned device and no
+lease owner. One was cancelled as `policy-changed` between phases; the other
+as `sending-stopped` at teardown. Both bodies were removed before deleting
+exactly **8 sessions, 2 challenges, 2 jobs and one synthetic device**. Ownership
+and update-time preconditions protected cleanup. The first atomic deletion was
+rejected when the reaper marked the synthetic device offline; a fresh ownership
+read allowed the retry. No partial deletion or real-user cleanup was applied.
+All seven rate-limit documents were retained.
+
+**Final state.** Original sender and limit fields are restored. Policy is
+`enabled:false`, `emergencyStop:true`, `signin.enabled:false`,
+`link.enabled:false`, with monotonic `policyVersion:21`. Temporary environment
+flags are absent; the provider is disabled and secret bindings unchanged.
+There are zero test sessions/challenges/jobs and zero queued/claimed/sending
+jobs project-wide. Relay jobs total **366**, as before. Two final stopped
+probes returned `phone-auth-unavailable` without changing counts. Including
+these probes, totals are **14 session-start and 28 code-request calls**, below
+the original ceilings.
+
+**Still open:** G5 trusted ingress/header derivation; source-budget enforcement;
+multi-destination admission races at global/shared scopes; distinct-number and
+unexercised daily-limit cases; sustained load; G7c signed-token matrix; native
+App Check/device gates; relay upgrades and rollout. No real SMS, production
+remediation, mobile/relay deployment or PR merge was performed.
