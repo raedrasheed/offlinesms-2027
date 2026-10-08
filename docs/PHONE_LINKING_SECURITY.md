@@ -308,7 +308,7 @@ commands also in the PR description).
 | Helper/unit | `npm test` | 697 / 697 (64 files) |
 | Firestore rules (emulator) | `npm run test:rules` (with the Firestore emulator) | 143 / 143 (14 files) |
 | Handler + Firestore/Auth emulators | `npm run test:integration` | 172 / 172 (7 files) |
-| Wire-level HTTP + real triggers (Functions emulator) | `npm run test:callable` | 7 / 7 |
+| Wire-level HTTP + real triggers (Functions emulator) | `npm run test:callable` | 17 / 17 at `d3cafc76` ([CI 37829267841](https://github.com/raedrasheed/offlinesms-2027/actions/runs/37829267841)); includes the G7 rehearsal in §12.3 |
 | Relay send pipeline (plain JVM, no Android SDK) | `gradle -p apps/mobile-relay/sendgate-jvm-test test` | 16 / 16 |
 | Relay **Android app**: compile + package | `gradle -p apps/mobile-relay :app:assembleDebug` (placeholder `google-services.json` via `scripts/ci/relay-google-services.sh`) | BUILD SUCCESSFUL (debug APK) |
 | Relay app unit + Robolectric integration | `gradle -p apps/mobile-relay :app:testDebugUnitTest` | 38 / 38 (`SendPipelineTest` 16, `RelayIntegrationTest` 17, `SendResultAggregatorTest` 5) |
@@ -335,7 +335,9 @@ devices; PoW timing on low-end phones (Hermes); Firebase ID-token **signature**
 checking (the Auth emulator doesn't sign tokens); App Check (the emulator does
 not enforce it); the production `X-Forwarded-For` chain (`sourceHopsFromRight`
 must be verified against the real ingress before relying on source budgets);
-production Firestore contention; any production data or logs (none inspected).
+production Firestore contention; production request logs. Read-only production
+configuration, queue/counter totals and a remediation dry-run were subsequently
+inspected on 2026-10-08 (§12.3); those observations do not prove these runtime gates.
 
 CI at `526c96a`: the general job and the new `relay-android` job passed; the
 security-emulators job failed in both runs on two **pre-existing phone-link
@@ -355,7 +357,7 @@ pass now; the rules tests fail on the base rules for the profile-create gap; the
 original abuse was reproduced on the base commit (25/25 anonymous SMS queued; 14
 SMS from 20 parallel requests to one number; fixed credential minted an account).
 
-### Production remediation (documented, NOT executed)
+### Production remediation (dry-run executed; apply NOT executed)
 `scripts/remediatePhoneOtpAbuse.ts` — dry-run by default, counts only (no PII),
 including `inFlightPossiblyOnDevice` (legacy jobs a relay may already hold).
 `--apply --project=<id>` cancels queued/claimed legacy OTP jobs, purges bodies and
@@ -411,10 +413,11 @@ not the identity of a person; a client installation id is resettable.
   layer, not a human check).
 * SMS text is English only.
 
-## 12. Remaining validation gates — execution plan (NOT executed)
+## 12. Remaining validation gates — execution plan and recorded results
 
-None of the steps below has been run. They need environments or access this
-work did not have. Roles, not people, are named; the product owner assigns them.
+The table below is the original gate plan. The G7 emulator rehearsal and the
+production read-only preflight/remediation dry-run have now run (§12.3); live G7
+and the device gates remain open. Roles, not people, are named; the product owner assigns them.
 "Fake/emulator" steps can run in CI or locally; "device" steps need an installed
 build; "authorized" steps need separately approved access to a non-production
 or production Firebase project, real SIMs or production data. The production
@@ -518,7 +521,7 @@ by status before and after teardown; the synthetic device document; the
 `smsConfig/otp` document used; harness version and runner IPs (redacted to /24).
 
 
-### 12.2 Existing production environment — authorized validation mode (NOT executed)
+### 12.2 Existing production environment — authorized validation mode (preflight executed; live G7 pending)
 
 On 2026-10-08 the product owner confirmed that the existing environment is
 production and explicitly permitted using it for these tests. The repository's
@@ -615,8 +618,84 @@ does not turn the native-device gates into server tests.
    user records. Remove the synthetic device after its jobs are safe.
    Verify the stopped state and record any unresolved cleanup explicitly.
 
-**Execution status:** plan only. This documentation change did not access the
-Firebase production project or execute any of these steps. The execution
-session needs an authenticated project connection, the concrete deployment/run
-manifest, controlled test-number inputs and an emulator rehearsal. The owner's
-environment authorization is already recorded and need not be requested again.
+**Execution status:** the emulator rehearsal, authenticated read-only production
+preflight and remediation dry-run are complete (§12.3). No production deployment,
+configuration mutation, cleanup application or live G7 admission run has taken
+place. The stopped-deployment proposal below requires a decision on its actual
+production effects; controlled test-number inputs are still needed for live G7b.
+The owner's environment authorization is already recorded and need not be
+requested again.
+
+
+### 12.3 Evidence and proposed stopped deployment — 2026-10-08
+
+**Emulator evidence.** Runtime/test source: `d3cafc76dae98469ce49d905450380147d53ac97`.
+[CI run 37829267841](https://github.com/raedrasheed/offlinesms-2027/actions/runs/37829267841)
+passed all three jobs, including 143 rules tests, 172 handler integration tests
+and 17 HTTP callable tests. Ten added HTTP cases cover four disabled-policy
+settings, five parallel budget phases and a session cooldown/exhaustion case.
+The environment-off case remains covered separately by the handler tests.
+
+The budget phases produced 14 unique accepted requests/jobs, 29 budget
+refusals and five successful idempotent replays with no extra jobs/counters.
+Global/shared counter changes reconciled with unique jobs; no job was claimed.
+Teardown cancelled all 14 jobs as `sending-stopped` and removed their bodies.
+The HTTP harness requires the exact local emulator project/hosts; it cannot
+be repointed at production. This closes the rehearsal, not live G7.
+
+**Production observations.** Authenticated reads of
+`offlinesms-prod-2027`, captured around 19:28–19:31 UTC. Queries are successive
+observations, not one atomic database snapshot.
+
+| Item | Observed result |
+|---|---|
+| Functions | 76 deployed functions. All nine additions listed below are absent. The Firebase source hash on the inspected legacy/relay functions is `2656c210f299f6c8dce4bc267b587f40b438e97b`; this is **not** a verified Git SHA. |
+| Firebase built-in Phone provider | **Enabled.** The prior assumption that it was disabled is false for this snapshot. No setting was changed. |
+| `smsConfig/otp` | Sender and Android hash are present; master/stop/version/signin/link fields are absent. This would resolve to disabled/stopped **under the new branch code**; it does not establish how the deployed legacy code behaves. |
+| Protected-flow state | Zero documents in `phoneAuthSessions`, `phoneAuthChallenges`, `phoneLinkChallenges` and `smsRateLimits`. All three named global/shared counter documents are absent. |
+| All relay jobs | 366 total: 334 delivered, 21 sent, 11 failed; zero queued/claimed/sending/expired. |
+| Relay devices | Two, both reporting 0.1.0: one revoked, one paused; neither heartbeat is fresh. No device upgrade was performed. |
+| Country discovery | One read-only call to deployed `getSupportedPhoneCountries` returned HTTP 200 and an empty country list. This is not a budget test. |
+| Rules | Deployed release updated 2026-06-26; differs from branch rules after normalizing line endings. |
+| Required sweep indexes | Neither `relayJobs(kind,status,expiresAt)` nor `relayJobs(kind,status,__name__)` appears in the complete composite-index listing. |
+| Pepper prerequisite | Secret Manager returned HTTP 403 / `SERVICE_DISABLED`. Secret existence/value could not be verified; no secret was read, created or rotated. |
+
+**Remediation dry-run.** Executed the unchanged exported
+`runRemediation` logic from `scripts/remediatePhoneOtpAbuse.ts` at the source
+revision above, using a read-only REST adapter for the authorized Firebase CLI
+session. The adapter exposes only the reads needed by this routine and supplies
+no write/batch interface; `apply:false`, `redactAudit:false`, all-time range.
+This is the exported routine, not the service-account CLI entry point.
+
+Results: 83 `otpChallenges`; 303 legacy OTP jobs (278 delivered, 17 sent,
+8 failed), zero with message bodies, zero possibly in flight on a device;
+456 OTP audit rows whose target is still a raw phone number; 71 phone-only
+Auth users across all time. All applied-change counts and forensic-export counts
+are zero. These counts do not identify abuse-created accounts. Published evidence
+contains no phone numbers, codes, message bodies, emails, UIDs or credentials.
+G9 remains open because its required provider/relay-version state is not met.
+
+**Concrete stopped-deployment proposal — prepared, NOT approved or executed.**
+Pinned application source is `d3cafc76`; this is a partial deployment to prepare
+controlled validation, not deployment of every change in PR #28.
+
+| Surface | Exact proposed scope |
+|---|---|
+| Google/Firebase configuration | Enable Secret Manager API; inspect secret metadata, reuse `PHONE_HASH_PEPPER` if present or create it only if confirmed absent, with access for the selected runtime identity. Disable Firebase's built-in Phone provider. Disabling this provider affects clients that currently use Firebase phone authentication and is an explicit decision, not a read-only test. |
+| Firestore policy | Preserve sender/hash and unrelated fields; set master/signin/link disabled and `emergencyStop:true`; monotonically advance `policyVersion`. Keep both purpose environment flags unset and preserve current App Check settings. |
+| Firestore rules | The complete branch `firestore.rules`: protect phone/email profile creation and private-profile owner writes; deny client writes to relay jobs, SMS policy and OTP state, including admin clients; add protected-flow server-only collections. |
+| Firestore indexes | Add only the two missing relay sweep indexes above; retain all existing indexes and wait for READY. |
+| Nine new functions, us-central1 | `startPhoneAuth`, `requestPhoneAuthCode`, `verifyPhoneAuthCode`, `requestPhoneLinkOtp`, `verifyPhoneLinkOtp`, `resumePhoneLink`, `getPhoneLinkStatus`, `authorizeRelaySend`, `onOtpPolicyWritten`. |
+| Eleven existing functions, us-central1 | `requestPhoneOtp`, `verifyPhoneOtp`, `getSupportedPhoneCountries`, `createRelayPairingCode`, `enrollRelayDevice`, `relayHeartbeat`, `revokeRelayDevice`, `setRelayCountries`, `claimRelayJobs`, `reportRelayDelivery`, `relayReaper`. |
+| Effect on old phone clients | Retired OTP endpoints refuse and old clients receive no supported phone countries. Updated relay handlers enforce the new claim/report protocol; legacy verification work becomes unsendable. Recheck live queue/device state immediately before deployment. |
+
+The other existing functions, dashboard/mobile deployment, relay installation,
+record deletion/audit redaction and general SMS rollout are outside this
+proposal. Rules changes also affect direct admin-client writes to SMS settings
+and OTP records; trusted server/Admin SDK operations remain available.
+
+After a stopped deployment, first verify refusal before writes and capture its
+deployed configuration. A later admission-enabled production run still needs
+controlled destination numbers, its bounded run manifest (§12.2), checked test
+business/identity isolation and ingress evidence. No existing user's number
+may be selected as a test input from these read-only inspections.
