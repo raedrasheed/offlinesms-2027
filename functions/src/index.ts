@@ -113,6 +113,8 @@ export { claimRelayJobs, reportRelayDelivery, authorizeRelaySend } from './sms/r
 // Relay-only reaper (Phase 3): lease expiry/requeue + stale-device offline +
 // metrics. Touches relay* collections only; no production SMS impact.
 export { relayReaper } from './sms/relayReaper';
+// OTP policy changed → generation-conditional cleanup of stale queued codes.
+export { onOtpPolicyWritten } from './verification/staleJobSweep';
 
 // Phase 24 — OTP over relay (custom-token phone sign-in; no Firebase phone auth).
 // The original requestPhoneOtp/verifyPhoneOtp are retired (always refuse); the

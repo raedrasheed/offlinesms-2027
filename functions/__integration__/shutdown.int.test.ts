@@ -100,8 +100,12 @@ describe('scenario 9 — relay queue: legacy jobs, duplicates, retries, emergenc
   it('the reaper also purges queued legacy OTP jobs and expired link codes', async () => {
     await queueJob('otp_legacy_3', { kind: 'otp' });
     await queueJob('plink_expired', { kind: 'phone_link_otp', expiresAt: Timestamp.fromMillis(Date.now() - 1000) });
-    await queueJob('plink_live', { kind: 'phone_link_otp', expiresAt: Timestamp.fromMillis(Date.now() + 120_000) });
+    // Current-generation code (bound to the policy's sender + version) survives…
+    await queueJob('plink_live', { kind: 'phone_link_otp', policyVersion: 1, expiresAt: Timestamp.fromMillis(Date.now() + 120_000) });
+    // …one with no generation (pre-binding) is undeliverable at claim/authorization anyway, so it is purged too.
+    await queueJob('plink_ungenerated', { kind: 'phone_link_otp', expiresAt: Timestamp.fromMillis(Date.now() + 120_000) });
     await relayReaper.run({} as never);
+    expect((await db().collection('relayJobs').doc('plink_ungenerated').get()).get('status')).toBe('failed');
     expect((await db().collection('relayJobs').doc('otp_legacy_3').get()).get('status')).toBe('failed');
     expect((await db().collection('relayJobs').doc('plink_expired').get()).get('status')).toBe('failed');
     expect((await db().collection('relayJobs').doc('plink_expired').get()).get('messageBody')).toBeUndefined();

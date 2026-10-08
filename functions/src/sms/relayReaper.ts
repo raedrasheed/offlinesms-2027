@@ -10,8 +10,8 @@ import { getFirestore, FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { writeAuditLog } from '../lib/auditLog';
 import {
   reapDecision, backoffMs, isHeartbeatStale, recipientStatusFor, type RelayJobStatus,
-  PUBLIC_OTP_JOB_KIND, PHONE_LINK_JOB_KIND, PHONE_AUTH_JOB_KIND,
 } from './relayLogic';
+import { sweepStaleVerificationJobs } from '../verification/staleJobSweep';
 import { maybeFinalizeRelayBatch } from './relaySettlement';
 
 const SCAN_LIMIT = 200;
@@ -116,41 +116,15 @@ export const relayReaper = onSchedule(
   },
 );
 
-async function cancelQueuedVerificationJobs(db: FirebaseFirestore.Firestore, now: number): Promise<number> {
-  let n = 0;
-  const sweep = async (q: FirebaseFirestore.Query, reason: string, expiredOnly: boolean) => {
-    const snap = await q.limit(SCAN_LIMIT).get();
-    for (const doc of snap.docs) {
-      const done = await db.runTransaction(async tx => {
-        const fresh = await tx.get(doc.ref);
-        if (!fresh.exists || fresh.get('status') !== 'queued') return false;
-        if (expiredOnly) {
-          const exp = (fresh.get('expiresAt') as Timestamp | undefined)?.toMillis?.() ?? null;
-          if (exp != null && exp > now) return false;
-        }
-        tx.update(doc.ref, {
-          status: 'failed', failedAt: FieldValue.serverTimestamp(), lastError: reason,
-          messageBody: FieldValue.delete(), updatedAt: FieldValue.serverTimestamp(),
-        });
-        return true;
-      });
-      if (done) n++;
-    }
-  };
+/** Every minute: generation-conditional, paginated cleanup of queued verification
+ *  codes (legacy, expired, stopped, other sender/generation). Bounded per run. */
+async function cancelQueuedVerificationJobs(db: FirebaseFirestore.Firestore, _now: number): Promise<number> {
   try {
-    await sweep(db.collection('relayJobs').where('kind', '==', PUBLIC_OTP_JOB_KIND).where('status', '==', 'queued'),
-      'public-otp-disabled', false);
-    for (const kind of [PHONE_LINK_JOB_KIND, PHONE_AUTH_JOB_KIND]) {
-      await sweep(db.collection('relayJobs').where('kind', '==', kind).where('status', '==', 'queued')
-        .where('expiresAt', '<=', Timestamp.fromMillis(now)), 'expired', true);
-    }
+    return (await sweepStaleVerificationJobs(db, 10)).cancelled;
   } catch (e) {
-    // A missing composite index must not stop the lease sweep above; the claim-
-    // time gate still blocks delivery. Logged without any job content.
+    // A failure here must not stop the lease sweep; claim/authorization still
+    // block delivery of stale codes. Logged without any job content.
     console.error('[relayReaper] verification sweep failed', (e as Error)?.message);
+    return 0;
   }
-  if (n > 0) {
-    await writeAuditLog({ action: 'relay.verification.cancelled', actor: { uid: 'system' }, target: { type: 'relayJobs', id: 'sweep' }, result: 'success', metadata: { count: n } });
-  }
-  return n;
 }

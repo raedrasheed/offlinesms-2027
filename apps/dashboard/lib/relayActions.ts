@@ -96,30 +96,25 @@ export async function setRelayModeAction(mode: 'http' | 'relay' | 'hybrid', targ
 
 const E164 = /^\+[1-9]\d{6,14}$/;
 
-/** Verification-SMS job kinds (mirror of functions/src/sms/relayLogic.ts). */
-const VERIFICATION_KINDS = ['otp', 'phone_auth_otp', 'phone_link_otp'];
-
 /**
- * Cancel every QUEUED verification job (codes not yet handed to a device) and
- * purge its body. Called whenever the OTP policy changes so stale codes never
- * drain later. Jobs already claimed are stopped by the relay's final
- * authorization (policyVersion mismatch); an SMS already handed to a phone's
- * modem cannot be recalled.
+ * Apply an OTP-policy change and advance policyVersion in ONE transaction.
+ * Queued codes from the retired generation are then cancelled by the backend's
+ * generation-conditional sweep (functions: onOtpPolicyWritten + relayReaper),
+ * which re-checks each job's status and generation in its own transaction —
+ * this action never bulk-overwrites job documents. Codes already claimed are
+ * stopped at the relay's final authorization (policyVersion mismatch).
  */
-async function cancelQueuedVerificationJobs(reason: string): Promise<number> {
-  let n = 0;
-  for (const kind of VERIFICATION_KINDS) {
-    const snap = await adminDb.collection('relayJobs').where('kind', '==', kind).where('status', '==', 'queued').limit(450).get();
-    if (snap.empty) continue;
-    const batch = adminDb.batch();
-    snap.docs.forEach(d => batch.update(d.ref, {
-      status: 'failed', failedAt: FieldValue.serverTimestamp(), lastError: reason,
-      messageBody: FieldValue.delete(), updatedAt: FieldValue.serverTimestamp(),
-    }));
-    await batch.commit();
-    n += snap.size;
-  }
-  return n;
+async function applyOtpPolicyChange(patch: Record<string, unknown>): Promise<number> {
+  const ref = adminDb.collection('smsConfig').doc('otp');
+  return adminDb.runTransaction(async tx => {
+    const snap = await tx.get(ref);
+    const cur = snap.exists && typeof snap.get('policyVersion') === 'number' ? (snap.get('policyVersion') as number) : 0;
+    const next = cur + 1;
+    if (snap.exists) tx.update(ref, { ...patch, policyVersion: next, updatedAt: FieldValue.serverTimestamp() });
+    else tx.set(ref, { policyVersion: next, updatedAt: FieldValue.serverTimestamp() });
+    if (!snap.exists && Object.keys(patch).length) tx.update(ref, patch);
+    return next;
+  });
 }
 
 function platformOnly(session: AuthorizedSession): string | null {
@@ -136,16 +131,13 @@ export async function setOtpOrgAction(businessId: string): Promise<RelayActionSt
   const denied = platformOnly(session);
   if (denied) return { error: denied };
   const id = (businessId ?? '').trim() || null;
-  let cancelled = 0;
+  let policyVersion = 0;
   try {
-    await adminDb.collection('smsConfig').doc('otp').set(
-      { businessId: id, policyVersion: FieldValue.increment(1), updatedAt: FieldValue.serverTimestamp() }, { merge: true },
-    );
-    cancelled = await cancelQueuedVerificationJobs('policy-changed');
+    policyVersion = await applyOtpPolicyChange({ businessId: id });
   } catch {
     return { error: 'Could not save the OTP organization.' };
   }
-  await audit(id ? 'relay.otp.org.set' : 'relay.otp.org.cleared', session, id ?? 'none', { businessId: id, cancelled });
+  await audit(id ? 'relay.otp.org.set' : 'relay.otp.org.cleared', session, id ?? 'none', { businessId: id, policyVersion });
   revalidatePath('/admin/settings');
   revalidatePath('/admin/relay');
   return { success: true };
@@ -166,23 +158,19 @@ export async function setOtpPolicyAction(patch: OtpPolicyPatch): Promise<RelayAc
   if ('error' in session) return session;
   const denied = platformOnly(session);
   if (denied) return { error: denied };
-  const update: Record<string, unknown> = { policyVersion: FieldValue.increment(1), updatedAt: FieldValue.serverTimestamp() };
+  const update: Record<string, unknown> = {};
   if (typeof patch.enabled === 'boolean') update.enabled = patch.enabled;
   if (typeof patch.emergencyStop === 'boolean') update.emergencyStop = patch.emergencyStop;
   if (typeof patch.signinEnabled === 'boolean') update['signin.enabled'] = patch.signinEnabled;
   if (typeof patch.linkEnabled === 'boolean') update['link.enabled'] = patch.linkEnabled;
-  if (Object.keys(update).length === 2) return { error: 'Nothing to change.' };
-  let cancelled = 0;
+  if (Object.keys(update).length === 0) return { error: 'Nothing to change.' };
+  let policyVersion = 0;
   try {
-    const ref = adminDb.collection('smsConfig').doc('otp');
-    // update() needs the doc to exist and keeps dotted paths nested.
-    await ref.set({ updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-    await ref.update(update);
-    cancelled = await cancelQueuedVerificationJobs('policy-changed');
+    policyVersion = await applyOtpPolicyChange(update);
   } catch {
     return { error: 'Could not update the OTP policy.' };
   }
-  await audit('relay.otp.policy.set', session, 'smsConfig/otp', { ...patch, cancelled });
+  await audit('relay.otp.policy.set', session, 'smsConfig/otp', { ...patch, policyVersion });
   revalidatePath('/admin/settings');
   return { success: true };
 }
