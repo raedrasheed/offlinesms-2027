@@ -3,9 +3,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { colors, radius } from '../theme';
 
-// Email sign-in (passwordless OTP). The backend gates it on the admin
-// "Email sign-in" flag; if disabled, requestEmailOtp returns a clear error.
-const SHOW_EMAIL_LOGIN = true;
+// Email sign-in (passwordless OTP) is the only sign-in method. Public phone
+// sign-in/registration is disabled on the server (requestPhoneOtp always
+// refuses), so the phone entry point is not offered; signed-in users add a
+// phone number from Settings → Phone number.
 
 export default function Welcome({ navigation }: any) {
   const { t } = useTranslation();
@@ -27,14 +28,9 @@ export default function Welcome({ navigation }: any) {
       </View>
 
       <View style={s.actions}>
-        <Pressable style={s.primaryBtn} onPress={() => navigation.navigate('PhoneEntry')}>
-          <Text style={s.primaryBtnText}>{t('welcome.continuePhone')}</Text>
+        <Pressable style={s.primaryBtn} onPress={() => navigation.navigate('EmailEntry')}>
+          <Text style={s.primaryBtnText}>{t('welcome.continueEmail')}</Text>
         </Pressable>
-        {SHOW_EMAIL_LOGIN ? (
-          <Pressable style={s.secondaryBtn} onPress={() => navigation.navigate('EmailEntry')}>
-            <Text style={s.secondaryBtnText}>{t('welcome.continueEmail')}</Text>
-          </Pressable>
-        ) : null}
         <Text style={s.terms}>
           By continuing you agree to our <Text style={s.termsLink}>Terms</Text> & <Text style={s.termsLink}>Privacy</Text>.
         </Text>
@@ -57,8 +53,6 @@ const s = StyleSheet.create({
   actions:  { paddingBottom: 24, gap: 10 },
   primaryBtn:     { backgroundColor: colors.primary, padding: 16, borderRadius: radius.md, alignItems: 'center' },
   primaryBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
-  secondaryBtn:   { backgroundColor: '#fff', padding: 16, borderRadius: radius.md, alignItems: 'center', borderWidth: 1, borderColor: colors.ink200 },
-  secondaryBtnText: { color: colors.ink, fontWeight: '700', fontSize: 15 },
   terms:    { fontSize: 11, color: colors.ink500, textAlign: 'center', marginTop: 10 },
   termsLink:{ fontWeight: '600', color: colors.ink700 },
 });
