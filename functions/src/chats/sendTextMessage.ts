@@ -12,6 +12,13 @@
 //   - Capture senderDisplayName + senderPhotoURL snapshots on the message
 //     doc so the chat UI can render sender headers without joining /users.
 //
+// Stickers and polls (kind: 'sticker' | 'poll') use this same callable so they
+// get exactly the same membership / lock / admins-only / block / idempotency
+// gates as text. A sticker is validated against the server catalog (no client
+// URLs); a poll is validated by pollLogic.buildPoll. Both also carry a short
+// `text` fallback, so older app versions show "👋" / "📊 question" instead of
+// an empty bubble.
+//
 // Audit metadata never carries the body. The conversation summary,
 // recipient unread counters, and receipt fan-out are handled by the
 // onMessageCreate trigger.
@@ -20,6 +27,8 @@ import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { writeAuditLog } from '../lib/auditLog';
 import { assertDirectNotBlocked } from './blockGuard';
+import { findSticker } from './stickerCatalog';
+import { buildPoll, pollFallbackText, PollError, type PollDoc } from './pollLogic';
 
 const TEXT_MAX = 4000;
 
@@ -30,7 +39,9 @@ export const sendTextMessage = onCall(async (request) => {
   const data = (request.data ?? {}) as {
     conversationId?: unknown; text?: unknown; replyTo?: unknown; mentions?: unknown;
     localId?: unknown; idempotencyKey?: unknown;
+    kind?: unknown; sticker?: unknown; poll?: unknown;
   };
+  const kind: 'text' | 'sticker' | 'poll' = data.kind === 'sticker' || data.kind === 'poll' ? data.kind : 'text';
   if (typeof data.conversationId !== 'string' || !data.conversationId) {
     throw new HttpsError('invalid-argument', 'conversationId-required');
   }
@@ -40,12 +51,27 @@ export const sendTextMessage = onCall(async (request) => {
   const clientLocalId = typeof data.localId === 'string' && data.localId ? data.localId : null;
   const clientIdempotencyKey = typeof data.idempotencyKey === 'string' && data.idempotencyKey
     ? data.idempotencyKey : null;
-  if (typeof data.text !== 'string') {
-    throw new HttpsError('invalid-argument', 'text-required');
+  let text: string;
+  let sticker: { packId: string; stickerId: string; alt: string } | null = null;
+  let poll: PollDoc | null = null;
+  if (kind === 'sticker') {
+    const ref = (data.sticker ?? {}) as { packId?: unknown; stickerId?: unknown };
+    const st = findSticker(ref.packId, ref.stickerId);
+    if (!st) throw new HttpsError('invalid-argument', 'sticker-unknown');
+    sticker = { packId: st.packId, stickerId: st.id, alt: st.alt };
+    text = st.alt;
+  } else if (kind === 'poll') {
+    try { poll = buildPoll(data.poll); }
+    catch (e) { throw new HttpsError('invalid-argument', e instanceof PollError ? e.code : 'poll-invalid'); }
+    text = pollFallbackText(poll.question);
+  } else {
+    if (typeof data.text !== 'string') {
+      throw new HttpsError('invalid-argument', 'text-required');
+    }
+    text = data.text.trim();
+    if (text.length === 0)       throw new HttpsError('invalid-argument', 'text-empty');
+    if (text.length > TEXT_MAX)  throw new HttpsError('invalid-argument', 'text-too-long');
   }
-  const text = data.text.trim();
-  if (text.length === 0)       throw new HttpsError('invalid-argument', 'text-empty');
-  if (text.length > TEXT_MAX)  throw new HttpsError('invalid-argument', 'text-too-long');
 
   // Optional replyTo. Validate shape; trust the caller for messageId — the
   // referenced message lives in the same conversation and we don't need to
@@ -62,7 +88,7 @@ export const sendTextMessage = onCall(async (request) => {
         type:              'text';
         createdAt:         unknown;
       } = null;
-  if (data.replyTo != null) {
+  if (data.replyTo != null && kind !== 'poll') {
     const r = data.replyTo as Record<string, unknown>;
     if (typeof r.messageId !== 'string' || !r.messageId)
       throw new HttpsError('invalid-argument', 'replyTo.messageId-required');
@@ -81,7 +107,7 @@ export const sendTextMessage = onCall(async (request) => {
   const MENTION_MAX = 50;
   type RawMention = { userId: string; displayName: string; startIndex: number; endIndex: number };
   let rawMentions: RawMention[] = [];
-  if (Array.isArray(data.mentions)) {
+  if (kind === 'text' && Array.isArray(data.mentions)) {
     for (const item of data.mentions.slice(0, MENTION_MAX)) {
       const r = item as Record<string, unknown>;
       if (typeof r?.userId !== 'string' || !r.userId) continue;
@@ -174,8 +200,10 @@ export const sendTextMessage = onCall(async (request) => {
     conversationId:     convoRef.id,
     senderUid:          uid,
     senderId:           uid,           // back-compat alias
-    type:               'text',
+    type:               kind,
     text,
+    ...(sticker ? { sticker } : {}),
+    ...(poll ? { poll } : {}),
     status:             'sent',
     deletedForEveryone: false,
     editedAt:           null,
@@ -205,6 +233,7 @@ export const sendTextMessage = onCall(async (request) => {
     metadata: {
       conversationId: convoRef.id,
       length:         text.length,
+      kind,
     },
   }).catch(() => {});
 

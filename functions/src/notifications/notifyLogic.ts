@@ -5,7 +5,7 @@
 export type ChatType = 'direct' | 'group';
 
 export interface MsgLike {
-  type?: string;          // text | image | voice | ...
+  type?: string;          // text | image | voice | sticker | poll | ...
   text?: string;
 }
 
@@ -25,7 +25,8 @@ const PREVIEW_MAX = 120;
 export function messagePreview(msg: MsgLike): string {
   if (msg.type === 'image') return '📷 Photo';
   if (msg.type === 'voice') return '🎤 Voice message';
-  if ((msg.type ?? 'text') === 'text' && typeof msg.text === 'string') {
+  if (msg.type === 'sticker') return `${typeof msg.text === 'string' && msg.text ? msg.text + ' ' : ''}Sticker`;
+  if (((msg.type ?? 'text') === 'text' || msg.type === 'poll') && typeof msg.text === 'string') {
     const t = msg.text.replace(/\s+/g, ' ').trim();
     if (!t) return 'Message';
     return t.length > PREVIEW_MAX ? t.slice(0, PREVIEW_MAX - 1) + '…' : t;
