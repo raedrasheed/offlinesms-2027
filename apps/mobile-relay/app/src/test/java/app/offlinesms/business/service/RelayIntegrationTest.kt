@@ -290,16 +290,18 @@ class RelayIntegrationTest {
     /**
      * A delayed report that attempt 1 may have gone out after all (e.g. a late
      * delivery receipt), written by the production ReportStore. Called from the
-     * seams on the pipeline's own coroutine: inside admission it joins the
-     * admission transaction — the only way any write can land between that read
-     * and that write now (a writer on another coroutine waits for the
-     * transaction's lock and lands after it: the inverse-ordering tests).
+     * seams on the pipeline's own coroutine. Inside admission it is a NESTED
+     * write within the admission transaction (it joins it; it does not commit
+     * independently): with admission atomic, that is the only way any write can
+     * land between admission's read and its takeover. A writer on another
+     * coroutine waits for the transaction's lock and lands after it — the
+     * before/after-sending-decision tests cover those orderings.
      */
     private suspend fun lateReport(id: String) {
         ReportStore(db) { now }.record(id, 1, "delivered", null, -1)
     }
 
-    @Test fun q2_reportCommittedBetweenAdmissionReadAndWrite_isNeverErased_andTheAttemptIsRefused() {
+    @Test fun q2_nestedReportWriteBetweenAdmissionReadAndTakeover_isPreserved_andTheAttemptIsRefused() {
         retryableFirstAttempt("q1")
         var fired = false
         afterRowRead = { id -> if (id == "q1" && !fired) { fired = true; lateReport(id) } }
@@ -324,10 +326,13 @@ class RelayIntegrationTest {
         assertTrue(r.noResend); assertEquals(2, r.attempt); assertEquals("failed", r.localStatus)
     }
 
-    @Test fun q2_reportAfterTheSendingWrite_keepsTheGuard_andRefusesEveryLaterAttempt() {
+    @Test fun q2_reportAfterTheLocalSendingDecision_keepsTheGuard_andRefusesEveryLaterAttempt() {
         retryableFirstAttempt("q3")
+        // The report lands after the committed 'sending' decision but BEFORE
+        // transport.send: the in-flight attempt still proceeds to the (fake)
+        // transport; the mark stays effective for every later attempt.
         afterBeginSending = { id -> if (id == "q3") lateReport(id) }
-        run()                                              // past the decision point: attempt 2 is handed off
+        run()
         assertEquals(listOf("q3#1", "q3#2"), handoffs)
         assertTrue(row("q3")!!.noResend)
         afterBeginSending = {}

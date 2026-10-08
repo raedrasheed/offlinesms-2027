@@ -11,16 +11,18 @@ current production suspension is preserved until an explicitly authorized rollou
 | Second review head (findings N1–N7) | `430dcfcbdc123ead8042d699635e93737c622754` |
 | Third review head (findings M1–M3) | `0e90b7a14ddfdc18b01e9999878f2b40d3b3a1a6` |
 | Fourth review head (findings Q1–Q2) | `538e67202c2123d2682e0b3dc9be7f21a3735701` |
-| This revision | see the PR description (head of the branch) |
+| Fifth review head (Q1–Q2 closed; E1 wording) | `c4349b27d52f92ff8dc8943fa614c6dbbc51d76b` — CI [run 37780903956](https://github.com/raedrasheed/offlinesms-2027/actions/runs/37780903956) green (its synthetic merge tree equals this head's tree) |
+| This revision | see the PR description (documentation/evidence wording + test names only on top of `c4349b2`) |
 
-**Current review status:** the independent fourth review of `538e672` (CI green
-there) closed M3 and accepted the original M1/M2 sequences, with two focused
-defects left in those changes: Q1 (late-report reconciliation trusted an
-unverified attempt identity) and Q2 (a check-then-REPLACE could erase a
-committed no-resend mark). This revision addresses Q1–Q2 (§4d); it has **not**
-been re-reviewed. N2, N3, N4, N6, N7 and M3 stay accepted as reviewed.
-Production verification SMS stays disabled pending review and the
-deployment/device gates (§11).
+**Current review status (fifth independent review, of `c4349b2`):** Q1 and Q2
+are **closed** for the reported code defects; no new blocking product defect
+was found in that focused review. Accepted as reviewed: N2, N3, N4, N6, N7, M3,
+the M1/M2 sequences and Q1/Q2. This revision only corrects evidence wording
+(E1) and records the plan for the remaining gates (§12). This is code-review
+acceptance, **not** approval to merge, deploy, enable production SMS or
+certify the application: the real-device and deployment gates (§11, §12)
+remain open, and R4/R5 stay **partial** where they depend on them.
+Production verification SMS stays disabled.
 
 Terms used below: **implemented** = code on this branch; **tested locally** =
 executed in this environment at the layer stated; **deployed** / **verified in
@@ -81,8 +83,8 @@ limits apply to the link purpose. Source identity and installation ids are
 | **R1** public phone flow removed | **Fixed** | Protected public flow `functions/src/phoneAuth/*`: pre-auth session, PoW, layered budgets, idempotent requestId, session-bound challenge, recoverable completion; mobile `PhoneEntry`/`Otp` use it; Welcome shows phone only while open | `phoneAuth.int.test.ts` A/B/C/D/M (handler), `wire.callable.test.ts` (HTTP), `phoneAuth.test.ts` (client flow) |
 | **R2** heartbeat resets counters | **Fixed** server + app | Heartbeat stores clamped `telemetry`; capacity uses server `usage` reservations; app no longer sends counters | `relay.int.test.ts` E (exact old Android payload `sentToday:0`), unit clamps |
 | **R3** no reservations | **Fixed** | Reservation in the same tx as the lease; minute/hour/day; UTC rollover; accounting unit = claimed attempt (conservative, no refunds); delivered-before-sent fixed | `relay.int.test.ts` F + A11, unit windows/rollover |
-| **R4** stop/expiry only at claim | **Partially closed at `430dcfc`** (device timing, N4; retry contract, N5). Code fixed in this revision; re-review and device timing pending | `authorizeRelaySend` immediately before hand-off; conservative monotonic deadlines; final check after the durable write; attempt-aware de-dup | `relay.int.test.ts` G/N4/N5, `SendPipelineTest` (JVM), `RelayIntegrationTest` (Robolectric) |
-| **R5** stale sender/routing | **Partially closed at `430dcfc`** (routing not re-checked at authorization, N3; unconditional cancellation, N6). Code fixed in this revision; re-review pending | Jobs carry `businessId` + `policyVersion`; claim/authorize compare with current policy and re-check device routing; conditional server sweep | `relay.int.test.ts` H/N3, `sweep.int.test.ts`, `wire.callable.test.ts` N6 |
+| **R4** stop/expiry only at claim | **Partial.** Code-level fixes accepted by independent review (N4 at `0e90b7a`; the N5 retry contract via M1/M2 and Q2 at `c4349b2`). Still open: device timing, the physical hand-off and real callback ordering (§12 G2–G3) | `authorizeRelaySend` immediately before hand-off; conservative monotonic deadlines; final check after the durable write; attempt-aware de-dup | `relay.int.test.ts` G/N4/N5, `SendPipelineTest` (JVM), `RelayIntegrationTest` (Robolectric) |
+| **R5** stale sender/routing | **Partial.** Code-level fixes accepted by independent review (N3 for verification SMS, N6 at `0e90b7a`). Still open: the deployed policy/routing configuration and relay fleet versions (§12 G1, G9) | Jobs carry `businessId` + `policyVersion`; claim/authorize compare with current policy and re-check device routing; conditional server sweep | `relay.int.test.ts` H/N3, `sweep.int.test.ts`, `wire.callable.test.ts` N6 |
 | **R6** late worker downgrades `done` | **Fixed** | All op transitions conditional (`advanceOp`); release never undoes a terminal op; corrupted ops reconstructed from HMAC-matched sources | `phoneLink.int.test.ts` J (exact two-worker + crash ordering; **fails on PR #28 code, passes now**) |
 | **R7** reauth always → number entry | **Fixed** | `stepForStatus` (pure) + reload after reauth; recovery wins even while sending is paused | `phoneAuth.test.ts` K (unit; no device UI run) |
 | **R8** CI didn't run security suites | **Fixed** | `security-emulators` CI job: rules, integration, wire-level callable, JVM send pipeline; `relay-android` CI job: full relay APK build + unit + Robolectric integration | CI (runs on push) |
@@ -154,13 +156,18 @@ evidence. "Neg" = the test was run against the `538e672` code and failed there.
 | # | Finding | Fix | Regression (layer) · negative control |
 |---|---|---|---|
 | **Q1** | `stale` was not proof of a legitimate earlier attempt: a future/never-issued attempt, or an earlier attempt from a device that never held it, could settle a queued job or set `noRetry` | Claim records an immutable, server-issued `attemptOwners[n] = deviceId` for every lease. `reportBinding` now distinguishes: **current** (current attempt, proven holder); **stale** (earlier attempt, reporter is its RECORDED holder) — the only category with late-reconciliation authority; **unverified** (attempt > current, incl. never-leased jobs, or an earlier attempt whose holder is not on record) — acknowledged, no effect; **unbound** (no attempt identity on a re-leased job) — acknowledged, no effect; **foreign** (an attempt recorded as held by another device) — refused. Legacy jobs leased before `attemptOwners` existed only know their current attempt's holder, so their earlier-attempt reports are `unverified`: legacy late-report reconciliation is deliberately given up | **H**: never-leased job + attempt 99 sent/delivered/ambiguous → nothing changes and it is still claimable; another device's in-flight job + future attempt from any device → nothing changes; a real earlier attempt reported by a device that never held it, in flight and between attempts → refused, nothing changes; legacy history → no effect; cross-business → refused; a **real batch + recipient** with forged evidence → recipient, batch finalization and all device counters unchanged, then the genuine holder settles it. Positive controls: the recorded holder's late ambiguity settles a job between attempts; its late success while a newer attempt is in flight sets `noRetry`. **U**: binding table. **Neg**: 5 of 5 forged/legacy cases failed on `538e672` (the attempt-99 report was **applied** to a never-leased job); the 2 controls pass on both |
-| **Q2** | `get` → `dedup` → `put` (REPLACE) were separate steps; a no-resend mark committed in between was overwritten with `noResend=false` | Admission is **one Room transaction** (`RoomLocalJobs.admit`): fresh read → `dedup` → write. The REPLACE upsert is **removed**: a new job is an insert, a newer attempt takes the row over with `UPDATE … WHERE attempt < :new AND noResend = 0`, which never writes `noResend` (0 rows ⇒ refused as ambiguous). The durable `sending` write is conditional too (`… AND noResend = 0`) and is the **local decision point**: a mark committed after admission but before it refuses the hand-off; a mark committed after it is kept (the hand-off already happened) and refuses every later attempt | **R**: a real `ReportStore.record` committed exactly between admission's read and its write (seam inside the production path) → mark kept, attempt refused, never reaches the fake transport; database closed/reopened and a further attempt offered → still refused. Inverse orderings: report after admission, before the `sending` write → hand-off refused; report after the `sending` write → guard stays true and refuses every later attempt after reopen. Positive control: no late report → the retryable attempt is sent once. Pre-hand-off pause and definitive carrier failure controls unchanged. **Neg**: on `538e672` the same seam erased the committed mark ("noResend erased") |
+| **Q2** | `get` → `dedup` → `put` (REPLACE) were separate steps; a no-resend mark committed in between was overwritten with `noResend=false` | Admission is **one Room transaction** (`RoomLocalJobs.admit`): fresh read → `dedup` → write. The REPLACE upsert is **removed**: a new job is an insert, a newer attempt takes the row over with `UPDATE … WHERE attempt < :new AND noResend = 0`, which never writes `noResend` (0 rows ⇒ refused as ambiguous). The durable `sending` write is conditional too (`… AND noResend = 0`) and is the **local sending decision**: a mark written after admission but before it refuses the hand-off. A mark written after it is kept and refuses every later attempt, but does **not** stop the attempt already in flight — that attempt may still proceed through the final pause/deadline check to `transport.send` (the decision is committed; the physical hand-off has not necessarily happened yet) | **R**: a production `ReportStore.record` written as a **nested write inside the admission transaction**, between its read and its conditional takeover (seam on the production path; it joins the transaction rather than committing independently) → takeover refused, mark kept, attempt never reaches the fake transport; database closed/reopened and a further attempt offered → still refused. This shows the conditional write preserves/rejects the intervening state; it does not demonstrate an independent concurrent transaction committing inside an active admission (Room's lock makes such a writer wait — covered by the orderings below). Report after admission, before the `sending` decision → hand-off refused; report after the `sending` decision but before `transport.send` → that in-flight attempt still reaches the fake transport, the guard stays true and refuses every later attempt after reopen. Positive control: no late report → the retryable attempt is sent once. Pre-hand-off pause and definitive carrier failure controls unchanged. **Neg**: on `538e672` (no admission transaction there) the same seam's write committed independently between `get` and the REPLACE `put`, and the REPLACE erased it ("noResend erased") |
 
 Note on the Q2 seam: with admission in one transaction, a writer on another
-coroutine waits for the transaction's lock and commits after it (the inverse
-orderings). The only way any write can land between the read and the write is
-on the transaction's own coroutine, which the seam does; the conditional
-takeover is what refuses it.
+coroutine waits for the transaction's lock and commits after it (the
+before/after-sending-decision tests). The only way any write can land between
+the read and the takeover is as a nested write on the transaction's own
+coroutine, which the seam does; the conditional takeover is what refuses it.
+
+Fifth review (of `c4349b2`): **Q1 and Q2 closed** for the reported defects. E1
+(this wording) corrected afterwards: the sending decision is distinguished from
+the physical hand-off, and the between-read-and-write test is described as a
+nested write.
 
 ## 5. Original audit F01–F16
 
@@ -391,9 +398,31 @@ not the identity of a person; a client installation id is resettable.
   a job leased before `attemptOwners` existed are acknowledged with no effect
   (§4d) — legacy late reconciliation is given up rather than trusted; a business job whose earlier attempt
   went out unreported can still be duplicated by a different device (§6.2).
-* Release gates before enabling verification SMS: independent re-review of this
+* Release gates before enabling verification SMS (execution plan: §12): independent re-review of this
   revision; relay 0.2.0+ on every relay phone and a supervised device run
   (timing, pause, Room migration); verified ingress `X-Forwarded-For` hop count;
   thresholds from real traffic; a decision on native App Check (PoW is a cost
   layer, not a human check).
 * SMS text is English only.
+
+## 12. Remaining validation gates — execution plan (NOT executed)
+
+None of the steps below has been run. They need environments or access this
+work did not have. Roles, not people, are named; the product owner assigns them.
+"Fake/emulator" steps can run in CI or locally; "device" steps need an installed
+build; "authorized" steps need separately approved access to a non-production
+or production Firebase project, real SIMs or production data.
+
+| Gate | Environment | Operator (role) | Steps | Expected observations | Evidence to retain | Needs |
+|---|---|---|---|---|---|---|
+| **G1** Relay app upgrade + Room migration on device | Two Android test phones (API 26 and API 34), relay 0.1.x installed, a **non-production** Firebase project | Relay app engineer | Enrol with 0.1.x; create local rows and pending reports while offline; upgrade to this build; reopen; reconnect | No crash; rows kept; `attempt`=0, `noResend` set on `sending/sent/delivered` rows; pending reports flushed unbound and acknowledged | `adb logcat` excerpt; exported `jobs`/`reports` tables **with bodies removed**; app versions | Device + non-production project. (Migration logic already covered by Robolectric — fake) |
+| **G2** `SmsManager` / modem / multipart callbacks | Same phones with test SIMs; destinations = **business-controlled test numbers only** | Relay app engineer + business owner of the numbers | Business SMS: single part, multipart (≥3 parts), radio off mid-send, airplane mode, invalid destination | One callback outcome per (job, attempt); partial multipart → `ambiguous-partial-send`, never resent; all-parts-failed → one retry as the next attempt; reports bound to attempts | Server `relayJobs` timeline (masked numbers, no bodies), audit rows, device logs | Device + **explicit authorization for real SMS to controlled numbers** (not authorized so far) |
+| **G3** Lifecycle, timing, restart | Phones from G2; network shaping (e.g. a throttling proxy) | Relay app engineer | Kill the app between `sending` and the callback; reboot; Doze/background; FCM wake vs poll overlap; delay claim/authorization responses near code expiry | No second hand-off of any attempt; verification codes refused on device once the deadline passes; lease expiry → ambiguous → no resend | Monotonic timestamps from device logs; server job timelines | Device (sequences already covered with fakes in `SendPipelineTest` / `RelayIntegrationTest`) |
+| **G4** Proof-of-work speed on phones | Low-end Android (2–3 GB RAM), mid-range Android, oldest supported iPhone; release build of the mobile app | Mobile engineer | Time `solvePow` at 14/16/18 bits, 30 runs each, cold and warm | p50/p95 per device; pick `powBits` so p95 stays acceptable (threshold set by product) | Raw timings per device/model/OS | Devices (Node timing is not representative) |
+| **G5** Ingress `X-Forwarded-For` trust | Non-production project with the **same** Cloud Functions v2 front end as production | Backend engineer | Call `startPhoneAuth` from 2–3 known client IPs, directly and via a proxy that sets its own XFF; log the header chain (test project only) | The real client IP sits at a fixed position from the right; `sourceHopsFromRight` set to it; spoofed left-side values ignored | Redacted header chains and the derived source bucket | Authorized non-production project; production confirmation needs authorized log access |
+| **G6** Native App Check | Product/security decision; then a mobile build with `@react-native-firebase/app-check` (Play Integrity / App Attest) | Product owner + mobile engineer | Decide; implement; test with the debug provider in non-production; then `signin.attestation: 'required'` there | Requests without a valid token refused; legitimate builds pass | Decision record; non-production enforcement test log | Native build + non-production project |
+| **G7** Real token verification, configuration and load | Non-production project with real Auth (signed tokens) | Backend engineer | Expired/forged/other-project tokens against protected callables; `PHONE_HASH_PEPPER` present; load on `startPhoneAuth` / `requestPhoneAuthCode` with SMS sending disabled (no relay job is handed out) | Invalid tokens refused; budgets hold under parallel load; no relay job claimable while sending is off | Request/response summaries; counter documents; latency percentiles | Authorized non-production project (the emulator cannot check signatures) |
+| **G8** Platform-admin `relayDevices` write boundary | Rules emulator | Backend engineer + product owner | Decide whether admin clients may write `usage`/`caps`/routing; if not, server-only rules plus rules tests | Admin client writes to those fields refused; dashboard still works through callables | Rules diff + emulator test output | Fake/emulator only |
+| **G9** Pre-rollout production read-only checks | Production, **read-only** | Operator with authorized production read access | `remediatePhoneOtpAbuse.ts` dry-run (counts only); read `smsConfig/otp`; list relay `appVersion`s from heartbeats; confirm Firebase Phone provider disabled | Counts only (no PII); suspension still in place; every relay on 0.2.0+ before any enable | Dry-run output; screenshots of settings | **Separately authorized production access** |
+| **G10** Rollout | Production | Product owner (decision) + backend/relay engineers | §8 order; start with tight limits; watch §8 signals; emergency stop ready | Only after G1–G9 sign-off | Change record, dashboards | **Explicit rollout authorization** (not given) |
+
