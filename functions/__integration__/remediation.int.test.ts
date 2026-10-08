@@ -57,9 +57,25 @@ describe('remediation script', () => {
     expect(again.applied).toEqual({ jobsCancelled: 0, bodiesPurged: 0, challengesDeleted: 0, auditRedacted: 0 });
   });
 
-  it('--redact-audit replaces raw phone targetIds', async () => {
-    await runRemediation(db(), getAuth(), { apply: true, redactAudit: true, sinceMs: null });
+  it('--redact-audit refuses to run without a forensic copy (or an explicit opt-out)', async () => {
+    await expect(runRemediation(db(), getAuth(), { apply: true, redactAudit: true, sinceMs: null })).rejects.toThrow(/forensic/);
+    const ids = (await db().collection('auditLogs').get()).docs.map(d => String(d.get('targetId')));
+    expect(ids).toContain('970599100001'); // untouched
+  });
+
+  it('--redact-audit exports the raw rows first, then redacts', async () => {
+    let exported: Array<Record<string, unknown>> = [];
+    const r = await runRemediation(db(), getAuth(), {
+      apply: true, redactAudit: true, sinceMs: null, forensicExport: async rows => { exported = rows; },
+    });
+    expect(r.forensicRowsExported).toBe(2);
+    expect(exported.map(x => x.targetId).sort()).toEqual(['970599100001', '970599100002']);
     const ids = (await db().collection('auditLogs').get()).docs.map(d => String(d.get('targetId')));
     expect(ids.join(',')).not.toMatch(/599100/);
+  });
+
+  it('reports claimed/sending legacy jobs as possibly already on a device', async () => {
+    const r = await runRemediation(db(), getAuth(), { apply: false, redactAudit: false, sinceMs: null });
+    expect(r.inFlightPossiblyOnDevice).toBe(1);
   });
 });

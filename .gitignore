@@ -51,3 +51,7 @@ keystore.properties
 # Firebase app config (FCM) — contains keys, keep out of git
 google-services.json
 GoogleService-Info.plist
+apps/mobile-relay/sendgate-jvm-test/build/
+apps/mobile-relay/sendgate-jvm-test/.gradle/
+apps/mobile-relay/sendgate-jvm-test/.kotlin/
+functions/.secret.local

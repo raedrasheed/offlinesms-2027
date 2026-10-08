@@ -18,7 +18,17 @@
 //   • otpChallenges deleted
 // --redact-audit (separately, with --apply): replace raw phone targetIds on
 //   auth.otp.* audit rows with a redacted form. This DESTROYS forensic detail
-//   (which numbers were targeted) — export a restricted copy first if you need it.
+//   (which numbers were targeted), so it REQUIRES --forensic-export=<file>: the
+//   untouched rows (id, action, targetId, createdAt) are first written to that
+//   local file with owner-only permissions (0600) for restricted retention.
+//   Pass --no-forensic-export only if the owner explicitly decided to discard it.
+//
+// Already-claimed work: jobs in claimed/sending may already be on a relay phone.
+// Cancelling them server-side stops current relay builds (they must obtain
+// authorizeRelaySend, which refuses legacy 'otp' jobs) and stops any retry, but
+// an OLD relay build that already received the body sends without asking, and
+// anything handed to the modem cannot be recalled. The report counts these
+// separately (`inFlightPossiblyOnDevice`).
 //
 // NEVER deletes or disables Auth users: phone-only accounts created during the
 // abuse need a product decision (see the doc). NEVER sends anything.
@@ -34,6 +44,10 @@ export interface RemediationOptions {
   apply: boolean;
   redactAudit: boolean;
   sinceMs: number | null;
+  /** Called with the raw audit rows BEFORE redaction; must persist them. */
+  forensicExport?: (rows: Array<Record<string, unknown>>) => Promise<void>;
+  /** Owner explicitly chose to redact without keeping a forensic copy. */
+  noForensicExport?: boolean;
 }
 
 export interface RemediationReport {
@@ -45,6 +59,9 @@ export interface RemediationReport {
   otpAuditRowsByDay: Record<string, number>;
   otpAuditRowsWithRawPhone: number;
   phoneOnlyAuthUsersSince: number;
+  /** Legacy OTP jobs claimed/sending: a relay may already hold (or have sent) the body. */
+  inFlightPossiblyOnDevice: number;
+  forensicRowsExported: number;
   applied: { jobsCancelled: number; bodiesPurged: number; challengesDeleted: number; auditRedacted: number };
 }
 
@@ -70,6 +87,8 @@ export async function runRemediation(db: Firestore, auth: Auth, o: RemediationOp
     otpChallenges: 0, otpJobsByStatus: {}, otpJobsWithBody: 0,
     otpAuditRows: 0, otpAuditRowsByDay: {}, otpAuditRowsWithRawPhone: 0,
     phoneOnlyAuthUsersSince: 0,
+    inFlightPossiblyOnDevice: 0,
+    forensicRowsExported: 0,
     applied: { jobsCancelled: 0, bodiesPurged: 0, challengesDeleted: 0, auditRedacted: 0 },
   };
 
@@ -84,6 +103,7 @@ export async function runRemediation(db: Firestore, auth: Auth, o: RemediationOp
     r.otpJobsByStatus[st] = (r.otpJobsByStatus[st] ?? 0) + 1;
     const hasBody = j.get('messageBody') != null;
     if (hasBody) r.otpJobsWithBody++;
+    if (st === 'claimed' || st === 'sending') r.inFlightPossiblyOnDevice++;
     if (IN_FLIGHT.has(st)) toCancel.push(j);
     else if (hasBody) toPurge.push(j);
   }
@@ -122,6 +142,14 @@ export async function runRemediation(db: Firestore, auth: Auth, o: RemediationOp
   await inBatches(challenges.docs, (b, c) => b.delete(c.ref), db);
   r.applied.challengesDeleted = challenges.size;
   if (o.redactAudit) {
+    if (!o.forensicExport && !o.noForensicExport) throw new Error('redact-audit requires a forensic export (or an explicit opt-out)');
+    if (o.forensicExport && rawRows.length > 0) {
+      await o.forensicExport(rawRows.map(a => ({
+        id: a.id, action: a.get('action'), targetId: a.get('targetId'),
+        createdAt: (a.get('createdAt') as Timestamp | undefined)?.toDate?.()?.toISOString() ?? null,
+      })));
+      r.forensicRowsExported = rawRows.length;
+    }
     await inBatches(rawRows, (b, a) => b.update(a.ref, { targetId: redact(String(a.get('targetId'))) }), db);
     r.applied.auditRedacted = rawRows.length;
   }
@@ -133,7 +161,7 @@ async function main() {
   const { initializeApp, cert, getApps } = await import('firebase-admin/app');
   const { getFirestore } = await import('firebase-admin/firestore');
   const { getAuth } = await import('firebase-admin/auth');
-  const { readFileSync } = await import('node:fs');
+  const { readFileSync, writeFileSync, existsSync } = await import('node:fs');
 
   const arg = (name: string) => process.argv.find(a => a.startsWith(`--${name}=`))?.split('=').slice(1).join('=');
   const apply = process.argv.includes('--apply');
@@ -142,6 +170,16 @@ async function main() {
   const sinceMs = sinceRaw ? Date.parse(sinceRaw) : null;
   if (sinceRaw && !Number.isFinite(sinceMs)) { console.error('Bad --since date'); process.exit(2); }
   if (redactAudit && !apply) { console.error('--redact-audit requires --apply'); process.exit(2); }
+  const exportPath = arg('forensic-export');
+  const noExport = process.argv.includes('--no-forensic-export');
+  if (redactAudit && !exportPath && !noExport) {
+    console.error('NO-GO: --redact-audit needs --forensic-export=<file> (restricted copy) or an explicit --no-forensic-export');
+    process.exit(2);
+  }
+  if (exportPath && existsSync(exportPath)) { console.error('NO-GO: forensic export file already exists'); process.exit(2); }
+  const forensicExport = exportPath
+    ? async (rows: Array<Record<string, unknown>>) => { writeFileSync(exportPath, JSON.stringify(rows, null, 2), { mode: 0o600, flag: 'wx' }); }
+    : undefined;
 
   const emulator = !!process.env.FIRESTORE_EMULATOR_HOST;
   let projectId: string | undefined;
@@ -161,7 +199,7 @@ async function main() {
     console.error(`NO-GO: --apply requires --project=${projectId ?? '<project>'} (must match the target project)`);
     process.exit(2);
   }
-  const report = await runRemediation(getFirestore(), getAuth(), { apply, redactAudit, sinceMs });
+  const report = await runRemediation(getFirestore(), getAuth(), { apply, redactAudit, sinceMs, forensicExport, noForensicExport: noExport });
   console.log(JSON.stringify({ projectId, ...report }, null, 2));
 }
 

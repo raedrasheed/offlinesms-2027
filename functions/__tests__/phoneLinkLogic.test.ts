@@ -43,16 +43,21 @@ describe('config gates (fail closed)', () => {
     expect(phoneLinkSendingAllowed(c)).toBe(false);
   });
   it('emergencyStop must be explicitly false to send', () => {
-    expect(resolvePhoneLinkConfig(true, { enabled: true, businessId: 'b' }).emergencyStop).toBe(true);
-    expect(resolvePhoneLinkConfig(true, { enabled: true, businessId: 'b', emergencyStop: 'false' }).emergencyStop).toBe(true);
-    const ok = resolvePhoneLinkConfig(true, { enabled: true, businessId: 'b', emergencyStop: false });
+    const base = { enabled: true, businessId: 'b', link: { enabled: true } };
+    expect(resolvePhoneLinkConfig(true, base).emergencyStop).toBe(true);
+    expect(resolvePhoneLinkConfig(true, { ...base, emergencyStop: 'false' }).emergencyStop).toBe(true);
+    const ok = resolvePhoneLinkConfig(true, { ...base, emergencyStop: false });
     expect(phoneLinkSendingAllowed(ok)).toBe(true);
   });
+  it('the link purpose must be switched on separately from the master switch', () => {
+    expect(resolvePhoneLinkConfig(true, { enabled: true, emergencyStop: false, businessId: 'b' }).enabled).toBe(false);
+    expect(resolvePhoneLinkConfig(true, { enabled: true, emergencyStop: false, businessId: 'b', signin: { enabled: true } }).enabled).toBe(false);
+  });
   it('doc cannot enable the feature without the env gate', () => {
-    expect(resolvePhoneLinkConfig(false, { enabled: true, businessId: 'b', emergencyStop: false }).enabled).toBe(false);
+    expect(resolvePhoneLinkConfig(false, { enabled: true, businessId: 'b', emergencyStop: false, link: { enabled: true } }).enabled).toBe(false);
   });
   it('limits are clamped into hard bounds; garbage falls back to defaults', () => {
-    const l = resolveLimits({ accountPerHour: 1e9, accountCooldownSec: 0, globalPerDay: -5, codeTtlSec: 'x' });
+    const l = resolveLimits({ accountPerHour: 1e9, accountCooldownSec: 0, globalPerDay: -5, codeTtlSec: 'x' } as never);
     expect(l.accountPerHour).toBe(LIMIT_BOUNDS.accountPerHour[1]);
     expect(l.accountCooldownSec).toBe(LIMIT_BOUNDS.accountCooldownSec[0]);
     expect(l.globalPerDay).toBe(0);

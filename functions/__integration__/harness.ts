@@ -30,10 +30,19 @@ export async function resetEmulators(): Promise<void> {
   if (!r1.ok || !r2.ok) throw new Error(`emulator reset failed: ${r1.status}/${r2.status}`);
 }
 
-export async function seedPhoneLinkConfig(over: Record<string, unknown> = {}): Promise<void> {
-  await db().collection('smsConfig').doc('phoneLink').set({
-    enabled: true, emergencyStop: false, businessId: BUSINESS, ...over,
+/** Seed smsConfig/otp (the shared verification policy) with both purposes on. */
+export async function seedPolicy(over: Record<string, unknown> = {}): Promise<void> {
+  await db().collection('smsConfig').doc('otp').set({
+    enabled: true, emergencyStop: false, businessId: BUSINESS, policyVersion: 1,
+    signin: { enabled: true }, link: { enabled: true },
+    ...over,
   });
+}
+
+/** Back-compat for the link suites: `limits`/`enabled` map to the `link` section. */
+export async function seedPhoneLinkConfig(over: Record<string, unknown> = {}): Promise<void> {
+  const { limits, enabled, ...rest } = over as { limits?: unknown; enabled?: boolean };
+  await seedPolicy({ ...rest, link: { enabled: enabled ?? true, ...(limits ? { limits } : {}) } });
 }
 
 export async function seedRelayDevice(country = 'PS'): Promise<void> {
@@ -41,7 +50,7 @@ export async function seedRelayDevice(country = 'PS'): Promise<void> {
     businessId: BUSINESS, status: 'active',
     lastHeartbeatAt: Timestamp.fromMillis(Date.now()),
     countryRoutingEnabled: true, allowedCountryCodes: [country],
-    caps: { maxPerDay: 10_000 }, counters: { sentToday: 0 },
+    caps: { maxPerMinute: 1000, maxPerHour: 10_000, maxPerDay: 10_000 }, counters: { sentToday: 0 },
   });
 }
 
@@ -124,8 +133,8 @@ export async function relayJobs(kind?: string) {
 }
 
 /** The 6-digit code a relay phone would have texted for a challenge. */
-export async function deliveredCode(challengeId: string): Promise<string> {
-  const job = await db().collection('relayJobs').doc(`plink_${challengeId}`).get();
+export async function deliveredCode(challengeId: string, prefix = 'plink'): Promise<string> {
+  const job = await db().collection('relayJobs').doc(`${prefix}_${challengeId}`).get();
   const m = /\b(\d{6})\b/.exec((job.get('messageBody') as string) ?? '');
   if (!m) throw new Error('no code in job body');
   return m[1];
@@ -157,11 +166,18 @@ export async function authUserCount(): Promise<number> {
   return (await getAuth().listUsers(1000)).users.length;
 }
 
-/** Relay-device request (custom-token claims a paired phone carries). */
-export function deviceReq(data: Record<string, unknown>): CallableRequest<unknown> {
-  return req(DEVICE, { deviceId: DEVICE, ...data }, {
-    claims: { relayDevice: true, deviceId: DEVICE, businessId: BUSINESS },
+/** Relay-device request (custom-token claims a paired phone carries). Current
+ *  relay builds declare the send-authorization capability; pass `caps: []` to
+ *  act as an older build. */
+export function deviceReq(data: Record<string, unknown>, deviceId = DEVICE): CallableRequest<unknown> {
+  return req(deviceId, { deviceId, clientCaps: ['send-auth-v1'], ...data }, {
+    claims: { relayDevice: true, deviceId, businessId: BUSINESS },
   });
+}
+
+/** Read a job's current server state. */
+export async function job(id: string) {
+  return (await db().collection('relayJobs').doc(id).get()).data() ?? null;
 }
 
 export { Timestamp, FieldValue };

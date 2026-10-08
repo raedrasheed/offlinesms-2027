@@ -4,7 +4,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  db, resetEmulators, seedPhoneLinkConfig, seedRelayDevice, makeEmailUser, req, deviceReq,
+  db, resetEmulators, seedPhoneLinkConfig, seedPolicy, seedRelayDevice, makeEmailUser, req, deviceReq,
   expectHttps, relayJobs, authUserCount, num, linkReq, deliveredCode, BUSINESS, Timestamp,
 } from './harness';
 import { requestPhoneOtp } from '../src/auth/requestPhoneOtp';
@@ -16,14 +16,13 @@ import { handleRequestPhoneLinkOtp } from '../src/phoneLink/requestPhoneLinkOtp'
 
 beforeEach(async () => {
   await resetEmulators();
-  // Even with the OLD sign-in config present, nothing may be sent.
-  await db().collection('smsConfig').doc('otp').set({ businessId: BUSINESS });
+  // Policy fully ON — the retired endpoints must still refuse.
   await seedPhoneLinkConfig();
   await seedRelayDevice();
 });
 afterEach(() => { process.env.PHONE_LINK_ENABLED = 'true'; });
 
-describe('scenario 2 — public phone sign-in is shut down on the server', () => {
+describe('scenario 2 / M — the retired unprotected endpoints refuse every client version', () => {
   const payloads: unknown[] = [
     { phoneE164: num(1) },
     { phoneE164: '+970599999999' },                         // former app-review number
@@ -34,7 +33,7 @@ describe('scenario 2 — public phone sign-in is shut down on the server', () =>
 
   it.each(payloads)('requestPhoneOtp refuses %j with no side effects', async (data) => {
     const users = await authUserCount();
-    await expectHttps(requestPhoneOtp.run(req(null, data)), 'failed-precondition', 'phone-signin-disabled');
+    await expectHttps(requestPhoneOtp.run(req(null, data)), 'failed-precondition', 'app-update-required');
     expect((await db().collection('otpChallenges').get()).size).toBe(0);
     expect((await relayJobs()).length).toBe(0);
     expect(await authUserCount()).toBe(users);
@@ -42,23 +41,27 @@ describe('scenario 2 — public phone sign-in is shut down on the server', () =>
 
   it('requestPhoneOtp refuses authenticated callers too', async () => {
     const u = await makeEmailUser();
-    await expectHttps(requestPhoneOtp.run(req(u.uid, { phoneE164: num(2) })), 'failed-precondition', 'phone-signin-disabled');
+    await expectHttps(requestPhoneOtp.run(req(u.uid, { phoneE164: num(2) })), 'failed-precondition', 'app-update-required');
     expect((await relayJobs()).length).toBe(0);
   });
 
   it('verifyPhoneOtp no longer accepts the fixed test credential or creates accounts', async () => {
     const users = await authUserCount();
-    await expectHttps(verifyPhoneOtp.run(req(null, { phoneE164: '+970599999999', code: '123456' })), 'failed-precondition', 'phone-signin-disabled');
+    await expectHttps(verifyPhoneOtp.run(req(null, { phoneE164: '+970599999999', code: '123456' })), 'failed-precondition', 'app-update-required');
     // A pre-existing challenge from before the shutdown is inert.
     await db().collection('otpChallenges').doc('970599100003').set({ phoneE164: num(3), codeHash: 'x', salt: 'y', attempts: 0 });
-    await expectHttps(verifyPhoneOtp.run(req(null, { phoneE164: num(3), code: '000000' })), 'failed-precondition', 'phone-signin-disabled');
+    await expectHttps(verifyPhoneOtp.run(req(null, { phoneE164: num(3), code: '000000' })), 'failed-precondition', 'app-update-required');
     expect(await authUserCount()).toBe(users);
     expect((await db().collection('wallets').get()).size).toBe(0);
   });
 
-  it('the old sign-in country picker reports no countries', async () => {
-    const res = await getSupportedPhoneCountries.run(req(null, {}));
-    expect(res).toEqual({ countries: [] });
+  it('old builds see no countries; current builds see them only while sign-in is open', async () => {
+    expect(await getSupportedPhoneCountries.run(req(null, {}))).toEqual({ countries: [] });
+    expect(await getSupportedPhoneCountries.run(req(null, { v: 2 }))).toEqual({ available: true, countries: ['PS'] });
+    await seedPolicy({ emergencyStop: true });
+    expect(await getSupportedPhoneCountries.run(req(null, { v: 2 }))).toEqual({ available: false, countries: [] });
+    await db().collection('smsConfig').doc('otp').set({ businessId: BUSINESS }); // today's production shape
+    expect(await getSupportedPhoneCountries.run(req(null, { v: 2 }))).toEqual({ available: false, countries: [] });
   });
 
   it('a tampered purpose on the link endpoint is rejected without queuing', async () => {
@@ -156,9 +159,9 @@ describe('scenario 9 — relay queue: legacy jobs, duplicates, retries, emergenc
 
   it('missing/garbled runtime config fails closed (no sending)', async () => {
     const u = await makeEmailUser();
-    await db().collection('smsConfig').doc('phoneLink').delete();
+    await db().collection('smsConfig').doc('otp').delete();
     await expectHttps(handleRequestPhoneLinkOtp(req(u.uid, linkReq(num(14)))), 'failed-precondition', 'phone-link-disabled');
-    await db().collection('smsConfig').doc('phoneLink').set({ enabled: true, businessId: BUSINESS }); // no explicit emergencyStop:false
+    await db().collection('smsConfig').doc('otp').set({ enabled: true, businessId: BUSINESS, link: { enabled: true } }); // no explicit emergencyStop:false
     await expectHttps(handleRequestPhoneLinkOtp(req(u.uid, linkReq(num(14)))), 'unavailable', 'service-paused');
     expect((await relayJobs()).length).toBe(0);
   });

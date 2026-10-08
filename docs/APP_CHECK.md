@@ -16,8 +16,15 @@ before the mobile client can mint tokens would lock out all users.
     now refuse (public phone sign-in is disabled server-side). The authenticated
     phone-link callables (`getPhoneLinkStatus`, `requestPhoneLinkOtp`,
     `verifyPhoneLinkOtp`, `resumePhoneLink`) use the same `appCheckOptions()` and
-    record whether an App Check token was present. See
-    `docs/PHONE_LINKING_SECURITY.md` §5 for the rollout path.
+    record whether an App Check token was present.
+  - Public phone sign-in (`startPhoneAuth`, `requestPhoneAuthCode`,
+    `verifyPhoneAuthCode`) can REQUIRE a verified App Check token at runtime via
+    `smsConfig/otp.signin.attestation = 'required'` (default 'off' — native
+    builds can't attest yet). With `APPCHECK_CONSUME=on`, the two request/verify
+    callables also consume limited-use tokens (replay protection; clients must
+    request limited-use tokens). Until native attestation ships, a server-checked
+    proof-of-work is the active anti-automation step. See
+    `docs/PHONE_LINKING_SECURITY.md` §5–§6.
 - **Mobile** (`apps/mobile/src/lib/appCheck.ts`, called from `App.tsx`):
   initializes App Check **only on web** with a configured reCAPTCHA key, with
   debug-token support. **No-op on native** (see constraint below). Never throws.

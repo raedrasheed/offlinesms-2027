@@ -27,6 +27,8 @@ export default defineConfig({
       // Test-only values; production reads the secret from Secret Manager.
       PHONE_HASH_PEPPER: 'integration-test-pepper-0123456789abcdef0123456789',
       PHONE_LINK_ENABLED: 'true',
+      PHONE_AUTH_ENABLED: 'true',
+      EMAIL_PROVIDER: 'console',
     },
     reporters: ['default'],
   },

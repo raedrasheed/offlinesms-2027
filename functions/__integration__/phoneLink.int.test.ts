@@ -4,6 +4,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getAuth } from 'firebase-admin/auth';
+import { FieldValue } from 'firebase-admin/firestore';
 import {
   db, resetEmulators, seedPhoneLinkConfig, seedRelayDevice, makeEmailUser, req, expectHttps,
   relayJobs, deliveredCode, sideEffectSnapshot, authUserCount, num, linkReq, CONSENT,
@@ -443,6 +444,57 @@ describe('scenario 8 — interruption after partial success, then retry', () => 
     const s = await sideEffectSnapshot(u.uid);
     expect(s).toMatchObject({ claims: 0, authPhone: null, privatePhone: null, phoneVerified: null });
     expect((await db().collection('phoneLinkOps').doc(u.uid).get()).get('stage')).toBe('failed');
+  });
+});
+
+// ── J (R6) ─────────────────────────────────────────────────────────────────
+describe('J (R6) — a late worker can never downgrade a completed link', () => {
+  it('worker A finishes, worker B arrives late and crashes; state stays done and resume is idempotent', async () => {
+    const u = await makeEmailUser();
+    const r = await request(u.uid, num(140));
+    const c = await deliveredCode(r.challengeId);
+    // Leave the op at `claimed` (first attempt interrupted at the Auth step).
+    phoneLinkDeps.setAuthPhone = async () => { throw Object.assign(new Error('x'), { code: 'auth/internal-error' }); };
+    await expectHttps(verify(u.uid, r.challengeId, c), 'unavailable', 'link-interrupted');
+
+    let calls = 0;
+    let releaseB!: () => void;
+    const bGate = new Promise<void>(res => { releaseB = res; });
+    phoneLinkDeps.setAuthPhone = async (uid, e164) => {
+      const me = ++calls;
+      await origSetAuthPhone(uid, e164);
+      if (me === 2) await bGate; // B holds the old number in memory, A races ahead
+    };
+    let finals = 0;
+    phoneLinkDeps.beforeFinalize = async () => { if (finals++ === 1) throw new Error('worker B crashed'); };
+
+    const A = handleResumePhoneLink(req(u.uid, {}));
+    const B = handleResumePhoneLink(req(u.uid, {}));
+    await expect(A).resolves.toMatchObject({ linked: true });
+    const opAfterA = (await db().collection('phoneLinkOps').doc(u.uid).get()).data()!;
+    expect(opAfterA.stage).toBe('done');
+    releaseB();
+    await B.catch(() => undefined); // B's crash is reported as link-interrupted
+    const op = (await db().collection('phoneLinkOps').doc(u.uid).get()).data()!;
+    expect(op.stage).toBe('done');            // not downgraded to auth-updated
+    expect(op.phoneE164).toBeUndefined();     // and still terminal/cleaned
+    phoneLinkDeps.beforeFinalize = origBeforeFinalize;
+    phoneLinkDeps.setAuthPhone = origSetAuthPhone;
+    await expect(handleResumePhoneLink(req(u.uid, {}))).resolves.toMatchObject({ linked: true });
+    expect(await sideEffectSnapshot(u.uid)).toMatchObject({ authPhone: num(140), privatePhone: num(140), claims: 1, relayJobs: 1 });
+  });
+
+  it('an op already corrupted by the old race (non-terminal, number missing) is repaired without a new code or SMS', async () => {
+    const u = await makeEmailUser();
+    const r = await request(u.uid, num(141));
+    const c = await deliveredCode(r.challengeId);
+    phoneLinkDeps.beforeFinalize = async () => { throw new Error('crash'); };
+    await expectHttps(verify(u.uid, r.challengeId, c), 'unavailable', 'link-interrupted');
+    phoneLinkDeps.beforeFinalize = origBeforeFinalize;
+    // Reproduce the pre-fix corruption: auth-updated without phoneE164.
+    await db().collection('phoneLinkOps').doc(u.uid).update({ stage: 'auth-updated', phoneE164: FieldValue.delete() });
+    await expect(handleResumePhoneLink(req(u.uid, {}))).resolves.toMatchObject({ linked: true });
+    expect(await sideEffectSnapshot(u.uid)).toMatchObject({ authPhone: num(141), privatePhone: num(141), relayJobs: 1 });
   });
 });
 
