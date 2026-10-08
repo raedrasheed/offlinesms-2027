@@ -307,6 +307,12 @@ describe('N5 — server attempt identity and ambiguous hand-offs', () => {
     await report('a1', 'failed', { reason: 'no-service', androidResultCode: 4 });
     await db().collection('relayJobs').doc('a1').update({ nextAttemptAt: null }); // skip backoff for the test
     expect((await claim()).jobs[0]).toMatchObject({ jobId: 'a1', attempt: 2 });
+    // Policy: the accounting unit is one claimed attempt, never refunded — the
+    // retry consumed a second reservation; the job settles once when reported.
+    const usage = (await db().collection('relayDevices').doc(DEVICE).get()).get('usage');
+    expect([usage.m.c, usage.h.c, usage.d.c]).toEqual([2, 2, 2]);
+    await report('a1', 'sent');
+    expect(await job('a1')).toMatchObject({ status: 'sent', attempts: 2 });
   });
 
   it("a device-reported 'ambiguous-handoff' is permanent: never re-queued", async () => {
@@ -315,6 +321,7 @@ describe('N5 — server attempt identity and ambiguous hand-offs', () => {
     const r = await report('a2', 'failed', { reason: 'ambiguous-handoff' }) as { requeued: boolean };
     expect(r.requeued).toBe(false);
     expect((await job('a2'))!.status).toBe('failed');
+    expect((await claim()).jobs).toEqual([]); // never handed out again
   });
 });
 

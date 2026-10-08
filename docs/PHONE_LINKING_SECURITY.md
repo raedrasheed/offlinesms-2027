@@ -224,7 +224,7 @@ commands also in the PR description).
 |---|---|---|
 | Helper/unit | `npm test` | 688 / 688 (63 files) |
 | Firestore rules (emulator) | `npm run test:rules` (with the Firestore emulator) | 143 / 143 (14 files) |
-| Handler + Firestore/Auth emulators | `npm run test:integration` | 146 / 146 (7 files) |
+| Handler + Firestore/Auth emulators | `npm run test:integration` | 147 / 147 (7 files; also 2 consecutive runs pinned to 2 CPU cores) |
 | Wire-level HTTP + real triggers (Functions emulator) | `npm run test:callable` | 7 / 7 |
 | Relay send pipeline (plain JVM, no Android SDK) | `gradle -p apps/mobile-relay/sendgate-jvm-test test` | 14 / 14 |
 | Relay **Android app**: compile + package | `gradle -p apps/mobile-relay :app:assembleDebug` (placeholder `google-services.json` via `scripts/ci/relay-google-services.sh`) | BUILD SUCCESSFUL (debug APK) |
@@ -247,6 +247,19 @@ checking (the Auth emulator doesn't sign tokens); App Check (the emulator does
 not enforce it); the production `X-Forwarded-For` chain (`sourceHopsFromRight`
 must be verified against the real ingress before relying on source budgets);
 production Firestore contention; any production data or logs (none inspected).
+
+CI at `526c96a`: the general job and the new `relay-android` job passed; the
+security-emulators job failed in both runs on two **pre-existing phone-link
+concurrency tests** (not N1–N7 tests). One was a test race: the R6 two-worker
+test assumed worker A always reached the Auth step first and deadlocked when B
+did (reproduced locally 1/5 on 2 cores; fixed to be order-independent, 0/8
+after). The other was a product gap: when the verify transaction failed for an
+infrastructure reason (the emulator's `INVALID_ARGUMENT: Transaction is invalid
+or closed` under contention; in production, exhausted contention retries or a
+lost commit response), the raw error reached the caller as `INTERNAL`. It is now
+reported as the retryable `link-interrupted` (resume completes a committed link,
+or finds nothing and the code stays usable). Regression injects that exact error
+and **fails on the `526c96a` handler**.
 
 Negative controls: N1–N7 as listed in §4b; R6 tests fail on the PR #28 file and
 pass now; the rules tests fail on the base rules for the profile-create gap; the

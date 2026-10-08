@@ -175,6 +175,12 @@ describe('N2 — store-review login over HTTP never reaches phone-linking trigge
     } } }, { merge: true });
     const reviewGroup = await groupWithExternal('grp-review', REVIEW);
     const normalGroup = await groupWithExternal('grp-normal', NORMAL);
+    // A real user's private contact for each number (contact ownership must not move to the demo).
+    const contact = (id: string, phone: string) => db().collection('phoneContacts').doc(id).set({
+      contactId: id, ownerUid: 'owner-x', phoneE164: phone, normalizedPhone: phone.replace(/\D/g, ''), isRegistered: false,
+    });
+    await contact('c-review', REVIEW);
+    await contact('c-normal', NORMAL);
 
     const rev = await phoneSignin(REVIEW, async () => CODE);
     expect(rev.uid).toBe(demo.uid);
@@ -188,7 +194,11 @@ describe('N2 — store-review login over HTTP never reaches phone-linking trigge
     await waitFor(async () => ((await normalGroup.get()).get('participantUids') as string[]).includes(normal.uid));
     await new Promise(r => setTimeout(r, 1500)); // let any (wrongly) queued review trigger land too
 
+    expect((await db().collection('phoneContacts').doc('c-normal').get()).get('linkedUid')).toBe(normal.uid); // trigger live
     expect((await reviewGroup.get()).get('participantUids')).toEqual(['owner-x']);
+    const rc = (await db().collection('phoneContacts').doc('c-review').get()).data()!;
+    expect(rc.isRegistered).toBe(false);
+    expect(rc.linkedUid).toBeUndefined();
     expect((await reviewGroup.collection('externalMembers').doc(REVIEW.replace(/\D/g, '')).get()).get('isRegistered')).toBe(false);
     expect((await db().collection('users').doc(demo.uid).collection('userPrivate').doc('profile').get()).exists).toBe(false);
     expect((await db().collection('users').doc(demo.uid).get()).get('phoneVerified')).toBeUndefined();
