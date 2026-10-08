@@ -28,6 +28,24 @@ async function readGeneralSettings(
   };
 }
 
+/**
+ * Record a provider outcome for ONE send generation. A late result from an
+ * older provider call never changes a newer challenge (N7): the write happens
+ * only if the stored challenge still carries this generation and is still
+ * awaiting its outcome.
+ */
+export async function settleSend(
+  db: FirebaseFirestore.Firestore, ref: FirebaseFirestore.DocumentReference,
+  generation: string, status: 'pending' | 'send-failed',
+): Promise<boolean> {
+  return db.runTransaction(async tx => {
+    const s = await tx.get(ref);
+    if (!s.exists || s.get('generation') !== generation || s.get('status') !== 'sending') return false;
+    tx.update(ref, { status, updatedAt: FieldValue.serverTimestamp() });
+    return true;
+  });
+}
+
 export const requestEmailOtp = onCall({ region: REGION, ...appCheckOptions() }, async (request) => {
   const email = normalizeEmail((request.data ?? {}).email);
   if (!email) throw new HttpsError('invalid-argument', 'email-invalid');
@@ -42,6 +60,9 @@ export const requestEmailOtp = onCall({ region: REGION, ...appCheckOptions() }, 
   const now = Date.now();
   const code = generateOtp();
   const salt = newSalt();
+  // Immutable identity of THIS send; completion writes apply only while the
+  // stored challenge is still this generation (a newer request may replace it).
+  const generation = newSalt();
 
   // Reserve the send atomically BEFORE delivering: cooldown + hourly window
   // live in emailOtpLimits/{key}, separate from the short-lived challenge, so
@@ -67,6 +88,7 @@ export const requestEmailOtp = onCall({ region: REGION, ...appCheckOptions() }, 
       expiresAt: Timestamp.fromMillis(now + EMAIL_OTP_TTL_MS),
       attempts: 0,
       status: 'sending',
+      generation,
       updatedAt: FieldValue.serverTimestamp(),
     });
     return 'ok';
@@ -80,10 +102,10 @@ export const requestEmailOtp = onCall({ region: REGION, ...appCheckOptions() }, 
   } catch {
     // A failed provider call may or may not have delivered; the reservation is
     // kept (conservative) and the code is voided. Never include provider detail.
-    await ref.update({ status: 'send-failed', updatedAt: FieldValue.serverTimestamp() }).catch(() => {});
+    await settleSend(db, ref, generation, 'send-failed').catch(() => {});
     throw new HttpsError('unavailable', 'email-send-failed');
   }
-  await ref.update({ status: 'pending', updatedAt: FieldValue.serverTimestamp() }).catch(() => {});
+  await settleSend(db, ref, generation, 'pending').catch(() => {});
 
   await writeAuditLog({
     action: 'auth.email-otp.requested', actor: { uid: 'anonymous' },
