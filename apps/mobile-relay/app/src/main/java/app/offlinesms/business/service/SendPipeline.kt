@@ -55,9 +55,16 @@ class SendPipeline(
     data class LocalJob(val jobId: String, val attempt: Int, val localStatus: String, val noResend: Boolean = false)
 
     interface LocalJobs {
-        suspend fun get(jobId: String): LocalJob?
-        /** Insert, or replace the row for a newer attempt. */
-        suspend fun put(job: ClaimedJob, localStatus: String)
+        /**
+         * ATOMIC admission (Q2): reads the logical job's row, applies [dedup] to
+         * that fresh row and records this attempt as 'claimed' — one transaction.
+         * Returns null when admitted, otherwise the refusal reason. Never lowers
+         * a committed noResend mark.
+         */
+        suspend fun admit(job: ClaimedJob): String?
+        /** Durable 'sending' for THIS attempt, only while the logical job is not
+         *  marked no-resend; false = refused (the local decision point). */
+        suspend fun beginSending(jobId: String, attempt: Int): Boolean
         /** Status of THIS attempt's row only. */
         suspend fun setStatus(jobId: String, attempt: Int, localStatus: String)
     }
@@ -115,8 +122,8 @@ class SendPipeline(
     private suspend fun process(job: ClaimedJob, claimStartedAt: Long): Outcome {
         if (pause.paused) return Outcome.StoppedBatch(job.jobId)
 
-        when (val d = dedup(local.get(job.jobId), job)) {
-            null -> local.put(job, "claimed")
+        when (val d = local.admit(job)) {
+            null -> Unit
             "ambiguous-handoff" -> return fail(job, d, noResend = true)
             else -> return Outcome.Skipped(job.jobId, d)
         }
@@ -140,8 +147,10 @@ class SendPipeline(
         }
 
         // Durable 'sending' BEFORE the hand-off: after a crash this attempt is
-        // treated as possibly handed off and is never resent.
-        local.setStatus(job.jobId, job.attempt, "sending")
+        // treated as possibly handed off and is never resent. Conditional: a
+        // no-resend mark committed after admission (a late report that the job
+        // may already have gone out) refuses the hand-off here.
+        if (!local.beginSending(job.jobId, job.attempt)) return fail(job, "ambiguous-handoff", noResend = true)
 
         // Last practical check, after the (suspending) durable write.
         if (pause.paused) {

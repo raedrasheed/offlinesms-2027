@@ -55,6 +55,11 @@ class RelayIntegrationTest {
     private var now = 0L
     private var paused = false
     private var onDurableSending: () -> Unit = {}
+    /** Q2 seams, inside the production code path: right after admission reads the
+     *  row (before it writes), and around the conditional 'sending' write. */
+    private var afterRowRead: suspend (String) -> Unit = {}
+    private var beforeBeginSending: suspend (String) -> Unit = {}
+    private var afterBeginSending: suspend (String) -> Unit = {}
     private val originalCallables = RelayApi.callables
 
     @Before fun setUp() {
@@ -75,9 +80,15 @@ class RelayIntegrationTest {
         val dao = db.jobs()
         return relayPipeline(
             deviceId = "dev-1",
+            db = db,
             dao = object : JobDao by dao {
-                override suspend fun setStatus(jobId: String, attempt: Int, status: String, now: Long) {
-                    dao.setStatus(jobId, attempt, status, now); if (status == "sending") onDurableSending()
+                override suspend fun byId(jobId: String) = dao.byId(jobId).also { afterRowRead(jobId) }
+                override suspend fun beginSending(jobId: String, attempt: Int, now: Long): Int {
+                    beforeBeginSending(jobId)
+                    val n = dao.beginSending(jobId, attempt, now)
+                    if (n == 1) onDurableSending()
+                    afterBeginSending(jobId)
+                    return n
                 }
             },
             transport = object : SendPipeline.Transport { override fun send(job: ClaimedJob) { handoffs += "${job.jobId}#${job.attempt}" } },
@@ -265,6 +276,73 @@ class RelayIntegrationTest {
         callback("b6", 2, SendResultAggregator.Kind.SENT, 2, ok = true)    // part 2 of attempt 2
         assertEquals("sent", row("b6")!!.localStatus)
         assertEquals(listOf(1, 1, 2), pending().map { it.attempt })
+    }
+
+    // ── Q2: the no-resend mark is never lost to a concurrent local writer ──
+    /** b: attempt 1 went out and its SENT callback said every part failed (retryable). */
+    private fun retryableFirstAttempt(id: String) {
+        server.add(id, null)
+        run()
+        callback(id, 1, SendResultAggregator.Kind.SENT, 1, ok = false)
+        assertTrue(!row(id)!!.noResend)
+        server.jobs.getValue(id).status = "queued" // the server re-queued it after that report
+    }
+    /**
+     * A delayed report that attempt 1 may have gone out after all (e.g. a late
+     * delivery receipt), written by the production ReportStore. Called from the
+     * seams on the pipeline's own coroutine: inside admission it joins the
+     * admission transaction — the only way any write can land between that read
+     * and that write now (a writer on another coroutine waits for the
+     * transaction's lock and lands after it: the inverse-ordering tests).
+     */
+    private suspend fun lateReport(id: String) {
+        ReportStore(db) { now }.record(id, 1, "delivered", null, -1)
+    }
+
+    @Test fun q2_reportCommittedBetweenAdmissionReadAndWrite_isNeverErased_andTheAttemptIsRefused() {
+        retryableFirstAttempt("q1")
+        var fired = false
+        afterRowRead = { id -> if (id == "q1" && !fired) { fired = true; lateReport(id) } }
+        assertEquals(Outcome.Failed("q1", "ambiguous-handoff"), run().single()) // attempt 2
+        assertEquals(listOf("q1#1"), handoffs)            // attempt 2 never reached the transport
+        val r = row("q1")!!
+        assertTrue(r.noResend); assertEquals(1, r.attempt)
+        afterRowRead = {}
+        restart()
+        server.jobs.getValue("q1").status = "queued"      // even if offered again (attempt 3)…
+        run()
+        assertEquals(listOf("q1#1"), handoffs)            // …refused after reopening Room
+        assertTrue(row("q1")!!.noResend)
+    }
+
+    @Test fun q2_reportAfterAdmission_beforeTheSendingWrite_blocksTheHandOff() {
+        retryableFirstAttempt("q2")
+        beforeBeginSending = { id -> if (id == "q2") lateReport(id) }
+        assertEquals(Outcome.Failed("q2", "ambiguous-handoff"), run().single())
+        assertEquals(listOf("q2#1"), handoffs)
+        val r = row("q2")!!
+        assertTrue(r.noResend); assertEquals(2, r.attempt); assertEquals("failed", r.localStatus)
+    }
+
+    @Test fun q2_reportAfterTheSendingWrite_keepsTheGuard_andRefusesEveryLaterAttempt() {
+        retryableFirstAttempt("q3")
+        afterBeginSending = { id -> if (id == "q3") lateReport(id) }
+        run()                                              // past the decision point: attempt 2 is handed off
+        assertEquals(listOf("q3#1", "q3#2"), handoffs)
+        assertTrue(row("q3")!!.noResend)
+        afterBeginSending = {}
+        restart()
+        server.jobs.getValue("q3").status = "queued"
+        run()
+        assertEquals(listOf("q3#1", "q3#2"), handoffs)
+        assertTrue(row("q3")!!.noResend)
+    }
+
+    @Test fun q2_positiveControl_withoutAnyLateReport_theRetryableAttemptIsSentOnce() {
+        retryableFirstAttempt("q4")
+        run()
+        assertEquals(listOf("q4#1", "q4#2"), handoffs)
+        assertEquals(2, row("q4")!!.attempt)
     }
 
     // ── report flushing ──

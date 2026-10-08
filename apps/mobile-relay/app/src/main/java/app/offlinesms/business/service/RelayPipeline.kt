@@ -1,7 +1,9 @@
 package app.offlinesms.business.service
 
+import androidx.room.withTransaction
 import app.offlinesms.business.data.db.JobDao
 import app.offlinesms.business.data.db.JobEntity
+import app.offlinesms.business.data.db.RelayDb
 import app.offlinesms.business.net.ClaimedJob
 import app.offlinesms.business.net.RelayApi
 import app.offlinesms.business.util.RelayLog
@@ -14,19 +16,32 @@ class RelayApiBackend(private val deviceId: String) : SendPipeline.Backend {
 }
 
 /** SendPipeline.LocalJobs over Room. The row keeps the server attempt, the sticky
- *  no-resend mark (schema v3) and only a masked phone number. */
+ *  no-resend mark (schema v3) and only a masked phone number. No write here ever
+ *  sets noResend to false: there is no REPLACE; a newer attempt takes the row
+ *  over with a conditional UPDATE that leaves noResend untouched (Q2). */
 class RoomLocalJobs(
-    private val dao: JobDao,
+    private val db: RelayDb,
+    private val dao: JobDao = db.jobs(),
     private val now: () -> Long = System::currentTimeMillis,
 ) : SendPipeline.LocalJobs {
-    override suspend fun get(jobId: String) =
-        dao.byId(jobId)?.let { SendPipeline.LocalJob(it.jobId, it.attempt, it.localStatus, it.noResend) }
-
-    override suspend fun put(job: ClaimedJob, localStatus: String) {
+    override suspend fun admit(job: ClaimedJob): String? = db.withTransaction {
+        val row = dao.byId(job.jobId)
+        val d = SendPipeline.dedup(row?.let { SendPipeline.LocalJob(it.jobId, it.attempt, it.localStatus, it.noResend) }, job)
+        if (d != null) return@withTransaction d
         val t = now()
-        dao.upsert(JobEntity(job.jobId, RelayLog.maskPhone(job.phoneE164), job.body,
-            job.simSubscriptionId, job.traceId, localStatus, t, t, job.attempt))
+        val phone = RelayLog.maskPhone(job.phoneE164)
+        val written = if (row == null) {
+            dao.insert(JobEntity(job.jobId, phone, job.body, job.simSubscriptionId, job.traceId, "claimed", t, t, job.attempt)) != -1L
+        } else {
+            dao.takeOver(job.jobId, job.attempt, phone, job.body, job.simSubscriptionId, job.traceId, "claimed", t) == 1
+        }
+        // Not written ⇒ the row changed after the read (e.g. a no-resend mark):
+        // refuse conservatively instead of trusting the earlier decision.
+        if (written) null else "ambiguous-handoff"
     }
+
+    override suspend fun beginSending(jobId: String, attempt: Int): Boolean =
+        dao.beginSending(jobId, attempt, now()) == 1
 
     /** States after which this attempt's body is never needed again (privacy):
      *  a refused verification code ('skipped') and a business SMS stopped before
@@ -53,10 +68,11 @@ class StoreReports(
  *  pieces (SmsManager transport, durable Reporter, SystemClock, SecureStore pause). */
 fun relayPipeline(
     deviceId: String,
-    dao: JobDao,
+    db: RelayDb,
+    dao: JobDao = db.jobs(),
     transport: SendPipeline.Transport,
     reports: SendPipeline.Reports,
     clock: SendPipeline.Clock,
     pause: SendPipeline.Pause,
     pacer: suspend () -> Unit,
-) = SendPipeline(RelayApiBackend(deviceId), RoomLocalJobs(dao), transport, reports, clock, pause, pacer)
+) = SendPipeline(RelayApiBackend(deviceId), RoomLocalJobs(db, dao), transport, reports, clock, pause, pacer)

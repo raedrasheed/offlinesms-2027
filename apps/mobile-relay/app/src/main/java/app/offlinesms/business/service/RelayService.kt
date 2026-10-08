@@ -102,7 +102,7 @@ class RelayService : Service() {
         val ctx = this
         return relayPipeline(
             deviceId = deviceId,
-            dao = RelayDb.get(this).jobs(),
+            db = RelayDb.get(this),
             transport = object : SendPipeline.Transport {
                 override fun send(job: ClaimedJob) {
                     SmsEngine.send(ctx, job)

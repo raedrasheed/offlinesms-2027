@@ -38,8 +38,20 @@ class SendPipelineTest {
                 }
             },
             local = object : SendPipeline.LocalJobs {
-                override suspend fun get(jobId: String) = rows[jobId]
-                override suspend fun put(job: ClaimedJob, localStatus: String) { rows[job.jobId] = SendPipeline.LocalJob(job.jobId, job.attempt, localStatus) }
+                // Mirrors RoomLocalJobs: decision on the current row, then a write that keeps noResend.
+                override suspend fun admit(job: ClaimedJob): String? {
+                    val r = rows[job.jobId]
+                    SendPipeline.dedup(r, job)?.let { return it }
+                    if (r?.noResend == true) return "ambiguous-handoff"
+                    rows[job.jobId] = SendPipeline.LocalJob(job.jobId, job.attempt, "claimed", r?.noResend ?: false)
+                    return null
+                }
+                override suspend fun beginSending(jobId: String, attempt: Int): Boolean {
+                    val r = rows.getValue(jobId)
+                    if (r.attempt != attempt || r.noResend) return false
+                    rows[jobId] = r.copy(localStatus = "sending"); onSetStatus("sending")
+                    return true
+                }
                 override suspend fun setStatus(jobId: String, attempt: Int, localStatus: String) {
                     val r = rows.getValue(jobId)
                     if (r.attempt == attempt) rows[jobId] = r.copy(localStatus = localStatus) // attempt-bound, like JobDao
