@@ -125,3 +125,92 @@ describe('authenticated callables: real token verification', () => {
     expect(r.error).toMatchObject({ status: 'PERMISSION_DENIED', message: 'device-id-mismatch' });
   });
 });
+
+// ── Second-round review: trigger boundaries (real Firestore triggers in the
+// Functions emulator, not handler-level assertions).
+
+async function waitFor<T>(fn: () => Promise<T | null | undefined | false>, ms = 20_000): Promise<T> {
+  const until = Date.now() + ms;
+  for (;;) {
+    const v = await fn();
+    if (v) return v as T;
+    if (Date.now() > until) throw new Error('timed out waiting for trigger');
+    await new Promise(r => setTimeout(r, 250));
+  }
+}
+
+async function phoneSignin(phone: string, code: (challengeId: string) => Promise<string>) {
+  const s = (await call('startPhoneAuth', {})).result as { sessionToken: string; pow: { nonce: string; bits: number } };
+  const r = await call('requestPhoneAuthCode', {
+    sessionToken: s.sessionToken, phoneE164: phone, requestId: `req-${phone.slice(-6)}-${Date.now()}`,
+    powNonce: s.pow.nonce, powSolution: solve(s.pow.nonce, phone, s.pow.bits),
+  });
+  expect(r.error).toBeUndefined();
+  const challengeId = r.result.challengeId as string;
+  const v = await call('verifyPhoneAuthCode', { sessionToken: s.sessionToken, challengeId, code: await code(challengeId) });
+  expect(v.error).toBeUndefined();
+  return v.result as { uid: string; customToken: string };
+}
+
+async function groupWithExternal(id: string, phone: string) {
+  const ref = db().collection('conversations').doc(id);
+  await ref.set({ type: 'group', participantUids: ['owner-x'], memberIds: ['owner-x'], memberCount: 1, externalMemberCount: 1 });
+  const digits = phone.replace(/\D/g, '');
+  await ref.collection('externalMembers').doc(digits).set({ normalizedPhone: digits, phoneE164: phone, displayName: 'Ext', isRegistered: false });
+  return ref;
+}
+
+describe('N2 — store-review login over HTTP never reaches phone-linking triggers', () => {
+  it('review login: no phone recorded, no group promotion; a normal sign-in in the same run IS promoted (trigger live)', async () => {
+    const REVIEW = '+970599100071';
+    const NORMAL = '+970599100072';
+    const CODE = '246813';
+    const demo = await getAuth().createUser({ displayName: 'Demo' });
+    await getAuth().setCustomUserClaims(demo.uid, { demoReview: true });
+    await db().collection('users').doc(demo.uid).set({ displayName: 'Demo', status: 'active', demo: true });
+    const codeSalt = 'wire-salt-0123456789abcdef';
+    await db().collection('smsConfig').doc('otp').set({ signin: { review: {
+      enabled: true, phoneE164: REVIEW, codeSalt, codeHash: createHash('sha256').update(`${codeSalt}:${CODE}`).digest('hex'),
+      uid: demo.uid, expiresAtMs: Date.now() + 86_400_000,
+    } } }, { merge: true });
+    const reviewGroup = await groupWithExternal('grp-review', REVIEW);
+    const normalGroup = await groupWithExternal('grp-normal', NORMAL);
+
+    const rev = await phoneSignin(REVIEW, async () => CODE);
+    expect(rev.uid).toBe(demo.uid);
+    expect((await db().collection('relayJobs').where('phoneE164', '==', REVIEW).get()).size).toBe(0);
+
+    // Positive control: the real trigger runs and promotes a genuine phone sign-in.
+    const normal = await phoneSignin(NORMAL, async id => {
+      const body = (await db().collection('relayJobs').doc(`pauth_${id}`).get()).get('messageBody') as string;
+      return /\b(\d{6})\b/.exec(body)![1];
+    });
+    await waitFor(async () => ((await normalGroup.get()).get('participantUids') as string[]).includes(normal.uid));
+    await new Promise(r => setTimeout(r, 1500)); // let any (wrongly) queued review trigger land too
+
+    expect((await reviewGroup.get()).get('participantUids')).toEqual(['owner-x']);
+    expect((await reviewGroup.collection('externalMembers').doc(REVIEW.replace(/\D/g, '')).get()).get('isRegistered')).toBe(false);
+    expect((await db().collection('users').doc(demo.uid).collection('userPrivate').doc('profile').get()).exists).toBe(false);
+    expect((await db().collection('users').doc(demo.uid).get()).get('phoneVerified')).toBeUndefined();
+    expect((await getAuth().getUser(demo.uid)).phoneNumber).toBeUndefined();
+  });
+});
+
+describe('N6 — a policy write triggers the conditional stale-code sweep', () => {
+  it('bumping policyVersion cancels old-generation queued codes; current-generation codes survive', async () => {
+    const base = {
+      kind: 'phone_auth_otp', purpose: 'signin', businessId: 'biz-wire', status: 'queued', messageBody: 'code 111111',
+      phoneE164: '+970599100081', recipientCountryCode: 'PS', expiresAt: Timestamp.fromMillis(Date.now() + 300_000),
+    };
+    await db().collection('relayJobs').doc('old-gen').set({ ...base, jobId: 'old-gen', policyVersion: 1 });
+    await db().collection('relayJobs').doc('new-gen').set({ ...base, jobId: 'new-gen', policyVersion: 2 });
+    await db().collection('smsConfig').doc('otp').set({ policyVersion: 2 }, { merge: true });
+    const old = await waitFor(async () => {
+      const d = (await db().collection('relayJobs').doc('old-gen').get()).data();
+      return d?.status === 'failed' ? d : null;
+    });
+    expect(old).toMatchObject({ lastError: 'policy-changed' });
+    expect(old.messageBody).toBeUndefined();
+    expect((await db().collection('relayJobs').doc('new-gen').get()).get('status')).toBe('queued');
+  });
+});

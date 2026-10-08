@@ -58,10 +58,10 @@ jobs:
   # Security gate for SMS/OTP abuse protection: Firestore rules, emulator-backed
   # handler tests (public phone sign-in, linking, relay enforcement, email OTP,
   # remediation), wire-level callable tests through the Functions emulator, and
-  # the relay app's Android-free send rules on a plain JVM. No SMS/email is sent:
+  # the relay app's Android-free send pipeline on a plain JVM. No SMS/email is sent:
   # every provider and relay is emulated or mocked.
   security-emulators:
-    name: rules · integration · callable (emulators) · relay send rules (JVM)
+    name: rules · integration · callable (emulators) · relay send pipeline (JVM)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -102,6 +102,52 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.14.3'
 
-      - name: Relay send-boundary rules (plain JVM)
+      - name: Relay send pipeline (plain JVM, no Android SDK)
         run: gradle -p apps/mobile-relay/sendgate-jvm-test test --no-daemon
+
+  # Full relay Android application: compile + package the debug APK (AGP, Room
+  # kapt, resources, manifest) and run its unit/integration tests — the send
+  # pipeline with fakes, and Room + RelayApi + production pipeline wiring over a
+  # fake callable transport under Robolectric. Uses a NON-PRODUCTION placeholder
+  # google-services.json. Not covered here: SmsManager/carrier behaviour, the
+  # foreground service lifecycle and FCM on a real device.
+  relay-android:
+    name: relay app · assembleDebug · unit + Robolectric integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # The hosted runner image ships the Android SDK; make sure the exact
+      # platform/build-tools this app compiles against are present.
+      - name: Android SDK packages
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-34" "build-tools;34.0.0" > /dev/null
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.14.3'
+
+      - name: Placeholder google-services.json (non-production)
+        run: bash scripts/ci/relay-google-services.sh
+
+      - name: Build relay APK and run its tests
+        run: gradle -p apps/mobile-relay :app:assembleDebug :app:testDebugUnitTest --no-daemon
+
+      - name: Relay test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: relay-test-reports
+          path: apps/mobile-relay/app/build/reports/tests/
+          if-no-files-found: ignore
