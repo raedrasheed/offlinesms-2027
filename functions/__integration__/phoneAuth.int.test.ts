@@ -406,13 +406,31 @@ describe('A08 — interruptions during account completion', () => {
   });
 });
 
-// ── A17 ───────────────────────────────────────────────────────────────────
-describe('A17 — store-review access replaces the fixed credential', () => {
+// ── A17 / N1 / N2 ─────────────────────────────────────────────────────────
+describe('A17 + N2 — store-review access: designated demo only, no phone side effects', () => {
   const REVIEW = num(140);
-  async function enableReview(uid: string, over: Record<string, unknown> = {}) {
-    const codeSalt = randomBytes(16).toString('hex');
-    const codeHash = createHash('sha256').update(`${codeSalt}:246810`).digest('hex');
-    await seedPolicy({ signin: { enabled: true, limits: FAST, review: { enabled: true, phoneE164: REVIEW, codeSalt, codeHash, uid, expiresAtMs: Date.now() + 86_400_000, ...over } } });
+  const CODE = '246810';
+  let reviewCfg: Record<string, unknown> = {};
+  async function enableReview(uid: string, over: Record<string, unknown> = {}, keepSalt = false) {
+    const codeSalt = keepSalt && reviewCfg.codeSalt ? reviewCfg.codeSalt as string : randomBytes(16).toString('hex');
+    const codeHash = createHash('sha256').update(`${codeSalt}:${over.code ?? CODE}`).digest('hex');
+    const { code: _c, ...rest } = over;
+    reviewCfg = { enabled: true, phoneE164: REVIEW, codeSalt, codeHash, uid, expiresAtMs: Date.now() + 86_400_000, ...rest };
+    await seedPolicy({ signin: { enabled: true, limits: FAST, review: reviewCfg } });
+  }
+  async function demoAccount(claims: Record<string, unknown> | null = { demoReview: true }) {
+    const u = await getAuth().createUser({ displayName: 'Demo' });
+    if (claims) await getAuth().setCustomUserClaims(u.uid, claims);
+    await db().collection('users').doc(u.uid).set({ displayName: 'Demo', status: 'active', demo: true, createdAt: new Date(0) });
+    return u.uid;
+  }
+  async function acceptedReview(uid: string) {
+    await enableReview(uid);
+    const s = await start();
+    const r = await send(s, REVIEW);
+    const first = await verify(s, r.challengeId, CODE);
+    expect(first.uid).toBe(uid);
+    return { s, r };
   }
 
   it('no review access unless configured: the old fixed number/code is just a normal number', async () => {
@@ -421,40 +439,140 @@ describe('A17 — store-review access replaces the fixed credential', () => {
     await expectHttps(verify(s, r.challengeId, '123456'), 'permission-denied', 'code-invalid');
   });
 
-  it('configured review access signs into the demo account only, sends no SMS, and can be revoked', async () => {
-    const demo = await getAuth().createUser({});
-    await db().collection('users').doc(demo.uid).set({ displayName: 'Demo', status: 'active', createdAt: new Date(0) });
-    await enableReview(demo.uid);
+  it('signs into the designated demo only, sends no SMS, creates nothing, records NO phone', async () => {
+    const demo = await demoAccount();
+    await enableReview(demo);
     const before = await authUserCount();
     const s = await start();
     const r = await send(s, REVIEW);
     expect(await authJobs()).toBe(0);
     await expectHttps(verify(s, r.challengeId, '135791'), 'permission-denied', 'code-invalid');
-    const res = await verify(s, r.challengeId, '246810');
-    expect(res).toMatchObject({ uid: demo.uid, isNewUser: false });
+    const res = await verify(s, r.challengeId, CODE);
+    expect(res).toMatchObject({ uid: demo, isNewUser: false });
     expect(await authUserCount()).toBe(before);
-    // Revoked → the code stops working.
-    await enableReview(demo.uid, { enabled: false });
-    await advance(61_000);
-    const s2 = await start({ ip: '203.0.113.90' });
-    const r2 = await send(s2, REVIEW).catch(e => e);
-    if (!(r2 instanceof Error)) await expectHttps(verify(s2, r2.challengeId, '246810'), 'permission-denied', 'code-invalid');
+    // No unproved phone ownership is recorded anywhere (so no contact/group linking).
+    expect((await getAuth().getUser(demo)).phoneNumber).toBeUndefined();
+    expect((await db().collection('users').doc(demo).get()).get('phoneVerified')).toBeUndefined();
+    expect((await db().collection('users').doc(demo).collection('userPrivate').doc('profile').get()).exists).toBe(false);
   });
 
-  it('an expired or over-long review window is ignored; a missing demo account is never created', async () => {
+  it('a non-designated or privileged target is refused at runtime (no token)', async () => {
+    for (const claims of [null, { demoReview: true, admin: true }, { admin: true }, { demoReview: true, role: 'super_admin' }]) {
+      await resetEmulators(); await seedRelayDevice();
+      const uid = await demoAccount(claims);
+      await enableReview(uid);
+      const s = await start();
+      const r = await send(s, REVIEW);
+      await expectHttps(verify(s, r.challengeId, CODE), 'permission-denied', 'account-disabled');
+    }
+  });
+
+  it('N1: replaying the SAME accepted review op after disable / expiry / rotation / uid swap mints nothing', async () => {
+    const demo = await demoAccount();
+    const other = await demoAccount();
+    const cases: Array<[string, () => Promise<void>]> = [
+      ['disabled', () => enableReview(demo, { enabled: false })],
+      ['expired', () => enableReview(demo, { expiresAtMs: Date.now() - 1 })],
+      ['code rotated', () => enableReview(demo, { code: '999000' })],
+      ['salt rotated (same code)', () => enableReview(demo)],
+      ['demo uid replaced', () => enableReview(other, {}, true)],
+    ];
+    for (const [label, revoke] of cases) {
+      const { s, r } = await acceptedReview(demo);
+      expect((await verify(s, r.challengeId, '000000')).uid, `${label}: lost-response retry before revocation`).toBe(demo);
+      await revoke();
+      await expectHttps(verify(s, r.challengeId, CODE), 'not-found', 'challenge-not-found');
+      // Next case: clear abuse counters (5 review logins on one number would
+      // otherwise — correctly — hit the destination's hourly cap).
+      await db().collection('smsRateLimits').get().then(q => Promise.all(q.docs.map(d => d.ref.delete())));
+      await advance(61_000);
+    }
+  });
+
+  it('N1: demo designation removed after acceptance → replay refused', async () => {
+    const demo = await demoAccount();
+    const { s, r } = await acceptedReview(demo);
+    await getAuth().setCustomUserClaims(demo, { demoReview: true, admin: true });
+    await expectHttps(verify(s, r.challengeId, CODE), 'permission-denied', 'account-disabled');
+  });
+
+  it('an over-long review window is ignored; a missing demo account is never created', async () => {
     await enableReview('no-such-demo-uid');
     const s = await start();
     const r = await send(s, REVIEW);
     const before = await authUserCount();
-    await expectHttps(verify(s, r.challengeId, '246810'), 'unavailable', 'signin-interrupted');
+    await expectHttps(verify(s, r.challengeId, CODE), 'unavailable', 'signin-interrupted');
     expect(await authUserCount()).toBe(before);
-    const demo = await getAuth().createUser({});
-    await enableReview(demo.uid, { expiresAtMs: Date.now() + 40 * 86_400_000 });
+    const demo = await demoAccount();
+    await enableReview(demo, { expiresAtMs: Date.now() + 40 * 86_400_000 });
     const s2 = await start({ ip: '203.0.113.91' });
     await advance(61_000);
     const r2 = await send(s2, REVIEW);
     expect(await authJobs()).toBe(1); // treated as a normal number → real (mocked) SMS
-    await expectHttps(verify(s2, r2.challengeId, '246810'), 'permission-denied', 'code-invalid');
+    await expectHttps(verify(s2, r2.challengeId, CODE), 'permission-denied', 'code-invalid');
+  });
+
+  it('setup script: refuses a non-designated uid; --create-demo makes a clean designated account', async () => {
+    const { spawnSync } = await import('node:child_process');
+    const run = (args: string[]) => spawnSync('npx', ['tsx', 'scripts/setReviewAccess.ts', '--project=demo-offlinesms', ...args], {
+      cwd: process.cwd().endsWith('functions') ? '..' : process.cwd(), encoding: 'utf8',
+      env: { ...process.env, GOOGLE_APPLICATION_CREDENTIALS: '' },
+    });
+    const plain = await getAuth().createUser({});
+    const admin = await getAuth().createUser({});
+    await getAuth().setCustomUserClaims(admin.uid, { demoReview: true, admin: true });
+    expect(run([`--phone=${REVIEW}`, `--uid=${plain.uid}`]).status).toBe(2);
+    expect(run([`--phone=${REVIEW}`, `--uid=${admin.uid}`]).status).toBe(2);
+    const ok = run([`--phone=${REVIEW}`, '--create-demo', '--days=3']);
+    expect(ok.status).toBe(0);
+    const review = (await db().collection('smsConfig').doc('otp').get()).get('signin.review');
+    const demo = await getAuth().getUser(review.uid);
+    expect(demo.customClaims).toEqual({ demoReview: true });
+    expect(demo.phoneNumber).toBeUndefined();
+    expect(review.codeHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(JSON.stringify(review)).not.toMatch(/"code"/);
+  }, 120_000);
+});
+
+describe('N1 — every token mint re-checks eligibility inside a bounded window', () => {
+  it('suspension via profile status (as setUserStatus does) after completion → no new token', async () => {
+    const s = await start();
+    const r = await send(s, num(160));
+    const res = await verify(s, r.challengeId, await code(r.challengeId));
+    expect((await verify(s, r.challengeId, '000000')).uid).toBe(res.uid); // immediate retry still fine
+    await db().collection('users').doc(res.uid).update({ status: 'suspended' });
+    await expectHttps(verify(s, r.challengeId, '000000'), 'permission-denied', 'account-disabled');
+  });
+
+  it('Auth-disabled after completion → no new token', async () => {
+    const s = await start();
+    const r = await send(s, num(161));
+    const res = await verify(s, r.challengeId, await code(r.challengeId));
+    await getAuth().updateUser(res.uid, { disabled: true });
+    await expectHttps(verify(s, r.challengeId, '000000'), 'permission-denied', 'account-disabled');
+  });
+
+  it('an op interrupted before bootstrap cannot be completed after the window (measured from acceptance)', async () => {
+    const s = await start();
+    const r = await send(s, num(162));
+    const c = await code(r.challengeId);
+    phoneAuthDeps.beforeBootstrap = async () => { throw new Error('crash'); };
+    await expectHttps(verify(s, r.challengeId, c), 'unavailable', 'signin-interrupted');
+    phoneAuthDeps.beforeBootstrap = deps.beforeBootstrap;
+    await advance(601_000); // tokenRetryWindowSec default 600 s
+    const users = await authUserCount();
+    await expectHttps(verify(s, r.challengeId, c), 'not-found', 'challenge-not-found');
+    const op = (await db().collection('phoneAuthOps').doc(r.challengeId).get()).data()!;
+    expect(op.stage).not.toBe('done');
+    expect(await authUserCount()).toBe(users);
+  });
+
+  it('a done op is not re-issued after the window either', async () => {
+    const s = await start();
+    const r = await send(s, num(163));
+    await verify(s, r.challengeId, await code(r.challengeId));
+    await advance(601_000);
+    await expectHttps(verify(s, r.challengeId, '000000'), 'not-found', 'challenge-not-found');
   });
 });
 

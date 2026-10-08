@@ -22,7 +22,7 @@ import { onCall, HttpsError, type CallableRequest } from 'firebase-functions/v2/
 import { getFirestore, FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { getAuth, type UserRecord } from 'firebase-admin/auth';
 import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
-import type { ReviewAccess } from './config';
+import type { ReviewAccess, PhoneAuthConfig } from './config';
 import { appCheckOptions } from '../lib/appCheck';
 import { writeAuditLog } from '../lib/auditLog';
 import { userPrivateProfileRef } from '../lib/userPrivate';
@@ -86,10 +86,11 @@ export async function handleVerifyPhoneAuthCode(request: CallableRequest<unknown
       return { kind: 'error', code: 'challenge-not-found' };
     }
     if (opS.exists) {
-      // Already accepted: continue/repeat completion; never re-check a code.
-      const completedAt = (opS.get('completedAtMs') as number | undefined) ?? null;
-      if (completedAt != null && completedAt + L.tokenRetryWindowSec * 1000 < now) return { kind: 'error', code: 'challenge-not-found' };
-      return { kind: 'proceed' };
+      // Already accepted: continue/repeat completion without re-checking the
+      // (consumed) code — but only inside the bounded window measured from
+      // ACCEPTANCE. Every token mint re-checks eligibility (mintAllowed).
+      return withinCompletionWindow(opS.get('acceptedAtMs'), now, L.tokenRetryWindowSec)
+        ? { kind: 'proceed' } : { kind: 'error', code: 'challenge-not-found' };
     }
     const ch = chS.data()!;
     const destRef = db.collection(C.limits).doc(`dest_${ch.phoneKey}`);
@@ -127,15 +128,17 @@ export async function handleVerifyPhoneAuthCode(request: CallableRequest<unknown
     }
     tx.update(chRef, { status: 'used', usedAt: FieldValue.serverTimestamp(), codeVerifier: FieldValue.delete() });
     tx.create(opRef, review ? {
-      // Review access signs into the configured demo account ONLY — it never
-      // resolves the number to, creates, or touches any other account.
-      challengeId, sessionKey, stage: 'user-ready', uid: review.uid, created: false, review: true,
-      phoneKey: ch.phoneKey, phoneE164: ch.phoneE164,
+      // Review access signs into the configured demo account ONLY. It never
+      // resolves the number, creates or touches another account, and — since
+      // no SMS proved possession — records NO phone on the demo account (no
+      // phoneVerified, no private phone, so no contact/group linking).
+      challengeId, sessionKey, stage: 'review-ready', uid: review.uid, created: false, review: true,
+      reviewGen: reviewGeneration(review), phoneKey: ch.phoneKey, acceptedAtMs: now,
       createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
     } : {
       challengeId, sessionKey, stage: 'verified',
       phoneKey: ch.phoneKey, phoneE164: ch.phoneE164,
-      plannedUid: plannedUid(),
+      plannedUid: plannedUid(), acceptedAtMs: now,
       createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
     });
     return { kind: 'proceed' };
@@ -147,7 +150,7 @@ export async function handleVerifyPhoneAuthCode(request: CallableRequest<unknown
     if (res.code === 'code-expired') throw new HttpsError('deadline-exceeded', 'code-expired');
     throw new HttpsError('not-found', res.code);
   }
-  return completeSignin(challengeId);
+  return completeSignin(challengeId, cfg);
 }
 
 /** Resolve the Auth user for a verified op. Only an explicit user-not-found means "no account". */
@@ -175,13 +178,80 @@ async function resolveUser(e164: string, planned: string): Promise<{ user: UserR
   }
 }
 
-export async function completeSignin(challengeId: string): Promise<{ customToken: string; uid: string; isNewUser: boolean }> {
+/** Pure: is `now` inside the completion/retry window that starts at acceptance? */
+export function withinCompletionWindow(acceptedAtMs: unknown, now: number, windowSec: number): boolean {
+  return typeof acceptedAtMs === 'number' && Number.isFinite(acceptedAtMs)
+    && now >= acceptedAtMs - 5_000 && now < acceptedAtMs + windowSec * 1000;
+}
+
+/** Identity of one review-access configuration: any rotation (code, salt,
+ *  number, demo uid, expiry) or disable produces a different generation. */
+export function reviewGeneration(r: ReviewAccess): string {
+  return createHash('sha256').update(`review:v1|${r.phoneE164}|${r.uid}|${r.codeSalt}|${r.codeHash}|${r.expiresAtMs}`).digest('hex');
+}
+
+/**
+ * Pure: a designated store-review demo account carries the custom claim
+ * `demoReview: true` and NO other claims (no admin/role/org/relay power).
+ * Set up only via scripts/setReviewAccess.ts.
+ */
+export function isDemoReviewAccount(user: { customClaims?: Record<string, unknown> | null; disabled?: boolean }): boolean {
+  const c = user.customClaims ?? {};
+  const keys = Object.keys(c);
+  return !user.disabled && c.demoReview === true && keys.length === 1;
+}
+
+/**
+ * The ONE gate in front of every token mint (first completion, resume, or a
+ * lost-response replay of an accepted op). Re-checks, at mint time:
+ *   • the completion window from acceptance (explicit server deadline)
+ *   • review ops: the CURRENT review access is enabled, unexpired, the same
+ *     generation, the same demo uid, and that uid is a designated demo account
+ *   • Auth: user exists and is not disabled
+ *   • profile: not suspended (setUserStatus only writes the profile)
+ */
+async function assertMintAllowed(op: FirebaseFirestore.DocumentSnapshot, cfg: PhoneAuthConfig): Promise<UserRecord> {
+  if (!withinCompletionWindow(op.get('acceptedAtMs'), Date.now(), cfg.limits.tokenRetryWindowSec)) {
+    throw new HttpsError('not-found', 'challenge-not-found');
+  }
+  const uid = op.get('uid') as string;
+  if (op.get('review') === true) {
+    const r = cfg.review;
+    if (!r || reviewGeneration(r) !== op.get('reviewGen') || r.uid !== uid) {
+      throw new HttpsError('not-found', 'challenge-not-found');
+    }
+  }
+  let user: UserRecord;
+  try { user = await phoneAuthDeps.getUser(uid); } catch { throw new HttpsError('unavailable', 'signin-interrupted'); }
+  if (user.disabled) throw new HttpsError('permission-denied', 'account-disabled');
+  if (op.get('review') === true && !isDemoReviewAccount(user)) throw new HttpsError('permission-denied', 'account-disabled');
+  const profile = await getFirestore().collection('users').doc(uid).get();
+  if (profile.exists && !profileIsActive(true, profile.get('status'))) throw new HttpsError('permission-denied', 'account-disabled');
+  return user;
+}
+
+export async function completeSignin(challengeId: string, cfg: PhoneAuthConfig): Promise<{ customToken: string; uid: string; isNewUser: boolean }> {
   const db = getFirestore();
   const opRef = db.collection(C.ops).doc(challengeId);
   let op = await opRef.get();
   if (!op.exists) throw new HttpsError('not-found', 'challenge-not-found');
+  // Bounded completion: nothing (not even recovery work) happens after the
+  // window closes, regardless of TTL cleanup.
+  if (!withinCompletionWindow(op.get('acceptedAtMs'), Date.now(), cfg.limits.tokenRetryWindowSec)) {
+    throw new HttpsError('not-found', 'challenge-not-found');
+  }
 
   try {
+    if (op.get('stage') === 'review-ready') {
+      await assertMintAllowed(op, cfg); // demo eligibility before marking done
+      await db.runTransaction(async tx => {
+        const s = await tx.get(opRef);
+        if (s.get('stage') !== 'review-ready') return;
+        tx.update(opRef, { stage: 'done', completedAt: FieldValue.serverTimestamp(), completedAtMs: Date.now(), updatedAt: FieldValue.serverTimestamp() });
+      });
+      op = await opRef.get();
+    }
+
     if (op.get('stage') === 'verified') {
       const { user, created } = await resolveUser(op.get('phoneE164') as string, op.get('plannedUid') as string);
       if (user.disabled) throw new HttpsError('permission-denied', 'account-disabled');
@@ -239,9 +309,8 @@ export async function completeSignin(challengeId: string): Promise<{ customToken
   if (op.get('stage') !== 'done') throw new HttpsError('unavailable', 'signin-interrupted');
   const uid = op.get('uid') as string;
   let customToken: string;
+  await assertMintAllowed(op, cfg);
   try {
-    const u = await phoneAuthDeps.getUser(uid);
-    if (u.disabled) throw new HttpsError('permission-denied', 'account-disabled');
     customToken = await phoneAuthDeps.mintToken(uid);
   } catch (e) {
     if (e instanceof HttpsError) throw e;
