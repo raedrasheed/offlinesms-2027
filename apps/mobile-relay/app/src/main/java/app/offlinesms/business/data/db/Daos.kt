@@ -14,11 +14,21 @@ interface JobDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(job: JobEntity): Long
 
-    @Query("UPDATE jobs SET localStatus = :status, updatedAt = :now WHERE jobId = :jobId")
-    suspend fun setStatus(jobId: String, status: String, now: Long)
+    /** Status of ONE attempt: a result for another attempt never touches this row. */
+    @Query("UPDATE jobs SET localStatus = :status, updatedAt = :now, " +
+        "noResend = CASE WHEN :status IN ('sent','delivered') THEN 1 ELSE noResend END " +
+        "WHERE jobId = :jobId AND attempt = :attempt")
+    suspend fun setStatus(jobId: String, attempt: Int, status: String, now: Long)
 
-    @Query("UPDATE jobs SET body = NULL, localStatus = :status, updatedAt = :now WHERE jobId = :jobId")
-    suspend fun finalize(jobId: String, status: String, now: Long)
+    /** Terminal status of ONE attempt; drops the body (privacy). */
+    @Query("UPDATE jobs SET body = NULL, localStatus = :status, updatedAt = :now, " +
+        "noResend = CASE WHEN :status IN ('sent','delivered') THEN 1 ELSE noResend END " +
+        "WHERE jobId = :jobId AND attempt = :attempt")
+    suspend fun finalize(jobId: String, attempt: Int, status: String, now: Long)
+
+    /** Sticky no-resend mark for the LOGICAL job (whatever attempt the row holds). */
+    @Query("UPDATE jobs SET noResend = 1, updatedAt = :now WHERE jobId = :jobId")
+    suspend fun markNoResend(jobId: String, now: Long)
 
     @Query("SELECT * FROM jobs WHERE jobId = :jobId LIMIT 1")
     suspend fun byId(jobId: String): JobEntity?

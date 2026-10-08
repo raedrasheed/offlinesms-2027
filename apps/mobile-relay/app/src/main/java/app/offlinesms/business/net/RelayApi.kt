@@ -49,7 +49,7 @@ object RelayApi {
     suspend fun claim(deviceId: String, capacity: Int): List<ClaimedJob> {
         val data = mapOf(
             "deviceId" to deviceId, "capacity" to capacity,
-            "clientCaps" to listOf(SEND_AUTH_CAPABILITY),
+            "clientCaps" to listOf(SEND_AUTH_CAPABILITY, ATTEMPT_CAPABILITY),
         )
         return parseClaimedJobs(callables.call("claimRelayJobs", data))
     }
@@ -61,12 +61,16 @@ object RelayApi {
         return parseSendAuthorization(callables.call("authorizeRelaySend", data))
     }
 
+    /** [attempt] binds the report to one server attempt; null (pre-upgrade
+     *  pending reports) is sent unbound and the server only applies it to a job
+     *  that was never re-leased. */
     suspend fun report(
-        deviceId: String, jobId: String, status: String,
+        deviceId: String, jobId: String, attempt: Int?, status: String,
         reason: String?, androidResultCode: Int?, simSubscriptionId: Int?,
     ) {
         val data = mapOf(
             "deviceId" to deviceId, "jobId" to jobId, "status" to status,
+            "attempt" to attempt,
             "reason" to reason, "androidResultCode" to androidResultCode,
             "simSubscriptionId" to simSubscriptionId,
             "timestamp" to java.time.Instant.now().toString(),

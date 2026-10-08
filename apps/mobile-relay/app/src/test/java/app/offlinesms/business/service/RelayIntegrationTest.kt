@@ -4,6 +4,7 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import app.offlinesms.business.data.db.JobDao
 import app.offlinesms.business.data.db.RelayDb
 import app.offlinesms.business.net.Callables
 import app.offlinesms.business.net.ClaimedJob
@@ -11,6 +12,10 @@ import app.offlinesms.business.net.RelayApi
 import app.offlinesms.business.net.parseClaimedJobs
 import app.offlinesms.business.net.parseSendAuthorization
 import app.offlinesms.business.service.SendPipeline.Outcome
+import app.offlinesms.business.sms.SendResultAggregator
+import app.offlinesms.business.work.FlushResult
+import app.offlinesms.business.work.ReportStore
+import app.offlinesms.business.work.flushReports
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
@@ -23,51 +28,60 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.io.IOException
 
 /**
- * Layer: the relay app's production send wiring — [relayPipeline] with the real
- * Room database (schema v2, in-memory) and the real [RelayApi] request/response
- * code — driven through a FAKE callable transport (an in-memory server) and a
- * fake SMS transport, under Robolectric. Not covered here: the RelayService
- * lifecycle (foreground start, FCM wake, Firebase sign-in), SmsManager itself,
- * carrier behaviour, and real-device timing.
+ * Layer: the relay app's production send AND report path under Robolectric —
+ * [relayPipeline] (RelayApiBackend + RoomLocalJobs + SendPipeline), the
+ * production report persistence ([ReportStore], awaited by the pipeline via
+ * [StoreReports]) and flush ([flushReports] → [RelayApi.report]), on a real
+ * file-backed Room v3 database (closed and reopened to simulate a process
+ * restart), with a FAKE callable transport (an in-memory server that binds
+ * reports to attempts like reportRelayDelivery, and can go offline or lose a
+ * response after committing) and a fake SMS transport counting hand-offs.
+ * SMS callbacks are driven through the production [SendResultAggregator] +
+ * [ReportStore], i.e. what SmsResultReceiver does minus the Android broadcast
+ * glue. Not covered here: the RelayService lifecycle, WorkManager scheduling,
+ * SmsManager/modem/carrier, device timing.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], application = android.app.Application::class)
 class RelayIntegrationTest {
+    private val ctx get() = ApplicationProvider.getApplicationContext<Context>()
+    private val dbName = "relay-it.db"
     private lateinit var db: RelayDb
     private val server = FakeServer()
-    private val sent = mutableListOf<String>()
-    private val failed = mutableListOf<Pair<String, String>>()
+    private val handoffs = mutableListOf<String>()
     private var now = 0L
     private var paused = false
     private var onDurableSending: () -> Unit = {}
     private val originalCallables = RelayApi.callables
 
     @Before fun setUp() {
-        db = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), RelayDb::class.java)
-            .allowMainThreadQueries().build()
+        ctx.deleteDatabase(dbName)
+        db = open()
         RelayApi.callables = server
     }
 
-    @After fun tearDown() { RelayApi.callables = originalCallables; db.close() }
+    @After fun tearDown() { RelayApi.callables = originalCallables; db.close(); ctx.deleteDatabase(dbName) }
+
+    private fun open(): RelayDb = Room.databaseBuilder(ctx, RelayDb::class.java, dbName)
+        .addMigrations(*RelayDb.MIGRATIONS).allowMainThreadQueries().build()
+
+    /** Process restart: everything in memory is gone; only the database file survives. */
+    private fun restart() { db.close(); db = open() }
 
     private fun pipeline(): SendPipeline {
         val dao = db.jobs()
         return relayPipeline(
             deviceId = "dev-1",
-            dao = object : app.offlinesms.business.data.db.JobDao by dao {
-                override suspend fun setStatus(jobId: String, status: String, now: Long) {
-                    dao.setStatus(jobId, status, now); if (status == "sending") onDurableSending()
+            dao = object : JobDao by dao {
+                override suspend fun setStatus(jobId: String, attempt: Int, status: String, now: Long) {
+                    dao.setStatus(jobId, attempt, status, now); if (status == "sending") onDurableSending()
                 }
             },
-            transport = object : SendPipeline.Transport { override fun send(job: ClaimedJob) { sent += "${job.jobId}#${job.attempt}" } },
-            reports = object : SendPipeline.Reports {
-                override fun failed(jobId: String, reason: String) {
-                    failed += jobId to reason
-                    server.report(jobId, reason)
-                }
-            },
+            transport = object : SendPipeline.Transport { override fun send(job: ClaimedJob) { handoffs += "${job.jobId}#${job.attempt}" } },
+            reports = StoreReports(ReportStore(db) { now }),
             clock = object : SendPipeline.Clock { override fun elapsedMs() = now },
             pause = object : SendPipeline.Pause { override val paused get() = this@RelayIntegrationTest.paused },
             pacer = {},
@@ -75,25 +89,44 @@ class RelayIntegrationTest {
     }
     private fun run() = runBlocking { pipeline().runOnce(5) }
     private fun row(id: String) = runBlocking { db.jobs().byId(id) }
+    private fun pending() = runBlocking { db.reports().batch() }
+    private fun flush(): FlushResult = runBlocking {
+        flushReports(db.reports(),
+            send = { RelayApi.report("dev-1", it.jobId, it.attempt, it.status, it.reason, it.androidResultCode, it.simSubscriptionId) },
+            isPermanent = { it is PermanentRefusal })
+    }
+    /** What SmsResultReceiver does for one part callback (minus the broadcast glue). */
+    private fun callback(jobId: String, attempt: Int?, kind: SendResultAggregator.Kind, total: Int, ok: Boolean) = runBlocking {
+        aggregator.onPart(jobId, attempt, kind, total, ok)?.let {
+            ReportStore(db) { now }.record(jobId, attempt, it.status, it.reason, if (ok) -1 else 4, it.noResend)
+        }
+    }
+    private val aggregator = SendResultAggregator()
 
-    /** In-memory stand-in for claimRelayJobs / authorizeRelaySend / report, using the server's wire shapes. */
+    class PermanentRefusal(msg: String) : Exception(msg)
+
+    /** In-memory stand-in for claimRelayJobs / authorizeRelaySend / reportRelayDelivery (wire shapes and attempt binding). */
     private class FakeServer : Callables {
-        data class Job(val id: String, val kind: String?, var status: String = "queued", var attempt: Int = 0, var remainingMs: Long = 60_000)
+        data class Job(val id: String, val kind: String?, var status: String = "queued", var attempt: Int = 0,
+                       var remainingMs: Long = 60_000, var noRetry: Boolean = false, val maxAttempts: Int = 5)
         val jobs = linkedMapOf<String, Job>()
         val calls = mutableListOf<String>()
         var authorize: (Job) -> Map<String, Any?>? = { mapOf("ok" to true, "sendWithinMs" to 15_000L) }
-        val reports = mutableListOf<Pair<String, String>>()
+        val received = mutableListOf<Map<String, Any?>>()   // every report that reached the server
+        var online = true
+        var loseNextAck = false
 
         fun add(id: String, kind: String?) { jobs[id] = Job(id, kind) }
-        fun requeue(id: String) { jobs.getValue(id).status = "queued" }
-        fun report(id: String, reason: String) { reports += id to reason }
+        /** Lease lapsed / pre-hand-off pause handled server-side: next claim is a new attempt. */
+        fun requeue(id: String) { jobs.getValue(id).let { if (!it.noRetry && it.status in setOf("claimed", "sending")) it.status = "queued" } }
 
         override suspend fun call(name: String, data: Map<String, Any?>): Any? {
             calls += name
             return when (name) {
                 "claimRelayJobs" -> {
                     @Suppress("UNCHECKED_CAST")
-                    assertTrue("send-auth capability declared", (data["clientCaps"] as List<String>).contains("send-auth-v1"))
+                    val caps = data["clientCaps"] as List<String>
+                    assertTrue(caps.containsAll(listOf("send-auth-v1", "attempt-v1")))
                     val out = jobs.values.filter { it.status == "queued" }.map { j ->
                         j.status = "claimed"; j.attempt++
                         val otp = j.kind != null
@@ -103,77 +136,189 @@ class RelayIntegrationTest {
                     }
                     mapOf("jobs" to out, "capacityExhausted" to null)
                 }
-                "authorizeRelaySend" -> authorize(jobs.getValue(data["jobId"] as String)) ?: throw RuntimeException("UNAVAILABLE")
+                "authorizeRelaySend" -> authorize(jobs.getValue(data["jobId"] as String)) ?: throw IOException("UNAVAILABLE")
+                "reportRelayDelivery" -> {
+                    if (!online) throw IOException("offline")
+                    received += data
+                    val j = jobs[data["jobId"] as String] ?: throw PermanentRefusal("job-not-found")
+                    val a = data["attempt"] as Int?
+                    val bound = if (a == null) j.attempt <= 1 else a == j.attempt
+                    val result: Map<String, Any?> = if (!bound) {
+                        mapOf("ok" to true, "applied" to false, "notApplied" to if (a == null) "unbound" else "stale")
+                    } else {
+                        val reason = data["reason"] as String?
+                        when (data["status"]) {
+                            "sent", "delivered" -> { j.status = data["status"] as String; j.noRetry = true }
+                            "failed" -> j.status = when {
+                                reason?.startsWith("ambiguous") == true -> "failed"
+                                j.noRetry || j.attempt >= j.maxAttempts -> "failed"
+                                else -> "queued"
+                            }
+                        }
+                        mapOf("ok" to true, "applied" to true)
+                    }
+                    if (loseNextAck) { loseNextAck = false; throw IOException("response lost") } // committed above
+                    result
+                }
                 else -> mapOf<String, Any?>()
             }
         }
     }
 
+    // ── M1: the no-resend decision survives an offline report, lease expiries and a restart ──
+    @Test fun m1_ambiguousJob_neverHandedOffTwice_acrossReportOutage_twoLeaseExpiries_andRestart() {
+        server.add("b1", null)
+        run()                                              // attempt 1 handed off; no callback ever arrives
+        assertEquals(listOf("b1#1"), handoffs)
+        server.online = false                              // reports can't reach the server
+        server.requeue("b1")                               // lease 1 lapsed
+        assertEquals(Outcome.Failed("b1", "ambiguous-handoff"), run().single())
+        assertTrue(row("b1")!!.noResend)                   // durable before anything else
+        assertEquals(1, flush().kept)                      // the ambiguous report is held offline
+        server.requeue("b1")                               // lease 2 lapsed too
+        restart()                                          // process death
+        assertEquals(Outcome.Failed("b1", "ambiguous-handoff"), run().single()) // attempt 3
+        assertEquals(listOf("b1#1"), handoffs)             // still exactly ONE hand-off
+        val r = row("b1")!!
+        assertEquals(1, r.attempt); assertEquals("sending", r.localStatus); assertTrue(r.noResend)
+        assertEquals(listOf(2, 3), pending().map { it.attempt })
+
+        // Network back: both reports flush; the stale one (attempt 2) is acknowledged
+        // without being applied, the current one (attempt 3) ends the job.
+        server.online = true
+        assertEquals(FlushResult(delivered = 2, dropped = 0, kept = 0), flush())
+        assertEquals(listOf(2, 3), server.received.map { it["attempt"] })
+        assertEquals("failed", server.jobs.getValue("b1").status)
+        assertTrue(pending().isEmpty())
+        server.requeue("b1"); run()
+        assertEquals(listOf("b1#1"), handoffs)
+    }
+
+    @Test fun m1_positiveControl_knownPreHandOffPause_isRetriedOnceAsTheNextAttempt() {
+        server.add("b2", null)
+        onDurableSending = { paused = true }               // pause lands during the durable write
+        assertTrue(run().single() is Outcome.StoppedBatch)
+        assertTrue(handoffs.isEmpty())
+        assertEquals("paused", row("b2")!!.localStatus)
+        assertNull(row("b2")!!.body)                       // body dropped for the stopped attempt
+        paused = false; onDurableSending = {}
+        server.requeue("b2")
+        run()
+        assertEquals(listOf("b2#2"), handoffs)
+        assertEquals(2, row("b2")!!.attempt)
+    }
+
+    @Test fun m1_positiveControl_definitiveCarrierFailure_isRetried_partialSendIsNot() {
+        server.add("b3", null); server.add("b4", null)
+        run()
+        assertEquals(listOf("b3#1", "b4#1"), handoffs)
+        // b3: every part rejected by the radio → nothing went out → retry allowed.
+        callback("b3", 1, SendResultAggregator.Kind.SENT, 2, ok = false)
+        callback("b3", 1, SendResultAggregator.Kind.SENT, 2, ok = false)
+        // b4: one part out, one rejected → partially sent → never resent.
+        callback("b4", 1, SendResultAggregator.Kind.SENT, 2, ok = true)
+        callback("b4", 1, SendResultAggregator.Kind.SENT, 2, ok = false)
+        assertEquals(listOf("carrier-send-failed", "ambiguous-partial-send"), pending().map { it.reason })
+        flush()
+        assertEquals("queued", server.jobs.getValue("b3").status)
+        assertEquals("failed", server.jobs.getValue("b4").status)
+        server.jobs.getValue("b4").status = "queued" // even if a server re-queued it, this device refuses it
+        run()
+        assertEquals(listOf("b3#1", "b4#1", "b3#2"), handoffs)
+    }
+
+    // ── M2: attempt identity through callbacks, reports and local status ──
+    @Test fun m2_lostAcknowledgment_oldReportRetriedDuringAttempt2_onTheSameDevice_changesNothing() {
+        server.add("b5", null)
+        run()
+        callback("b5", 1, SendResultAggregator.Kind.SENT, 1, ok = false)   // definitive failure, attempt 1
+        server.loseNextAck = true
+        assertEquals(1, flush().kept)                     // server committed the requeue; the device never heard
+        assertEquals("queued", server.jobs.getValue("b5").status)
+        run()                                              // attempt 2 on the SAME device
+        assertEquals(listOf("b5#1", "b5#2"), handoffs)
+        assertEquals(2, server.jobs.getValue("b5").attempt)
+        flush()                                            // the unchanged attempt-1 report is retried
+        assertEquals(listOf(1, 1), server.received.map { it["attempt"] })
+        assertEquals("claimed", server.jobs.getValue("b5").status) // attempt 2 untouched
+        val r = row("b5")!!
+        assertEquals(2, r.attempt); assertEquals("sending", r.localStatus); assertEquals("body b5", r.body)
+        assertTrue(pending().isEmpty())
+        callback("b5", 2, SendResultAggregator.Kind.SENT, 1, ok = true); flush()
+        assertEquals("sent", server.jobs.getValue("b5").status)
+    }
+
+    @Test fun m2_delayedCallbackForAnOlderAttempt_neverRewritesTheNewerRow_andMultipartProgressNeverMixes() {
+        server.add("b6", null)
+        run()                                              // attempt 1: 2 parts
+        callback("b6", 1, SendResultAggregator.Kind.SENT, 2, ok = false)   // part 1 of attempt 1 failed …
+        // … attempt 1 is settled as retryable by the server some other way, attempt 2 starts (also 2 parts)
+        runBlocking { ReportStore(db) { now }.record("b6", 1, "failed", "lease-lost", null) }
+        server.requeue("b6"); run()
+        assertEquals(listOf("b6#1", "b6#2"), handoffs)
+        callback("b6", 2, SendResultAggregator.Kind.SENT, 2, ok = true)    // part 1 of attempt 2 OK
+        callback("b6", 1, SendResultAggregator.Kind.SENT, 2, ok = false)   // LATE part 2 of attempt 1
+        // Attempt 1 completes on its own (all parts failed); attempt 2 is still waiting for its part 2.
+        val r = row("b6")!!
+        assertEquals(2, r.attempt); assertEquals("sending", r.localStatus); assertEquals("body b6", r.body)
+        assertEquals(listOf(1, 1), pending().map { it.attempt })
+        callback("b6", 2, SendResultAggregator.Kind.SENT, 2, ok = true)    // part 2 of attempt 2
+        assertEquals("sent", row("b6")!!.localStatus)
+        assertEquals(listOf(1, 1, 2), pending().map { it.attempt })
+    }
+
+    // ── report flushing ──
+    @Test fun flush_permanentRefusalIsDropped_transientIsKept_andNothingBlocksTheQueue() {
+        server.add("b7", null)
+        runBlocking {
+            val store = ReportStore(db) { now }
+            store.record("ghost", 1, "failed", "x", null)  // server: job-not-found → permanent
+            store.record("b7", 1, "sent", null, -1)
+        }
+        server.jobs.getValue("b7").apply { status = "claimed"; attempt = 1 }
+        assertEquals(FlushResult(delivered = 1, dropped = 1, kept = 0), flush())
+        assertEquals("sent", server.jobs.getValue("b7").status)
+        assertTrue(pending().isEmpty())
+    }
+
+    // ── verification codes (send-auth path) ──
     @Test fun verificationCode_authorizedOnce_durableRowBeforeHandOff_neverResent() {
         server.add("pauth_a", "phone_auth_otp")
         var rowAtHandOff: String? = null
         onDurableSending = { rowAtHandOff = row("pauth_a")?.localStatus }
         assertEquals(listOf(Outcome.Sent("pauth_a")), run())
-        assertEquals(listOf("pauth_a#1"), sent)
+        assertEquals(listOf("pauth_a#1"), handoffs)
         assertEquals("sending", rowAtHandOff)
         assertEquals(listOf("claimRelayJobs", "authorizeRelaySend"), server.calls)
-        val r = row("pauth_a")!!
-        assertEquals(1, r.attempt)
-        assertEquals("•••01", r.phoneE164) // only a masked number is stored locally
-
-        // The same attempt handed out again (lost claim response, restart): never re-sent.
-        server.requeue("pauth_a"); server.jobs.getValue("pauth_a").attempt-- // same attempt number
+        assertEquals("•••01", row("pauth_a")!!.phoneE164) // only a masked number is stored locally
+        server.requeue("pauth_a"); server.jobs.getValue("pauth_a").attempt-- // same attempt handed out again
         run()
-        assertEquals(listOf("pauth_a#1"), sent)
+        assertEquals(listOf("pauth_a#1"), handoffs)
     }
 
     @Test fun verificationCode_authorizationUnavailable_failsClosed() {
         server.add("pauth_b", "phone_auth_otp")
         server.authorize = { null }
         run()
-        assertTrue(sent.isEmpty())
-        assertEquals(listOf("pauth_b" to "auth-unavailable"), failed)
+        assertTrue(handoffs.isEmpty())
+        assertEquals("auth-unavailable", pending().single().reason)
     }
 
-    @Test fun verificationCode_refusedAtAuthorization_isSkipped() {
+    @Test fun verificationCode_refusedAtAuthorization_isSkipped_andItsCodeIsDropped() {
         server.add("pauth_c", "phone_auth_otp")
         server.authorize = { mapOf("ok" to false, "reason" to "country-not-allowed") }
-        val out = run()
-        assertTrue(sent.isEmpty())
-        assertEquals(Outcome.Skipped("pauth_c", "not-authorized:country-not-allowed"), out.single())
+        assertEquals(Outcome.Skipped("pauth_c", "not-authorized:country-not-allowed"), run().single())
+        assertTrue(handoffs.isEmpty())
         assertEquals("skipped", row("pauth_c")!!.localStatus)
+        assertNull(row("pauth_c")!!.body)
     }
 
     @Test fun verificationCode_staleAuthorization_isNotSent() {
         server.add("pauth_d", "phone_auth_otp")
         server.authorize = { now += 3_000; mapOf("ok" to true, "sendWithinMs" to 1_000L) }
         run()
-        assertTrue(sent.isEmpty())
-        assertEquals("expired-on-device", failed.single().second)
-    }
-
-    @Test fun businessSms_retryAfterPauseBeforeHandOff_isSentOnceAsTheNextAttempt() {
-        server.add("b1", null)
-        onDurableSending = { paused = true } // pause lands during the durable write
-        assertTrue(run().single() is Outcome.StoppedBatch)
-        assertTrue(sent.isEmpty())
-        assertEquals("paused", row("b1")!!.localStatus)
-        // Server re-queues it (lease reaper / pause handling) as attempt 2.
-        paused = false; onDurableSending = {}
-        server.requeue("b1")
-        run()
-        assertEquals(listOf("b1#2"), sent)
-        assertEquals(2, row("b1")!!.attempt)
-    }
-
-    @Test fun businessSms_newAttemptAfterPossibleHandOff_isReportedAmbiguous_notResent() {
-        server.add("b2", null)
-        run()
-        assertEquals(listOf("b2#1"), sent)
-        server.requeue("b2") // e.g. lease lapsed before the report reached the server
-        run()
-        assertEquals(listOf("b2#1"), sent)
-        assertEquals(listOf("b2" to "ambiguous-handoff"), server.reports)
+        assertTrue(handoffs.isEmpty())
+        assertEquals("expired-on-device", pending().single().reason)
     }
 
     @Test fun contractFixtures_parseToTheExpectedJobs() {
@@ -187,29 +332,52 @@ class RelayIntegrationTest {
         assertTrue(!parseSendAuthorization("garbage").ok)
     }
 
-    @Test fun roomMigration_1to2_keepsJobsAndPendingReports() {
-        val ctx = ApplicationProvider.getApplicationContext<Context>()
-        val name = "relay-migration-test.db"
-        ctx.deleteDatabase(name)
-        SQLiteDatabase.openOrCreateDatabase(ctx.getDatabasePath(name).apply { parentFile?.mkdirs() }, null).use { v1 ->
-            // Schema v1 exactly as Room generated it before this change (no `attempt`).
-            v1.execSQL("CREATE TABLE IF NOT EXISTS `jobs` (`jobId` TEXT NOT NULL, `phoneE164` TEXT NOT NULL, `body` TEXT, `simSubscriptionId` INTEGER, `traceId` TEXT NOT NULL, `localStatus` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`jobId`))")
-            v1.execSQL("CREATE TABLE IF NOT EXISTS `reports` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `jobId` TEXT NOT NULL, `status` TEXT NOT NULL, `reason` TEXT, `androidResultCode` INTEGER, `simSubscriptionId` INTEGER, `createdAt` INTEGER NOT NULL)")
-            v1.execSQL("CREATE TABLE IF NOT EXISTS `logs` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `at` INTEGER NOT NULL, `level` TEXT NOT NULL, `event` TEXT NOT NULL, `detail` TEXT)")
-            v1.execSQL("INSERT INTO jobs VALUES ('old-1', '•••01', NULL, NULL, 'old-1', 'sending', 1, 1)")
-            v1.execSQL("INSERT INTO reports (jobId, status, reason, androidResultCode, simSubscriptionId, createdAt) VALUES ('old-1', 'sent', NULL, -1, NULL, 1)")
-            v1.version = 1
+    // ── migrations (non-destructive) ──
+    private fun v1Schema(d: SQLiteDatabase) {
+        d.execSQL("CREATE TABLE IF NOT EXISTS `jobs` (`jobId` TEXT NOT NULL, `phoneE164` TEXT NOT NULL, `body` TEXT, `simSubscriptionId` INTEGER, `traceId` TEXT NOT NULL, `localStatus` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`jobId`))")
+        d.execSQL("CREATE TABLE IF NOT EXISTS `reports` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `jobId` TEXT NOT NULL, `status` TEXT NOT NULL, `reason` TEXT, `androidResultCode` INTEGER, `simSubscriptionId` INTEGER, `createdAt` INTEGER NOT NULL)")
+        d.execSQL("CREATE TABLE IF NOT EXISTS `logs` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `at` INTEGER NOT NULL, `level` TEXT NOT NULL, `event` TEXT NOT NULL, `detail` TEXT)")
+    }
+    private fun legacyFile(version: Int, rows: (SQLiteDatabase) -> Unit) {
+        db.close(); ctx.deleteDatabase(dbName)
+        SQLiteDatabase.openOrCreateDatabase(ctx.getDatabasePath(dbName).apply { parentFile?.mkdirs() }, null).use { d ->
+            v1Schema(d)
+            if (version >= 2) d.execSQL("ALTER TABLE jobs ADD COLUMN attempt INTEGER NOT NULL DEFAULT 0")
+            rows(d)
+            d.version = version
         }
-        val migrated = Room.databaseBuilder(ctx, RelayDb::class.java, name)
-            .addMigrations(RelayDb.MIGRATION_1_2).allowMainThreadQueries().build()
-        try {
-            runBlocking {
-                val old = migrated.jobs().byId("old-1")!!
-                assertEquals(0, old.attempt)            // pre-upgrade rows read as attempt 0
-                assertEquals("sending", old.localStatus) // so a new attempt for it is refused as ambiguous
-                assertEquals(1, migrated.reports().count()) // pending delivery report survived
-            }
-        } finally { migrated.close(); ctx.deleteDatabase(name) }
+        db = open()
+    }
+
+    @Test fun roomMigration_1to3_keepsJobsAndPendingReports() {
+        legacyFile(1) { d ->
+            d.execSQL("INSERT INTO jobs VALUES ('old-1', '•••01', NULL, NULL, 'old-1', 'sending', 1, 1)")
+            d.execSQL("INSERT INTO reports (jobId, status, reason, androidResultCode, simSubscriptionId, createdAt) VALUES ('old-1', 'sent', NULL, -1, NULL, 1)")
+        }
+        val old = row("old-1")!!
+        assertEquals(0, old.attempt); assertEquals("sending", old.localStatus); assertTrue(old.noResend)
+        assertNull(pending().single().attempt)
+    }
+
+    @Test fun roomMigration_2to3_marksPossiblyHandedOffJobs_keepsPendingReportsUnbound() {
+        legacyFile(2) { d ->
+            d.execSQL("INSERT INTO jobs VALUES ('s', '•••01', NULL, NULL, 's', 'sending', 1, 1, 1)")
+            d.execSQL("INSERT INTO jobs VALUES ('f', '•••02', NULL, NULL, 'f', 'failed', 1, 1, 1)")
+            d.execSQL("INSERT INTO jobs VALUES ('d', '•••03', NULL, NULL, 'd', 'delivered', 1, 1, 2)")
+            d.execSQL("INSERT INTO reports (jobId, status, reason, androidResultCode, simSubscriptionId, createdAt) VALUES ('s', 'failed', 'no-service', 4, NULL, 1)")
+        }
+        assertTrue(row("s")!!.noResend); assertTrue(!row("f")!!.noResend); assertTrue(row("d")!!.noResend)
+        val p = pending().single()
+        assertEquals("s", p.jobId); assertNull(p.attempt)          // data kept, never guessed
+        // Flushed unbound: the server applies it only to a never-re-leased job.
+        server.add("s", null); server.jobs.getValue("s").apply { status = "claimed"; attempt = 2 }
+        flush()
+        assertTrue(server.received.single().containsKey("attempt"))
+        assertNull(server.received.single()["attempt"])
+        assertEquals("claimed", server.jobs.getValue("s").status)
+        // and this device never re-sends the possibly-handed-off job
+        server.requeue("s"); run()
+        assertTrue(handoffs.isEmpty())
     }
 
     private fun fixture(file: String): Any? {

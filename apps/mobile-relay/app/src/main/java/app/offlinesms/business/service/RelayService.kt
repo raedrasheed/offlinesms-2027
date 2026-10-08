@@ -17,6 +17,7 @@ import app.offlinesms.business.data.db.RelayDb
 import app.offlinesms.business.net.RelayApi
 import app.offlinesms.business.sms.SmsEngine
 import app.offlinesms.business.util.RelayLog
+import app.offlinesms.business.work.ReportStore
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
 import com.google.firebase.messaging.ktx.messaging
@@ -108,11 +109,9 @@ class RelayService : Service() {
                     RelayLog.info(ctx, "send", "job=${job.jobId} to=${RelayLog.maskPhone(job.phoneE164)}")
                 }
             },
-            reports = object : SendPipeline.Reports {
-                override fun failed(jobId: String, reason: String) {
-                    RelayLog.info(ctx, "not-sent", "job=$jobId $reason")
-                    app.offlinesms.business.work.Reporter.enqueue(ctx, jobId, "failed", reason, null)
-                }
+            reports = StoreReports(ReportStore(RelayDb.get(this))) { jobId, reason ->
+                RelayLog.info(ctx, "not-sent", "job=$jobId $reason")
+                app.offlinesms.business.work.Reporter.kickFlush(ctx)
             },
             clock = object : SendPipeline.Clock { override fun elapsedMs() = SystemClock.elapsedRealtime() },
             pause = object : SendPipeline.Pause { override val paused get() = store.paused },

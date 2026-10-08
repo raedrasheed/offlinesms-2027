@@ -8,29 +8,32 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import app.offlinesms.business.data.db.RelayDb
-import app.offlinesms.business.data.db.ReportEntity
 import app.offlinesms.business.util.RelayLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 
-/** Durably records a delivery result and triggers a network-gated flush. */
+/** Durably records a delivery result (see [ReportStore]) and triggers a network-gated flush. */
 object Reporter {
-    fun enqueue(context: Context, jobId: String, status: String, reason: String?, resultCode: Int?) {
+    /** Fire-and-forget form for broadcast callbacks. The send loop instead awaits
+     *  [record] so its no-resend mark is durable before it continues. */
+    fun enqueue(
+        context: Context, jobId: String, attempt: Int?, status: String, reason: String?,
+        resultCode: Int?, noResend: Boolean = false,
+    ) {
         val app = context.applicationContext
-        val db = RelayDb.get(app)
-        CoroutineScope(Dispatchers.IO).launch {
-            val now = System.currentTimeMillis()
-            db.reports().insert(
-                ReportEntity(jobId = jobId, status = status, reason = reason,
-                    androidResultCode = resultCode, simSubscriptionId = null, createdAt = now),
-            )
-            // Privacy: drop the body once the send reaches a terminal-ish state.
-            db.jobs().finalize(jobId, status, now)
-            RelayLog.info(app, status, "job=$jobId")
-            kickFlush(app)
-        }
+        CoroutineScope(Dispatchers.IO).launch { record(app, jobId, attempt, status, reason, resultCode, noResend) }
+    }
+
+    suspend fun record(
+        context: Context, jobId: String, attempt: Int?, status: String, reason: String?,
+        resultCode: Int?, noResend: Boolean = false,
+    ) {
+        val app = context.applicationContext
+        ReportStore(RelayDb.get(app)).record(jobId, attempt, status, reason, resultCode, noResend)
+        RelayLog.info(app, status, "job=$jobId attempt=${attempt ?: "?"}")
+        kickFlush(app)
     }
 
     fun kickFlush(context: Context) {

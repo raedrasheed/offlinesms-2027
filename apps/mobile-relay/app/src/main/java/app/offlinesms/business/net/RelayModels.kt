@@ -29,6 +29,10 @@ data class SendAuthorization(val ok: Boolean, val reason: String?, val sendWithi
 /** Declared to the server so it hands this build verification-code jobs. */
 const val SEND_AUTH_CAPABILITY = "send-auth-v1"
 
+/** Declared to the server: every report and SMS callback of this build is bound
+ *  to the server attempt, so it may be handed re-leases (attempt ≥ 2). */
+const val ATTEMPT_CAPABILITY = "attempt-v1"
+
 /** Parses the claimRelayJobs response (shape: functions/src/sms/relayJobs.ts ClaimedRelayJob;
  *  contract fixture: app/src/test/resources/relay-contract/claim-response.json). */
 fun parseClaimedJobs(res: Any?): List<ClaimedJob> {

@@ -5,40 +5,27 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import app.offlinesms.business.work.Reporter
-import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Maps SmsManager sent/delivered PendingIntent results to a relay report.
- * Aggregates multipart results per (jobId, kind): the job is "sent" only when
- * every part is OK; any part failure → "failed". "delivered" is reported only
- * when all parts are delivered (carriers that omit reports simply never fire).
+ * Maps SmsManager sent/delivered PendingIntent results to a relay report bound
+ * to the server attempt that produced them (see [SendResultAggregator]). A late
+ * callback for an older attempt is reported as that attempt and never changes
+ * the local row of a newer one.
  */
 class SmsResultReceiver : BroadcastReceiver() {
-
-    private class Progress(val total: Int) { var received = 0; var anyFail = false }
-
     override fun onReceive(context: Context, intent: Intent) {
-        val action = intent.action ?: return
-        val jobId = intent.getStringExtra(SmsEngine.EXTRA_JOB_ID) ?: return
-        val total = intent.getIntExtra(SmsEngine.EXTRA_PART_COUNT, 1)
-        val ok = resultCode == Activity.RESULT_OK
-
-        val key = "$jobId:$action"
-        val p = progress.getOrPut(key) { Progress(total) }
-        synchronized(p) {
-            p.received++
-            if (!ok) p.anyFail = true
-            if (p.received < p.total) return
-            progress.remove(key)
-            when (action) {
-                SmsEngine.ACTION_SENT ->
-                    Reporter.enqueue(context, jobId, if (p.anyFail) "failed" else "sent",
-                        reason = if (p.anyFail) "carrier-send-failed" else null, resultCode = resultCode)
-                SmsEngine.ACTION_DELIVERED ->
-                    if (!p.anyFail) Reporter.enqueue(context, jobId, "delivered", reason = null, resultCode = resultCode)
-            }
+        val kind = when (intent.action) {
+            SmsEngine.ACTION_SENT -> SendResultAggregator.Kind.SENT
+            SmsEngine.ACTION_DELIVERED -> SendResultAggregator.Kind.DELIVERED
+            else -> return
         }
+        val jobId = intent.getStringExtra(SmsEngine.EXTRA_JOB_ID) ?: return
+        // Intents from builds without attempt identity carry no attempt: reported unbound.
+        val attempt = intent.getIntExtra(SmsEngine.EXTRA_ATTEMPT, 0).takeIf { it > 0 }
+        val total = intent.getIntExtra(SmsEngine.EXTRA_PART_COUNT, 1)
+        val out = aggregator.onPart(jobId, attempt, kind, total, resultCode == Activity.RESULT_OK) ?: return
+        Reporter.enqueue(context, jobId, attempt, out.status, out.reason, resultCode, out.noResend)
     }
 
-    companion object { private val progress = ConcurrentHashMap<String, Progress>() }
+    companion object { val aggregator = SendResultAggregator() }
 }

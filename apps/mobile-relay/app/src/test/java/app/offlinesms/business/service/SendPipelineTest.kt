@@ -25,6 +25,7 @@ class SendPipelineTest {
         var authLatencyMs = 0L
         var authAnswer: (String) -> SendAuthorization? = { SendAuthorization(true, null, 60_000) }
         var onSetStatus: (String) -> Unit = {}
+        var throwOnSend = false
 
         val pipeline = SendPipeline(
             backend = object : SendPipeline.Backend {
@@ -39,15 +40,27 @@ class SendPipelineTest {
             local = object : SendPipeline.LocalJobs {
                 override suspend fun get(jobId: String) = rows[jobId]
                 override suspend fun put(job: ClaimedJob, localStatus: String) { rows[job.jobId] = SendPipeline.LocalJob(job.jobId, job.attempt, localStatus) }
-                override suspend fun setStatus(jobId: String, localStatus: String) {
-                    rows[jobId] = rows.getValue(jobId).copy(localStatus = localStatus); onSetStatus(localStatus)
+                override suspend fun setStatus(jobId: String, attempt: Int, localStatus: String) {
+                    val r = rows.getValue(jobId)
+                    if (r.attempt == attempt) rows[jobId] = r.copy(localStatus = localStatus) // attempt-bound, like JobDao
+                    onSetStatus(localStatus)
                 }
             },
-            transport = object : SendPipeline.Transport { override fun send(job: ClaimedJob) { sent += "${job.jobId}#${job.attempt}" } },
+            transport = object : SendPipeline.Transport {
+                override fun send(job: ClaimedJob) {
+                    if (throwOnSend) throw IllegalStateException("radio")
+                    sent += "${job.jobId}#${job.attempt}"
+                }
+            },
             reports = object : SendPipeline.Reports {
-                override fun failed(jobId: String, reason: String) {
+                // Mirrors ReportStore: sticky noResend, then an attempt-bound finalize.
+                override suspend fun failed(jobId: String, attempt: Int, reason: String, noResend: Boolean) {
                     failed += jobId to reason
-                    rows[jobId]?.let { rows[jobId] = it.copy(localStatus = "failed") } // Reporter.finalize
+                    rows[jobId]?.let { r ->
+                        var n = if (noResend) r.copy(noResend = true) else r
+                        if (n.attempt == attempt) n = n.copy(localStatus = "failed")
+                        rows[jobId] = n
+                    }
                 }
             },
             clock = object : SendPipeline.Clock { override fun elapsedMs() = now },
@@ -178,6 +191,30 @@ class SendPipelineTest {
         f.run(biz("b:1", 2))
         assertEquals(listOf("b:1#1"), f.sent)
         assertEquals("b:1" to "ambiguous-handoff", f.failed.single())
+    }
+
+    // ── M1: the ambiguity decision survives its own report ──────────────────
+    @Test fun thirdAttemptAfterAnAmbiguousSecondIsNeverSent() {
+        val f = Fake()
+        f.run(biz("b:m1", attempt = 1))                   // handed off; no definitive result
+        assertEquals(listOf("b:m1#1"), f.sent)
+        f.run(biz("b:m1", attempt = 2))                   // refused as ambiguous
+        assertEquals("ambiguous-handoff", f.failed.single().second)
+        // The report's own finalize must not make the job retryable again.
+        f.rows["b:m1"] = f.rows.getValue("b:m1").copy(localStatus = "failed")
+        f.run(biz("b:m1", attempt = 3))
+        assertEquals(listOf("b:m1#1"), f.sent)            // still exactly one hand-off
+        assertTrue(f.rows.getValue("b:m1").noResend)
+    }
+
+    @Test fun sendCallFailureIsAmbiguousNeverRetried() {
+        val f = Fake()
+        f.throwOnSend = true
+        f.run(biz("b:x", attempt = 1))
+        assertEquals("ambiguous-send-exception", f.failed.single().second)
+        f.throwOnSend = false
+        f.run(biz("b:x", attempt = 2))
+        assertTrue(f.sent.isEmpty())
     }
 
     @Test fun verificationCodesAreNeverSentTwice() {
