@@ -16,10 +16,14 @@ beforeEach(async () => { await clearAll(); });
 const KEY = 'a'.repeat(64); // looks like a sha256 emailKey
 
 describe('emailOtpChallenges', () => {
-  it('admin can read and write challenge docs', async () => {
+  it('admin can read but never write challenge docs (a written challenge = chosen code)', async () => {
+    await seed(async db => {
+      await setDoc(doc(db, 'emailOtpChallenges', KEY), { codeHash: 'x', salt: 'y', attempts: 0 });
+    });
     const db = await asAdmin();
-    await assertSucceeds(setDoc(doc(db, 'emailOtpChallenges', KEY), { codeHash: 'x', salt: 'y', attempts: 0 }));
+    await assertFails(setDoc(doc(db, 'emailOtpChallenges', KEY), { codeHash: 'x', salt: 'y', attempts: 0 }));
     await assertSucceeds(getDoc(doc(db, 'emailOtpChallenges', KEY)));
+    await assertFails(setDoc(doc(db, 'emailOtpLimits', KEY), { sendCount: 0 }));
   });
 
   it('anonymous clients cannot read or write', async () => {

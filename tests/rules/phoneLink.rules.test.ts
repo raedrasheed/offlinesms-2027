@@ -114,10 +114,59 @@ describe('verified-phone fields on the user profile', () => {
   });
 });
 
-describe('smsConfig/phoneLink (feature switch + emergency stop)', () => {
-  it('non-admins cannot read or flip the switch', async () => {
+describe('smsConfig/otp (verification policy, emergency stop, review access)', () => {
+  it('non-admins cannot read or flip the switches', async () => {
     const db = await asUser(UID);
-    await assertFails(setDoc(doc(db, 'smsConfig', 'phoneLink'), { enabled: true, emergencyStop: false }));
-    await assertFails(getDoc(doc(db, 'smsConfig', 'phoneLink')));
+    await assertFails(setDoc(doc(db, 'smsConfig', 'otp'), { enabled: true, emergencyStop: false }));
+    await assertFails(getDoc(doc(db, 'smsConfig', 'otp')));
+    await assertFails(getDoc(doc(await asAnon(), 'smsConfig', 'otp')));
+  });
+
+  it('admin clients can read but not write it (only audited server actions can)', async () => {
+    await seed(async db => { await setDoc(doc(db, 'smsConfig', 'otp'), { businessId: 'biz', enabled: false }); });
+    const admin = await asAdmin();
+    await assertSucceeds(getDoc(doc(admin, 'smsConfig', 'otp')));
+    await assertFails(updateDoc(doc(admin, 'smsConfig', 'otp'), { enabled: true, emergencyStop: false }));
+    await assertFails(setDoc(doc(admin, 'smsConfig', 'otp'), { signin: { review: { enabled: true } } }, { merge: true }));
+    const orgAdmin = await asUser('org-admin', { role: 'organization_admin', organizationId: 'biz' });
+    await assertFails(updateDoc(doc(orgAdmin, 'smsConfig', 'otp'), { emergencyStop: false }));
+  });
+});
+
+describe('public phone sign-in state + relay payloads', () => {
+  beforeEach(async () => {
+    await seed(async db => {
+      await setDoc(doc(db, 'phoneAuthSessions', 's'.repeat(64)), { pow: { nonce: 'n' }, codes: 0 });
+      await setDoc(doc(db, 'phoneAuthChallenges', 'c'.repeat(32)), { codeVerifier: 'x', status: 'pending' });
+      await setDoc(doc(db, 'phoneAuthOps', 'c'.repeat(32)), { stage: 'verified', plannedUid: 'u' });
+      await setDoc(doc(db, 'relayJobs', 'pauth_x'), { kind: 'phone_auth_otp', messageBody: 'code 123456', status: 'queued' });
+      await setDoc(doc(db, 'smsRateLimits', 'dest_x'), { h: { s: 1, c: 1 } });
+      await setDoc(doc(db, 'emailOtpLimits', 'e'.repeat(64)), { sendCount: 1 });
+    });
+  });
+
+  it('anonymous and ordinary users cannot read or write any of it', async () => {
+    for (const db of [await asAnon(), await asUser(UID)]) {
+      await assertFails(getDoc(doc(db, 'phoneAuthSessions', 's'.repeat(64))));
+      await assertFails(setDoc(doc(db, 'phoneAuthSessions', 's'.repeat(64)), { codes: 0 }));
+      await assertFails(getDoc(doc(db, 'phoneAuthChallenges', 'c'.repeat(32))));
+      await assertFails(updateDoc(doc(db, 'phoneAuthChallenges', 'c'.repeat(32)), { attempts: 0 }));
+      await assertFails(getDoc(doc(db, 'phoneAuthOps', 'c'.repeat(32))));
+      await assertFails(getDoc(doc(db, 'relayJobs', 'pauth_x')));
+      await assertFails(setDoc(doc(db, 'relayJobs', 'pauth_y'), { kind: 'phone_auth_otp', status: 'queued' }));
+      await assertFails(deleteDoc(doc(db, 'smsRateLimits', 'dest_x')));
+      await assertFails(getDoc(doc(db, 'emailOtpLimits', 'e'.repeat(64))));
+    }
+  });
+
+  it('admin clients cannot read verifiers/sessions or write any of it', async () => {
+    const admin = await asAdmin();
+    await assertFails(getDoc(doc(admin, 'phoneAuthSessions', 's'.repeat(64))));
+    await assertFails(getDoc(doc(admin, 'phoneAuthChallenges', 'c'.repeat(32))));
+    await assertSucceeds(getDoc(doc(admin, 'phoneAuthOps', 'c'.repeat(32))));
+    await assertFails(updateDoc(doc(admin, 'phoneAuthOps', 'c'.repeat(32)), { stage: 'done' }));
+    await assertFails(setDoc(doc(admin, 'relayJobs', 'forged'), { kind: 'phone_auth_otp', status: 'queued', messageBody: 'x' }));
+    await assertFails(updateDoc(doc(admin, 'relayJobs', 'pauth_x'), { status: 'queued', policyVersion: 99 }));
+    await assertFails(setDoc(doc(admin, 'smsRateLimits', 'dest_x'), {}));
   });
 });
