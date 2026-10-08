@@ -9,13 +9,15 @@ current production suspension is preserved until an explicitly authorized rollou
 | Base (main) | `9486773d680eb40be5d1d86cdaa2b70970c52fea` |
 | First review head (PR #28) | `8011ab4531774eead4ab1ab3db5e4bc3b009eba6` |
 | Second review head (findings N1–N7) | `430dcfcbdc123ead8042d699635e93737c622754` |
+| Third review head (findings M1–M3) | `0e90b7a14ddfdc18b01e9999878f2b40d3b3a1a6` |
 | This revision | see the PR description (head of the branch) |
 
-**Current review status:** the independent second-round review of `430dcfc`
-requested changes (N1–N7) and said production verification SMS must not be
-enabled. This revision addresses N1–N7 (§4b) and adds the full relay Android
-build gate; it has **not** been re-reviewed yet. Production verification SMS stays
-disabled.
+**Current review status:** the independent third review of `0e90b7a` (CI green
+there, including the full relay Android build) accepted N2, N3, N4, N6 and N7 for
+their reviewed scenarios, found N1 substantially corrected but for M3, and N5
+partial because of M1/M2. It requested a focused round on M1–M3. This revision
+addresses M1–M3 (§4c); it has **not** been re-reviewed. Production verification
+SMS stays disabled pending review and the deployment/device gates (§11).
 
 Terms used below: **implemented** = code on this branch; **tested locally** =
 executed in this environment at the layer stated; **deployed** / **verified in
@@ -59,10 +61,10 @@ limits apply to the link purpose. Source identity and installation ids are
 | `requestPhoneLinkOtp` / `verifyPhoneLinkOtp` / `resumePhoneLink` | auth + eligibility (verified email, active, fresh sign-in, consent) → link budgets + shared global → challenge + ≤1 job; monotonic link ops |
 | `getSupportedPhoneCountries` | legacy callers → `[]`; `{v:2}` → countries only while sign-in sending is allowed |
 | `claimRelayJobs` | device token → per-job tx re-reads job **and** device: status, pause/revoke, `countryRoutingEnabled` + countries, **capacity reservation (minute/hour/day)**; verification jobs: capability `send-auth-v1` required, legacy `otp` cancelled, expiry + sender + policyVersion bound |
-| `authorizeRelaySend` (new) | lease owner, job `claimed` (single use), device active, **device country routing re-checked** (`countryRoutingEnabled` + allow-list), verification: policy/sender/version/expiry + challenge still current & pending → job `sending`; returns a budget ≤ 15 s and ≤ the code's remaining lifetime, computed inside the transaction |
-| Android `RelayService` → `SendPipeline` | per job: local pause → local de-dup by (jobId, **server attempt**) → claim deadline measured from the claim **request** start (monotonic) → authorization (fail closed) → deadline = min(claim, authorization budget from its request start) − 1.5 s → durable `sending` in Room → **final pause + deadline check after the write** → `SmsManager` |
-| `reportRelayDelivery` | lease owner; idempotent/ordered; verification never requeues; metrics only (not capacity) |
-| `relayReaper` | lapsed lease: verification ⇒ fail (no resend); bounded run of the stale-code sweep |
+| `authorizeRelaySend` (new; **verification jobs only** — business SMS never call it) | lease owner, job `claimed` (single use), device active, **device country routing re-checked** (`countryRoutingEnabled` + allow-list), verification: policy/sender/version/expiry + challenge still current & pending → job `sending`; returns a budget ≤ 15 s and ≤ the code's remaining lifetime, computed inside the transaction |
+| Android `RelayService` → `SendPipeline` | per job: local pause → local de-dup by (jobId, **server attempt**) → claim deadline measured from the claim **request** start (monotonic) → authorization (fail closed) → deadline = min(claim, authorization budget from its request start) − 1.5 s → durable `sending` in Room → **final pause + deadline check after the write** → `SmsManager`; refusals of a possibly-handed-off job write the sticky `noResend` mark and the attempt-bound report in one awaited Room transaction (M1) |
+| `reportRelayDelivery` | bound to ONE attempt (M2): applied only to the job's current attempt from the device holding it; stale/duplicate/unbound reports are acknowledged and never applied to a newer attempt; a stale report that the message may already have gone out stops further attempts (`noRetry`) or settles a job waiting between attempts; verification never requeues; metrics only (not capacity) |
+| `relayReaper` | lapsed lease: verification or `noRetry` ⇒ fail (no resend); bounded run of the stale-code sweep |
 | Stale-code sweep (`verification/staleJobSweep.ts`; on every `smsConfig/otp` change + each reaper run) | paginated by document id over every queued verification kind; per job a transaction re-reads the job **and the current policy** and cancels only if still `queued` and invalid now (legacy, expired, stopped, other sender, other generation) |
 | `relayHeartbeat` | liveness + **telemetry only** (clamped); never touches `counters` or `usage` |
 | Dashboard actions | platform admin only; set/clear sender, master/purpose/stop; `policyVersion` bumped **in a transaction** with the change; no client-side bulk cancel (the server sweep does it conditionally); audited |
@@ -99,6 +101,44 @@ RelayApi code + production pipeline wiring over a fake callable transport). "Neg
 | **N5** | Local de-dup broke the business retry contract | Server returns `attempt` per lease; Room v2 stores it (real migration 1→2, no destructive fallback). Same attempt ⇒ never re-handed; a **new** attempt of a business SMS is sent unless this device may already have handed off the previous one (local `sending/sent/delivered`) ⇒ reported `ambiguous-handoff`, which the server classifies **permanent** (never re-queued). Verification codes are never sent twice | J + R (retry after pause before hand-off sent once as attempt 2; ambiguous never resent; migration keeps jobs + pending reports); `relay.int.test.ts` N5 (H). Neg: attempt test failed on `430dcfc` |
 | **N6** | Dashboard bulk cancel was unconditional, capped | Client-side cancel removed. Server sweep (trigger on `smsConfig/otp` + reaper): paginated, per-job transaction re-reading job **and current policy**; only still-`queued` **and** now-invalid jobs are cancelled; bounded runs report incompleteness and resume. Dashboard bumps `policyVersion` in a transaction with the change | `sweep.int.test.ts` (H, 7 incl. races: claimed/sending/delivered between query and tx, policy reverted mid-sweep, 480+ jobs, bounded runs) + a control reproducing the reviewed algorithm overwriting a claimed and a new-generation job; **W**: policy write → trigger cancels the old-generation job only |
 | **N7** | Late provider result could change a newer email challenge | Each send stores a `generation`; `settleSend` writes `pending`/`send-failed` only if the stored challenge still has that generation and is still `sending` | `emailOtp.int.test.ts` N7 (H, deferred provider promises, both orders × both outcomes). Neg: all 4 failed on `430dcfc` |
+
+
+Third-review precision on §4b: **N3** covers verification SMS (final authorization
+is only called when `requiresSendAuth`); **N4** device scheduling and the
+physical hand-off remain release gates; **N5** was partial at `0e90b7a` (M1/M2);
+the earlier N5 handler test used jobs with `batchId`/`recipientUid` null, so it
+did **not** cover batch settlement — settlement is now covered by a real
+batch + recipient fixture (§4c). The phone-link CI follow-up's injected
+transaction-failure test covers the **no-commit** case only, not a committed
+transaction whose response was lost.
+
+## 4c. Third-review findings M1–M3 (review of `0e90b7a`)
+
+Layers as in §4b; **R** now runs the production report path (`ReportStore`,
+`flushReports` → `RelayApi.report`) on a file-backed Room v3 database that is
+closed and reopened to simulate a process restart.
+
+| # | Finding | Fix | Regression (layer) · negative control |
+|---|---|---|---|
+| **M1** | Reporting `ambiguous-handoff` erased the local no-resend evidence (the report's finalize turned the row into `failed`, so attempt 3 was sent) | Sticky `jobs.noResend` (Room v3). Written in the **same Room transaction** as the report (`ReportStore.record`), and the send loop **awaits** that write before continuing; nothing clears it (finalize, report retry, restart, newer attempts). Set for: an ambiguous refusal, a `sent`/`delivered` result, a partially sent multipart message (`ambiguous-partial-send`), and an exception from the send call (`ambiguous-send-exception`, conservative). Known pre-hand-off outcomes stay retryable: pause before hand-off, all parts rejected by the radio (`carrier-send-failed`). Server side: a late ambiguous/positive report for an older attempt sets `noRetry`, so neither a failure report nor the lease reaper creates another attempt | **R**: attempt 1 handed off → report held offline → two lease expiries → attempt 3 offered → client restart → still **one** hand-off; reports flush afterwards (stale one acknowledged, current one ends the job). Positive controls: pre-hand-off pause and all-parts-failed retry once; partial send does not. **J**: same sequence on the pipeline. **H**: late ambiguous report after the third lease → `noRetry` → no 4th attempt; reservations [3,3,3]. **Neg**: on `0e90b7a` the pipeline handed off attempt 3 (`[b:m1#1, b:m1#3]`); the H test failed there |
+| **M2** | Attempt identity stopped at the local job: old reports/callbacks could change a newer attempt | **Device**: SMS PendingIntents carry the attempt (distinct identity per job/attempt/part via data URI); results aggregate per (job, attempt) (`SendResultAggregator`); reports are stored with `reports.attempt` and sent with it; local status updates are `WHERE jobId AND attempt`; the flush deletes a report only after a server answer and no longer stops at the first error (definitive refusals are dropped and logged). **Server**: `reportBinding` — a report applies only to the current attempt from the device holding it (`attemptDeviceId`, set at claim); older/other attempts are acknowledged with `notApplied: stale`; a duplicate failure of an attempt already re-queued is a no-op; a late success for an attempt whose lease lapsed settles the job instead of resending it; `sent` is never turned back by a later failure. Re-leases (attempt ≥ 2) only go to builds declaring `attempt-v1` | **H**: lost acknowledgment then re-lease to the **same** device → old report retried → attempt 2, counters and settlement unchanged; duplicate failure no-op; late success settles; late success for an older attempt while a newer one is in flight → `noRetry`; **different-device** re-lease; unbound reports; old build never re-leased; **real batch + recipient** fixture: retry then success settles the recipient and finalizes the batch once, a stale duplicate afterwards changes nothing. **R**: lost ack on the same device; delayed attempt-1 callback after the row became attempt 2 (row, body and multipart progress untouched); migrated pending reports flushed unbound. **U/J**: binding rules, aggregator. **Neg**: all 9 H tests failed on `0e90b7a` (old reports applied to the newer attempt; `not-lease-owner` for a lapsed attempt's success — the device would retry it forever; re-lease to an old build; a stale duplicate failure applied to a `sent` job after batch finalization); on `0e90b7a` a late attempt-1 callback rewrote attempt 2's local row to `failed` |
+| **M3** | The final review/sign-in gate used the request-start configuration | `assertMintAllowed` re-reads the sign-in policy (purpose switch, review access) **at the gate**, evaluates the completion window and review expiry with a fresh clock, and compares the accepted review generation/demo uid against the current access; then Auth + profile, then the token. The SMS emergency stop still does not block completing an accepted sign-in (send-stop ≠ sign-in suspension). Decision point: these reads immediately precede `createCustomToken`; a change committed in the milliseconds after them is not seen, and already-issued tokens are not revoked | **H**: handler paused (test seam) after its initial config load and acceptance, before the final gate; review disabled / code rotated / demo uid changed / review expired / sign-in purpose suspended during the pause → **no token minted**; the gate in front of the token itself (second gate) too; a normal phone sign-in with the purpose suspended mid-request; positive controls: unchanged policy mints, immediate lost-response retry mints with no new SMS/account; emergency stop alone does not block. **Neg**: 7 of 7 revocation cases minted on `0e90b7a` (with only the no-op seam added) |
+
+**Schema / report compatibility decisions (M2):**
+* Relay Room **v3** (`MIGRATION_2_3`, non-destructive; 1→2→3 chain kept): adds
+  `jobs.noResend` (rows in `sending`/`sent`/`delivered` are marked) and nullable
+  `reports.attempt`. Pending reports from before the upgrade are **kept** and
+  stay unbound (`attempt` NULL) — never guessed to belong to the current attempt.
+* The server applies an **unbound** report only to a job that was never
+  re-leased (`attempts ≤ 1`), where it is unambiguous; otherwise it acknowledges
+  it as `notApplied: unbound` (audited) so the device can drain it.
+* Re-leases go only to builds declaring `attempt-v1`; older builds still get
+  first attempts (so their unbound reports always describe attempt 1).
+* Jobs claimed before this revision have no `attemptDeviceId`; the lease owner
+  is used instead (a re-queued legacy job has none ⇒ its reports are treated as
+  stale/unbound, never applied).
+* The flush drops a report only on a definitive refusal (not-found / wrong
+  business or device / invalid); everything else is retried.
 
 ## 5. Original audit F01–F16
 
@@ -165,8 +205,15 @@ RelayApi code + production pipeline wiring over a fake callable transport). "Neg
   segments). Never refunded; ambiguous outcomes count as sent.
 * Verification jobs: `maxAttempts:1`, never requeued; lapsed leases fail.
 * Business SMS retry contract: each lease has an `attempt`; a new attempt is
-  sent unless this device may already have handed off the previous one, which
-  is reported as `ambiguous-handoff` (permanent; counted as sent).
+  sent unless this device may already have handed off the logical job (local
+  `sending/sent/delivered` or the sticky `noResend`), which is reported as
+  `ambiguous-handoff` (permanent; counted as sent). Reports and SMS callbacks
+  are bound to the attempt end to end (§4c).
+* Cross-device limit: if attempt N went out silently on device A (lease lapsed,
+  no report yet) and attempt N+1 is leased to device B, B has no local evidence
+  and may send it. The server stops any attempt after the late report arrives
+  (`noRetry`), but cannot stop one already in flight. Exactly-once across
+  devices is not claimed.
 * Remaining unavoidable window: after the final post-write check and before
   `SmsManager.sendMultipartTextMessage` accepts the message (in-process, no I/O;
   the 4 s pacing is *after* send). It is bounded by the device deadline but not
@@ -188,8 +235,9 @@ RelayApi code + production pipeline wiring over a fake callable transport). "Neg
 | Index | `firestore.indexes.json` | `relayJobs (kind, status, expiresAt)`; `relayJobs (kind, status, __name__)` for the paginated sweep |
 | Trigger | `onOtpPolicyWritten` | runs the conditional sweep when sender/master/stop/purpose/`policyVersion` change |
 | Review access | `scripts/setReviewAccess.ts` | `--create-demo` or `--uid=<designated demo>`; prints the code once to the operator terminal only |
-| Migrations | relay Room 1→2 (adds `jobs.attempt`, keeps rows) | legacy `otp` jobs cancelled at claim/reaper/sweep; pre-existing `smsConfig/otp` resolves to OFF; ops accepted before this revision have no `acceptedAtMs` and therefore mint nothing (users sign in again) |
-| Native builds | mobile: new build with the v2 phone flow; relay: 0.2.0 | old mobile builds see no phone countries and get `app-update-required` |
+| Migrations | relay Room 1→2→3 (adds `jobs.attempt`, `jobs.noResend`, `reports.attempt`; keeps rows and pending reports) | legacy `otp` jobs cancelled at claim/reaper/sweep; pre-existing `smsConfig/otp` resolves to OFF; ops accepted before this revision have no `acceptedAtMs` and therefore mint nothing (users sign in again) |
+| Relay capabilities | claim `clientCaps` | `send-auth-v1` (verification jobs), `attempt-v1` (re-leases) |
+| Native builds | mobile: new build with the v2 phone flow; relay: 0.2.0 (this revision's Room v3 / attempt-bound reports) | old mobile builds see no phone countries and get `app-update-required` |
 
 ## 8. Deployment, observability, rollback (not executed)
 
@@ -222,20 +270,26 @@ commands also in the PR description).
 
 | Layer | Command | Result |
 |---|---|---|
-| Helper/unit | `npm test` | 688 / 688 (63 files) |
+| Helper/unit | `npm test` | 695 / 695 (64 files) |
 | Firestore rules (emulator) | `npm run test:rules` (with the Firestore emulator) | 143 / 143 (14 files) |
-| Handler + Firestore/Auth emulators | `npm run test:integration` | 147 / 147 (7 files; also 2 consecutive runs pinned to 2 CPU cores) |
+| Handler + Firestore/Auth emulators | `npm run test:integration` | 165 / 165 (7 files) |
 | Wire-level HTTP + real triggers (Functions emulator) | `npm run test:callable` | 7 / 7 |
-| Relay send pipeline (plain JVM, no Android SDK) | `gradle -p apps/mobile-relay/sendgate-jvm-test test` | 14 / 14 |
+| Relay send pipeline (plain JVM, no Android SDK) | `gradle -p apps/mobile-relay/sendgate-jvm-test test` | 16 / 16 |
 | Relay **Android app**: compile + package | `gradle -p apps/mobile-relay :app:assembleDebug` (placeholder `google-services.json` via `scripts/ci/relay-google-services.sh`) | BUILD SUCCESSFUL (debug APK) |
-| Relay app unit + Robolectric integration | `gradle -p apps/mobile-relay :app:testDebugUnitTest` | 22 / 22 (`SendPipelineTest` 14, `RelayIntegrationTest` 8) |
+| Relay app unit + Robolectric integration | `gradle -p apps/mobile-relay :app:testDebugUnitTest` | 34 / 34 (`SendPipelineTest` 16, `RelayIntegrationTest` 13, `SendResultAggregatorTest` 5) |
 | Typecheck / lint / i18n / build | `npm run typecheck|lint|build --workspaces`, mobile typecheck, `npm run i18n:check` | clean |
 
 `RelayIntegrationTest` exercises the production send wiring (`relayPipeline`:
-`RelayApiBackend` + `RoomLocalJobs` + `SendPipeline`) with a real (in-memory)
-Room v2 database, the real `RelayApi` request/response code over a **fake
-callable transport**, a fake SMS transport, and the Room 1→2 migration on a v1
-file. The JSON fixtures it parses are checked against the real
+`RelayApiBackend` + `RoomLocalJobs` + `SendPipeline`) and the production report
+path (`StoreReports` → `ReportStore`, `flushReports` → `RelayApi.report`) on a
+real **file-backed** Room v3 database (closed and reopened for restarts), the
+real `RelayApi` request/response code over a **fake callable transport** (that
+binds reports to attempts, goes offline, or loses a committed response), a fake
+SMS transport, SMS callbacks through `SendResultAggregator` + `ReportStore` (the
+receiver minus its broadcast glue), and the Room 1→3 / 2→3 migrations on legacy
+files. Not exercised: `SmsResultReceiver`'s Android broadcast glue, WorkManager
+scheduling of `SyncReportsWorker` (its loop is `flushReports`), and
+`isPermanentRefusal`'s Firebase exception mapping. The JSON fixtures it parses are checked against the real
 `claimRelayJobs` / `authorizeRelaySend` responses in `relay.int.test.ts`
 (contract tests).
 
@@ -261,7 +315,7 @@ reported as the retryable `link-interrupted` (resume completes a committed link,
 or finds nothing and the code stays usable). Regression injects that exact error
 and **fails on the `526c96a` handler**.
 
-Negative controls: N1–N7 as listed in §4b; R6 tests fail on the PR #28 file and
+Negative controls: M1–M3 as listed in §4c; N1–N7 as listed in §4b; R6 tests fail on the PR #28 file and
 pass now; the rules tests fail on the base rules for the profile-create gap; the
 original abuse was reproduced on the base commit (25/25 anonymous SMS queued; 14
 SMS from 20 parallel requests to one number; fixed credential minted an account).
@@ -303,6 +357,16 @@ not the identity of a person; a client installation id is resettable.
   private phone, which runs `linkPhoneContactsOnUserWrite` and can **add the user
   to groups where that number was an external member**. (Store-review logins no
   longer do — N2.)
+* The stale-code sweep is bounded per run and starts from the first queued job
+  of each kind every time (the cursor lives only inside one run). It progresses
+  as cancelled rows leave the queue, but a long prefix of still-valid queued
+  codes is re-scanned on every run; forward progress past such a prefix is not
+  guaranteed within one bounded run. Delivery never depends on it (claim and
+  final authorization re-check every job). A persisted continuation is a
+  follow-up.
+* Relay report compatibility: unbound pre-upgrade reports for a re-leased job
+  are acknowledged but not applied (§4c); a business job whose earlier attempt
+  went out unreported can still be duplicated by a different device (§6.2).
 * Release gates before enabling verification SMS: independent re-review of this
   revision; relay 0.2.0+ on every relay phone and a supervised device run
   (timing, pause, Room migration); verified ingress `X-Forwarded-For` hop count;
