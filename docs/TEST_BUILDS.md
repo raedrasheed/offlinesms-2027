@@ -86,7 +86,7 @@ Record pass/fail per row, with the APK SHA-256 and the phone models. Phone resul
 | 4 | B in **airplane mode**; A sends; B turns airplane off, then taps | "Waiting for connection…" → the message appears; no duplicate |
 | 5 | A **offline**, sends 3 texts; A goes online | Each arrives exactly once at B, in order |
 | 6 | A sends a **sticker** (needs §3 step 5) | B shows the sticker image; the chat list shows "👋 Sticker" |
-| 7 | A creates a **single-choice** poll with the keyboard open: edit the question, first and last options, then send; A and B vote at the same moment | Focused inputs and Send stay reachable above the keyboard; the message shows the question and selectable options, including while queued (disabled until delivery). Both votes count once |
+| 7 | A creates a **single-choice** poll: open/close the keyboard five times, leave it open for 20 seconds, edit the question and first/last of 12 options, then send; A and B vote at the same moment | The form stays stable without flashing/collapsing, the draft survives, and focused inputs and Send stay reachable above the keyboard; the message shows the question and selectable options, including while queued (disabled until delivery). Both votes count once |
 | 8 | A creates a **multiple-choice** poll; B selects 2 options, then removes 1 | A's counts update live |
 | 9 | B votes while **offline**, changes the vote, then goes online | Only the last choice counts |
 | 10 | A goes offline, ends the poll, restarts the app, then reconnects; B taps an option after the close arrives | A shows pending confirmation across restart; closes after reconnect; B cannot vote after server confirmation; results stay visible. A server refusal offers retry |

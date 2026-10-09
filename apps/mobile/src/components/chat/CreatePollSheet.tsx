@@ -33,6 +33,13 @@ export function CreatePollSheet({ visible, onClose, onCreate, initial }: {
   const [multiple, setMultiple] = useState(initial?.multiple ?? false);
   const [touched, setTouched] = useState(false);
 
+  // RN's Android Modal already uses SOFT_INPUT_ADJUST_RESIZE. A second
+  // height-based avoider feeds its own resized layout back into the keyboard
+  // calculation and can make the sheet repeatedly collapse/expand. Let that
+  // native window be the only resize owner; iOS still needs padding avoidance.
+  const KeyboardFrame = Platform.OS === 'ios' ? KeyboardAvoidingView : View;
+  const keyboardProps = Platform.OS === 'ios' ? { behavior: 'padding' as const } : {};
+
   const scrollRef = useRef<ScrollView>(null);
   const fieldLayouts = useRef(new Map<string, { y: number; height: number }>());
   const focusedField = useRef<string | null>(null);
@@ -42,7 +49,12 @@ export function CreatePollSheet({ visible, onClose, onCreate, initial }: {
     const field = fieldLayouts.current.get(focusedField.current ?? '');
     if (!field || viewport.current <= 0) return;
     const y = pollFormScrollOffset(field.y, field.height, viewport.current, scrollY.current);
-    if (y !== scrollY.current) scrollRef.current?.scrollTo({ y, animated: true });
+    if (y !== scrollY.current) {
+      // Repeated layout callbacks during IME resize must not restart an
+      // animated scroll against the same stale native offset.
+      scrollY.current = y;
+      scrollRef.current?.scrollTo({ y, animated: false });
+    }
   };
   const focusField = (key: string) => { focusedField.current = key; revealFocused(); };
   const recordField = (key: string, layout: { y: number; height: number }) => {
@@ -73,7 +85,7 @@ export function CreatePollSheet({ visible, onClose, onCreate, initial }: {
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={close}
       onShow={() => { scrollY.current = 0; scrollRef.current?.scrollTo({ y: 0, animated: false }); }}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={[s.backdrop, { paddingTop: insets.top + 12 }]}>
+      <KeyboardFrame {...keyboardProps} style={[s.backdrop, { paddingTop: insets.top + 12 }]}>
         <View style={[s.sheet, { paddingBottom: insets.bottom + 12 }]}>
           <View style={s.headerRow}>
             <Pressable onPress={close} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('common.cancel')}>
@@ -138,7 +150,7 @@ export function CreatePollSheet({ visible, onClose, onCreate, initial }: {
             {touched && error ? <Text style={s.err} accessibilityLiveRegion="polite">{t(`poll.errors.${error}`)}</Text> : null}
           </ScrollView>
         </View>
-      </KeyboardAvoidingView>
+      </KeyboardFrame>
     </Modal>
   );
 }

@@ -37,7 +37,7 @@ Screenshots (English and Arabic/RTL) are in [`docs/screenshots/composer/`](scree
 
 ## 3. Polls
 
-- **Create:** Attach → Poll. The expanded form resizes above the keyboard on Android and iOS, keeps Cancel/Send visible, and scrolls the focused question/option into view. Enter a question (≤ 300 characters) and 2–12 unique options (≤ 100 characters each), and choose **single** or **multiple** choice. The form applies the same rules as the server.
+- **Create:** Attach → Poll. The expanded form resizes above the keyboard on Android and iOS, keeps Cancel/Send visible, and scrolls the focused question/option into view. Android uses the native modal's `adjustResize` with a plain flex view; only iOS uses `KeyboardAvoidingView` padding. The extra Android height avoider introduced in `c4601c1` is the suspected source of the owner-reported collapse/expand flicker and has been removed. Focus reveal records the requested scroll offset immediately and avoids restarting animations during repeated layout events. Enter a question (≤ 300 characters) and 2–12 unique options (≤ 100 characters each), and choose **single** or **multiple** choice. The form applies the same rules as the server.
 - **Message:** `type: 'poll'` with
   - `poll: {question, options[{id,text}], multiple, closed, votes{uid: optionIds}, counts, voterCount}`.
   - `text` is `📊 question`, which older clients, the chat list and push notifications show.
@@ -94,3 +94,6 @@ npx serve dist-gallery   # then open /#chat, #emoji, #emoji-search, #stickers, #
   - Polls already published as plain text by an older server have no remote option list to reconstruct; create a new poll after backend deployment.
   - Votes fail, because `votePoll` doesn't exist on the old server. The queued vote is dead-lettered after its retries, and the next snapshot restores the real tally.
 
+### Poll keyboard regression (2026-10-09)
+
+The owner's 21-second Android recording shows a stationary keyboard while the form repeatedly collapses and expands. `createPollSheet.test.ts` mounts the actual form with native host mocks and checks resize ownership, repeated layout callbacks, the last of 12 options, Arabic draft preservation and submission. Its negative control fails on `c4601c1`. These are component tests, not an Android IME/emulator run; the corrected APK still needs the same physical-device check (TEST_BUILDS §5, row 7).
