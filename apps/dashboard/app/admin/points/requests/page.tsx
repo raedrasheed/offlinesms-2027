@@ -12,6 +12,8 @@ import { canDo } from '@/lib/adminPermissions';
 import { listPointsRequests } from '@/lib/adminData';
 import { PermissionState, EmptyState } from '@/components/state';
 import StatusBadge from '@/components/admin/StatusBadge';
+import UserName from '@/components/admin/UserName';
+import { resolveUserNames } from '@/lib/userNames';
 import FilterBar from '@/components/admin/FilterBar';
 import RequestActions from './RequestActions';
 
@@ -40,6 +42,7 @@ export default async function PointsRequestsPage({
   let fetchError: string | null = null;
   try { rows = await listPointsRequests(searchParams?.cursor, statusFilter || undefined); }
   catch (e: any) { fetchError = e?.message ?? 'Failed to load requests.'; }
+  const names = await resolveUserNames(rows.map(r => r.userId));
 
   const nextCursor = rows.length === 50 ? rows[rows.length - 1].id : null;
 
@@ -101,9 +104,7 @@ export default async function PointsRequestsPage({
                 >
                   <td className="px-4 py-3 font-mono text-[11px]" style={{ color: 'var(--c-text-4)' }}>{r.id.slice(0, 12)}…</td>
                   <td className="px-4 py-3">
-                    <Link href={`/admin/users/${r.userId}` as any} className="font-mono text-[11px] hover:underline" style={{ color: '#5BB6DE' }}>
-                      {r.userId.slice(0, 12)}
-                    </Link>
+                    <UserName uid={r.userId} info={names[r.userId]} color="#5BB6DE" />
                   </td>
                   <td className="px-4 py-3 text-[11px]" style={{ color: 'var(--c-text-2)' }}>{r.packageName || '—'}</td>
                   <td className="px-4 py-3 text-right font-mono text-[11px] font-bold" style={{ color: '#22C55E' }}>{r.points.toLocaleString()}</td>

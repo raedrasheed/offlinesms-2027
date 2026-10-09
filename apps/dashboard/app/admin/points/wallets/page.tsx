@@ -6,6 +6,8 @@ import { canDo } from '@/lib/adminPermissions';
 import { listWallets } from '@/lib/adminData';
 import { PermissionState, EmptyState } from '@/components/state';
 import StatusBadge from '@/components/admin/StatusBadge';
+import UserName from '@/components/admin/UserName';
+import { resolveUserNames } from '@/lib/userNames';
 import WalletFreezeAction from './WalletFreezeAction';
 
 export const dynamic = 'force-dynamic';
@@ -29,6 +31,7 @@ export default async function WalletsPage({ searchParams }: { searchParams?: { c
   let fetchError: string | null = null;
   try { rows = await listWallets(searchParams?.cursor, statusFilter || undefined); }
   catch (e: any) { fetchError = e?.message ?? 'Failed to load wallets.'; }
+  const names = await resolveUserNames(rows.map(r => r.uid));
 
   const nextCursor = rows.length === 50 ? rows[rows.length - 1].uid : null;
 
@@ -100,9 +103,7 @@ export default async function WalletsPage({ searchParams }: { searchParams?: { c
                   style={i < rows.length - 1 ? { borderBottom: `1px solid ${BORDER}` } : {}}
                 >
                   <td className="px-4 py-3">
-                    <Link href={`/admin/points/wallets/${w.uid}` as any} className="font-mono text-[11px] hover:underline" style={{ color: '#5BB6DE' }}>
-                      {w.uid.slice(0, 14)}…
-                    </Link>
+                    <UserName uid={w.uid} info={names[w.uid]} href={`/admin/points/wallets/${w.uid}`} color="#5BB6DE" />
                   </td>
                   <td className="px-4 py-3 text-right font-mono text-[11px] font-bold" style={{ color: 'var(--c-text)' }}>{w.balance}</td>
                   <td className="px-4 py-3 text-right font-mono text-[11px]" style={{ color: '#F59E0B' }}>{w.reserved}</td>

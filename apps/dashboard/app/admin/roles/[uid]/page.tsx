@@ -15,6 +15,7 @@ import MetadataList from '@/components/admin/MetadataList';
 import RoleBadge from '@/components/RoleBadge';
 import RoleAssignAction from './RoleAssignAction';
 import type { AdminRole } from '@/lib/session';
+import { userLabel, userInitial } from '@/lib/userLabel';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -54,15 +55,16 @@ export default async function RoleDetailPage({ params }: { params: { uid: string
         <p className="text-[12px] font-medium mb-0.5" style={{ color: 'var(--c-text-3)' }}>Admin / Roles</p>
         <Link href={'/admin/roles' as any} className="text-sm hover:underline" style={{ color: 'var(--c-text-3)' }}>← Roles</Link>
         <span style={{ color: 'var(--c-text-4)' }}>/</span>
-        <span className="text-sm font-semibold truncate" style={{ color: 'var(--c-text)' }}>{user.displayName ?? params.uid}</span>
+        <span className="text-sm font-semibold truncate" style={{ color: 'var(--c-text)' }}>{userLabel(user, { uid: params.uid })}</span>
       </div>
 
       <div className="flex items-center gap-4 mb-6">
         <div className="w-12 h-12 rounded-full font-bold text-xl grid place-items-center shrink-0" style={{ background: 'rgba(91,182,222,0.15)', color: '#5BB6DE' }}>
-          {(user.displayName ?? params.uid).slice(0, 1).toUpperCase()}
+          {userInitial(userLabel(user, { uid: params.uid }))}
         </div>
         <div>
-          <h1 className="text-[22px] font-extrabold tracking-tight">{user.displayName ?? '—'}</h1>
+          <h1 className="text-[22px] font-extrabold tracking-tight">{userLabel(user, { uid: params.uid })}</h1>
+          <p className="text-[11px] font-mono" style={{ color: 'var(--c-text-4)' }}>{params.uid}</p>
           <p className="text-sm" style={{ color: 'var(--c-text-3)' }}>{maskEmail(user.email, session.role)}</p>
         </div>
         {currentRole && <RoleBadge role={currentRole as AdminRole} />}
