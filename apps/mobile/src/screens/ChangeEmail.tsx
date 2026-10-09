@@ -57,6 +57,7 @@ export default function ChangeEmail({ navigation }: any) {
     try {
       const m = await getSignInMethods();
       setMethods(m);
+      if (m.emailChange.pendingChallengeId) setChallengeId(m.emailChange.pendingChallengeId);
       if (m.emailChange.pendingRecovery) setStep('recover');
       else if (!m.emailChange.available) setStep('unavailable');
       else setStep(m.emailChange.reauthRequired ? 'reauth' : 'email');
@@ -96,7 +97,9 @@ export default function ChangeEmail({ navigation }: any) {
   });
 
   const finish = () => run(async () => {
-    const r = await resumeEmailChange();
+    const id = challengeId ?? (await getSignInMethods()).emailChange.pendingChallengeId;
+    if (!id) throw new Error('challenge-not-found');
+    const r = await resumeEmailChange(id);
     setMasked(r.email || r.maskedEmail);
     setStep('done');
   });

@@ -18,6 +18,7 @@ const ERROR_KEYS: Record<string, string> = {
   'change-pending-recovery': 'pendingRecovery',
   'change-interrupted': 'interrupted',
   'cooldown': 'cooldown',
+  'change-settling': 'cooldown',
   'rate-limited': 'rateLimited',
   'too-many-numbers': 'tooManyAddresses',
   'code-invalid': 'codeInvalid',

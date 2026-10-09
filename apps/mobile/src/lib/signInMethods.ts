@@ -6,6 +6,7 @@
 
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { signInWithCustomToken } from 'firebase/auth';
+import * as Crypto from 'expo-crypto';
 import { app, auth } from './firebase';
 import { newPhoneAuthFlow } from './phoneAuth';
 import type { PhoneAuthFlow } from './phoneAuth.flow';
@@ -16,7 +17,7 @@ export interface SignInMethods {
   email: string | null;
   emailVerified: boolean;
   phone: string | null;
-  emailChange: { available: boolean; pendingRecovery: boolean; reauthRequired: boolean; codeTtlSec: number };
+  emailChange: { available: boolean; pendingRecovery: boolean; pendingChallengeId: string | null; reauthRequired: boolean; codeTtlSec: number };
 }
 
 export async function getSignInMethods(): Promise<SignInMethods> {
@@ -43,14 +44,37 @@ async function continueSession(r: ChangeResult): Promise<ChangeResult> {
   return r;
 }
 
-export async function verifyEmailChangeCode(challengeId: string, code: string): Promise<ChangeResult> {
-  const res = await httpsCallable<{ challengeId: string; code: string }, ChangeResult>(fns(), 'verifyEmailChangeCode')({ challengeId, code });
-  return continueSession(res.data);
+// The email change signs out every session, this one included. If the reply
+// carrying the replacement token is lost, this device finishes the change with
+// a one-off recovery key it sent along with the code — kept in memory only and
+// bound by the server to this challenge.
+const recoveryKeys = new Map<string, string>();
+
+async function recoveryKeyFor(challengeId: string): Promise<string> {
+  let k = recoveryKeys.get(challengeId);
+  if (!k) {
+    const b = await Crypto.getRandomBytesAsync(32);
+    k = Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
+    recoveryKeys.set(challengeId, k);
+  }
+  return k;
 }
 
-export async function resumeEmailChange(): Promise<ChangeResult> {
-  const res = await httpsCallable<Record<string, never>, ChangeResult>(fns(), 'resumeEmailChange')({});
-  return continueSession(res.data);
+export async function verifyEmailChangeCode(challengeId: string, code: string): Promise<ChangeResult> {
+  const recoveryKey = await recoveryKeyFor(challengeId);
+  const res = await httpsCallable<{ challengeId: string; code: string; recoveryKey: string }, ChangeResult>(fns(), 'verifyEmailChangeCode')({ challengeId, code, recoveryKey });
+  const out = await continueSession(res.data);
+  recoveryKeys.delete(challengeId);
+  return out;
+}
+
+export async function resumeEmailChange(challengeId: string): Promise<ChangeResult> {
+  const recoveryKey = recoveryKeys.get(challengeId);
+  const res = await httpsCallable<{ challengeId: string; recoveryKey?: string }, ChangeResult>(fns(), 'resumeEmailChange')(
+    recoveryKey ? { challengeId, recoveryKey } : { challengeId });
+  const out = await continueSession(res.data);
+  recoveryKeys.delete(challengeId);
+  return out;
 }
 
 // ── Re-authentication with a method the account ALREADY has ─────────────────

@@ -21,7 +21,7 @@ vi.mock('../src/lib/email', () => ({
 
 import {
   db, resetEmulators, seedPolicy, seedRelayDevice, makeEmailUser, req, expectHttps,
-  deliveredCode, authUserCount, num, linkReq,
+  deliveredCode, authUserCount, num, linkReq, PROJECT,
 } from './harness';
 import { handleStartPhoneAuth } from '../src/phoneAuth/startPhoneAuth';
 import { handleRequestPhoneAuthCode } from '../src/phoneAuth/requestPhoneAuthCode';
@@ -38,6 +38,7 @@ import {
   handleVerifyEmailChangeCode, handleResumeEmailChange, emailChangeDeps,
 } from '../src/emailChange/verifyEmailChangeCode';
 import { handleGetSignInMethods } from '../src/emailChange/getSignInMethods';
+import { userPrivateProfileRef } from '../src/lib/userPrivate';
 
 const FAST = { powBits: 8, powMaxBits: 8 };
 const PEPPER = process.env.PHONE_HASH_PEPPER!;
@@ -121,9 +122,13 @@ beforeEach(async () => {
   await seedRelayDevice();
   await db().collection('systemSettings').doc('general').set({ emailSignInEnabled: true });
 });
+const origBeforeAuthWrite = emailChangeDeps.beforeAuthWrite;
+const origBeforeFinalize = emailChangeDeps.beforeFinalize;
 afterEach(() => {
   vi.useRealTimers();
   emailChangeDeps.setAuthEmail = origSetAuthEmail;
+  emailChangeDeps.beforeAuthWrite = origBeforeAuthWrite;
+  emailChangeDeps.beforeFinalize = origBeforeFinalize;
 });
 
 describe('path A — started with email, then added a phone', () => {
@@ -261,10 +266,11 @@ describe('email codes: wrong, expired, used, wrong account, wrong purpose', () =
     const r = await requestEmail(u.uid, 'x@example.test');
     const good = lastCodeTo('x@example.test');
     await verifyEmail(u.uid, r.challengeId, good);
-    // Same challenge again: idempotent, same result, nothing new.
-    expect(await verifyEmail(u.uid, r.challengeId, good)).toMatchObject({ changed: true, email: 'x@example.test' });
+    // Same challenge again (from a session signed in after the change, since
+    // the change revoked the old one): idempotent, same result, nothing new.
+    expect(await verifyEmail(u.uid, r.challengeId, good, { authAgeSec: -2 })).toMatchObject({ changed: true, email: 'x@example.test' });
     // A fresh challenge for another address cannot be satisfied by the old code.
-    await advance(61_000);
+    await advance(151_000);
     const r2 = await requestEmail(u.uid, 'y@example.test');
     const e = await verifyEmail(u.uid, r2.challengeId, good).catch(x => x as HttpsError);
     if (lastCodeTo('y@example.test') !== good) expect((e as HttpsError).message).toBe('code-invalid');
@@ -404,7 +410,8 @@ describe('re-authentication, availability, limits, concurrency, interruption', (
     expect((await handleGetSignInMethods(req(u.uid, {}))).emailChange.pendingRecovery).toBe(true);
     emailChangeDeps.setAuthEmail = origSetAuthEmail;
     const sentBefore = sent.length;
-    await handleResumeEmailChange(req(u.uid, {}));
+    await expectHttps(handleResumeEmailChange(req(u.uid, {})), 'not-found', 'challenge-not-found');
+    await handleResumeEmailChange(req(u.uid, { challengeId: r.challengeId }));
     expect((await getAuth().getUser(u.uid)).email).toBe('x@example.test');
     expect(sent.length).toBe(sentBefore);
   });
@@ -419,5 +426,187 @@ describe('re-authentication, availability, limits, concurrency, interruption', (
     expect(audit).not.toContain(code);
     const op = JSON.stringify((await db().collection('emailChangeOps').doc(u.uid).get()).data());
     expect(op).not.toContain('secret-addr');
+  });
+});
+
+// ── Review findings on 15234ab: revoked-session recovery and stale writers ───
+
+const KEY = 'ab'.repeat(32);
+const OTHER_KEY = 'cd'.repeat(32);
+const resume = (uid: string, data: Record<string, unknown>, o: Parameters<typeof req>[2] = {}) =>
+  handleResumeEmailChange(req(uid, data, o)) as Promise<{ changed: true; email: string; customToken: string }>;
+
+function gate() {
+  let open!: () => void;
+  const p = new Promise<void>(r => { open = r; });
+  return { p, open };
+}
+
+/** Set the account's "sessions valid since" (what revokeRefreshTokens does), at a chosen second. */
+async function setValidSince(uid: string, sec: number) {
+  const au = process.env.FIREBASE_AUTH_EMULATOR_HOST;
+  const r = await fetch(`http://${au}/identitytoolkit.googleapis.com/v1/projects/${PROJECT}/accounts:update`, {
+    method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer owner' },
+    body: JSON.stringify({ localId: uid, validSince: String(sec) }),
+  });
+  if (!r.ok) throw new Error(`validSince update failed: ${r.status} ${await r.text()}`);
+}
+
+/** Change the email on one session whose reply is then "lost"; returns that session. */
+async function changeAndLoseReply(email = 'x@example.test') {
+  const u = await makeEmailUser();
+  const session = { claims: { auth_time: Math.floor(Date.now() / 1000) - 5 } };
+  const r = await requestEmail(u.uid, email, session);
+  await handleVerifyEmailChangeCode(req(u.uid, { challengeId: r.challengeId, code: lastCodeTo(email), recoveryKey: KEY }, session));
+  const user = await getAuth().getUser(u.uid);
+  expect(user.email).toBe(email);
+  // The change itself revoked this session.
+  expect(Date.parse(user.tokensValidAfterTime!) / 1000).toBeGreaterThan(session.claims.auth_time);
+  return { u, r, session };
+}
+
+describe('revoked session after an email change: recovery needs its own proof', () => {
+  it('the device that made the change finishes with its key; no key, no challenge or another key is refused', async () => {
+    const { u, r, session } = await changeAndLoseReply();
+    await expectHttps(resume(u.uid, {}, session), 'not-found', 'challenge-not-found');
+    await expectHttps(resume(u.uid, { recoveryKey: KEY }, session), 'not-found', 'challenge-not-found');
+    await expectHttps(resume(u.uid, { challengeId: r.challengeId }, session), 'unauthenticated', 'reauth-required');
+    await expectHttps(resume(u.uid, { challengeId: r.challengeId, recoveryKey: OTHER_KEY }, session), 'unauthenticated', 'reauth-required');
+    await expectHttps(resume(u.uid, { challengeId: 'f'.repeat(32), recoveryKey: KEY }, session), 'unauthenticated', 'reauth-required');
+    const out = await resume(u.uid, { challengeId: r.challengeId, recoveryKey: KEY }, session);
+    expect(out.customToken).toBeTruthy();
+    expect(out.email).toBe('x@example.test');
+  });
+
+  it('a revoked session without a recovery key cannot get a token at all', async () => {
+    const u = await makeEmailUser();
+    const session = { claims: { auth_time: Math.floor(Date.now() / 1000) - 5 } };
+    const r = await requestEmail(u.uid, 'x@example.test', session);
+    await handleVerifyEmailChangeCode(req(u.uid, { challengeId: r.challengeId, code: lastCodeTo('x@example.test') }, session));
+    await expectHttps(resume(u.uid, { challengeId: r.challengeId }, session), 'unauthenticated', 'reauth-required');
+    await expectHttps(verifyEmail(u.uid, r.challengeId, '000000', session), 'unauthenticated', 'reauth-required');
+  });
+
+  it('recovery stops after a later revocation (sign-out everywhere)', async () => {
+    const { u, r, session } = await changeAndLoseReply();
+    await setValidSince(u.uid, Math.floor(Date.now() / 1000) + 60);
+    await expectHttps(resume(u.uid, { challengeId: r.challengeId, recoveryKey: KEY }, session), 'unauthenticated', 'reauth-required');
+  });
+
+  it('recovery is refused for a suspended or disabled account', async () => {
+    const { u, r, session } = await changeAndLoseReply();
+    await db().collection('users').doc(u.uid).set({ status: 'suspended' }, { merge: true });
+    await expectHttps(resume(u.uid, { challengeId: r.challengeId, recoveryKey: KEY }, session), 'permission-denied', 'account-disabled');
+    await db().collection('users').doc(u.uid).set({ status: 'active' }, { merge: true });
+    await getAuth().updateUser(u.uid, { disabled: true });
+    await expectHttps(resume(u.uid, { challengeId: r.challengeId, recoveryKey: KEY }, session), 'permission-denied', 'account-disabled');
+  });
+
+  it('recovery has a use budget and a time window', async () => {
+    const { u, r, session } = await changeAndLoseReply();
+    for (let i = 0; i < 3; i++) await resume(u.uid, { challengeId: r.challengeId, recoveryKey: KEY }, session);
+    await expectHttps(resume(u.uid, { challengeId: r.challengeId, recoveryKey: KEY }, session), 'unauthenticated', 'reauth-required');
+
+    const b = await changeAndLoseReply('y@example.test');
+    vi.setSystemTime(Date.now() + 16 * 60_000);
+    await expectHttps(resume(b.u.uid, { challengeId: b.r.challengeId, recoveryKey: KEY }, b.session), 'unauthenticated', 'reauth-required');
+  });
+
+  it('a fresh session can still resume an interrupted change after a restart, by its challenge id', async () => {
+    const u = await makeEmailUser();
+    const r = await requestEmail(u.uid, 'x@example.test');
+    emailChangeDeps.setAuthEmail = async () => { throw Object.assign(new Error('net'), { code: 'auth/internal-error' }); };
+    await expectHttps(verifyEmail(u.uid, r.challengeId, lastCodeTo('x@example.test')), 'unavailable', 'change-interrupted');
+    emailChangeDeps.setAuthEmail = origSetAuthEmail;
+    const m = await handleGetSignInMethods(req(u.uid, {}));
+    expect(m.emailChange.pendingChallengeId).toBe(r.challengeId);
+    await resume(u.uid, { challengeId: m.emailChange.pendingChallengeId });
+    expect((await getAuth().getUser(u.uid)).email).toBe('x@example.test');
+  });
+});
+
+describe('stale Auth writers cannot bring back an earlier address', () => {
+  const stage = async (uid: string) => (await db().collection('emailChangeOps').doc(uid).get()).get('stage');
+  const privEmail = async (uid: string) => (await userPrivateProfileRef(db(), uid).get()).get('email');
+
+  /** Change A whose first worker stalls INSIDE its Auth write while a second worker completes A. */
+  async function stalledA() {
+    const u = await makeEmailUser();
+    const rA = await requestEmail(u.uid, 'a@example.test');
+    const release = gate(); const reached = gate();
+    let first = true;
+    emailChangeDeps.setAuthEmail = async (uid, email) => {
+      if (first && email === 'a@example.test') { first = false; reached.open(); await release.p; }
+      return origSetAuthEmail(uid, email);
+    };
+    const slow = verifyEmail(u.uid, rA.challengeId, lastCodeTo('a@example.test'));
+    await reached.p;
+    await resume(u.uid, { challengeId: rA.challengeId });
+    expect(await stage(u.uid)).toBe('done');
+    expect((await getAuth().getUser(u.uid)).email).toBe('a@example.test');
+    return { u, slow, release };
+  }
+
+  it('a new change waits until no writer of the previous one can still be running', async () => {
+    const { u, slow, release } = await stalledA();
+    await expectHttps(requestEmail(u.uid, 'b@example.test', { authAgeSec: -2 }), 'resource-exhausted', 'change-settling');
+    release.open();
+    await slow.catch(() => {});
+  });
+
+  it('a late write after the newer change completed is undone; the newer address stays', async () => {
+    const { u, slow, release } = await stalledA();
+    await advance(151_000);
+    await changeEmail(u.uid, 'b@example.test');
+    expect((await getAuth().getUser(u.uid)).email).toBe('b@example.test');
+    release.open();
+    await expectHttps(slow, 'not-found', 'challenge-not-found');
+    expect((await getAuth().getUser(u.uid)).email).toBe('b@example.test');
+    expect(await privEmail(u.uid)).toBe('b@example.test');
+    expect(await stage(u.uid)).toBe('done');
+    const audit = (await db().collection('auditLogs').get()).docs.map(d => d.get('action'));
+    expect(audit).toContain('emailChange.staleWriteUndone');
+    // The old address no longer resolves to this account.
+    await expect(getAuth().getUserByEmail('a@example.test')).rejects.toBeTruthy();
+  });
+
+  it('a late write that lands before the newer change finalizes is caught; the newer change still completes', async () => {
+    const { u, slow, release } = await stalledA();
+    await advance(151_000);
+    const rB = await requestEmail(u.uid, 'b@example.test');
+    emailChangeDeps.beforeFinalize = async () => {
+      emailChangeDeps.beforeFinalize = origBeforeFinalize;
+      release.open();
+      await slow.catch(() => {});
+      expect((await getAuth().getUser(u.uid)).email).toBe('a@example.test');
+    };
+    await expectHttps(verifyEmail(u.uid, rB.challengeId, lastCodeTo('b@example.test')), 'unavailable', 'change-interrupted');
+    expect(await stage(u.uid)).toBe('verified');
+    await advance(1_000);
+    await resume(u.uid, { challengeId: rB.challengeId });
+    expect((await getAuth().getUser(u.uid)).email).toBe('b@example.test');
+    expect(await privEmail(u.uid)).toBe('b@example.test');
+    expect(await stage(u.uid)).toBe('done');
+  });
+
+  it('a worker that stalls past its claim deadline does not write', async () => {
+    const u = await makeEmailUser();
+    const r = await requestEmail(u.uid, 'x@example.test');
+    const release = gate(); const reached = gate();
+    emailChangeDeps.beforeAuthWrite = async () => {
+      emailChangeDeps.beforeAuthWrite = origBeforeAuthWrite;
+      reached.open(); await release.p;
+    };
+    const writes: string[] = [];
+    emailChangeDeps.setAuthEmail = async (uid, email) => { writes.push(email); return origSetAuthEmail(uid, email); };
+    const slow = verifyEmail(u.uid, r.challengeId, lastCodeTo('x@example.test'));
+    await reached.p;
+    vi.setSystemTime(Date.now() + 21_000);
+    release.open();
+    await expectHttps(slow, 'unavailable', 'change-interrupted');
+    expect(writes).toEqual([]);
+    expect((await getAuth().getUser(u.uid)).email).toBe(u.email);
+    await resume(u.uid, { challengeId: r.challengeId });
+    expect((await getAuth().getUser(u.uid)).email).toBe('x@example.test');
   });
 });

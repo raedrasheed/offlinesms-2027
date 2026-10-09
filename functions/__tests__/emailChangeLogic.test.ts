@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   emailChangeVerifier, emailChangeCodeMatches, checkEmailChangeAccount, applyEmailChangeAccount,
   emailChangeVerifyExhausted, applyEmailChangeVerifyFailure, maskEmail, EMAIL_CHANGE_LIMITS as L,
+  recoveryAllowed, recoveryKeyHash, unsettled, settleWaitSec,
 } from '../src/emailChange/logic';
 import { hasVerifiedSignInMethod } from '../src/phoneLink/gates';
 import { renderOtpEmail } from '../src/lib/email/template';
@@ -59,5 +60,42 @@ describe('helpers', () => {
     expect(m.text).toContain('add this email address');
     expect(m.text).toContain('123456');
     expect(renderOtpEmail({ code: '1', ttlMinutes: 10 }).subject).toBe('Your OfflineSMS verification code');
+  });
+});
+
+describe('revoked-session recovery (pure)', () => {
+  const key = 'ab'.repeat(32);
+  const t0 = Date.parse('2026-10-09T12:00:00Z');
+  const base = {
+    op: { uid: 'u1', stage: 'done', challengeId: 'c'.repeat(32), recoveryHash: recoveryKeyHash(key), recoveryUses: 0, startedAtMs: t0, authClaimAtMs: t0 + 1_000 },
+    uid: 'u1', challengeId: 'c'.repeat(32), recoveryKey: key,
+    authTimeSec: t0 / 1000 - 30, tokensValidAfterTime: new Date(t0 + 2_000).toUTCString(), nowMs: t0 + 60_000,
+  };
+  it('allows only the revocation this change caused, with the key, for the same challenge', () => {
+    expect(recoveryAllowed(base)).toBe(true);
+    expect(recoveryAllowed({ ...base, recoveryKey: 'cd'.repeat(32) })).toBe(false);
+    expect(recoveryAllowed({ ...base, recoveryKey: undefined })).toBe(false);
+    expect(recoveryAllowed({ ...base, challengeId: 'd'.repeat(32) })).toBe(false);
+    expect(recoveryAllowed({ ...base, uid: 'u2' })).toBe(false);
+    expect(recoveryAllowed({ ...base, op: { ...base.op, recoveryHash: null } })).toBe(false);
+    // Later revocation (sign-out everywhere, suspension …).
+    expect(recoveryAllowed({ ...base, tokensValidAfterTime: new Date(t0 + 60_000).toUTCString() })).toBe(false);
+    // Not revoked at all → the normal gate decides (no bypass for an aged session).
+    expect(recoveryAllowed({ ...base, tokensValidAfterTime: undefined })).toBe(false);
+    expect(recoveryAllowed({ ...base, authTimeSec: t0 / 1000 + 10 })).toBe(false);
+    // No Auth write was ever claimed.
+    expect(recoveryAllowed({ ...base, op: { ...base.op, authClaimAtMs: undefined } })).toBe(false);
+  });
+  it('bounded by uses, window, stage and session age', () => {
+    expect(recoveryAllowed({ ...base, op: { ...base.op, recoveryUses: 3 } })).toBe(false);
+    expect(recoveryAllowed({ ...base, nowMs: t0 + 16 * 60_000 })).toBe(false);
+    expect(recoveryAllowed({ ...base, op: { ...base.op, stage: 'failed' } })).toBe(false);
+    expect(recoveryAllowed({ ...base, authTimeSec: t0 / 1000 - 1300 })).toBe(false);
+  });
+  it('settle window after an Auth-write claim', () => {
+    expect(unsettled({ authClaimAtMs: t0 }, t0 + 149_000)).toBe(true);
+    expect(unsettled({ authClaimAtMs: t0 }, t0 + 151_000)).toBe(false);
+    expect(unsettled(null, t0)).toBe(false);
+    expect(settleWaitSec({ authClaimAtMs: t0 }, t0 + 100_000)).toBe(50);
   });
 });

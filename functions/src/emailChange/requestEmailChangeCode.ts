@@ -33,7 +33,7 @@ import { requireEligibleCaller } from '../phoneLink/gates';
 import { DAY_MS } from '../phoneLink/limits';
 import {
   EMAIL_CHANGE_COLLECTIONS as C, EMAIL_CHANGE_LIMITS as L, EMAIL_CHANGE_PURPOSE,
-  checkEmailChangeAccount, applyEmailChangeAccount, emailChangeVerifier, maskEmail,
+  checkEmailChangeAccount, applyEmailChangeAccount, emailChangeVerifier, maskEmail, unsettled, settleWaitSec,
   type EmailChangeAccountCounter,
 } from './logic';
 
@@ -96,6 +96,9 @@ export async function handleRequestEmailChangeCode(request: CallableRequest<unkn
     const [opS, acctS, destS] = await tx.getAll(opRef, acctRef, destRef);
     const stage = opS.exists ? (opS.get('stage') as string) : null;
     if (stage && stage !== 'done' && stage !== 'failed') return { kind: 'reject', code: 'change-pending-recovery' };
+    // The previous change's Auth write may still be in flight somewhere.
+    const opData = opS.exists ? opS.data()! : null;
+    if (unsettled(opData, now)) return { kind: 'limit', code: 'change-settling', retryAfterSec: settleWaitSec(opData, now) };
 
     const acct = (acctS.data() ?? {}) as EmailChangeAccountCounter;
     const rej = checkEmailChangeAccount(acct, key, now);
