@@ -1,42 +1,80 @@
-// Lightweight performance markers for on-device measurement.
+// On-device timing for test builds. THE SAME FILE ships in the baseline and the
+// updated test build (scripts/test-builds/), and both call it at the same
+// screen-level points, so before/after numbers are comparable:
 //
-// Marks are timestamps (ms) relative to JS bundle start, kept in a small ring
-// buffer. In development builds each mark is logged ("[perf] name +1234ms"),
-// and `perfReport()` returns the buffer so a debug screen / adb log capture can
-// read: app start → auth ready → first chat-list render → conversation open →
-// first local render → notification tap → target message visible.
-// No-ops cost a few object allocations; nothing is sent anywhere.
+//   mark  auth:resolved            first auth state known          (App)
+//   mark  chatList:shown           chat list first has rows        (ChatsList)
+//   span  conversation_open        open → first messages rendered  (Conversation)
+//   span  push_to_visible          notification tap → that message in the rendered list
+//   span  send_to_visible          send tap → own message in the rendered list
+//   span  older_to_visible         "load older" → more messages in the rendered list
+//
+// "Rendered" = present in the array handed to the conversation's FlatList.
+// Output (EXPO_PUBLIC_PERF_LOG=1 builds, or development): logcat lines
+//   [perf] mark <name> +<ms since JS start>
+//   [perf] span <name> <ms>
+// Nothing is sent anywhere; store builds log nothing.
 
-const t0 = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
-const now = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()) - t0;
+const clock = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now());
+const t0 = clock();
+const LOG = (typeof __DEV__ !== 'undefined' && __DEV__) || process.env.EXPO_PUBLIC_PERF_LOG === '1';
 
-export interface PerfMark { name: string; at: number; data?: Record<string, unknown> }
+export interface PerfEntry { kind: 'mark' | 'span'; name: string; ms: number; data?: Record<string, unknown> }
 
 const MAX = 200;
-// Logged in development, and in test builds made with EXPO_PUBLIC_PERF_LOG=1
-// (on-device measurement: `adb logcat | grep '\[perf\]'`). Off in store builds.
-const LOG = (typeof __DEV__ !== 'undefined' && __DEV__) || process.env.EXPO_PUBLIC_PERF_LOG === '1';
-const marks: PerfMark[] = [];
-const firsts = new Map<string, number>();
+const entries: PerfEntry[] = [];
+const once = new Set<string>();
 
-export function perfMark(name: string, data?: Record<string, unknown>): number {
-  const at = Math.round(now());
-  marks.push({ name, at, data });
-  if (marks.length > MAX) marks.shift();
-  if (!firsts.has(name)) firsts.set(name, at);
+function record(e: PerfEntry) {
+  entries.push(e);
+  if (entries.length > MAX) entries.shift();
   if (LOG) {
     // eslint-disable-next-line no-console
-    console.log(`[perf] ${name} +${at}ms${data ? ' ' + JSON.stringify(data) : ''}`);
+    console.log(`[perf] ${e.kind} ${e.name} ${e.kind === 'mark' ? '+' : ''}${e.ms}${e.data ? ' ' + JSON.stringify(e.data) : ''}`);
   }
-  return at;
 }
 
-/** Elapsed ms between the FIRST occurrences of two marks, or null. */
-export function perfSpan(from: string, to: string): number | null {
-  const a = firsts.get(from), b = firsts.get(to);
-  return a != null && b != null ? b - a : null;
+/** A point in time (ms since JS start). `onlyFirst` records it once per process. */
+export function perfMark(name: string, data?: Record<string, unknown>, onlyFirst = false): void {
+  if (onlyFirst) { if (once.has(name)) return; once.add(name); }
+  record({ kind: 'mark', name, ms: Math.round(clock() - t0), data });
 }
 
-export function perfReport(): PerfMark[] {
-  return marks.slice();
+interface Pending { start: number; id?: string; minCount?: number; lastNot?: string }
+const pending = new Map<string, Pending>();
+
+/** Current clock, to start a span before its target id is known. */
+export function perfNow(): number {
+  return clock();
+}
+
+/**
+ * Start a span that ends when the conversation list renders: the message
+ * `id` (if given); or at least `minCount` rows whose last (oldest) row is no
+ * longer `lastNot` (older messages loaded); or any rows at all.
+ */
+export function perfBegin(
+  span: string,
+  target: { id?: string | null; minCount?: number; lastNot?: string } = {},
+  startedAt: number = clock(),
+): void {
+  pending.set(span, { start: startedAt, id: target.id ?? undefined, minCount: target.minCount, lastNot: target.lastNot });
+}
+
+/** Report what the conversation list renders (newest first); ends matching spans. */
+export function perfObserve(ids: readonly string[]): void {
+  if (pending.size === 0) return;
+  for (const [span, p] of pending) {
+    const done = p.id ? ids.includes(p.id)
+      : p.minCount != null ? ids.length >= p.minCount && ids[ids.length - 1] !== p.lastNot
+        : ids.length > 0;
+    if (done) {
+      pending.delete(span);
+      record({ kind: 'span', name: span, ms: Math.round(clock() - p.start) });
+    }
+  }
+}
+
+export function perfReport(): PerfEntry[] {
+  return entries.slice();
 }

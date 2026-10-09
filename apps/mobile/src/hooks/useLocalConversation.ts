@@ -29,7 +29,6 @@ import { isOnline, onConnectivityChange } from '../localdb/sync/networkState';
 import { importLegacyQueueOnce } from '../localdb/sync/legacyImport';
 import { createMessageMapper } from './messageModel';
 import { coalescing } from '../lib/coalesce';
-import { perfMark } from '../lib/perf';
 import type { Message } from '../lib/conversations';
 
 export type ConversationSource = 'disabled' | 'local' | 'firestoreFallback';
@@ -80,7 +79,6 @@ export function useLocalConversation(
   const runner = useMemo(() => {
     if (!enabled || !conversationId) return null;
     const mapRows = createMessageMapper();
-    let first = true;
     return coalescing(async () => {
       try {
         const all = await messagesRepo.listMessages(conversationId, limitRef.current);
@@ -94,7 +92,6 @@ export function useLocalConversation(
         oldestMsRef.current = oldest ? (oldest.remote_created_at ?? oldest.created_at ?? null) : null;
         setMessages(mapRows(rows));
         setSource('local');
-        if (first) { first = false; perfMark('conversation:firstLocalRender', { rows: rows.length }); }
       } catch {
         setSource('firestoreFallback');
       } finally {
@@ -121,7 +118,6 @@ export function useLocalConversation(
     let stopFeeder: (() => void) | null = null;
     let stopTargets: (() => void) | null = null;
     let cancelled = false;
-    perfMark('conversation:open', { id: conversationId });
 
     (async () => {
       try {

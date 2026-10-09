@@ -69,7 +69,7 @@ import * as Notifications from 'expo-notifications';
 import { installForegroundHandler, registerForPush, routeFromNotification } from './src/lib/notifications';
 import { initAppCheck } from './src/lib/appCheck';
 import { dispatchForRoute, pushTarget } from './src/lib/pushRouting';
-import { perfMark } from './src/lib/perf';
+import { perfMark, perfBegin } from './src/lib/perf';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { notificationTargets, pullConversationNow } from './src/localdb';
 import { ShareIntentProvider, useShareIntentContext } from 'expo-share-intent';
@@ -93,7 +93,6 @@ initAppCheck();
 function prefetchFromData(data: unknown) {
   const target = pushTarget(routeFromNotification(data));
   if (!target) return;
-  perfMark('push:prefetch', { hasMessage: !!target.messageId });
   if (target.messageId) void notificationTargets.request(target.conversationId, target.messageId);
   else void pullConversationNow(target.conversationId).catch(() => {});
 }
@@ -244,7 +243,7 @@ export default function App() {
   const [userTheme, setUserTheme] = useState<ThemePreference | null>(null);
 
   useEffect(() => onAuthStateChanged(auth, u => {
-    perfMark('auth:resolved', { signedIn: !!u });
+    perfMark('auth:resolved', { signedIn: !!u }, true);
     setUser(u);
     setReady(true);
     if (!u) { setProfileCompleted(null); setUserTheme(null); }
@@ -260,7 +259,7 @@ export default function App() {
     const key = `profileCompleted.v1:${user.uid}`;
     let live = false;
     AsyncStorage.getItem(key).then(v => {
-      if (!live && v === '1') { setProfileCompleted(prev => (prev === null ? true : prev)); perfMark('profile:fromCache'); }
+      if (!live && v === '1') setProfileCompleted(prev => (prev === null ? true : prev));
     }).catch(() => {});
     return onSnapshot(doc(db, 'users', user.uid), snap => {
       live = true;
@@ -311,11 +310,14 @@ export default function App() {
     const handled = new Set<string>();
     const handleTap = (resp: Notifications.NotificationResponse | null) => {
       if (!resp) return;
-      perfMark('push:tap');
       const id = resp.notification.request.identifier;
       if (id && handled.has(id)) return;
       if (id) handled.add(id);
       const data = resp.notification.request.content.data;
+      // Timing (test builds): tap → this message rendered in its conversation.
+      const tappedId = (data as { messageId?: unknown } | undefined)?.messageId;
+      perfMark('push:tap');
+      perfBegin('push_to_visible', { id: typeof tappedId === 'string' ? tappedId : null });
       // Kick a targeted pull immediately so the chat is loaded by the time it
       // opens, then navigate (stashing + retrying if we're not ready yet).
       prefetchFromData(data);

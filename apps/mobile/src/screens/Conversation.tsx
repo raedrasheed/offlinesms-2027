@@ -45,7 +45,7 @@ import { avatarColor, initials } from '../lib/avatar';
 import { useOffline } from '../context/OfflineContext';
 import { OfflineNotice, SyncSuccessChip } from '../components/OfflineBanners';
 import { SyncStatusBanner } from '../components/chat/SyncStatusBanner';
-import { perfMark } from '../lib/perf';
+import { perfBegin, perfObserve, perfNow } from '../lib/perf';
 import { getDraft, setDraft as persistDraft, clearDraft } from '../lib/drafts';
 import { useLocalConversation } from '../hooks/useLocalConversation';
 import { useMessagePersistence } from '../hooks/useLocalPersistence';
@@ -796,7 +796,8 @@ export default function Conversation({ route, navigation }: any) {
         // Local-first: write an optimistic local message + idempotent outbox
         // item; the sync engine delivers it (online or on reconnect) and
         // reconciles to the server id without duplicating on retry.
-        await queueSendMessage({
+        const sendStartedAt = perfNow();
+        const queued = await queueSendMessage({
           conversationId: id,
           senderUid: me,
           text,
@@ -809,6 +810,8 @@ export default function Conversation({ route, navigation }: any) {
           } : null,
           mentions: mentions.length ? mentions : null,
         });
+        // Timing (test builds): send tap → own message rendered.
+        perfBegin('send_to_visible', { id: queued.local_id }, sendStartedAt);
         local.refresh();
         clearComposer();
       } else if (isOffline) {
@@ -873,6 +876,17 @@ export default function Conversation({ route, navigation }: any) {
   // Inverted list: newest is at the top of the data array (index 0) and the
   // bottom of the screen (scroll offset 0).
   const invData = useMemo(() => data.slice().reverse(), [data]);
+
+  // Timing (test builds, src/lib/perf.ts): the same screen-level points as the
+  // baseline build — open → first rows, and every render reports its ids so
+  // tap/send/older spans end when their message is in the rendered list.
+  const renderedRef = useRef<string[]>([]);
+  useEffect(() => { perfBegin('conversation_open'); }, [id]);
+  useEffect(() => {
+    const ids = invData.map((m: any) => m.id as string);
+    renderedRef.current = ids;
+    perfObserve(ids);
+  }, [invData]);
   useEffect(() => { dataLenRef.current = data.length; }, [data]);
 
   const onListScroll = useCallback((e: any) => {
@@ -887,7 +901,11 @@ export default function Conversation({ route, navigation }: any) {
   // memoised list body isn't rebuilt on every render.
   const loadOlder = local.loadOlder;
   const onReachOlder = useCallback(() => {
-    if (useLocal) loadOlder();
+    if (!useLocal) return;
+    // Timing (test builds): request → older messages rendered.
+    const rendered = renderedRef.current;
+    perfBegin('older_to_visible', { minCount: rendered.length + 1, lastNot: rendered[rendered.length - 1] });
+    loadOlder();
   }, [useLocal, loadOlder]);
 
   // Notification deep link: once the target message is on screen, scroll to it
@@ -900,7 +918,6 @@ export default function Conversation({ route, navigation }: any) {
     const idx = invData.findIndex((m: any) => m.id === f.messageId);
     if (idx < 0) return;
     focusedRef.current = f.messageId;
-    perfMark('push:targetVisible', { index: idx });
     setHighlightId(f.messageId);
     requestAnimationFrame(() => {
       if (idx === 0) listRef.current?.scrollToOffset?.({ offset: 0, animated: true });

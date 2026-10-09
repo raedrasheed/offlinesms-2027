@@ -13,6 +13,7 @@ import {
 } from '../lib/conversations';
 import { subscribeToPresence, type ChatPresence } from '../services/presenceService';
 import { createKeyedSubscriptions } from '../lib/keyedSubscriptions';
+import { perfMark } from '../lib/perf';
 import { useTheme } from '../context/ThemeContext';
 import { useLocalChatList } from '../hooks/useLocalChatList';
 import { isRTL } from '../i18n';
@@ -162,6 +163,8 @@ export default function ChatsList({ navigation }: any) {
 
   // Archived chats are always hidden from every filter now (no archive tab).
   const visible = useMemo(() => enriched.filter(c => c.state?.archived !== true), [enriched]);
+  // Timing (test builds, src/lib/perf.ts): first time the chat list has rows.
+  useEffect(() => { if (visible.length > 0) perfMark('chatList:shown', { rows: visible.length }, true); }, [visible]);
 
   const filtered = useMemo(() => {
     let out = visible;

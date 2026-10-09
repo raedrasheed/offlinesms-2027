@@ -7,7 +7,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { coalescing } from '../lib/coalesce';
-import { perfMark } from '../lib/perf';
 import { LOCAL_FIRST_CHAT_LIST_ENABLED } from '../config/features';
 import { openLocalDb, conversationsRepo } from '../localdb';
 import { startChatListFeeder } from '../localdb/sync/chatListFeeder';
@@ -33,14 +32,12 @@ export function useLocalChatList(uid: string | undefined): LocalChatList {
   // one more pass instead of being lost until the next unrelated change.
   const runner = useMemo(() => {
     if (!enabled) return null;
-    let first = true;
     return coalescing(async () => {
       try {
         const rows = await conversationsRepo.listConversations({ includeArchived: false });
         setItems(rows.map(mapConversationRow));
         setSource('local');
         setError(null);
-        if (first) { first = false; perfMark('chatList:firstLocalRender', { rows: rows.length }); }
       } catch (e: any) {
         setError(e?.message ?? 'local-read-failed');
         setSource('firestoreFallback');
