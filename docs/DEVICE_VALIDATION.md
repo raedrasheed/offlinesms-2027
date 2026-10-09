@@ -14,23 +14,14 @@ This document records **what has actually been validated and where**. Results fr
 
 As a result, **every row marked "device" in §3–§5 is still open**. The build, scripts and steps for running them are below.
 
-## 1. Installable build
+## 1. Installable builds
 
-- **CI artifact:** the `mobile app · installable APK` job runs on PRs and on manual dispatch. It uploads `offlinesms-<commit>-<backend>.apk` with its SHA-256 under the run's *Artifacts*.
-- **Backend:**
-  - **`placeholder-backend`** (current default): the APK installs and opens, but it cannot sign in, sync or receive push. Use it only for install, launch, UI and RTL checks.
-  - **`test-backend-<project>`**: built when the repository has a non-production test project configured:
-    - the secret `MOBILE_GOOGLE_SERVICES_JSON`, which is the `google-services.json` of an Android app `app.offlinesms.mobile` in that project;
-    - the variables `MOBILE_TEST_FIREBASE_API_KEY`, `_AUTH_DOMAIN`, `_PROJECT_ID`, `_STORAGE_BUCKET`, `_APP_ID` and `_MESSAGING_SENDER_ID`.
-  - The job and `scripts/ci/mobile-google-services.sh` **refuse the production project**.
-- **Signing:** the release JS bundle is signed with the debug key, because there is no release keystore in CI. Uninstall any Play-store build first, since the signatures differ.
-- **Perf logging:** built with `EXPO_PUBLIC_PERF_LOG=1`, so the in-app marks appear in `adb logcat` (§5).
+See **[TEST_BUILDS.md](TEST_BUILDS.md)**. CI builds a matched pair, `offlinesms-test-updated` and `offlinesms-test-baseline`:
+- package `app.offlinesms.mobile.test`, named "OfflineSMS Test";
+- it installs **next to** the store app, so there's no need to uninstall anything;
+- both have the same signing and identical timing instrumentation.
 
-To make the test backend usable, these steps must be done by someone with access. They are **not done**:
-1. Create a non-production Firebase project, with Auth email sign-in, Firestore, Functions, Storage and FCM.
-2. Deploy `firestore.rules`, the indexes and `functions/` to it, including `votePoll`, `closePoll` and `sendTextMessage` with `kind`.
-3. Add the secret and variables above, then re-run the job.
-4. Keep `smsConfig/otp` and phone linking **disabled** in that project, as they are in production. None of these tests need SMS.
+They are functional once the backend configuration in TEST_BUILDS.md §3 is set. Until then they use a placeholder backend: they install and open, but cannot sign in.
 
 ## 2. Recording results
 
@@ -74,19 +65,18 @@ Record every run as one row:
 
 ## 5. Performance (same device, same network)
 
-1. Install the **before** build, sign in, open the same chats, then run:
+1. Install `offlinesms-test-baseline`, sign in, open the same chats, then run:
    ```
-   scripts/device/perf-capture.sh coldstart before 10
-   scripts/device/perf-capture.sh session before 180   # open 5 chats, scroll up twice, send 5, tap 3 notifications
+   scripts/device/perf-capture.sh coldstart baseline 10
+   scripts/device/perf-capture.sh session baseline 240   # open 5 chats, load older twice, send 5, tap 3 notifications
    ```
-2. Uninstall it (`adb uninstall app.offlinesms.mobile`), install the **after** build, sign into the **same account**, and repeat with the label `after`.
+2. Install `offlinesms-test-updated` **over it**, without uninstalling, and repeat with the label `updated`.
 3. Compare the medians:
    - cold start `TotalTime`;
-   - `chatList:firstLocalRender`;
-   - conversation open (`conversation:open → conversation:firstLocalRender`);
-   - notification tap → visible.
+   - `auth:resolved` and `chatList:shown`;
+   - the spans `conversation_open`, `push_to_visible`, `send_to_visible` and `older_to_visible`.
 
-**Caveat:** the "before" commit (`2a61167`) has no in-app perf marks. For it, only `am start -W` cold start can be compared like-for-like. Feature-level spans need an instrumented baseline build; that is not done.
+The `baseline` build carries the same timing points as `updated` (byte-identical `src/lib/perf.ts`), so every span compares like-for-like.
 
 | Metric | Before (device) | After (device) | In-process harness (same machine, before → after) |
 |---|---|---|---|
@@ -106,4 +96,4 @@ Record every run as one row:
 | Upgrade interrupted at **any** statement → full rollback; the next launch succeeds | ✅ (fixed in `353d2d6`; it failed before) | — |
 | Devices left half-upgraded by the old runner open again | ✅ (fixed in `353d2d6`) | — |
 
-**Device check:** install the production 2.3.18 build, use it, then install the test APK **over it**. This only works if both are signed with the same key: with the debug-signed APK, Android refuses an in-place update over a Play-signed build. Doing it properly therefore needs a build signed with the release key, or two test builds (an old commit and the new one), both debug-signed.
+**Device check:** install `offlinesms-test-baseline` (schema v5, same code as production 2.3.18), use it, then install `offlinesms-test-updated` **over it**. Same package and same key, so this is a real in-place upgrade to v7. See TEST_BUILDS.md §4.

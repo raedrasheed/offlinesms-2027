@@ -153,27 +153,41 @@ jobs:
           path: apps/mobile-relay/app/build/reports/tests/
           if-no-files-found: ignore
 
-  # Installable Android build of the MAIN mobile app (release JS bundle, debug
-  # signing — no release keystore in CI). Downloadable from the run's
-  # "Artifacts" section. Backend selection, never production:
-  #   • repository secret MOBILE_GOOGLE_SERVICES_JSON + variables
-  #     MOBILE_TEST_FIREBASE_{API_KEY,AUTH_DOMAIN,PROJECT_ID,STORAGE_BUCKET,
-  #     APP_ID,MESSAGING_SENDER_ID} for a NON-production test project → a
-  #     usable test build ("test-backend");
-  #   • otherwise placeholders → the app installs and opens but cannot sign in
-  #     or receive push ("placeholder-backend", UI/smoke only).
-  # The script refuses a google-services.json for offlinesms-prod-2027.
+  # Matched pair of installable TEST builds of the main mobile app
+  # (docs/TEST_BUILDS.md): "updated" (this commit) and "baseline" (2a61167 +
+  # scripts/test-builds/baseline-instrumentation.patch) — same package
+  # app.offlinesms.mobile.test (installs next to the store app), same signing,
+  # same timing instrumentation, versionCode baseline < updated. Download from
+  # the run's "Artifacts".
+  #
+  # Backend (one Firebase project for both builds):
+  #   secret   MOBILE_GOOGLE_SERVICES_JSON  google-services.json with an Android
+  #            app for app.offlinesms.mobile.test
+  #   vars     MOBILE_TEST_FIREBASE_{API_KEY,AUTH_DOMAIN,PROJECT_ID,
+  #            STORAGE_BUCKET,APP_ID,MESSAGING_SENDER_ID}  (that project's web config)
+  #   var      MOBILE_TEST_ALLOW_PRODUCTION_BACKEND=true  required if it is
+  #            offlinesms-prod-2027 (owner decision)
+  #   none     → placeholder backend (installs/opens; no sign-in or push)
+  # Optional private signing key (else the repo debug key) — secrets
+  #   MOBILE_TEST_KEYSTORE_BASE64, MOBILE_TEST_KEYSTORE_PASSWORD,
+  #   MOBILE_TEST_KEY_ALIAS, MOBILE_TEST_KEY_PASSWORD.
   mobile-android:
-    name: mobile app · installable APK
+    name: mobile test build · ${{ matrix.variant }}
     if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [updated, baseline]
     env:
       MOBILE_GOOGLE_SERVICES_JSON: ${{ secrets.MOBILE_GOOGLE_SERVICES_JSON }}
-      TEST_PROJECT_ID: ${{ vars.MOBILE_TEST_FIREBASE_PROJECT_ID }}
+      MOBILE_TEST_ALLOW_PRODUCTION_BACKEND: ${{ vars.MOBILE_TEST_ALLOW_PRODUCTION_BACKEND }}
     steps:
-      - name: Checkout
+      - name: Checkout (full history for the baseline commit)
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Node 20
         uses: actions/setup-node@v4
@@ -189,59 +203,57 @@ jobs:
       - name: Android SDK packages
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0" "ndk;27.1.12297006" "cmake;3.22.1" > /dev/null
 
-      - name: Install mobile dependencies
+      - name: Install mobile dependencies (identical for both variants)
         run: npm --prefix apps/mobile ci
 
-      - name: Backend configuration (never production)
-        id: backend
+      - name: Backend web config
         run: |
-          if [ -n "$MOBILE_GOOGLE_SERVICES_JSON" ] && [ -n "$TEST_PROJECT_ID" ]; then
-            if [ "$TEST_PROJECT_ID" = "offlinesms-prod-2027" ]; then echo "refusing production project" >&2; exit 1; fi
-            echo "label=test-backend-$TEST_PROJECT_ID" >> "$GITHUB_OUTPUT"
+          if [ -n "$MOBILE_GOOGLE_SERVICES_JSON" ]; then
             {
               echo "EXPO_PUBLIC_FIREBASE_API_KEY=${{ vars.MOBILE_TEST_FIREBASE_API_KEY }}"
               echo "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN=${{ vars.MOBILE_TEST_FIREBASE_AUTH_DOMAIN }}"
-              echo "EXPO_PUBLIC_FIREBASE_PROJECT_ID=$TEST_PROJECT_ID"
+              echo "EXPO_PUBLIC_FIREBASE_PROJECT_ID=${{ vars.MOBILE_TEST_FIREBASE_PROJECT_ID }}"
               echo "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET=${{ vars.MOBILE_TEST_FIREBASE_STORAGE_BUCKET }}"
               echo "EXPO_PUBLIC_FIREBASE_APP_ID=${{ vars.MOBILE_TEST_FIREBASE_APP_ID }}"
               echo "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=${{ vars.MOBILE_TEST_FIREBASE_MESSAGING_SENDER_ID }}"
             } >> "$GITHUB_ENV"
-          else
-            unset MOBILE_GOOGLE_SERVICES_JSON   # half-configured → placeholder, never a mix
-            echo "label=placeholder-backend" >> "$GITHUB_OUTPUT"
-            {
-              echo "EXPO_PUBLIC_FIREBASE_API_KEY=AIzaSyDUMMY-NOT-A-REAL-KEY-000000000000"
-              echo "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN=demo-offlinesms-ci.firebaseapp.com"
-              echo "EXPO_PUBLIC_FIREBASE_PROJECT_ID=demo-offlinesms-ci"
-              echo "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET=demo-offlinesms-ci.appspot.com"
-              echo "EXPO_PUBLIC_FIREBASE_APP_ID=1:000000000000:android:0000000000000001"
-              echo "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=000000000000"
-            } >> "$GITHUB_ENV"
+            [ -n "${{ vars.MOBILE_TEST_FIREBASE_PROJECT_ID }}" ] || { echo "MOBILE_TEST_FIREBASE_PROJECT_ID variable missing" >&2; exit 1; }
           fi
-          # The script writes the supplied test-project file, or the placeholder.
-          bash scripts/ci/mobile-google-services.sh
 
-      - name: Build release APK (debug-signed)
-        working-directory: apps/mobile/android
+      - name: Private test signing key (optional)
         env:
-          NODE_ENV: production
-          # Test build: log the in-app perf marks to logcat for on-device timing.
-          EXPO_PUBLIC_PERF_LOG: '1'
-        run: ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a,x86_64 --no-daemon
-
-      - name: Name the APK after the commit and backend
-        id: apk
+          KS: ${{ secrets.MOBILE_TEST_KEYSTORE_BASE64 }}
         run: |
-          name="offlinesms-${{ github.event.pull_request.head.sha || github.sha }}-${{ steps.backend.outputs.label }}.apk"
-          cp apps/mobile/android/app/build/outputs/apk/release/app-release.apk "$name"
-          sha256sum "$name" | tee "$name.sha256"
-          echo "name=$name" >> "$GITHUB_OUTPUT"
+          if [ -n "$KS" ]; then
+            echo "$KS" | base64 -d > apps/mobile/android/app/test-release.keystore
+            {
+              echo "RELEASE_STORE_FILE=test-release.keystore"
+              echo "RELEASE_STORE_PASSWORD=${{ secrets.MOBILE_TEST_KEYSTORE_PASSWORD }}"
+              echo "RELEASE_KEY_ALIAS=${{ secrets.MOBILE_TEST_KEY_ALIAS }}"
+              echo "RELEASE_KEY_PASSWORD=${{ secrets.MOBILE_TEST_KEY_PASSWORD }}"
+            } > apps/mobile/android/keystore.properties
+            if [ "${{ matrix.variant }}" = baseline ]; then echo "COPY_KEYSTORE=1" >> "$GITHUB_ENV"; fi
+          fi
+
+      - name: Build ${{ matrix.variant }} test APK
+        env:
+          BASELINE_DIR: ${{ github.workspace }}/../offlinesms-baseline
+        run: |
+          if [ "${COPY_KEYSTORE:-}" = 1 ]; then
+            # build.sh creates the baseline worktree; give it the same key.
+            git worktree add -f "$BASELINE_DIR" 2a61167
+            git -C "$BASELINE_DIR" apply scripts/test-builds/baseline-instrumentation.patch
+            cp apps/mobile/android/app/test-release.keystore "$BASELINE_DIR/apps/mobile/android/app/"
+          fi
+          scripts/test-builds/build.sh ${{ matrix.variant }} dist-apk
+
+      - name: Signing certificate (must match between baseline and updated)
+        run: |
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs dist-apk/*.apk | grep -E "SHA-256 digest" | tee dist-apk/signing-cert.txt
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.apk.outputs.name }}
-          path: |
-            ${{ steps.apk.outputs.name }}
-            ${{ steps.apk.outputs.name }}.sha256
+          name: offlinesms-test-${{ matrix.variant }}
+          path: dist-apk/
           retention-days: 30
