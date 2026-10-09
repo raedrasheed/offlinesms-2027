@@ -77,7 +77,6 @@ export async function requireEligibleCaller(
   db: Firestore,
   maxAuthAgeSec: number,
   nowMs = Date.now(),
-  opts: { skipFreshness?: boolean } = {},
 ): Promise<Caller> {
   const auth = request.auth;
   if (!auth?.uid) throw new HttpsError('unauthenticated', 'auth-required');
@@ -93,10 +92,7 @@ export async function requireEligibleCaller(
     throw new HttpsError('unauthenticated', 'auth-required');
   }
   if (user.disabled) throw new HttpsError('permission-denied', 'account-disabled');
-  // skipFreshness: only for a caller that proved, by other means, that it may
-  // continue despite a revoked/aged session (email-change recovery). Every
-  // other standing check below still applies.
-  if (!opts.skipFreshness && authFreshness(token.auth_time, nowMs, maxAuthAgeSec, user.tokensValidAfterTime) !== 'ok') {
+  if (authFreshness(token.auth_time, nowMs, maxAuthAgeSec, user.tokensValidAfterTime) !== 'ok') {
     throw new HttpsError('unauthenticated', 'reauth-required');
   }
   // The account must already hold a verified sign-in method: a verified email

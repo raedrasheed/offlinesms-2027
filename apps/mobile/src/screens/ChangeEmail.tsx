@@ -46,7 +46,12 @@ export default function ChangeEmail({ navigation }: any) {
 
   const showError = useCallback((e: unknown) => {
     const info = emailChangeErrorInfo(e);
-    if (info.needsReauth) setStep('reauth');
+    if (info.needsReauth) {
+      // A revoked session (e.g. the change landed but its reply was lost) must
+      // sign in again; confirm with the address the account carries NOW.
+      setStep('reauth');
+      void getSignInMethods().then(setMethods).catch(() => {});
+    }
     if (info.canResume) setStep('recover');
     if (info.retryAfterSec) setResendAt(Date.now() + info.retryAfterSec * 1000);
     setError(t(info.key, { time: info.retryAfterSec ? formatCountdown(info.retryAfterSec) : '', count: info.attemptsLeft ?? 0 }));
@@ -58,13 +63,17 @@ export default function ChangeEmail({ navigation }: any) {
       const m = await getSignInMethods();
       setMethods(m);
       if (m.emailChange.pendingChallengeId) setChallengeId(m.emailChange.pendingChallengeId);
-      if (m.emailChange.pendingRecovery) setStep('recover');
+      // A change is mid-way. Without its id this session was revoked (the change
+      // itself signs every session out): sign in again first, then finish.
+      if (m.emailChange.pendingRecovery && !m.emailChange.pendingChallengeId) {
+        setStep('reauth'); setError(t('emailChange.errors.reauthRequired'));
+      } else if (m.emailChange.pendingRecovery) setStep('recover');
       else if (!m.emailChange.available) setStep('unavailable');
       else setStep(m.emailChange.reauthRequired ? 'reauth' : 'email');
     } catch (e) {
       setStep('unavailable'); showError(e);
     }
-  }, [showError]);
+  }, [showError, t]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -134,7 +143,8 @@ export default function ChangeEmail({ navigation }: any) {
         </>
       ) : null}
 
-      {step === 'reauth' ? <ReauthPanel onDone={async () => { setError(null); setStep('email'); }} /> : null}
+      {/* After signing in again, reload: a change that was mid-way resumes from the "finish" step. */}
+      {step === 'reauth' ? <ReauthPanel email={methods?.email} onDone={load} /> : null}
 
       {step === 'email' ? (
         <>

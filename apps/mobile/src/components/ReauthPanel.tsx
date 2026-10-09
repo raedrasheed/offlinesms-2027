@@ -20,12 +20,15 @@ import { formatCountdown } from '../lib/phoneLink.helpers';
 
 const CODE_LEN = 6;
 
-export default function ReauthPanel({ onDone }: { onDone: () => void | Promise<void> }) {
+/** `email`: the address the server reports on the account, when known (newer
+ *  than the cached one right after an email change landed). */
+export default function ReauthPanel({ onDone, email }: { onDone: () => void | Promise<void>; email?: string | null }) {
   const { t } = useTranslation();
   const { colors } = useTheme();
   const s = useMemo(() => buildStyles(colors, isRTL), [colors]);
-  const methods = useMemo(() => reauthMethods(), []);
-  const [method, setMethod] = useState<ReauthMethod | null>(methods[0] ?? null);
+  const methods = useMemo(() => reauthMethods(email), [email]);
+  const [picked, setMethod] = useState<ReauthMethod | null>(null);
+  const method = picked && methods.includes(picked) ? picked : methods[0] ?? null;
   const [sent, setSent] = useState(false);
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
@@ -46,17 +49,17 @@ export default function ReauthPanel({ onDone }: { onDone: () => void | Promise<v
   }
 
   const send = () => run(async () => {
-    if (method === 'phone') await sendReauthPhoneCode(); else await sendReauthEmailCode();
+    if (method === 'phone') await sendReauthPhoneCode(); else await sendReauthEmailCode(email);
     setSent(true); setCode('');
   });
   const confirm = () => run(async () => {
-    if (method === 'phone') await reauthenticateWithPhoneCode(code); else await reauthenticateWithEmailCode(code);
+    if (method === 'phone') await reauthenticateWithPhoneCode(code); else await reauthenticateWithEmailCode(code, email);
     setCode(''); setSent(false);
     await onDone();
   });
 
   if (!method) return <Text style={s.body}>{t('signInMethods.reauthNoMethod')}</Text>;
-  const target = method === 'phone' ? formatOwnPhone(auth.currentUser?.phoneNumber) : auth.currentUser?.email ?? '';
+  const target = method === 'phone' ? formatOwnPhone(auth.currentUser?.phoneNumber) : email || auth.currentUser?.email || '';
 
   return (
     <View style={s.wrap}>

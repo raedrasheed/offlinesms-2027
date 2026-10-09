@@ -2,9 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   emailChangeVerifier, emailChangeCodeMatches, checkEmailChangeAccount, applyEmailChangeAccount,
   emailChangeVerifyExhausted, applyEmailChangeVerifyFailure, maskEmail, EMAIL_CHANGE_LIMITS as L,
-  recoveryAllowed, recoveryKeyHash, ownRevocationMarker,
 } from '../src/emailChange/logic';
-import { hasVerifiedSignInMethod } from '../src/phoneLink/gates';
+import { hasVerifiedSignInMethod, authFreshness } from '../src/phoneLink/gates';
 import { liveWrites, writeOutcomeUnknown, ABANDON_MS } from '../src/emailChange/authWrites';
 import { renderOtpEmail } from '../src/lib/email/template';
 
@@ -64,38 +63,17 @@ describe('helpers', () => {
   });
 });
 
-describe('revoked-session recovery (pure)', () => {
-  const key = 'ab'.repeat(32);
-  const t0 = Date.parse('2026-10-09T12:00:00Z');
-  const own = new Date(t0 + 2_000).toUTCString();
-  const base = {
-    op: { uid: 'u1', stage: 'done', challengeId: 'c'.repeat(32), recoveryHash: recoveryKeyHash(key), recoveryUses: 0, startedAtMs: t0, changeValidAfter: own },
-    uid: 'u1', challengeId: 'c'.repeat(32), recoveryKey: key,
-    authTimeSec: t0 / 1000 - 30, tokensValidAfterTime: own, nowMs: t0 + 60_000,
-  };
-  it("allows only this change's own revocation marker, with the key, for the same challenge", () => {
-    expect(recoveryAllowed(base)).toBe(true);
-    expect(recoveryAllowed({ ...base, recoveryKey: 'cd'.repeat(32) })).toBe(false);
-    expect(recoveryAllowed({ ...base, recoveryKey: undefined })).toBe(false);
-    expect(recoveryAllowed({ ...base, challengeId: 'd'.repeat(32) })).toBe(false);
-    expect(recoveryAllowed({ ...base, uid: 'u2' })).toBe(false);
-    expect(recoveryAllowed({ ...base, op: { ...base.op, recoveryHash: null } })).toBe(false);
-    // Any other revocation — even within seconds of the change's own — ends it.
-    for (const d of [1, 2, 10, 24, 60]) {
-      expect(recoveryAllowed({ ...base, tokensValidAfterTime: new Date(t0 + 2_000 + d * 1000).toUTCString() })).toBe(false);
-    }
-    // Not revoked at all → the normal gate decides (no bypass for an aged session).
-    expect(recoveryAllowed({ ...base, tokensValidAfterTime: undefined })).toBe(false);
-    expect(recoveryAllowed({ ...base, authTimeSec: t0 / 1000 + 10 })).toBe(false);
-    // The change's own marker was never recorded → ambiguous → refused.
-    expect(recoveryAllowed({ ...base, op: { ...base.op, changeValidAfter: null } })).toBe(false);
-    expect(recoveryAllowed({ ...base, op: { ...base.op, stage: 'verified' } })).toBe(false);
+describe('revoked sessions (pure, R4-1)', () => {
+  const signedIn = Date.parse('2026-10-09T17:00:20Z') / 1000;
+  const now = Date.parse('2026-10-09T17:00:40Z');
+  const at = (sec: number) => new Date(sec * 1000).toUTCString();
+  it('any revocation after the sign-in ends the session, whichever operation caused it', () => {
+    // The change's own marker (17:00:30) and an independent one (17:00:31) are treated alike.
+    expect(authFreshness(signedIn, now, L.reauthMaxAgeSec + L.codeTtlSec, at(signedIn + 10))).toBe('reauth-required');
+    expect(authFreshness(signedIn, now, L.reauthMaxAgeSec + L.codeTtlSec, at(signedIn + 11))).toBe('reauth-required');
   });
-  it('bounded by uses, window, stage and session age', () => {
-    expect(recoveryAllowed({ ...base, op: { ...base.op, recoveryUses: 3 } })).toBe(false);
-    expect(recoveryAllowed({ ...base, nowMs: t0 + 16 * 60_000 })).toBe(false);
-    expect(recoveryAllowed({ ...base, op: { ...base.op, stage: 'failed' } })).toBe(false);
-    expect(recoveryAllowed({ ...base, authTimeSec: t0 / 1000 - 1300 })).toBe(false);
+  it('a sign-in after the revocation is a fresh session', () => {
+    expect(authFreshness(signedIn + 12, now, L.reauthMaxAgeSec + L.codeTtlSec, at(signedIn + 11))).toBe('ok');
   });
 });
 
@@ -113,25 +91,5 @@ describe('Auth-write ledger (pure)', () => {
     expect(writeOutcomeUnknown({ code: 'auth/internal-error' })).toBe(true);
     expect(writeOutcomeUnknown({ code: 'app/network-timeout' })).toBe(true);
     expect(writeOutcomeUnknown(new Error('ECONNRESET'))).toBe(true);
-  });
-});
-
-describe('own revocation marker (pure, R3-1)', () => {
-  const start = Date.parse('2026-10-09T12:00:00.400Z');
-  const end = start + 300;
-  const at = (ms: number) => new Date(ms).toUTCString();
-  it("keeps a marker inside the write call's own seconds (±1s skew)", () => {
-    expect(ownRevocationMarker(at(start), start, end)).toBe(at(start));
-    expect(ownRevocationMarker(at(start - 1_000), start, end)).toBe(at(start - 1_000));
-    expect(ownRevocationMarker(at(end + 1_000), start, end)).toBe(at(end + 1_000));
-  });
-  it('drops a later independent revocation read back after the write', () => {
-    for (const d of [2, 10, 24, 60]) expect(ownRevocationMarker(at(end + d * 1000), start, end)).toBeNull();
-    expect(ownRevocationMarker(at(start - 5_000), start, end)).toBeNull(); // the write did not move it
-  });
-  it('drops anything when the write call was too slow to bound, or the marker is missing', () => {
-    expect(ownRevocationMarker(at(start), start, start + 2_500)).toBeNull();
-    expect(ownRevocationMarker(undefined, start, end)).toBeNull();
-    expect(ownRevocationMarker('garbage', start, end)).toBeNull();
   });
 });

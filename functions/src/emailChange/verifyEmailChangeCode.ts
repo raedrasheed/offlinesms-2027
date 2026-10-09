@@ -21,6 +21,14 @@
 // resumeEmailChange with the same challengeId (or retries verify); this
 // continues from the recorded stage without a new code or a new email.
 //
+// Revoked sessions: the Auth write revokes every session, the caller's too.
+// The request that made the write still answers with a token for the same
+// account (it was authorized before its own write). Any later step needs an
+// unrevoked session: a device whose reply was lost signs in again to the same
+// account and resumes. Firebase's one-second revocation marker cannot tell the
+// change's own revocation from an independent one, so no revoked session is
+// ever let through on other proof.
+//
 // Stale workers: Firebase Auth has no compare-and-set, and a request timeout
 // does not stop a worker that is still running. Every Auth write is therefore
 // recorded before it is sent and resolved after it returns (./authWrites.ts):
@@ -35,12 +43,11 @@ import { appCheckOptions } from '../lib/appCheck';
 import { writeAuditLog } from '../lib/auditLog';
 import { userPrivateProfileRef } from '../lib/userPrivate';
 import { emailKey as keyOf } from '../auth/emailOtpLogic';
-import { requireEligibleCaller } from '../phoneLink/gates';
+import { requireEligibleCaller, profileIsActive } from '../phoneLink/gates';
 import { authErrorCode } from '../phoneLink/shared';
 import {
   EMAIL_CHANGE_COLLECTIONS as C, EMAIL_CHANGE_LIMITS as L, EMAIL_CHANGE_PURPOSE, EMAIL_CHANGE_FN_TIMEOUT_SEC,
   emailChangeCodeMatches, emailChangeVerifyExhausted, applyEmailChangeVerifyFailure, maskEmail,
-  recoveryAllowed, recoveryKeyHash, ownRevocationMarker, RECOVERY_KEY_RE,
   type EmailChangeAccountCounter,
 } from './logic';
 import {
@@ -59,55 +66,22 @@ export const emailChangeDeps = {
   get setAuthEmail() { return authWriteDeps.setAuthEmail; },
   set setAuthEmail(f: (uid: string, email: string) => Promise<void>) { authWriteDeps.setAuthEmail = f; },
   beforeAuthWrite: async (_uid: string): Promise<void> => { /* no-op */ },
-  /** Between the change's Auth write returning and its marker read-back. */
+  /** Right after the change's Auth write returns. */
   afterAuthWrite: async (_uid: string): Promise<void> => { /* no-op */ },
   beforeFinalize: async (_uid: string): Promise<void> => { /* no-op */ },
   /** Between finalize's Auth read and its Firestore transaction. */
   afterAuthCheck: async (_uid: string): Promise<void> => { /* no-op */ },
 };
 
-const ms = (v: unknown): number => (v as Timestamp | undefined)?.toMillis?.() ?? 0;
-
 /**
- * The eligible caller — or, ONLY to finish the change it had accepted, the same
- * device after Firebase revoked its session because of that change (the email
- * update signs out every session). That device must present the challenge and
- * the recovery key it sent with the verify; the revocation must be the one this
- * change caused, with none since; and the account must still be in good
- * standing (enabled, not suspended). Each recovery use is counted.
+ * The caller of every change step: eligible, recently signed in, and NOT
+ * revoked since. A session the change itself revoked is no exception — that
+ * device signs in again to the same account and resumes with the fresh session.
  */
-async function callerForChange(
-  request: CallableRequest<unknown>, challengeId: string, recoveryKey: string | null,
-): Promise<{ uid: string; email: string | null; emailVerified: boolean }> {
-  const db = getFirestore();
-  try {
-    const c = await requireEligibleCaller(request, db, L.reauthMaxAgeSec + L.codeTtlSec);
-    return { uid: c.uid, email: c.user.email ?? null, emailVerified: c.user.emailVerified === true };
-  } catch (e) {
-    if (!(e instanceof HttpsError) || e.message !== 'reauth-required') throw e;
-    if (!recoveryKey || !CHALLENGE_ID_RE.test(challengeId)) throw e;
-    // Same standing checks as any caller, minus session freshness.
-    const c = await requireEligibleCaller(request, db, 0, Date.now(), { skipFreshness: true });
-    const opRef = db.collection(C.ops).doc(c.uid);
-    const authTimeSec = (request.auth!.token as { auth_time?: number }).auth_time;
-    const ok = await db.runTransaction(async tx => {
-      const s = await tx.get(opRef);
-      const op = s.exists ? s.data()! : null;
-      const allowed = recoveryAllowed({
-        op: op ? { ...op, startedAtMs: ms(op.startedAt) } : null,
-        uid: c.uid, challengeId, recoveryKey, authTimeSec,
-        tokensValidAfterTime: c.user.tokensValidAfterTime, nowMs: Date.now(),
-      });
-      if (allowed) tx.update(opRef, { recoveryUses: FieldValue.increment(1), updatedAt: FieldValue.serverTimestamp() });
-      return allowed;
-    });
-    if (!ok) throw e;
-    return { uid: c.uid, email: c.user.email ?? null, emailVerified: c.user.emailVerified === true };
-  }
+async function callerForChange(request: CallableRequest<unknown>): Promise<{ uid: string; email: string | null; emailVerified: boolean }> {
+  const c = await requireEligibleCaller(request, getFirestore(), L.reauthMaxAgeSec + L.codeTtlSec);
+  return { uid: c.uid, email: c.user.email ?? null, emailVerified: c.user.emailVerified === true };
 }
-
-const readRecoveryKey = (v: unknown): string | null => (typeof v === 'string' && RECOVERY_KEY_RE.test(v) ? v : null);
-
 
 type VerifyTx = { kind: 'proceed' } | { kind: 'error'; code: string; attemptsLeft?: number; retryAfterSec?: number };
 
@@ -118,10 +92,8 @@ export async function handleVerifyEmailChangeCode(request: CallableRequest<unkno
   const db = getFirestore();
   const challengeId = typeof data.challengeId === 'string' ? data.challengeId : '';
   const code = typeof data.code === 'string' ? data.code.trim() : '';
-  if (data.recoveryKey !== undefined && readRecoveryKey(data.recoveryKey) === null) throw new HttpsError('invalid-argument', 'recovery-invalid');
-  const recoveryKey = readRecoveryKey(data.recoveryKey);
   // A verify may legitimately arrive up to one code-lifetime after the fresh sign-in.
-  const caller = await callerForChange(request, challengeId, recoveryKey);
+  const caller = await callerForChange(request);
   const uid = caller.uid;
   if (!CHALLENGE_ID_RE.test(challengeId)) throw new HttpsError('not-found', 'challenge-not-found');
   if (!CODE_RE.test(code)) throw new HttpsError('invalid-argument', 'code-invalid');
@@ -189,7 +161,6 @@ export async function handleVerifyEmailChangeCode(request: CallableRequest<unkno
       tx.set(opRef, {
         uid, stage: 'verified', challengeId, email: ch.email, emailKey: ch.emailKey,
         previousEmailKey: previousEmail ? keyOf(previousEmail.toLowerCase()) : null,
-        recoveryHash: recoveryKey ? recoveryKeyHash(recoveryKey) : null, recoveryUses: 0,
         startedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
       });
       return { kind: 'proceed' };
@@ -246,8 +217,13 @@ async function heldByOther(uid: string, email: string): Promise<boolean> {
 type ChangeResult = { changed: true; email: string; maskedEmail: string; customToken: string };
 
 /** Firebase signs out existing sessions when the email changes; hand the
- *  device that made the change a token for its OWN account to continue. */
+ *  (unrevoked) caller a token for its OWN account to continue — only while the
+ *  account is still enabled and active, re-read right before minting. */
 async function withToken(uid: string, email: string): Promise<ChangeResult> {
+  let disabled: boolean;
+  try { disabled = (await getAuth().getUser(uid)).disabled; } catch { throw new HttpsError('unavailable', 'change-interrupted'); }
+  const profile = await getFirestore().collection('users').doc(uid).get();
+  if (disabled || !profileIsActive(profile.exists, profile.get('status'))) throw new HttpsError('permission-denied', 'account-disabled');
   let customToken: string;
   try { customToken = await getAuth().createCustomToken(uid); } catch { throw new HttpsError('unavailable', 'change-interrupted'); }
   return { changed: true, email, maskedEmail: email ? maskEmail(email) : '•••', customToken };
@@ -255,9 +231,8 @@ async function withToken(uid: string, email: string): Promise<ChangeResult> {
 
 /**
  * Step 1's Auth write, recorded in the ledger before it is sent and resolved
- * after it returns. Records the revocation marker the write produced (the only
- * one revoked-session recovery accepts). A write that lost to a newer change
- * is handed to reconcileAuthEmail (dirty-mark or undo).
+ * after it returns. A write that lost to a newer change is handed to
+ * reconcileAuthEmail (dirty-mark or undo).
  */
 async function fencedChangeWrite(uid: string, challengeId: string, email: string): Promise<boolean> {
   const db = getFirestore();
@@ -274,13 +249,13 @@ async function fencedChangeWrite(uid: string, challengeId: string, email: string
   });
   if (!claimed) return false; // another worker moved it on; the caller re-reads the op
   // outcome: 'none' (never sent), 'unknown' (may still land), 'written' (landed).
-  const resolve = (outcome: 'none' | 'unknown' | 'written', marker: string | null) => db.runTransaction(async tx => {
+  const resolve = (outcome: 'none' | 'unknown' | 'written') => db.runTransaction(async tx => {
     const [s, l] = await tx.getAll(opRef, lRef);
     resolvePending(tx, lRef, l.exists ? (l.data() as Ledger) : undefined, writeId, outcome === 'unknown', Date.now());
     if (!s.exists || s.get('challengeId') !== challengeId) return outcome === 'none' ? 'ok' : 'stale';
     const st = s.get('stage');
     if (outcome === 'written' && (st === 'verified' || st === 'auth-updated')) {
-      tx.update(opRef, { stage: 'auth-updated', changeValidAfter: marker, updatedAt: FieldValue.serverTimestamp() });
+      tx.update(opRef, { stage: 'auth-updated', updatedAt: FieldValue.serverTimestamp() });
       return 'ok';
     }
     return st === 'failed' && outcome !== 'none' ? 'stale' : 'ok';
@@ -288,14 +263,13 @@ async function fencedChangeWrite(uid: string, challengeId: string, email: string
 
   await emailChangeDeps.beforeAuthWrite(uid);
   if (Date.now() - claimAt > L.authWriteDeadlineMs) {
-    await resolve('none', null);
+    await resolve('none');
     throw new HttpsError('unavailable', 'change-interrupted');
   }
-  const writeStart = Date.now();
   try {
     await authWriteDeps.setAuthEmail(uid, email);
   } catch (e) {
-    const r = await resolve(writeOutcomeUnknown(e) ? 'unknown' : 'none', null);
+    const r = await resolve(writeOutcomeUnknown(e) ? 'unknown' : 'none');
     if (r === 'stale') await reconcileAuthEmail(uid);
     const code = authErrorCode(e);
     if (code === 'auth/email-already-exists' && await heldByOther(uid, email)) {
@@ -304,13 +278,8 @@ async function fencedChangeWrite(uid: string, challengeId: string, email: string
     }
     throw e;
   }
-  const writeEnd = Date.now();
   await emailChangeDeps.afterAuthWrite(uid);
-  // Keep the read-back marker only if this write can have produced it; a
-  // revocation between the write and this read must never pass for our own.
-  let marker: string | null = null;
-  try { marker = ownRevocationMarker((await getAuth().getUser(uid)).tokensValidAfterTime, writeStart, writeEnd); } catch { marker = null; }
-  if (await resolve('written', marker) === 'stale') {
+  if (await resolve('written') === 'stale') {
     // This write lost to a newer change: undo it (or make that change re-write).
     await reconcileAuthEmail(uid);
     throw new HttpsError('not-found', 'challenge-not-found');
@@ -428,8 +397,7 @@ export async function handleResumeEmailChange(request: CallableRequest<unknown>)
   const data = (request.data ?? {}) as Record<string, unknown>;
   const challengeId = typeof data.challengeId === 'string' ? data.challengeId : '';
   if (!CHALLENGE_ID_RE.test(challengeId)) throw new HttpsError('not-found', 'challenge-not-found');
-  if (data.recoveryKey !== undefined && readRecoveryKey(data.recoveryKey) === null) throw new HttpsError('invalid-argument', 'recovery-invalid');
-  const caller = await callerForChange(request, challengeId, readRecoveryKey(data.recoveryKey));
+  const caller = await callerForChange(request);
   return completeEmailChange(caller.uid, challengeId);
 }
 

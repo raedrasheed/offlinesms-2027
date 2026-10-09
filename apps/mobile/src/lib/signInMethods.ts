@@ -6,7 +6,6 @@
 
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { signInWithCustomToken } from 'firebase/auth';
-import * as Crypto from 'expo-crypto';
 import { app, auth } from './firebase';
 import { newPhoneAuthFlow } from './phoneAuth';
 import type { PhoneAuthFlow } from './phoneAuth.flow';
@@ -44,67 +43,51 @@ async function continueSession(r: ChangeResult): Promise<ChangeResult> {
   return r;
 }
 
-// The email change signs out every session, this one included. If the reply
-// carrying the replacement token is lost, this device finishes the change with
-// a one-off recovery key it sent along with the code — kept in memory only and
-// bound by the server to this challenge.
-const recoveryKeys = new Map<string, string>();
-
-async function recoveryKeyFor(challengeId: string): Promise<string> {
-  let k = recoveryKeys.get(challengeId);
-  if (!k) {
-    const b = await Crypto.getRandomBytesAsync(32);
-    k = Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
-    recoveryKeys.set(challengeId, k);
-  }
-  return k;
-}
-
 export async function verifyEmailChangeCode(challengeId: string, code: string): Promise<ChangeResult> {
-  const recoveryKey = await recoveryKeyFor(challengeId);
-  const res = await httpsCallable<{ challengeId: string; code: string; recoveryKey: string }, ChangeResult>(fns(), 'verifyEmailChangeCode')({ challengeId, code, recoveryKey });
-  const out = await continueSession(res.data);
-  recoveryKeys.delete(challengeId);
-  return out;
+  const res = await httpsCallable<{ challengeId: string; code: string }, ChangeResult>(fns(), 'verifyEmailChangeCode')({ challengeId, code });
+  return continueSession(res.data);
 }
 
+/** Finish a change that was interrupted. The email change signs out every
+ *  session, this one included: if the reply that carried the replacement token
+ *  was lost, the server answers `reauth-required` and this device signs in
+ *  again to the same account (see reauthenticateWith*) before resuming. */
 export async function resumeEmailChange(challengeId: string): Promise<ChangeResult> {
-  const recoveryKey = recoveryKeys.get(challengeId);
-  const res = await httpsCallable<{ challengeId: string; recoveryKey?: string }, ChangeResult>(fns(), 'resumeEmailChange')(
-    recoveryKey ? { challengeId, recoveryKey } : { challengeId });
-  const out = await continueSession(res.data);
-  recoveryKeys.delete(challengeId);
-  return out;
+  const res = await httpsCallable<{ challengeId: string }, ChangeResult>(fns(), 'resumeEmailChange')({ challengeId });
+  return continueSession(res.data);
 }
 
 // ── Re-authentication with a method the account ALREADY has ─────────────────
 
 export type ReauthMethod = 'email' | 'phone';
 
-/** Methods this account can confirm itself with right now. */
-export function reauthMethods(): ReauthMethod[] {
+/** Methods this account can confirm itself with right now. `email` is the
+ *  address the server reports on the account (it may be newer than this
+ *  device's cached one, e.g. right after an email change landed). */
+export function reauthMethods(email?: string | null): ReauthMethod[] {
   const u = auth.currentUser;
   const out: ReauthMethod[] = [];
-  if (u?.email) out.push('email');
+  if (email || u?.email) out.push('email');
   if (u?.phoneNumber) out.push('phone');
   return out;
 }
 
 /** Send a code to the account's own email. */
-export async function sendReauthEmailCode(): Promise<void> {
-  const email = auth.currentUser?.email;
+export async function sendReauthEmailCode(accountEmail?: string | null): Promise<void> {
+  const email = accountEmail || auth.currentUser?.email;
   if (!email) throw new Error('reauth-required');
   await httpsCallable<{ email: string }, { ok: boolean }>(fns(), 'requestEmailOtp')({ email });
 }
 
 /** Confirm with the emailed code; refuses (without signing in) if the code
  *  belongs to any account other than the current one. */
-export async function reauthenticateWithEmailCode(code: string): Promise<void> {
+export async function reauthenticateWithEmailCode(code: string, accountEmail?: string | null): Promise<void> {
   const me = auth.currentUser;
-  if (!me?.email) throw new Error('reauth-required');
+  const email = accountEmail || me?.email;
+  if (!me || !email) throw new Error('reauth-required');
   const res = await httpsCallable<{ email: string; code: string }, { customToken: string; uid: string }>(
     fns(), 'verifyEmailOtp',
-  )({ email: me.email, code });
+  )({ email, code });
   if (res.data?.uid !== me.uid) throw new Error('reauth-required');
   await signInWithCustomToken(auth, res.data.customToken);
   await auth.currentUser?.getIdToken(true);

@@ -29,13 +29,8 @@ export const EMAIL_CHANGE_LIMITS = {
   accountDistinctEmailsPerDay: 3,
   /** How recent the caller's sign-in must be to start a change (seconds). */
   reauthMaxAgeSec: 600,
-  /** Revoked-session recovery of an accepted change: how long, how many tokens. */
-  recoveryWindowSec: 900,
-  maxRecoveryUses: 3,
   /** A worker must start its Auth write within this long of claiming it, or not at all. */
   authWriteDeadlineMs: 20_000,
-  /** A write call slower than this cannot bound its own revocation marker. */
-  markerMaxWriteMs: 2_000,
 } as const;
 
 export const EMAIL_CHANGE_FN_TIMEOUT_SEC = 60;
@@ -108,80 +103,10 @@ export function maskEmail(email: string): string {
   return `${local.slice(0, Math.min(2, local.length))}•••${email.slice(at)}`;
 }
 
-// ── Revoked-session recovery ─────────────────────────────────────────────────
+// ── Revoked sessions ─────────────────────────────────────────────────────────
 // Firebase revokes every session when the account's email changes, including
-// the one making the change. If the response that carries the replacement token
-// is lost, the device may finish with a dedicated recovery proof — a random key
-// it generated and sent with the verify — and only while the account's
-// revocation marker (tokensValidAfterTime) is EXACTLY the one this change's own
-// Auth write produced. The worker reads the marker back after its write and
-// keeps it only if it falls inside the seconds of the write call itself
-// (ownRevocationMarker), so a revocation between the write and the read-back
-// is never taken for the change's own. Any other revocation (sign-out
-// everywhere, password change, a repair write, a later change) moves the
-// marker and ends the recovery; when no own marker could be established
-// recovery is refused and the device signs in again normally.
-
-export const RECOVERY_KEY_RE = /^[0-9a-f]{64}$/;
-
-export function recoveryKeyHash(key: string): string {
-  return createHash('sha256').update(`email-change-recovery:v1|${key}`).digest('hex');
-}
-
-export function recoveryKeyMatches(key: unknown, hash: unknown): boolean {
-  if (typeof key !== 'string' || !RECOVERY_KEY_RE.test(key) || typeof hash !== 'string' || hash.length !== 64) return false;
-  return timingSafeEqual(Buffer.from(recoveryKeyHash(key), 'hex'), Buffer.from(hash, 'hex'));
-}
-
-export interface RecoveryOp {
-  uid?: unknown; stage?: unknown; challengeId?: unknown; recoveryHash?: unknown;
-  recoveryUses?: unknown; startedAtMs: number; changeValidAfter?: unknown;
-}
-
-const parseTime = (v: unknown): number => (typeof v === 'string' && v ? Date.parse(v) : NaN);
-
-/**
- * Pure: the marker read back after this change's Auth write, ONLY if it can
- * have been produced by that write — inside the seconds the write call itself
- * spanned (Firebase keeps it at one-second resolution; ±1s for clock skew).
- * A later independent revocation, or a write call too slow to bound, yields
- * null: the change then has no recoverable marker and a revoked device signs
- * in again normally.
- */
-export function ownRevocationMarker(marker: unknown, writeStartMs: number, writeEndMs: number): string | null {
-  const m = parseTime(marker);
-  if (!Number.isFinite(m) || !(writeEndMs >= writeStartMs)) return null;
-  if (writeEndMs - writeStartMs > EMAIL_CHANGE_LIMITS.markerMaxWriteMs) return null;
-  const lo = Math.floor(writeStartMs / 1000) * 1000 - 1000;
-  const hi = Math.floor(writeEndMs / 1000) * 1000 + 1000;
-  return m >= lo && m <= hi ? (marker as string) : null;
-}
-
-/**
- * Pure: may a caller whose session is revoked continue this op? Only the device
- * that accepted the change (holds the recovery key), for the same challenge,
- * whose sign-in predates the change, within the window and use budget, and
- * whose session was revoked by this change's own Auth write and by nothing else.
- */
-export function recoveryAllowed(a: {
-  op: RecoveryOp | null; uid: string; challengeId: string; recoveryKey: unknown;
-  authTimeSec: unknown; tokensValidAfterTime: string | undefined; nowMs: number;
-}): boolean {
-  const L = EMAIL_CHANGE_LIMITS;
-  const op = a.op;
-  if (!op || op.uid !== a.uid || op.challengeId !== a.challengeId) return false;
-  if (!['auth-updated', 'done'].includes(op.stage as string)) return false;
-  if (!recoveryKeyMatches(a.recoveryKey, op.recoveryHash)) return false;
-  if (typeof op.recoveryUses === 'number' && op.recoveryUses >= L.maxRecoveryUses) return false;
-  if (!(op.startedAtMs > 0) || a.nowMs - op.startedAtMs > L.recoveryWindowSec * 1000) return false;
-  // The session was fresh when the change was accepted (it passed the gate then).
-  if (typeof a.authTimeSec !== 'number' || !Number.isFinite(a.authTimeSec)) return false;
-  const authMs = a.authTimeSec * 1000;
-  if (authMs > op.startedAtMs + 5_000 || op.startedAtMs - authMs > (L.reauthMaxAgeSec + L.codeTtlSec) * 1000) return false;
-  // Revoked, and the marker is exactly the one this change's write produced.
-  const own = parseTime(op.changeValidAfter);
-  const current = parseTime(a.tokensValidAfterTime);
-  if (!Number.isFinite(own) || !Number.isFinite(current)) return false;
-  if (current <= authMs) return false; // not revoked → the normal gate decides
-  return current === own;
-}
+// the one making the change, and keeps only a one-second marker of the latest
+// revocation (tokensValidAfterTime) — nothing says which operation caused it.
+// So a revoked session never continues a change on its own proof: the device
+// signs in again to the same account (any method it has, including the new,
+// already verified address) and resumes with that fresh session.
