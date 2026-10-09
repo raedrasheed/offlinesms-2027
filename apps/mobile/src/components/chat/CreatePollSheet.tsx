@@ -2,15 +2,16 @@
 // choice of single or multiple answers. The same rules are enforced by the
 // server (functions/src/chats/pollLogic.ts); the form shows them up front.
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
-  Modal, View, Text, TextInput, Pressable, ScrollView, Switch, StyleSheet, KeyboardAvoidingView, Platform,
+  Modal, View, Text, TextInput, Pressable, ScrollView, Switch, StyleSheet, KeyboardAvoidingView, Keyboard, Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../context/ThemeContext';
 import { isRTL } from '../../i18n';
+import { pollFormScrollOffset } from './pollFormLayout';
 import {
   validatePollDraft, POLL_OPTIONS_MAX, POLL_OPTION_MAX, POLL_QUESTION_MAX,
 } from '../../lib/pollModel';
@@ -32,12 +33,31 @@ export function CreatePollSheet({ visible, onClose, onCreate, initial }: {
   const [multiple, setMultiple] = useState(initial?.multiple ?? false);
   const [touched, setTouched] = useState(false);
 
+  const scrollRef = useRef<ScrollView>(null);
+  const fieldLayouts = useRef(new Map<string, { y: number; height: number }>());
+  const focusedField = useRef<string | null>(null);
+  const viewport = useRef(0);
+  const scrollY = useRef(0);
+  const revealFocused = () => {
+    const field = fieldLayouts.current.get(focusedField.current ?? '');
+    if (!field || viewport.current <= 0) return;
+    const y = pollFormScrollOffset(field.y, field.height, viewport.current, scrollY.current);
+    if (y !== scrollY.current) scrollRef.current?.scrollTo({ y, animated: true });
+  };
+  const focusField = (key: string) => { focusedField.current = key; revealFocused(); };
+  const recordField = (key: string, layout: { y: number; height: number }) => {
+    fieldLayouts.current.set(key, layout);
+    if (focusedField.current === key) revealFocused();
+  };
+
   const error = validatePollDraft(question, options);
   const reset = () => { setQuestion(''); setOptions(['', '']); setMultiple(false); setTouched(false); };
-  const close = () => { reset(); onClose(); };
+  const close = () => { Keyboard.dismiss(); focusedField.current = null; reset(); onClose(); };
   const submit = () => {
     setTouched(true);
     if (error) return;
+    Keyboard.dismiss();
+    focusedField.current = null;
     onCreate({ question: question.trim(), options: options.map(o => o.trim()).filter(Boolean), multiple });
     reset();
   };
@@ -51,8 +71,9 @@ export function CreatePollSheet({ visible, onClose, onCreate, initial }: {
   const align = isRTL ? 'right' : 'left';
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={close}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.backdrop}>
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={close}
+      onShow={() => { scrollY.current = 0; scrollRef.current?.scrollTo({ y: 0, animated: false }); }}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={[s.backdrop, { paddingTop: insets.top + 12 }]}>
         <View style={[s.sheet, { paddingBottom: insets.bottom + 12 }]}>
           <View style={s.headerRow}>
             <Pressable onPress={close} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('common.cancel')}>
@@ -63,10 +84,21 @@ export function CreatePollSheet({ visible, onClose, onCreate, initial }: {
               <Text style={[s.send, !!error && s.sendDisabled]}>{t('common.send')}</Text>
             </Pressable>
           </View>
-          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 10, paddingBottom: 12 }}>
+          <ScrollView
+            ref={scrollRef}
+            style={s.form}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            onLayout={e => { viewport.current = e.nativeEvent.layout.height; revealFocused(); }}
+            onScroll={e => { scrollY.current = e.nativeEvent.contentOffset.y; }}
+            scrollEventThrottle={16}
+            contentContainerStyle={{ gap: 10, paddingBottom: 24 }}
+          >
             <Text style={[s.label, { textAlign: align }]}>{t('poll.question')}</Text>
             <TextInput
               style={[s.input, { textAlign: align }]}
+              onFocus={() => focusField('question')}
+              onLayout={e => recordField('question', e.nativeEvent.layout)}
               value={question}
               onChangeText={setQuestion}
               placeholder={t('poll.questionPlaceholder')}
@@ -77,9 +109,10 @@ export function CreatePollSheet({ visible, onClose, onCreate, initial }: {
             />
             <Text style={[s.label, { textAlign: align }]}>{t('poll.options')}</Text>
             {options.map((o, i) => (
-              <View key={i} style={s.optRow}>
+              <View key={i} style={s.optRow} onLayout={e => recordField(`option-${i}`, e.nativeEvent.layout)}>
                 <TextInput
                   style={[s.input, { flex: 1, textAlign: align }]}
+                  onFocus={() => focusField(`option-${i}`)}
                   value={o}
                   onChangeText={v => setOption(i, v)}
                   placeholder={t('poll.optionPlaceholder', { n: i + 1 })}
@@ -113,7 +146,8 @@ export function CreatePollSheet({ visible, onClose, onCreate, initial }: {
 function styles(colors: any) {
   return StyleSheet.create({
     backdrop:    { flex: 1, backgroundColor: 'rgba(15,18,32,0.55)', justifyContent: 'flex-end' },
-    sheet:       { backgroundColor: colors.background.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 16, paddingTop: 12, maxHeight: '90%' },
+    sheet:       { backgroundColor: colors.background.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 16, paddingTop: 12, flex: 1, minHeight: 0 },
+    form:        { flex: 1, minHeight: 0 },
     headerRow:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
     title:       { fontSize: 16, fontWeight: '800', color: colors.text.primary },
     cancel:      { fontSize: 15, color: colors.text.muted },
@@ -128,3 +162,4 @@ function styles(colors: any) {
     err:         { fontSize: 13, fontWeight: '600', color: colors.state.error },
   });
 }
+

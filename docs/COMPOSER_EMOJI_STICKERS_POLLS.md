@@ -37,7 +37,7 @@ Screenshots (English and Arabic/RTL) are in [`docs/screenshots/composer/`](scree
 
 ## 3. Polls
 
-- **Create:** Attach → Poll. Enter a question (≤ 300 characters) and 2–12 unique options (≤ 100 characters each), and choose **single** or **multiple** choice. The form applies the same rules as the server.
+- **Create:** Attach → Poll. The expanded form resizes above the keyboard on Android and iOS, keeps Cancel/Send visible, and scrolls the focused question/option into view. Enter a question (≤ 300 characters) and 2–12 unique options (≤ 100 characters each), and choose **single** or **multiple** choice. The form applies the same rules as the server.
 - **Message:** `type: 'poll'` with
   - `poll: {question, options[{id,text}], multiple, closed, votes{uid: optionIds}, counts, voterCount}`.
   - `text` is `📊 question`, which older clients, the chat list and push notifications show.
@@ -49,6 +49,7 @@ Screenshots (English and Arabic/RTL) are in [`docs/screenshots/composer/`](scree
   - `closePoll` is limited to the creator. Results stay visible after closing.
   - Delete-for-everyone removes the poll, including its votes, and stickers.
 - **Client:**
+  - Queued/failed polls retain their complete question and options; voting and closing stay disabled until delivery. A failed send can retry its original outbox job without duplicating the poll.
   - Votes are optimistic. They are written to the local `payload_json` immediately and queued in the outbox, which is ordered and idempotent per `seq`.
   - Live results arrive from the conversation's realtime feed. Only the poll's bubble re-renders, because of structural sharing.
   - Ending a delivered poll is durably queued while offline, survives app restart and displays “waiting for confirmation”. A permanent refusal displays failure and permits an explicit retry. Closing is confirmed only after the server acknowledges it; concurrent vote updates are preserved.
@@ -88,7 +89,8 @@ npx serve dist-gallery   # then open /#chat, #emoji, #emoji-search, #stickers, #
 
 - **Deploy the functions before releasing the app.**
 - If the app is released first:
-  - A sticker or poll sent through the local-first outbox reaches an old `sendTextMessage` as **plain text**: the sticker's emoji, or "📊 question". The old server ignores `kind`, and the outbox sends the fallback text.
-  - On the legacy direct path, the same send is refused with `text-required`.
+  - Both send paths omit `text` for rich messages. An old `sendTextMessage` refuses them with `text-required` instead of silently publishing a sticker/poll as plain text. The local-first draft retains its structured payload and shows failed delivery for an explicit retry after deployment.
+  - Only the upgraded server generates the stored fallback text for old **recipient apps**, alongside the actual sticker/poll payload.
+  - Polls already published as plain text by an older server have no remote option list to reconstruct; create a new poll after backend deployment.
   - Votes fail, because `votePoll` doesn't exist on the old server. The queued vote is dead-lettered after its retries, and the next snapshot restores the real tally.
 

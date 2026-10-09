@@ -11,11 +11,11 @@
 | Responsiveness (v6 indexes, mapper, listeners) | PR #29 (app) | in-process harness | **No** |
 | Local DB v7 + atomic, self-healing upgrades | PR #29 (app) | real SQLite, upgrades from v1–v5 | **No.** Production 2.3.18 still has the non-atomic upgrade bug, which this fixes. |
 | Emoji picker and full searchable reactions | PR #29 (app + reaction validation) | catalog/search and full-catalog admission unit tests; web gallery | **No store release.** Deploy `reactToMessage` for flags/keycaps/information emoji |
-| Stickers | PR #29 (app + `sendTextMessage` `kind`) | unit, emulators | **No.** The server is not deployed. A new app talking to the current server sends a sticker as its emoji text. |
-| Polls | PR #29 (app + `sendTextMessage` `kind`, `votePoll`, `closePoll`) | unit, emulators (incl. concurrency) | **No.** Without the deployed functions, a new app sends the poll as text "📊 question" and votes fail. |
+| Stickers | PR #29 (app + `sendTextMessage` `kind`) | unit, emulators | **No.** The server is not deployed. Updated test builds keep the full sticker locally and fail the send against the old server instead of silently publishing emoji text. |
+| Polls | PR #29 (app + `sendTextMessage` `kind`, `votePoll`, `closePoll`) | unit, emulators (incl. concurrency) | **No.** Updated test builds retain the full question/options locally and refuse the send against the old server. Deploy the functions for delivery and voting; polls already published as text need to be recreated. |
 | Test APK pair | PR #29 CI jobs, package `app.offlinesms.mobile.test` | both passed run #448 before the current additions | Production backend configured with owner approval; installs alongside the store app. New feature backend still needs deployment |
 
-The current additions also queue poll closing offline, persist its pending/failure state and mount the reaction picker only when opened. Local regression tests passed; physical-device performance remains to be measured. The owner reported that notification taps now reveal the message immediately, but conversation/group opening was still slow.
+The current additions also queue poll closing offline, persist its pending/failure state and mount the reaction picker only when opened. The routine Connecting banner is hidden, the poll form resizes and scrolls above the keyboard, and queued/failed polls retain their full card with explicit retry. Keyboard behavior still needs a physical-device check. Local regression tests passed; physical-device performance remains to be measured. The owner reported that notification taps now reveal the message immediately, but conversation/group opening was still slow.
 
 ## Release order (store release not requested)
 1. Merge PR #28, then PR #29.

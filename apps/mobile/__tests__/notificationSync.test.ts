@@ -140,25 +140,25 @@ describe('notification targets', () => {
 describe('syncBannerKind', () => {
   const f = (state: any) => ({ messageId: 'm1', state });
   it('shows "loading this message" while the target is being located or fetched', () => {
-    expect(syncBannerKind(f('locating'), 'live', false)).toBe('loading-message');
-    expect(syncBannerKind(f('fetching'), 'connecting', false)).toBe('loading-message');
-    expect(syncBannerKind(f('pending'), 'live', false)).toBe('loading-message');
+    expect(syncBannerKind(f('locating'), 'live')).toBe('loading-message');
+    expect(syncBannerKind(f('fetching'), 'connecting')).toBe('loading-message');
+    expect(syncBannerKind(f('pending'), 'live')).toBe('loading-message');
   });
   it('shows "waiting for connection" when the target cannot be fetched offline', () => {
-    expect(syncBannerKind(f('fetching'), 'offline', false)).toBe('waiting-network');
-    expect(syncBannerKind(f('waiting-network'), 'live', false)).toBe('waiting-network');
+    expect(syncBannerKind(f('fetching'), 'offline')).toBe('waiting-network');
+    expect(syncBannerKind(f('waiting-network'), 'live')).toBe('waiting-network');
   });
   it('reports missing / error targets', () => {
-    expect(syncBannerKind(f('missing'), 'live', false)).toBe('missing');
-    expect(syncBannerKind(f('error'), 'live', false)).toBe('error');
+    expect(syncBannerKind(f('missing'), 'live')).toBe('missing');
+    expect(syncBannerKind(f('error'), 'live')).toBe('error');
   });
   it('falls back to connection state once the target is shown', () => {
-    expect(syncBannerKind(f('ready'), 'live', false)).toBeNull();
-    expect(syncBannerKind(f('ready'), 'offline', false)).toBe('offline');
+    expect(syncBannerKind(f('ready'), 'live')).toBeNull();
+    expect(syncBannerKind(f('ready'), 'offline')).toBe('offline');
   });
-  it('does not flash "connecting" during a fast open', () => {
-    expect(syncBannerKind(null, 'connecting', false)).toBeNull();
-    expect(syncBannerKind(null, 'connecting', true)).toBe('connecting');
+  it('keeps routine connection establishment silent even after the target is ready', () => {
+    expect(syncBannerKind(null, 'connecting')).toBeNull();
+    expect(syncBannerKind(f('ready'), 'connecting')).toBeNull();
   });
 });
 
@@ -245,3 +245,4 @@ describe('remoteMessageInput', () => {
     expect(r.clientLocalId).toBeNull();
   });
 });
+

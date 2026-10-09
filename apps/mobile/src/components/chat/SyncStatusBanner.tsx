@@ -1,10 +1,7 @@
 // In-conversation synchronisation state, shown above the composer:
 //   • a notification's message that isn't on screen yet ("Loading this message…",
 //     "Waiting for connection…", "No longer available", retry on error);
-//   • connection loss ("Offline — showing saved messages");
-//   • a slow first sync ("Connecting…", only after a short grace period so a
-//     fast open never flashes it).
-import { useEffect, useState } from 'react';
+//   • connection loss ("Offline — showing saved messages").
 import { View, Text, Pressable, ActivityIndicator, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
@@ -13,21 +10,12 @@ import { syncBannerKind } from './syncBannerModel';
 
 export { syncBannerKind, type SyncBannerKind } from './syncBannerModel';
 
-const CONNECTING_GRACE_MS = 1500;
-
 export function SyncStatusBanner({ focus, live, onRetry }: { focus: FocusState | null; live: LiveState; onRetry: () => void }) {
   const { t } = useTranslation();
-  const [slow, setSlow] = useState(false);
-  useEffect(() => {
-    if (live !== 'connecting') { setSlow(false); return; }
-    const h = setTimeout(() => setSlow(true), CONNECTING_GRACE_MS);
-    return () => clearTimeout(h);
-  }, [live]);
-
-  const kind = syncBannerKind(focus, live, slow);
+  const kind = syncBannerKind(focus, live);
   if (!kind) return null;
 
-  const spinner = kind === 'loading-message' || kind === 'connecting';
+  const spinner = kind === 'loading-message';
   const icon = kind === 'offline' || kind === 'waiting-network' ? 'cloud-offline-outline'
     : kind === 'missing' ? 'alert-circle-outline' : kind === 'error' ? 'refresh' : null;
   return (
@@ -52,3 +40,4 @@ const s = StyleSheet.create({
   text: { fontSize: 13, color: '#1F4E79', fontWeight: '600', flexShrink: 1, textAlign: 'auto' },
   retry: { fontSize: 13, color: '#1F7BA8', fontWeight: '800' },
 });
+

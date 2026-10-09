@@ -12,7 +12,7 @@ import { isRTL } from '../../i18n';
 import { pollView, toggleSelection, type PollData } from '../../lib/pollModel';
 
 export const PollBubble = memo(function PollBubble({
-  poll, me, isCreator, mine, onVote, onClose,
+  poll, me, isCreator, mine, onVote, onClose, interactive = true,
 }: {
   poll: PollData;
   me: string;
@@ -20,18 +20,19 @@ export const PollBubble = memo(function PollBubble({
   mine: boolean;          // rendered in my (sent) bubble
   onVote: (selection: string[]) => void;
   onClose: () => void;
+  interactive?: boolean; // pending/failed sends still render their full question and options
 }) {
   const { t } = useTranslation();
   const v = useMemo(() => pollView(poll, me), [poll, me]);
   const accent = mine ? '#3E7B33' : '#1F7BA8';
   const align = isRTL ? 'right' : 'left';
-  const disabled = poll.closed || !!poll.closingPending;
+  const disabled = !interactive || poll.closed || !!poll.closingPending;
 
   return (
     <View style={s.root}>
       <Text style={[s.q, { textAlign: align }]}>{poll.question}</Text>
       <Text style={[s.mode, { textAlign: align }]}>
-        {poll.closed ? t('poll.closed') : poll.closingPending ? t('poll.ending') : poll.closingFailed ? t('poll.endFailed') : poll.multiple ? t('poll.selectMany') : t('poll.selectOne')}
+        {!interactive ? t('poll.waitingToSend') : poll.closed ? t('poll.closed') : poll.closingPending ? t('poll.ending') : poll.closingFailed ? t('poll.endFailed') : poll.multiple ? t('poll.selectMany') : t('poll.selectOne')}
       </Text>
       {v.options.map(o => (
         <Pressable

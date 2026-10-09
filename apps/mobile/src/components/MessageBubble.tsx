@@ -91,7 +91,7 @@ export type MessageBubbleProps = {
   onMentionPress?: (uid: string) => void;
   // Offline-first: locally queued outgoing message not yet on the server.
   pending?:   'queued' | 'syncing' | 'failed';
-  onRetry?:   () => void;
+  onRetry?:   (message: Message) => void;
 };
 
 function createdAtMillis(value: any): number {
@@ -171,11 +171,14 @@ function MessageBubbleImpl({
         <View style={[s.col, s.colMine]}>
           <Pressable
             style={{ marginBottom: 2 }}
-            onPress={pending === 'failed' ? onRetry : undefined}
+            onPress={pending === 'failed' ? () => onRetry?.(m) : undefined}
             disabled={pending !== 'failed'}
           >
             <View style={[s.bubble, s.sent, pending !== 'failed' && { opacity: 0.92 }]}>
-              {m.type === 'sticker' ? <StickerBubble sticker={m.sticker} fallbackText={m.text} /> : (
+              {m.type === 'poll' && m.poll ? (
+                <PollBubble poll={m.poll} me={context.myUid} isCreator={false} mine={mine}
+                  interactive={false} onVote={() => {}} onClose={() => {}} />
+              ) : m.type === 'sticker' ? <StickerBubble sticker={m.sticker} fallbackText={m.text} /> : (
                 <View style={s.bubbleRow}>
                   <Text style={s.bubbleText}>{m.text ?? ''}</Text>
                 </View>

@@ -23,6 +23,7 @@ import { pullMessageById } from './sync/firebasePull';
 import { createNotificationTargets } from './sync/notificationTarget';
 import type { MessageRow } from './types';
 import { enqueuePollClose } from './pollClose';
+import { retryQueuedSend } from './retrySend';
 import { emitLocalMessagesChanged } from './messageChanges';
 
 export * from './types';
@@ -195,6 +196,10 @@ export async function queueClosePoll(args: { conversationId: string; messageId: 
   const result = await enqueuePollClose(args);
   if (result.ok) kick('outbox');
   return result;
+}
+
+export async function retryQueuedMessage(localId: string): Promise<void> {
+  if (await retryQueuedSend(localId)) kick('outbox');
 }
 
 export interface QueueSendImageInput {

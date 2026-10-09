@@ -145,6 +145,7 @@ export async function pushOutbox(): Promise<number> {
       }
       if (item.type === 'close_poll' && item.conversation_id) emitLocalMessagesChanged(item.conversation_id);
     }
+    if (item.type === 'send_message' && item.conversation_id) emitLocalMessagesChanged(item.conversation_id);
   }
   return completed;
 }

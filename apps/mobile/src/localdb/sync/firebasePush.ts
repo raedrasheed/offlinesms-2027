@@ -88,7 +88,9 @@ export async function pushOutboxItem(item: OutboxRow): Promise<PushResult> {
     case 'send_message': {
       const res = await call<{ messageId: string; idempotent?: boolean }>('sendTextMessage', {
         conversationId: payload.conversationId,
-        text: payload.text,
+        // Only the new backend may create the text fallback for rich messages.
+        // Omitting it makes an older backend refuse instead of losing the options.
+        ...(payload.kind === 'poll' || payload.kind === 'sticker' ? {} : { text: payload.text }),
         replyTo: payload.replyTo ?? null,
         mentions: payload.mentions ?? null,
         localId: payload.localId,

@@ -10,7 +10,7 @@ A test APK works when its two pieces of Firebase configuration point at **one** 
 | Sync (chats, messages, read state) | Same web config | Rules, indexes and chat callables deployed | ✅ (PR #28 rules and indexes deployed 2026-10-08) |
 | Push notifications (Android) | `google-services.json` of **the same project**, containing an Android app for the **test package** `app.offlinesms.mobile.test`; the device's FCM token is issued for that project | `onMessageCreateNotify` sends through firebase-admin FCM in that project, with `messageId` in the data | ✅ test package registered; CI config and production opt-in completed. |
 | Notification tap → that message; sync banner; performance; DB upgrade | Nothing beyond the above (client-only changes) | Nothing new | ✅ |
-| Stickers, polls | Same | **Deploy from this branch:** `sendTextMessage`, `votePoll`, `closePoll`, `deleteMessage`, `onMessageCreate`, `onMessageCreateNotify`, `reactToMessage`. No rules or index change. | ❌ not deployed. Stickers arrive as emoji text and votes fail. |
+| Stickers, polls | Same | **Deploy from this branch:** `sendTextMessage`, `votePoll`, `closePoll`, `deleteMessage`, `onMessageCreate`, `onMessageCreateNotify`, `reactToMessage`. No rules or index change. | ❌ not deployed. New rich sends are refused and retain their local draft; an older server cannot store poll options. |
 | Phone registration / linking | Existing protected phone flow | Ready relay 0.2.0, deployed purpose env and runtime policy | Owner authorized activation on 2026-10-09; **not activated yet**. See `PHONE_TEST_ACTIVATION.md`. |
 
 ## 2. Technical requirement vs. current CI policy
@@ -74,6 +74,8 @@ If your Google Cloud API key has *Application restrictions* set to Android apps,
 
 ## 5. Two-phone checklist (A and B, both with "OfflineSMS Test", different test accounts)
 
+Open a conversation/group with a slow connection: the routine "Connecting…" chip must never appear. Notification-target and actual offline/error notices remain.
+
 Record pass/fail per row, with the APK SHA-256 and the phone models. Phone results only; see `docs/DEVICE_VALIDATION.md` for the full matrix.
 
 | # | Do | Expect |
@@ -84,7 +86,7 @@ Record pass/fail per row, with the APK SHA-256 and the phone models. Phone resul
 | 4 | B in **airplane mode**; A sends; B turns airplane off, then taps | "Waiting for connection…" → the message appears; no duplicate |
 | 5 | A **offline**, sends 3 texts; A goes online | Each arrives exactly once at B, in order |
 | 6 | A sends a **sticker** (needs §3 step 5) | B shows the sticker image; the chat list shows "👋 Sticker" |
-| 7 | A creates a **single-choice** poll; A and B vote at the same moment | Both count once; each phone shows "2 people voted"; changing a vote moves it |
+| 7 | A creates a **single-choice** poll with the keyboard open: edit the question, first and last options, then send; A and B vote at the same moment | Focused inputs and Send stay reachable above the keyboard; the message shows the question and selectable options, including while queued (disabled until delivery). Both votes count once |
 | 8 | A creates a **multiple-choice** poll; B selects 2 options, then removes 1 | A's counts update live |
 | 9 | B votes while **offline**, changes the vote, then goes online | Only the last choice counts |
 | 10 | A goes offline, ends the poll, restarts the app, then reconnects; B taps an option after the close arrives | A shows pending confirmation across restart; closes after reconnect; B cannot vote after server confirmation; results stay visible. A server refusal offers retry |

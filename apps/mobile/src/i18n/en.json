@@ -596,6 +596,7 @@
     "selectMany": "Select one or more",
     "closed": "Poll ended",
     "endFailed": "Could not end poll. Try again.",
+    "waitingToSend": "Poll not sent yet",
     "ending": "Ending poll — waiting for confirmation…",
     "end": "End poll",
     "endTitle": "End this poll?",

@@ -49,7 +49,7 @@ import { perfBegin, perfObserve, perfNow } from '../lib/perf';
 import { getDraft, setDraft as persistDraft, clearDraft } from '../lib/drafts';
 import { useLocalConversation } from '../hooks/useLocalConversation';
 import { useMessagePersistence } from '../hooks/useLocalPersistence';
-import { queueSendMessage, queueEditMessage, queueMarkReceipt, retryMediaMessage, queueSendVoiceMessage, openLocalDb, kickSync } from '../localdb';
+import { queueSendMessage, queueEditMessage, queueMarkReceipt, retryMediaMessage, queueSendVoiceMessage, openLocalDb, kickSync, retryQueuedMessage } from '../localdb';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import { prefetchMedia } from '../media/mediaCache';
@@ -452,9 +452,11 @@ export default function Conversation({ route, navigation }: any) {
     listRef.current?.scrollToIndex?.({ index: total - 1 - idx, animated: true, viewPosition: 0.5 });
   }, [visibleMsgs]);
 
-  // Re-attempt a stuck/failed local send: poke the sync engine to flush the
-  // outbox (it re-claims due items).
-  const retrySend = useCallback(() => { kickSync('manual'); }, []);
+  // Reset the failed job before waking sync, retaining its original local id.
+  const retrySend = useCallback((message: Message) => {
+    if (useLocal) void retryQueuedMessage(message.id);
+    else kickSync('manual');
+  }, [useLocal]);
 
   const startReply = useCallback((m: Message) => {
     if (m.deletedForEveryone) return;
@@ -1030,12 +1032,12 @@ export default function Conversation({ route, navigation }: any) {
             );
           }
           const mine = item.senderUid === me || (item as any).senderId === me;
-          // Surface real send state for my own not-yet-synced TEXT messages so
+          // Surface real send state for my own not-yet-synced text/sticker/poll messages so
           // they show "Sending/Queued/Failed" instead of a misleading "Seen by
           // 0" — and so the un-pushed message has no server-info menu (which
           // would 404 with message-not-found). Media keeps its own upload UI.
           const sendState: 'queued' | 'syncing' | 'failed' | undefined =
-            mine && !item.deletedForEveryone && (item.type ?? 'text') === 'text'
+            mine && !item.deletedForEveryone && ['text', 'sticker', 'poll'].includes(item.type ?? 'text')
               ? (item.status === 'failed' ? 'failed'
                 : item.status === 'sending' ? (isOffline ? 'queued' : 'syncing')
                 : undefined)
