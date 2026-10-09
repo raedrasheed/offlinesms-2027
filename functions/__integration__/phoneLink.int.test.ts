@@ -291,11 +291,76 @@ describe('scenario 5 — guessing, expiry, replay, simultaneous verification', (
     await expectHttps(verify(u.uid, r.challengeId, code), 'not-found', 'challenge-not-found');
   });
 
-  it('a contention abort evaluates nothing: forced 100-way burst', async () => {
-    // Deliberately provoke lock-timeout aborts (most of a 100-way burst aborts
-    // on the emulator) to pin down the interrupted path: whatever aborts, the
-    // committed counter matches exactly the guesses answered as evaluated, and
-    // the budget is never exceeded.
+  // Deterministic: the verify transaction is made to fail exactly as an
+  // exhausted lock-contention retry does ("10 ABORTED: Transaction lock
+  // timeout"), at two points — before the guess is evaluated, and AFTER it was
+  // evaluated but before commit (the transaction body ran, then the commit was
+  // aborted). Both a wrong and the CORRECT code are tried at each point. The
+  // caller must get the same retryable answer either way (no oracle), and
+  // nothing may persist: no attempt counted, no account failure, no claim, no
+  // op. The code then still works.
+  describe('interrupted verify (injected transaction abort)', () => {
+    const aborted = () => Object.assign(new Error('10 ABORTED: Transaction lock timeout.'), { code: 10 });
+    type Point = 'before-evaluation' | 'after-evaluation';
+    function injectAbort(point: Point) {
+      const fs = db();
+      const real = fs.runTransaction.bind(fs);
+      return vi.spyOn(fs, 'runTransaction').mockImplementationOnce((async (fn: any, opts?: any) => {
+        if (point === 'before-evaluation') throw aborted();
+        // Run the real transaction body (the guess IS compared), then abort the
+        // commit: throwing from the body rolls the transaction back.
+        let ran = false;
+        await real(async (tx: any) => { await fn(tx); ran = true; throw aborted(); }, opts).catch(e => { if (!ran) throw e; });
+        throw aborted();
+      }) as any);
+    }
+    async function snapshot(uid: string) {
+      const [ch, acct, op] = await Promise.all([
+        db().collection('phoneLinkChallenges').doc(uid).get(),
+        db().collection('smsRateLimits').doc(`acct_${uid}`).get(),
+        db().collection('phoneLinkOps').doc(uid).get(),
+      ]);
+      return {
+        attempts: ch.get('attempts') ?? 0, status: ch.get('status'),
+        acct: JSON.stringify(acct.data() ?? null), op: op.exists,
+        claims: (await db().collection('phoneClaims').get()).size,
+      };
+    }
+
+    for (const point of ['before-evaluation', 'after-evaluation'] as const) {
+      it(`${point}: same answer for a wrong and the correct code, and nothing persists`, async () => {
+        const u = await makeEmailUser();
+        const r = await request(u.uid, num(point === 'before-evaluation' ? 84 : 85));
+        const code = await deliveredCode(r.challengeId);
+        const before = await snapshot(u.uid);
+
+        const answers: string[] = [];
+        for (const guess of [wrong(code), code]) {
+          const spy = injectAbort(point);
+          const e = await expectHttps(verify(u.uid, r.challengeId, guess), 'unavailable', 'link-interrupted');
+          answers.push(`${e.code}/${e.message}/${JSON.stringify(e.details ?? null)}`);
+          expect(spy).toHaveBeenCalled();
+          spy.mockRestore();
+          expect(await snapshot(u.uid)).toEqual(before);
+        }
+        // Indistinguishable: the correct code is not revealed by the abort path.
+        expect(answers[0]).toBe(answers[1]);
+
+        // Without interference the budget is intact and the code still links.
+        await expectHttps(verify(u.uid, r.challengeId, wrong(code)), 'permission-denied', 'code-invalid');
+        expect((await snapshot(u.uid)).attempts).toBe(1);
+        await expect(verify(u.uid, r.challengeId, code)).resolves.toMatchObject({ linked: true });
+      });
+    }
+  });
+
+  it('contention stress: a 100-way parallel burst never exceeds the budget', async () => {
+    // A STRESS test, not a test of any particular outcome: how many of the 100
+    // concurrent transactions the emulator aborts varies with timing (usually
+    // most of them). Whatever the mix, every answer must be one of the four
+    // legitimate outcomes, the committed counter must equal the guesses
+    // answered as evaluated, and the budget can never be exceeded. The abort
+    // path itself is pinned deterministically by the injected tests above.
     const u = await makeEmailUser();
     const r = await request(u.uid, num(83));
     const code = await deliveredCode(r.challengeId);
