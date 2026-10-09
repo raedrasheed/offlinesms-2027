@@ -19,6 +19,7 @@ import {
   pointsErrorCopy, pointsErrorReason, Wallet,
 } from '../lib/points';
 import { normalizeUsername } from '../lib/username';
+import { useProfileLabel } from '../lib/userProfiles';
 import { colors, radius } from '../theme';
 import { LoadingState, EmptyState, ErrorState } from '../components/state';
 
@@ -32,6 +33,7 @@ type Candidate = {
 
 export default function TransferPoints({ navigation }: any) {
   const me = auth.currentUser?.uid;
+  const label = useProfileLabel();
 
   const [wallet, setWallet] = useState<Wallet | null>(null);
   useEffect(() => { if (me) return subscribeWallet(me, setWallet); }, [me]);
@@ -139,10 +141,10 @@ export default function TransferPoints({ navigation }: any) {
                     style={s.row}
                     onPress={() => { setPicked(item); setStep('amount'); }}
                   >
-                    <View style={s.avatar}><Text style={s.avatarText}>{(item.displayName ?? item.username ?? '?').slice(0, 1).toUpperCase()}</Text></View>
+                    <View style={s.avatar}><Text style={s.avatarText}>{label(item).replace(/^@/, '').slice(0, 1).toUpperCase()}</Text></View>
                     <View style={{ flex: 1 }}>
-                      <Text style={s.recipName}>{item.displayName ?? '—'}</Text>
-                      <Text style={s.recipHandle}>@{item.username ?? item.uid.slice(0, 6)}</Text>
+                      <Text style={s.recipName}>{label(item)}</Text>
+                      {item.username ? <Text style={s.recipHandle}>@{item.username}</Text> : null}
                     </View>
                   </Pressable>
                 )}
@@ -155,10 +157,10 @@ export default function TransferPoints({ navigation }: any) {
           <>
             <Text style={s.sectionLabel}>Recipient</Text>
             <View style={s.row}>
-              <View style={s.avatar}><Text style={s.avatarText}>{(picked.displayName ?? picked.username ?? '?').slice(0, 1).toUpperCase()}</Text></View>
+              <View style={s.avatar}><Text style={s.avatarText}>{label(picked).replace(/^@/, '').slice(0, 1).toUpperCase()}</Text></View>
               <View style={{ flex: 1 }}>
-                <Text style={s.recipName}>{picked.displayName ?? '—'}</Text>
-                <Text style={s.recipHandle}>@{picked.username ?? picked.uid.slice(0, 6)}</Text>
+                <Text style={s.recipName}>{label(picked)}</Text>
+                {picked.username ? <Text style={s.recipHandle}>@{picked.username}</Text> : null}
               </View>
               <Pressable onPress={() => { setPicked(null); setStep('recipient'); }}>
                 <Text style={s.linkText}>Change</Text>
@@ -202,7 +204,7 @@ export default function TransferPoints({ navigation }: any) {
             <View style={s.card}>
               <Text style={s.cardLabel}>You’ll transfer</Text>
               <Text style={s.cardBig}>{amountInt.toLocaleString()} pts</Text>
-              <Text style={s.cardSub}>to {picked.displayName ?? picked.username ?? picked.uid}</Text>
+              <Text style={s.cardSub}>to {label(picked)}</Text>
             </View>
             <View style={s.card}>
               <View style={s.kv}><Text style={s.kvK}>Balance</Text><Text style={s.kvV}>{(wallet?.balance ?? 0).toLocaleString()}</Text></View>

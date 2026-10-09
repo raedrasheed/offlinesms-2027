@@ -36,12 +36,20 @@ export interface ChatListItem {
   };
 }
 
-export function mapConversationRow(row: ConversationRow): ChatListItem {
+/** Translated labels for chats with no stored title (never a uid). */
+export interface ChatListLabels {
+  group: string;
+  direct: string;
+}
+
+const DEFAULT_LABELS: ChatListLabels = { group: 'Group', direct: 'Unknown user' };
+
+export function mapConversationRow(row: ConversationRow, labels: ChatListLabels = DEFAULT_LABELS): ChatListItem {
   const at = tsLike(row.last_message_at);
   return {
     id: row.id,
     type: row.type,
-    peerName: row.title || (row.type === 'group' ? 'Group' : 'Conversation'),
+    peerName: row.title || (row.type === 'group' ? labels.group : labels.direct),
     photoURL: row.avatar_url,
     memberCount: row.member_count,
     participantKey: row.participant_key,
@@ -76,7 +84,7 @@ const CHAT_ITEM_FIELDS = [
  * order and contents are unchanged, avoiding a parent render on no-op feeds.
  * Create one mapper per signed-in user; removed items are evicted each pass.
  */
-export function createChatListMapper(): (rows: ConversationRow[]) => ChatListItem[] {
+export function createChatListMapper(labels: ChatListLabels = DEFAULT_LABELS): (rows: ConversationRow[]) => ChatListItem[] {
   type Cached = { row: ConversationRow; item: ChatListItem };
   let previous = new Map<string, Cached>();
   let previousItems: ChatListItem[] = [];
@@ -87,7 +95,7 @@ export function createChatListMapper(): (rows: ConversationRow[]) => ChatListIte
       const cached = previous.get(row.id);
       const entry = cached && CHAT_ITEM_FIELDS.every(key => cached.row[key] === row[key])
         ? cached
-        : { row: { ...row }, item: mapConversationRow(row) };
+        : { row: { ...row }, item: mapConversationRow(row, labels) };
       next.set(row.id, entry);
       if (entry.item !== previousItems[index]) sameList = false;
       return entry.item;

@@ -20,6 +20,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { colors } from '../theme';
 import { avatarColor, initials } from '../lib/avatar';
+import { useDisplayNames } from '../lib/userProfiles';
 import { LinkText } from './LinkText';
 import { MentionText } from './MentionText';
 import { ChatActionSheet, SheetAction } from './ChatActionSheet';
@@ -123,7 +124,16 @@ function MessageBubbleImpl({
   // fallback for when the profile hasn't resolved (e.g. a left member).
   const senderProfile = context.reactorNames?.[m.senderUid];
   const senderPhoto = senderProfile?.photoURL ?? m.senderPhotoURL ?? null;
-  const senderName = m.senderDisplayName ?? senderProfile?.name ?? m.senderUid.slice(0, 2);
+  // Names come from the shared resolver (live profile → snapshot while
+  // loading → "Unknown user"), never from the uid. The reply author is
+  // resolved from replyTo.senderUid so OLD replies that persisted a uid
+  // fragment as senderDisplayName still show the real name.
+  const replyUid = m.replyTo?.senderUid || null;
+  const nameFor = useDisplayNames([m.senderUid, replyUid]);
+  const senderName = nameFor(m.senderUid, { snapshot: [m.senderDisplayName, senderProfile?.name] });
+  const replyAuthor = m.replyTo
+    ? nameFor(replyUid, { snapshot: m.replyTo.senderDisplayName, selfAsYou: true })
+    : '';
   const [sheetOpen, setSheetOpen] = useState(false);
   // Track a photo URL that failed to load so we can fall back to the initials
   // placeholder instead of leaving a blank gap. Keyed by URL so a new/updated
@@ -368,7 +378,7 @@ function MessageBubbleImpl({
             style={[s.replyPreview, mine && !mediaMessage && s.replyPreviewMine]}
           >
             <Text style={[s.replyName, mine && !mediaMessage && s.replyNameMine]} numberOfLines={1}>
-              {m.replyTo.senderDisplayName || m.replyTo.senderUid.slice(0, 6)}
+              {replyAuthor}
             </Text>
             <Text style={s.replyText} numberOfLines={2}>
               {m.replyTo.preview}
@@ -491,10 +501,7 @@ function MessageBubbleImpl({
         onClose={() => setReactionsOpen(false)}
         reactions={m.reactions}
         myUid={context.myUid}
-        resolveName={(uid) =>
-          context.reactorNames?.[uid] ??
-          (uid === context.myUid ? { name: 'You' } : { name: uid.slice(0, 6) })
-        }
+        resolveName={(uid) => context.reactorNames?.[uid] ?? null}
         onRemoveMine={(emoji) => { void react(emoji); }}
       />
     </View>

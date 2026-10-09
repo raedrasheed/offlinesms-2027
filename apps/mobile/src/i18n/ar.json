@@ -623,6 +623,18 @@
     "voters_two": "صوّت شخصان",
     "voters_few": "صوّت {{count}} أشخاص",
     "voters_many": "صوّت {{count}} شخصًا"
+  },
+  "names": {
+    "unknownUser": "مستخدم غير معروف",
+    "you": "أنت",
+    "youSuffix": "{{name}} (أنت)",
+    "someone": "شخص ما",
+    "chat": "محادثة",
+    "group": "مجموعة",
+    "phoneContact": "جهة اتصال هاتفية",
+    "message": "مراسلة",
+    "viewGroupInfo": "عرض معلومات المجموعة",
+    "copyUsername": "نسخ اسم المستخدم",
+    "close": "إغلاق"
   }
 }
-

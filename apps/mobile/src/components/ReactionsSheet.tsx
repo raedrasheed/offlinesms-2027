@@ -3,13 +3,16 @@
 // Opened by tapping a message's reaction pill in a group. Lists every reactor
 // with their avatar, name and the emoji they used, plus emoji filter tabs.
 // Tapping your own row removes your reaction. Names are resolved via the
-// `resolveName` map passed from the conversation screen (group members).
+// shared display-name resolver; `resolveName` (from the conversation screen)
+// only supplies photos / member snapshots used while a profile loads.
 
 import { useMemo, useState } from 'react';
 import { Modal, View, Text, Pressable, StyleSheet, ScrollView, Image } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radius } from '../theme';
+import { useTranslation } from 'react-i18next';
 import { avatarColor, initials } from '../lib/avatar';
+import { useDisplayNames, useUserProfiles } from '../lib/userProfiles';
 
 export type ReactorInfo = { name: string; photoURL?: string | null };
 
@@ -20,10 +23,11 @@ export function ReactionsSheet({
   onClose:      () => void;
   reactions:    Record<string, string[]> | null | undefined;
   myUid:        string;
-  resolveName:  (uid: string) => ReactorInfo;
+  resolveName?: (uid: string) => ReactorInfo | null | undefined;
   onRemoveMine: (emoji: string) => void;
 }) {
   const insets = useSafeAreaInsets();
+  const { t } = useTranslation();
   const [tab, setTab] = useState<string>('all'); // 'all' or a specific emoji
 
   // Flatten reactions into per-user rows and tally per-emoji counts.
@@ -36,6 +40,14 @@ export function ReactionsSheet({
     const emojiList = entries.map(([emoji, uids]) => ({ emoji, count: uids.length }));
     return { rows: allRows, emojis: emojiList, total: allRows.length };
   }, [reactions]);
+
+  // Resolve reactor names/photos only while the sheet is open.
+  const reactorUids = useMemo(
+    () => (visible ? rows.map((r) => r.uid) : []),
+    [visible, rows],
+  );
+  const nameFor = useDisplayNames(reactorUids);
+  const profiles = useUserProfiles(reactorUids);
 
   const visibleRows = useMemo(
     () => (tab === 'all' ? rows : rows.filter((r) => r.emoji === tab)),
@@ -78,8 +90,12 @@ export function ReactionsSheet({
 
           <ScrollView style={s.list} contentContainerStyle={{ paddingBottom: 8 }}>
             {visibleRows.map((r) => {
-              const info = resolveName(r.uid);
+              const known = resolveName?.(r.uid) ?? null;
               const mine = r.uid === myUid;
+              const info: ReactorInfo = {
+                name: nameFor(r.uid, { snapshot: known?.name }),
+                photoURL: profiles[r.uid]?.photoURL || known?.photoURL || null,
+              };
               return (
                 <Pressable
                   key={`${r.emoji}:${r.uid}`}
@@ -96,7 +112,7 @@ export function ReactionsSheet({
                   )}
                   <View style={{ flex: 1, minWidth: 0 }}>
                     <Text style={s.name} numberOfLines={1}>
-                      {mine ? 'You' : info.name}
+                      {mine ? t('names.you') : info.name}
                     </Text>
                     {mine ? <Text style={s.tapHint}>Tap to remove</Text> : null}
                   </View>

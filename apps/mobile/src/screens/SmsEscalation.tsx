@@ -31,6 +31,7 @@ import {
   ExcludedRecipient,
 } from '../lib/sms';
 import { colors, radius } from '../theme';
+import { useDisplayName } from '../lib/userProfiles';
 import { LoadingState, ErrorState, EmptyState } from '../components/state';
 
 type Step = 'audience' | 'recipients' | 'text' | 'confirm' | 'sending' | 'result';
@@ -515,11 +516,12 @@ function Stat({ label, value }: { label: string; value: number }) {
 }
 
 function EligibleRow({ r }: { r: EligibleRecipient }) {
+  const name = useDisplayName(r.uid, { snapshot: r.displayName });
   return (
     <View style={s.recipientRow}>
-      <View style={s.avatar}><Text style={s.avatarText}>{(r.displayName ?? '?').slice(0, 1).toUpperCase()}</Text></View>
+      <View style={s.avatar}><Text style={s.avatarText}>{name.replace(/^@/, '').slice(0, 1).toUpperCase()}</Text></View>
       <View style={{ flex: 1 }}>
-        <Text style={s.recipientName}>{r.displayName ?? r.uid.slice(0, 6)}</Text>
+        <Text style={s.recipientName}>{name}</Text>
         <Text style={s.recipientPhone}>{r.maskedPhone}</Text>
       </View>
       <View style={[s.pill, { backgroundColor: '#DCFCE7' }]}>
@@ -530,11 +532,12 @@ function EligibleRow({ r }: { r: EligibleRecipient }) {
 }
 
 function ExcludedRow({ r }: { r: ExcludedRecipient }) {
+  const name = useDisplayName(r.uid, { snapshot: r.displayName });
   return (
     <View style={s.recipientRow}>
-      <View style={[s.avatar, { backgroundColor: colors.ink200 }]}><Text style={[s.avatarText, { color: colors.ink700 }]}>{(r.displayName ?? '?').slice(0, 1).toUpperCase()}</Text></View>
+      <View style={[s.avatar, { backgroundColor: colors.ink200 }]}><Text style={[s.avatarText, { color: colors.ink700 }]}>{name.replace(/^@/, '').slice(0, 1).toUpperCase()}</Text></View>
       <View style={{ flex: 1 }}>
-        <Text style={s.recipientName}>{r.displayName ?? r.uid.slice(0, 6)}</Text>
+        <Text style={s.recipientName}>{name}</Text>
         <Text style={s.recipientPhone}>{smsSkipReasonCopy(r.skipReason)}</Text>
       </View>
       <View style={[s.pill, { backgroundColor: '#FEF3C7' }]}>

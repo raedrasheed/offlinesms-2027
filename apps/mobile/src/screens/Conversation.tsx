@@ -27,7 +27,7 @@ import {
   getOrCreateDirectConversation,
 } from '../lib/conversations';
 import type { ReactorInfo } from '../components/ReactionsSheet';
-import { useUserProfiles } from '../lib/userProfiles';
+import { useUserProfiles, useDisplayNames, primeUserProfile, displayNameFromCache } from '../lib/userProfiles';
 import { blockUser, unblockUser, subscribeIsBlocked } from '../lib/blocks';
 import { useChatPresence, formatPresenceSubtitle } from '../hooks/useChatPresence';
 import { useTypingPresence } from '../hooks/useTypingPresence';
@@ -158,7 +158,7 @@ export default function Conversation({ route, navigation }: any) {
   const [err, setErr] = useState<string | null>(null);
 
   const [convo, setConvo] = useState<ConversationDoc | null | undefined>(undefined);
-  const [peerName, setPeerName] = useState<string>('Chat');
+  const [peerName, setPeerName] = useState<string>(() => t('names.chat'));
   const [peerUsername, setPeerUsername] = useState<string | null>(null);
   const [peerUid, setPeerUid] = useState<string | null>(null);
   const [iBlockedPeer, setIBlockedPeer] = useState(false);
@@ -255,16 +255,20 @@ export default function Conversation({ route, navigation }: any) {
   // Peer name (direct chats) / group header.
   useEffect(() => {
     if (!convo || !me) return;
-    if (convo.type === 'group') { setPeerName(convo.name ?? 'Group'); return; }
+    if (convo.type === 'group') { setPeerName(convo.name || t('names.group')); return; }
     const peers = (convo.participantUids ?? convo.memberIds ?? []).filter(u => u !== me);
     if (!peers[0]) return;
-    setPeerUid(peers[0]);
-    return onSnapshot(doc(db, 'users', peers[0]), userSnap => {
+    const peer = peers[0];
+    setPeerUid(peer);
+    return onSnapshot(doc(db, 'users', peer), userSnap => {
       const u = userSnap.data() as { displayName?: string; username?: string } | undefined;
-      setPeerName(u?.displayName ?? (u?.username ? `@${u.username}` : 'Chat'));
+      // Feed the live peer doc into the shared resolver so every label in
+      // this chat (bubbles, replies, reactions, typing) agrees with the header.
+      primeUserProfile(peer, u ?? {});
+      setPeerName(displayNameFromCache(peer));
       setPeerUsername(u?.username ?? null);
     });
-  }, [convo, me]);
+  }, [convo, me, t]);
 
   // Whether I've blocked this direct-chat peer (drives the composer gate +
   // header menu). Private to me (users/{me}/blockedUsers/{peer}).
@@ -302,12 +306,19 @@ export default function Conversation({ route, navigation }: any) {
   const peerPhoto = isDirect && peerUid ? (peerProfiles[peerUid]?.photoURL ?? null) : null;
   // Header avatar: direct peer photo, or the group's avatar for groups.
   const headerPhoto = isDirect ? peerPhoto : (convo?.avatarUrl ?? null);
+  // One resolver for every person label in this chat: group members, the
+  // direct peer and me (reactions / typing / mentions / reply previews).
+  const nameFor = useDisplayNames(isDirect ? [peerUid, me] : [...memberUids, me]);
   const reactorNames = useMemo<Record<string, ReactorInfo>>(() => {
     const map: Record<string, ReactorInfo> = {};
+    if (isDirect && peerUid) {
+      map[peerUid] = { name: nameFor(peerUid), photoURL: peerPhoto };
+    }
     for (const m of members) {
       const prof = memberProfiles[m.uid];
       map[m.uid] = {
-        name: m.displayNameSnapshot || prof?.displayName || m.uid.slice(0, 6),
+        // Live profile name first; the add-time snapshot only while loading.
+        name: nameFor(m.uid, { snapshot: m.displayNameSnapshot }),
         // Prefer the member's LIVE profile photo over the add-time snapshot.
         // The snapshot is captured when the member joins and goes stale once
         // they change their picture (a broken URL → invisible avatar), whereas
@@ -318,7 +329,7 @@ export default function Conversation({ route, navigation }: any) {
       };
     }
     return map;
-  }, [members, memberProfiles]);
+  }, [members, memberProfiles, nameFor, isDirect, peerUid, peerPhoto]);
 
   // @mention suggestions (groups only). Candidates are the current group members
   // (excluding me) — so a user can never be mentioned outside the group. The
@@ -329,11 +340,12 @@ export default function Conversation({ route, navigation }: any) {
       .filter(m => m.uid !== me && (m.status ?? 'active') === 'active')
       .map(m => ({
         uid: m.uid,
-        displayName: reactorNames[m.uid]?.name ?? m.displayNameSnapshot ?? m.uid.slice(0, 6),
-        username: (memberProfiles[m.uid] as any)?.username ?? null,
+        // Strip the handle's '@' so a username-only member mentions as @name, not @@name.
+        displayName: (reactorNames[m.uid]?.name ?? nameFor(m.uid, { snapshot: m.displayNameSnapshot })).replace(/^@/, ''),
+        username: memberProfiles[m.uid]?.username ?? null,
         phone: null,
       }));
-  }, [convo?.type, members, me, reactorNames, memberProfiles]);
+  }, [convo?.type, members, me, reactorNames, memberProfiles, nameFor]);
 
   const activeMention = useMemo(
     () => (convo?.type === 'group' && !editing ? detectMentionQuery(draft, selection.end) : null),
@@ -464,7 +476,9 @@ export default function Conversation({ route, navigation }: any) {
     setReplyTo({
       messageId:         m.id,
       senderUid:         m.senderUid,
-      senderDisplayName: m.senderDisplayName ?? m.senderUid.slice(0, 6),
+      // Store the RESOLVED name (never a uid fragment); readers re-resolve
+      // from senderUid anyway, this is only the offline/legacy fallback.
+      senderDisplayName: displayNameFromCache(m.senderUid, { snapshot: m.senderDisplayName, fallback: '' }),
       preview:           buildPreview(m.text ?? ''),
       type:              'text',
       createdAt:         m.createdAt,
@@ -843,10 +857,10 @@ export default function Conversation({ route, navigation }: any) {
     return formatPresenceSubtitle(presence, {
       isGroup,
       t,
-      nameFor: (uid) => reactorNames[uid]?.name ?? memberProfiles[uid]?.displayName ?? uid.slice(0, 6),
+      nameFor: (uid) => reactorNames[uid]?.name ?? nameFor(uid),
       groupFallback,
     }) || null;
-  }, [presence, isGroup, convo?.memberCount, convo?.status, reactorNames, memberProfiles, t]);
+  }, [presence, isGroup, convo?.memberCount, convo?.status, reactorNames, nameFor, t]);
 
   const queued = queuedFor(id);
 
@@ -1279,7 +1293,7 @@ export default function Conversation({ route, navigation }: any) {
           ) : replyTo ? (
             <View style={s.composerPreview}>
               <View style={{ flex: 1 }}>
-                <Text style={s.composerPreviewTitle}>{t('messageActions.replyingTo', { name: replyTo.senderDisplayName })}</Text>
+                <Text style={s.composerPreviewTitle}>{t('messageActions.replyingTo', { name: nameFor(replyTo.senderUid, { snapshot: replyTo.senderDisplayName, selfAsYou: true }) })}</Text>
                 <Text style={s.composerPreviewBody} numberOfLines={1}>{replyTo.preview}</Text>
               </View>
               <Pressable

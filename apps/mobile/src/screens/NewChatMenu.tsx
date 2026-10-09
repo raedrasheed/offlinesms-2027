@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { db, auth } from '../lib/firebase';
 import { getOrCreateDirectConversation } from '../lib/conversations';
 import { normalizeUsername } from '../lib/username';
+import { useProfileLabel } from '../lib/userProfiles';
 import { colors, radius } from '../theme';
 import { avatarColor, initials } from '../lib/avatar';
 import { LoadingState } from '../components/state';
@@ -24,6 +25,7 @@ import { LoadingState } from '../components/state';
 type UserRow = { uid: string; displayName?: string; username?: string };
 
 export default function NewChatMenu({ navigation }: any) {
+  const label = useProfileLabel();
   const insets = useSafeAreaInsets();
   const me = auth.currentUser?.uid;
   const [term, setTerm] = useState('');
@@ -123,11 +125,11 @@ export default function NewChatMenu({ navigation }: any) {
           renderItem={({ item }) => (
             <Pressable style={s.row} onPress={() => openDirect(item.uid)}>
               <View style={[s.av, { backgroundColor: avatarColor(item.uid) }]}>
-                <Text style={s.avText}>{initials(item.displayName ?? item.username ?? '?')}</Text>
+                <Text style={s.avText}>{initials(label(item))}</Text>
               </View>
               <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={s.name} numberOfLines={1}>{item.displayName ?? item.username ?? '—'}</Text>
-                <Text style={s.handle} numberOfLines={1}>@{item.username ?? item.uid.slice(0, 6)}</Text>
+                <Text style={s.name} numberOfLines={1}>{label(item)}</Text>
+                {item.username ? <Text style={s.handle} numberOfLines={1}>@{item.username}</Text> : null}
               </View>
             </Pressable>
           )}

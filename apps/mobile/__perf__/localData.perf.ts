@@ -87,7 +87,7 @@ describe(`local data performance [${label}]`, () => {
 
     // 1. Chat list first paint (local read + mapping).
     results.push(await measure(db, 'chatList.read+map (200 chats)', 30, async () => {
-      (await conversationsRepo.listConversations({ includeArchived: false })).map(mapConversationRow);
+      (await conversationsRepo.listConversations({ includeArchived: false })).map(r => mapConversationRow(r));
     }));
 
     // 2. Conversation open: newest 100 rows + mapping.
@@ -153,7 +153,7 @@ describe(`local data performance [${label}]`, () => {
       fakeWrite(`conversations/c_7`, { type: 'direct', participantUids: ['u_me', 'u_peer'], lastMessageText: `m${round}`, updatedAt: fakeTs(T0 + 10_000 + round), memberCount: 2 });
       fakeWrite(`conversations/c_7/userState/u_me`, { unreadCount: round });
       await done;
-      (await conversationsRepo.listConversations({ includeArchived: false })).map(mapConversationRow);
+      (await conversationsRepo.listConversations({ includeArchived: false })).map(r => mapConversationRow(r));
     }, 'server write → feeder committed → list re-read'));
     stopList();
   });

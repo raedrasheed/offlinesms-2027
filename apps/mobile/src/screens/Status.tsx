@@ -14,6 +14,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { auth } from '../lib/firebase';
+import { useDisplayNames, useDisplayName } from '../lib/userProfiles';
 import { useTheme } from '../context/ThemeContext';
 import { isRTL } from '../i18n';
 import {
@@ -44,7 +45,8 @@ export default function Status({ navigation }: any) {
   const { t } = useTranslation();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
-  const myName = auth.currentUser?.displayName ?? 'You';
+  // My own avatar initials: the live profile name (not the auth record).
+  const myName = useDisplayName(auth.currentUser?.uid, { snapshot: auth.currentUser?.displayName });
   const s = buildStyles(colors, isRTL);
 
   const [mine, setMine] = useState<MyStatus[]>([]);
@@ -68,6 +70,10 @@ export default function Status({ navigation }: any) {
   const groups = useMemo(() => groupStatusFeed(feed ?? []), [feed]);
   const recent = groups.filter(g => g.unviewedCount > 0);
   const viewed = groups.filter(g => g.unviewedCount === 0);
+  // Author names: live profile via the shared resolver; the server-stored
+  // authorName is only a fallback (and is ignored when it is a uid).
+  const nameFor = useDisplayNames(groups.map(g => g.authorId));
+  const authorLabel = (g: AuthorStatusGroup) => nameFor(g.authorId, { snapshot: g.authorName });
 
   function openComposer() { navigation.navigate('StatusComposer'); }
 
@@ -114,7 +120,7 @@ export default function Status({ navigation }: any) {
 
   function openGroup(g: AuthorStatusGroup) {
     navigation.navigate('StatusViewer', {
-      title: g.authorName,
+      title: authorLabel(g),
       isMine: false,
       startIndex: g.startIndex,
       items: toViewerItems(g.items),
@@ -125,10 +131,10 @@ export default function Status({ navigation }: any) {
     return (
       <Pressable key={g.authorId} style={s.row} onPress={() => openGroup(g)}>
         <View style={[s.ring, { borderColor: unviewed ? colors.action.primary : colors.border.default }]}>
-          <View style={s.av}><Text style={s.avText}>{initials(g.authorName)}</Text></View>
+          <View style={s.av}><Text style={s.avText}>{initials(authorLabel(g))}</Text></View>
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={s.title} numberOfLines={1}>{g.authorName}</Text>
+          <Text style={s.title} numberOfLines={1}>{authorLabel(g)}</Text>
           <Text style={s.sub}>{formatTime(g.latestAtMs)}</Text>
         </View>
       </Pressable>
