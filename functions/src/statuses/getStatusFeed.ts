@@ -11,6 +11,7 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore, Timestamp } from 'firebase-admin/firestore';
 import { isStatusAudienceMember, type StatusAudience } from './statusLogic';
+import { cleanNameSnapshot, resolvePublicNames } from '../lib/displayName';
 
 const FEED_SCAN_MAX = 300; // newest active statuses scanned per request
 
@@ -63,12 +64,18 @@ export const getStatusFeed = onCall(async (request) => {
     viewedIds = new Set(viewSnaps.filter(v => v.exists).map(v => v.ref.parent.parent!.id));
   }
 
+  // Live author names (one batched getAll for the distinct authors) so a
+  // rename shows immediately; the stored authorName is only a fallback and a
+  // uid is never returned as a name ('' → the client's translated fallback).
+  const liveNames = await resolvePublicNames(db, visible.map(d => d.get('authorId') as string | undefined));
+
   const items: StatusFeedItem[] = visible.map(d => {
     const s = d.data() as Record<string, any>;
+    const authorId = (s.authorId ?? '') as string;
     return {
       statusId:        d.id,
       authorId:        s.authorId ?? '',
-      authorName:      s.authorName ?? s.authorId ?? '?',
+      authorName:      liveNames.get(authorId) ?? cleanNameSnapshot(s.authorName, authorId) ?? '',
       authorPhotoURL:  s.authorPhotoURL ?? null,
       type:            (s.type === 'image' || s.type === 'video') ? s.type : 'text',
       body:            s.body ?? '',

@@ -680,5 +680,18 @@
       "network": "Network problem. Check your connection and try again.",
       "generic": "Something went wrong. Please try again."
     }
+  },
+  "names": {
+    "unknownUser": "Unknown user",
+    "you": "You",
+    "youSuffix": "{{name}} (you)",
+    "someone": "Someone",
+    "chat": "Chat",
+    "group": "Group",
+    "phoneContact": "Phone contact",
+    "message": "Message",
+    "viewGroupInfo": "View group info",
+    "copyUsername": "Copy username",
+    "close": "Close"
   }
 }

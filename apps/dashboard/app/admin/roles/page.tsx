@@ -9,6 +9,7 @@ import { listAdminUsers } from '@/lib/adminData';
 import { PermissionState, EmptyState } from '@/components/state';
 import RoleBadge from '@/components/RoleBadge';
 import type { AdminRole } from '@/lib/session';
+import { userLabel } from '@/lib/userLabel';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -65,9 +66,9 @@ export default async function RolesAdminPage() {
                 <tr key={u.uid} className={`border-t border-ink-100 hover:bg-primary/5 ${i % 2 === 0 ? 'bg-white' : 'bg-surface3/40'}`}>
                   <td className="px-4 py-3">
                     <Link href={`/admin/users/${u.uid}` as any} className="font-semibold text-ink-900 hover:text-primary block">
-                      {u.displayName ?? u.uid.slice(0, 10)}
+                      {userLabel(u, { uid: u.uid })}
                     </Link>
-                    <div className="text-[10px] font-mono text-ink-400 mt-0.5">{u.uid.slice(0, 14)}</div>
+                    <div className="text-[10px] font-mono text-ink-400 mt-0.5" title={u.uid}>{u.uid}</div>
                   </td>
                   <td className="px-4 py-3 text-xs text-ink-600 max-w-[180px] truncate">{u.email ?? '—'}</td>
                   <td className="px-4 py-3">

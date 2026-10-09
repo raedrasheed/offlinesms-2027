@@ -16,7 +16,9 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme';
 import { avatarColor, initials } from '../lib/avatar';
+import { useTranslation } from 'react-i18next';
 import { getUserProfile, UserProfile } from '../lib/userProfiles';
+import { displayNameFor } from '../lib/displayNames.pure';
 
 export type MemberInfoSheetProps = {
   visible:      boolean;
@@ -34,6 +36,7 @@ export type MemberInfoSheetProps = {
 export function MemberInfoSheet({
   visible, onClose, uid, fallbackName, fallbackPhoto, isSelf, onMessage, onViewGroupInfo,
 }: MemberInfoSheetProps) {
+  const { t } = useTranslation();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(false);
   const [photoFailed, setPhotoFailed] = useState(false);
@@ -52,7 +55,7 @@ export function MemberInfoSheet({
 
   if (!uid) return null;
 
-  const name  = profile?.displayName || fallbackName || uid.slice(0, 6);
+  const name  = displayNameFor(profile, { uid, snapshot: fallbackName, fallback: t('names.unknownUser') });
   const photo = profile?.photoURL ?? fallbackPhoto ?? null;
   const handle = profile?.username ? `@${profile.username}` : null;
   const about  = profile?.about || null;
@@ -78,7 +81,7 @@ export function MemberInfoSheet({
                 <Text style={s.avatarText}>{initials(name)}</Text>
               </View>
             )}
-            <Text style={s.name} numberOfLines={1}>{name}{isSelf ? ' (you)' : ''}</Text>
+            <Text style={s.name} numberOfLines={1}>{isSelf ? t('names.youSuffix', { name }) : name}</Text>
             {handle ? (
               <Text style={s.handle} numberOfLines={1}>{handle}</Text>
             ) : loading ? (
@@ -94,7 +97,7 @@ export function MemberInfoSheet({
                 <View style={[s.actionIcon, { backgroundColor: colors.primaryLight }]}>
                   <Ionicons name="chatbubble-ellipses" size={20} color={colors.primary} />
                 </View>
-                <Text style={s.actionLabel}>Message</Text>
+                <Text style={s.actionLabel}>{t('names.message')}</Text>
                 <Ionicons name="chevron-forward" size={18} color={colors.ink400} />
               </Pressable>
             ) : null}
@@ -103,7 +106,7 @@ export function MemberInfoSheet({
               <View style={[s.actionIcon, { backgroundColor: colors.surface2 }]}>
                 <Ionicons name="people" size={20} color={colors.ink700} />
               </View>
-              <Text style={s.actionLabel}>View group info</Text>
+              <Text style={s.actionLabel}>{t('names.viewGroupInfo')}</Text>
               <Ionicons name="chevron-forward" size={18} color={colors.ink400} />
             </Pressable>
 
@@ -112,13 +115,13 @@ export function MemberInfoSheet({
                 <View style={[s.actionIcon, { backgroundColor: colors.surface2 }]}>
                   <Ionicons name="copy-outline" size={20} color={colors.ink700} />
                 </View>
-                <Text style={s.actionLabel}>Copy username</Text>
+                <Text style={s.actionLabel}>{t('names.copyUsername')}</Text>
               </Pressable>
             ) : null}
           </View>
 
           <Pressable style={s.cancel} onPress={onClose}>
-            <Text style={s.cancelText}>Close</Text>
+            <Text style={s.cancelText}>{t('names.close')}</Text>
           </Pressable>
         </Pressable>
       </Pressable>

@@ -10,6 +10,8 @@ import { listSupportTickets } from '@/lib/adminData';
 import { PermissionState, EmptyState } from '@/components/state';
 import StatusBadge from '@/components/admin/StatusBadge';
 import SupportFilters from './SupportFilters';
+import UserName from '@/components/admin/UserName';
+import { resolveUserNames } from '@/lib/userNames';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -54,6 +56,7 @@ export default async function SupportPage({
     fetchError = e?.message ?? 'Failed to load support tickets.';
   }
 
+  const names = await resolveUserNames(rows.flatMap(t => [t.createdBy, t.assignedTo]));
   const nextCursor = rows.length === 50 ? rows[rows.length - 1].id : null;
   const canExport  = canDo(session.role, 'export:support');
   const exportHref = `/admin/support/export${statusFilter ? `?status=${statusFilter}` : ''}${categoryFilter ? `${statusFilter ? '&' : '?'}category=${categoryFilter}` : ''}`;
@@ -137,12 +140,10 @@ export default async function SupportPage({
                   <td className="px-4 py-3 capitalize" style={{ color: 'var(--c-text-2)' }}>{t.category}</td>
                   <td className="px-4 py-3"><StatusBadge status={t.status} /></td>
                   <td className="px-4 py-3">
-                    <Link href={`/admin/users/${t.createdBy}` as any} className="font-mono text-[11px] hover:underline" style={{ color: '#5BB6DE' }}>
-                      {t.createdBy.slice(0, 10)}…
-                    </Link>
+                    <UserName uid={t.createdBy} info={names[t.createdBy]} color="#5BB6DE" />
                   </td>
                   <td className="px-4 py-3" style={{ color: 'var(--c-text-4)' }}>
-                    {t.assignedTo ? <span className="font-mono text-[11px]">{t.assignedTo.slice(0, 10)}…</span> : '—'}
+                    {t.assignedTo ? <UserName uid={t.assignedTo} info={names[t.assignedTo]} /> : '—'}
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap text-[11px]" style={{ color: 'var(--c-text-4)' }}>{t.createdAt}</td>
                   <td className="px-4 py-3 whitespace-nowrap text-[11px]" style={{ color: 'var(--c-text-4)' }}>{t.updatedAt}</td>

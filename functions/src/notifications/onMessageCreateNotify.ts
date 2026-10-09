@@ -17,9 +17,10 @@
 import { onDocumentCreated } from 'firebase-functions/v2/firestore';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import {
-  buildNotification, decideForRecipient,
+  buildNotification, decideForRecipient, notifLang,
   type ChatType, type NotifSettings,
 } from './notifyLogic';
+import { cleanNameSnapshot, publicNameFrom } from '../lib/displayName';
 import { sendPushToUser } from './send';
 
 export const onMessageCreateNotify = onDocumentCreated(
@@ -44,8 +45,20 @@ export const onMessageCreateNotify = onDocumentCreated(
     const recipients = participants.filter(uid => uid !== senderUid);
     if (recipients.length === 0) return;
 
-    const senderName: string = msg.senderDisplayName ?? 'Someone';
-    const groupName = convo.name ?? 'Group';
+    // Sender name for BOTH direct and group chats comes from the sender's live
+    // public profile (direct messages carry no name snapshot, so every direct
+    // push used to say "Someone"). The message/member snapshot is only a
+    // fallback; a uid is never shown. With no name at all, buildNotification
+    // uses the recipient-language "Someone". Recipient docs are read in the
+    // same batched getAll to pick each person's preferredLanguage.
+    const userRefs = [senderUid, ...recipients].map(u => db.collection('users').doc(u));
+    const userSnaps = await db.getAll(...userRefs).catch(() => [] as FirebaseFirestore.DocumentSnapshot[]);
+    const senderDoc = userSnaps[0]?.data();
+    const senderName: string | null =
+      publicNameFrom(senderDoc, senderUid) ?? cleanNameSnapshot(msg.senderDisplayName, senderUid);
+    const langOf = new Map<string, unknown>();
+    userSnaps.slice(1).forEach((s, i) => langOf.set(recipients[i], s?.get('preferredLanguage')));
+    const groupName = convo.name ?? null;
 
     // Resolve per-recipient: mute (userState) + settings, then send.
     const counts = await Promise.all(recipients.map(async (uid) => {
@@ -61,6 +74,7 @@ export const onMessageCreateNotify = onDocumentCreated(
 
       const { title, body } = buildNotification({
         chatType, groupName, senderName, msg: msg as any, showPreview: settings.showPreview !== false,
+        lang: notifLang(langOf.get(uid)),
       });
 
       return sendPushToUser(uid, {

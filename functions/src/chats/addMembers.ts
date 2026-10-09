@@ -4,6 +4,7 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { writeAuditLog } from '../lib/auditLog';
+import { publicNameFrom } from '../lib/displayName';
 import { MAX_GROUP_MEMBERS } from './createGroup';
 
 export const addMembers = onCall(async (request) => {
@@ -83,13 +84,13 @@ export const addMembers = onCall(async (request) => {
 
   for (let i = 0; i < toAdd.length; i++) {
     const u = toAdd[i];
-    const profile = (userSnaps[i].data() ?? {}) as { displayName?: string; photoURL?: string };
+    const profile = (userSnaps[i].data() ?? {}) as { displayName?: string; username?: string; photoURL?: string };
     batch.set(convoRef.collection('members').doc(u), {
       uid: u,
       role: 'member',
       status: 'active',
       addedBy: uid,
-      displayNameSnapshot: profile.displayName ?? u,
+      displayNameSnapshot: publicNameFrom(profile, u), // null, never the uid
       photoURLSnapshot: profile.photoURL ?? null,
       joinedAt: now,
       updatedAt: now,

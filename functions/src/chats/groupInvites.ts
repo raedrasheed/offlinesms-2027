@@ -14,6 +14,7 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { writeAuditLog } from '../lib/auditLog';
+import { publicNameFrom } from '../lib/displayName';
 import { MAX_GROUP_MEMBERS } from './createGroup';
 import {
   generateInviteCode, isValidInviteCode, joinDecision, inviteUsable,
@@ -187,7 +188,8 @@ export const joinGroupByInviteLink = onCall(async (request) => {
   if (!inviteUsable(code)) throw new HttpsError('failed-precondition', 'invite-disabled');
 
   const convoRef = db.collection('conversations').doc(code.conversationId);
-  const profile = (await db.collection('users').doc(uid).get()).data() as { displayName?: string; photoURL?: string } | undefined;
+  const profile = (await db.collection('users').doc(uid).get()).data() as { displayName?: string; username?: string; photoURL?: string } | undefined;
+  const publicName = publicNameFrom(profile, uid); // null, never the uid
 
   const result = await db.runTransaction(async tx => {
     const convoSnap = await tx.get(convoRef);
@@ -209,7 +211,7 @@ export const joinGroupByInviteLink = onCall(async (request) => {
     if (decision === 'create_request') {
       tx.set(convoRef.collection('joinRequests').doc(uid), {
         requestId: uid, inviteCode: data.inviteCode, requesterUid: uid,
-        requesterName: profile?.displayName ?? uid, requesterPhotoURL: profile?.photoURL ?? null,
+        requesterName: publicName, requesterPhotoURL: profile?.photoURL ?? null,
         status: 'pending', requestedAt: now,
       }, { merge: true });
       return { status: 'pending' as const };
@@ -222,7 +224,7 @@ export const joinGroupByInviteLink = onCall(async (request) => {
     tx.update(convoRef, { participantUids: next, memberIds: next, memberCount: next.length, updatedAt: now });
     tx.set(convoRef.collection('members').doc(uid), {
       uid, role: 'member', status: 'active', addedBy: 'invite',
-      displayNameSnapshot: profile?.displayName ?? uid, photoURLSnapshot: profile?.photoURL ?? null,
+      displayNameSnapshot: publicName, photoURLSnapshot: profile?.photoURL ?? null,
       joinedAt: now, updatedAt: now,
     }, { merge: true });
     tx.set(convoRef.collection('userState').doc(uid), {
@@ -244,7 +246,7 @@ export const joinGroupByInviteLink = onCall(async (request) => {
 
 async function addMemberFromRequest(convoRef: FirebaseFirestore.DocumentReference, requesterUid: string) {
   const db = getFirestore();
-  const profile = (await db.collection('users').doc(requesterUid).get()).data() as { displayName?: string; photoURL?: string } | undefined;
+  const profile = (await db.collection('users').doc(requesterUid).get()).data() as { displayName?: string; username?: string; photoURL?: string } | undefined;
   await db.runTransaction(async tx => {
     const convoSnap = await tx.get(convoRef);
     if (!convoSnap.exists) throw new HttpsError('not-found', 'group-not-found');
@@ -257,7 +259,7 @@ async function addMemberFromRequest(convoRef: FirebaseFirestore.DocumentReferenc
       tx.update(convoRef, { participantUids: next, memberIds: next, memberCount: next.length, updatedAt: now });
       tx.set(convoRef.collection('members').doc(requesterUid), {
         uid: requesterUid, role: 'member', status: 'active', addedBy: 'invite-approval',
-        displayNameSnapshot: profile?.displayName ?? requesterUid, photoURLSnapshot: profile?.photoURL ?? null,
+        displayNameSnapshot: publicNameFrom(profile, requesterUid), photoURLSnapshot: profile?.photoURL ?? null,
         joinedAt: now, updatedAt: now,
       }, { merge: true });
       tx.set(convoRef.collection('userState').doc(requesterUid), {

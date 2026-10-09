@@ -14,6 +14,8 @@ import { adminDb } from '@/lib/firebase-admin';
 import { verifySession } from '@/lib/session';
 import { canDo } from '@/lib/adminPermissions';
 import { PermissionState } from '@/components/state';
+import { resolveUserNames } from '@/lib/userNames';
+import { userLabel } from '@/lib/userLabel';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -159,6 +161,12 @@ export default async function AuditLogPage({
     fetchError = e?.message ?? 'Failed to load audit log.';
   }
 
+  // Actor names (one batched read); 'system' / 'anonymous' are not users.
+  const SPECIAL_ACTORS = new Set(['system', 'anonymous']);
+  const actorNames = await resolveUserNames(
+    entries.map(e => e.actorUid).filter(u => !!u && !SPECIAL_ACTORS.has(u)),
+  );
+
   const hasFilters = !!(filters.actor || filters.action || filters.targetType || filters.result || filters.from || filters.to);
   const canExport = canDo(session.role, 'export:audit');
 
@@ -267,9 +275,28 @@ export default async function AuditLogPage({
                     {fmtTs(entry.createdAt)}
                   </td>
                   <td className="px-4 py-2.5">
-                    <p className="font-semibold text-[11px] truncate max-w-[140px]" style={{ color: 'var(--c-text)' }}>
-                      {entry.actorEmail ?? entry.actorUid ?? '—'}
-                    </p>
+                    {(() => {
+                      const uid = entry.actorUid;
+                      if (!uid || SPECIAL_ACTORS.has(uid)) {
+                        return (
+                          <p className="font-semibold text-[11px] truncate max-w-[140px]" style={{ color: 'var(--c-text)' }}>
+                            {uid ?? entry.actorEmail ?? '—'}
+                          </p>
+                        );
+                      }
+                      const info = actorNames[uid];
+                      const hasName = !!(info?.displayName || info?.username);
+                      // Name first; email (dedicated field) then uid kept for auditing.
+                      const primary = hasName ? userLabel(info, { uid }) : (entry.actorEmail ?? userLabel(null, { uid }));
+                      return (
+                        <div className="max-w-[180px]" title={uid}>
+                          <p className="font-semibold text-[11px] truncate" style={{ color: 'var(--c-text)' }}>{primary}</p>
+                          <p className="font-mono text-[10px] truncate" style={{ color: 'var(--c-text-4)' }}>
+                            {hasName && entry.actorEmail ? `${entry.actorEmail} · ` : ''}{uid}
+                          </p>
+                        </div>
+                      );
+                    })()}
                   </td>
                   <td className="px-4 py-2.5">
                     <span className="font-mono text-[11px]" style={{ color: 'var(--c-text-2)' }}>{entry.action}</span>

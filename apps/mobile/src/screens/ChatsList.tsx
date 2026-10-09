@@ -13,6 +13,8 @@ import {
 } from '../lib/conversations';
 import { subscribeToPresence, type ChatPresence } from '../services/presenceService';
 import { createKeyedSubscriptions } from '../lib/keyedSubscriptions';
+import { primeUserProfile } from '../lib/userProfiles';
+import { normalizeProfile, profileName } from '../lib/displayNames.pure';
 import { perfMark } from '../lib/perf';
 import { useTheme } from '../context/ThemeContext';
 import { useLocalChatList } from '../hooks/useLocalChatList';
@@ -66,7 +68,7 @@ export default function ChatsList({ navigation }: any) {
 
   // Per-conversation state + peer profile, keyed by conversation id.
   const [states, setStates]   = useState<Record<string, UserState | undefined>>({});
-  const [peers, setPeers]     = useState<Record<string, { name?: string; photoURL?: string | null }>>({});
+  const [peers, setPeers]     = useState<Record<string, { name?: string | null; photoURL?: string | null }>>({});
   // Live presence (online + typing/recording) per conversation, both paths.
   const [presence, setPresence] = useState<Record<string, ChatPresence>>({});
 
@@ -90,9 +92,11 @@ export default function ChatsList({ navigation }: any) {
         });
       }
       return onSnapshot(doc(db, 'users', peerUid), snap => {
-        const data = snap.data() as { displayName?: string; username?: string; photoURL?: string | null } | undefined;
-        const name = data?.displayName || (data?.username ? `@${data.username}` : peerUid.slice(0, 6));
-        setPeers(prev => ({ ...prev, [cid]: { name, photoURL: data?.photoURL ?? null } }));
+        // Live peer doc → shared resolver cache (so other screens agree) and
+        // the unified name rule (displayName → @username → translated fallback).
+        primeUserProfile(peerUid, snap.data() ?? {});
+        const prof = normalizeProfile(snap.data());
+        setPeers(prev => ({ ...prev, [cid]: { name: profileName(prof), photoURL: prof.photoURL } }));
       });
     });
   }, [me, useLocal]);
@@ -119,8 +123,8 @@ export default function ChatsList({ navigation }: any) {
     return rows.map(c => {
       const isGroup = c.type === 'group';
       const displayName = isGroup
-        ? (c.name ?? 'Group')
-        : (peers[c.id]?.name ?? c.name ?? 'Conversation');
+        ? (c.name || t('names.group'))
+        : (peers[c.id]?.name || c.name || t('names.unknownUser'));
       return {
         ...c,
         state:         states[c.id],
@@ -129,7 +133,7 @@ export default function ChatsList({ navigation }: any) {
         someoneTyping: false,
       };
     });
-  }, [useLocal, local.items, rows, states, peers]);
+  }, [useLocal, local.items, rows, states, peers, t]);
 
   // Resolve the peer uid of a direct chat (Firestore: participantUids; local:
   // the sorted participant_key "<a>_<b>").

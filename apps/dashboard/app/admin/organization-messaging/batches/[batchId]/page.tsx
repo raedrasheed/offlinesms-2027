@@ -15,6 +15,8 @@ import { canAccessBatch } from '@/lib/orgMessagingApi';
 import { getOrganization } from '@/lib/adminData';
 import { getOrgMessageBatch, listBatchMessages, MESSAGE_ROWS_MAX } from '@/lib/orgMessagingData';
 import { PermissionState, EmptyState } from '@/components/state';
+import { resolveUserNames } from '@/lib/userNames';
+import { userLabel } from '@/lib/userLabel';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -64,10 +66,16 @@ export default async function OrgBatchDetailPage({
     return <div className="p-8"><PermissionState title="Not available" description="This batch belongs to another organization." /></div>;
   }
 
-  const [orgName, messages] = await Promise.all([
+  const [orgName, messages, creatorNames] = await Promise.all([
     getOrganization(batch.organizationId).then(o => o?.name ?? batch.organizationId).catch(() => batch.organizationId),
     listBatchMessages(batch.id),
+    batch.source === 'api' ? Promise.resolve({} as Awaited<ReturnType<typeof resolveUserNames>>) : resolveUserNames([batch.createdBy]),
   ]);
+  // API batches are created by a key (show its prefix); dashboard batches by
+  // a person (show their name, uid kept in the tooltip below).
+  const createdByLabel = batch.source === 'api'
+    ? `API key ${batch.createdBy.slice(0, 8)}…`
+    : userLabel(creatorNames[batch.createdBy], { uid: batch.createdBy });
 
   return (
     <div className="p-6 max-w-5xl space-y-5" style={{ color: 'var(--c-text)' }}>
@@ -103,7 +111,7 @@ export default async function OrgBatchDetailPage({
         </div>
         <div className="grid grid-cols-4 gap-4 text-sm">
           <Meta label="Source" value={batch.source} />
-          <Meta label="Created by" value={batch.source === 'api' ? `API key ${batch.createdBy.slice(0, 8)}…` : batch.createdBy.slice(0, 12) + '…'} mono />
+          <Meta label="Created by" value={createdByLabel} title={batch.createdBy} mono={batch.source === 'api'} />
           <Meta label="SMS escalation" value={batch.escalationStatus.replace(/_/g, ' ')} />
           <Meta label="Created" value={fmt(batch.createdAt)} />
         </div>
@@ -157,9 +165,9 @@ function Stat({ label, value }: { label: string; value: number }) {
   );
 }
 
-function Meta({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+function Meta({ label, value, mono, title }: { label: string; value: string; mono?: boolean; title?: string }) {
   return (
-    <div>
+    <div title={title}>
       <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--c-text-4)' }}>{label}</p>
       <p className={`text-sm font-semibold mt-0.5 capitalize ${mono ? 'font-mono normal-case' : ''}`}>{value}</p>
     </div>

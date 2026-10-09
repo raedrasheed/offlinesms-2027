@@ -11,6 +11,7 @@
 
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore } from 'firebase-admin/firestore';
+import { cleanNameSnapshot, publicNameFrom } from '../lib/displayName';
 
 type Status = 'pending' | 'delivered' | 'read' | 'viewed' | 'played' | 'failed';
 
@@ -110,12 +111,12 @@ export const getMessageInfo = onCall(async (request) => {
 
       if (isGroup) {
         const m = memberSnaps[i]?.data() as { displayNameSnapshot?: string; photoURLSnapshot?: string | null; role?: Recipient['role'] } | undefined;
-        displayName = m?.displayNameSnapshot ?? null;
+        displayName = cleanNameSnapshot(m?.displayNameSnapshot, u); // never a uid
         photoURL    = m?.photoURLSnapshot   ?? null;
         role        = m?.role ?? 'member';
       } else {
-        const u2 = userSnaps[i]?.data() as { displayName?: string; photoURL?: string } | undefined;
-        displayName = u2?.displayName ?? null;
+        const u2 = userSnaps[i]?.data() as { displayName?: string; username?: string; photoURL?: string } | undefined;
+        displayName = publicNameFrom(u2, u);
         photoURL    = u2?.photoURL    ?? null;
       }
 
@@ -143,7 +144,7 @@ export const getMessageInfo = onCall(async (request) => {
     conversationId:     data.conversationId,
     type:               msg.type ?? 'text',
     senderUid,
-    senderDisplayName:  (msg.senderDisplayName as string | undefined) ?? null,
+    senderDisplayName:  cleanNameSnapshot(msg.senderDisplayName, senderUid),
     createdAt:          msg.createdAt ?? null,
     editedAt:           msg.editedAt  ?? null,
     deletedForEveryone: msg.deletedForEveryone === true,

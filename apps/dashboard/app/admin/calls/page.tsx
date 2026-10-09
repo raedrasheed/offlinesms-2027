@@ -8,6 +8,8 @@ import { canDo } from '@/lib/adminPermissions';
 import { adminDb } from '@/lib/firebase-admin';
 import { safeDate } from '@/lib/redaction';
 import { PermissionState, EmptyState } from '@/components/state';
+import UserName from '@/components/admin/UserName';
+import { resolveUserNames } from '@/lib/userNames';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -61,6 +63,8 @@ export default async function CallsPage() {
 
   const { rows, empty } = await fetchCallLogs();
 
+  const names = await resolveUserNames(rows.map(r => r.initiatorUid));
+
   const CARD = 'var(--c-card)';
   const BORDER = 'var(--c-border)';
 
@@ -94,7 +98,7 @@ export default async function CallsPage() {
             <tbody>
               {rows.map((r, i) => (
                 <tr key={r.id} className="transition hover:bg-white/[0.03]" style={i < rows.length - 1 ? { borderBottom: `1px solid ${BORDER}` } : {}}>
-                  <td className="px-4 py-3 font-mono text-xs" style={{ color: 'var(--c-text-2)' }}>{r.initiatorUid?.slice(0, 12) ?? '—'}…</td>
+                  <td className="px-4 py-3"><UserName uid={r.initiatorUid} info={r.initiatorUid ? names[r.initiatorUid] : null} /></td>
                   <td className="px-4 py-3 font-mono text-xs" style={{ color: 'var(--c-text-3)' }}>{r.conversationId?.slice(0, 10) ?? '—'}…</td>
                   <td className="px-4 py-3 text-right text-xs font-mono" style={{ color: 'var(--c-text)' }}>{r.durationSeconds}s</td>
                   <td className="px-4 py-3 text-xs capitalize" style={{ color: 'var(--c-text-2)' }}>{r.status}</td>

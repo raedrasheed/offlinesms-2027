@@ -11,6 +11,7 @@ import {
 import { db, auth } from '../lib/firebase';
 import { addGroupMembers, addExternalContactToGroup, groupErrorCopy } from '../lib/conversations';
 import { normalizeUsername } from '../lib/username';
+import { useProfileLabel } from '../lib/userProfiles';
 import { normalizePhoneToE164 } from '../lib/phone';
 import { LOCAL_FIRST_CONVERSATION_ENABLED } from '../config/features';
 import { queueAddExternalContactToGroup, getCurrentUid } from '../localdb';
@@ -26,6 +27,7 @@ type UserRow = {
 };
 
 export default function AddMembers({ route, navigation }: any) {
+  const label = useProfileLabel();
   const me = auth.currentUser?.uid;
   const { id } = route.params as { id: string };
 
@@ -259,7 +261,7 @@ export default function AddMembers({ route, navigation }: any) {
           <View style={s.chips}>
             {selected.map(u => (
               <Pressable key={u.uid} style={s.chip} onPress={() => remove(u.uid)}>
-                <Text style={s.chipText}>{u.displayName ?? u.username ?? u.uid.slice(0, 6)}  ×</Text>
+                <Text style={s.chipText}>{label(u)}  ×</Text>
               </Pressable>
             ))}
           </View>
@@ -290,10 +292,10 @@ export default function AddMembers({ route, navigation }: any) {
             keyExtractor={u => u.uid}
             renderItem={({ item }) => (
               <Pressable style={s.row} onPress={() => add(item)}>
-                <View style={s.avatar}><Text style={s.avatarText}>{(item.displayName ?? item.username ?? '?').slice(0, 1).toUpperCase()}</Text></View>
+                <View style={s.avatar}><Text style={s.avatarText}>{label(item).replace(/^@/, '').slice(0, 1).toUpperCase()}</Text></View>
                 <View style={{ flex: 1 }}>
-                  <Text style={s.name}>{item.displayName ?? '—'}</Text>
-                  <Text style={s.handle}>@{item.username ?? item.uid.slice(0, 6)}</Text>
+                  <Text style={s.name}>{label(item)}</Text>
+                  {item.username ? <Text style={s.handle}>@{item.username}</Text> : null}
                 </View>
                 <Text style={s.add}>＋</Text>
               </Pressable>

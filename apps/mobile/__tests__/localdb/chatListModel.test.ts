@@ -48,7 +48,13 @@ describe('mapConversationRow', () => {
   });
   it('falls back to a placeholder name', () => {
     expect(mapConversationRow(row({ type: 'group', title: null })).peerName).toBe('Group');
-    expect(mapConversationRow(row({ type: 'direct', title: null })).peerName).toBe('Conversation');
+    expect(mapConversationRow(row({ type: 'direct', title: null })).peerName).toBe('Unknown user');
+  });
+  it('uses the translated labels it is given (never a uid)', () => {
+    const labels = { group: 'مجموعة', direct: 'مستخدم غير معروف' };
+    expect(mapConversationRow(row({ type: 'group', title: null }), labels).peerName).toBe('مجموعة');
+    expect(mapConversationRow(row({ type: 'direct', title: null }), labels).peerName).toBe('مستخدم غير معروف');
+    expect(createChatListMapper(labels)([row({ type: 'direct', title: null })])[0].peerName).toBe('مستخدم غير معروف');
   });
 });
 

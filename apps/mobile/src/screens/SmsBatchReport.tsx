@@ -12,6 +12,7 @@ import { collection, doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { retryFailedSmsRecipients, smsErrorCopy, smsErrorReason } from '../lib/sms';
 import { colors, radius } from '../theme';
+import { useDisplayNames } from '../lib/userProfiles';
 import { LoadingState, EmptyState, ErrorState } from '../components/state';
 
 type Status = 'queued' | 'sent' | 'delivered' | 'undelivered' | 'failed' | 'skipped';
@@ -86,6 +87,9 @@ export default function SmsBatchReport({ route, navigation }: any) {
 
   const [batch, setBatch]           = useState<Batch | null | undefined>(undefined);
   const [recipients, setRecipients] = useState<Recipient[] | null>(null);
+  // Recipient rows are keyed by uid (or `ext:<phone>` for phone-only
+  // contacts); names come from the shared resolver, never the raw id.
+  const nameFor = useDisplayNames(useMemo(() => (recipients ?? []).map(r => r.uid), [recipients]));
   const [filter, setFilter]         = useState<FilterKey>('all');
   const [busy, setBusy]             = useState(false);
 
@@ -199,9 +203,9 @@ export default function SmsBatchReport({ route, navigation }: any) {
             keyExtractor={r => r.uid}
             renderItem={({ item }) => (
               <View style={s.recipientRow}>
-                <View style={s.avatar}><Text style={s.avatarText}>{item.uid.slice(0, 1).toUpperCase()}</Text></View>
+                <View style={s.avatar}><Text style={s.avatarText}>{nameFor(item.uid).replace(/^@/, '').slice(0, 1).toUpperCase()}</Text></View>
                 <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text style={s.recipientName} numberOfLines={1}>{item.uid.slice(0, 8)}…</Text>
+                  <Text style={s.recipientName} numberOfLines={1}>{nameFor(item.uid)}</Text>
                   <Text style={s.recipientPhone}>{item.maskedPhone ?? '—'}</Text>
                   {item.skipReason ? <Text style={s.recipientNote}>{prettifyReason(item.skipReason)}</Text> : null}
                   {item.gatewayErrorMessage ? <Text style={s.recipientNote}>{item.gatewayErrorMessage}</Text> : null}

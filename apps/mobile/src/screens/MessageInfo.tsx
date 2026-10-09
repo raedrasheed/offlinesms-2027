@@ -20,6 +20,7 @@ import {
 } from '../lib/conversations';
 import { colors, radius } from '../theme';
 import { avatarColor, initials } from '../lib/avatar';
+import { useDisplayNames } from '../lib/userProfiles';
 import { LoadingState, ErrorState, PermissionState } from '../components/state';
 
 type TabKey = 'all' | 'read' | 'delivered' | 'pending' | 'failed';
@@ -68,6 +69,10 @@ export default function MessageInfo({ route, navigation }: any) {
   const [err, setErr]   = useState<string | null>(null);
   const [tab, setTab]   = useState<TabKey>('all');
   const [search, setSearch] = useState('');
+  // Recipient names from the shared resolver (live; the server snapshot is
+  // only a fallback and never a uid).
+  const recipientUids = useMemo(() => (info?.recipients ?? []).map(r => r.uid), [info?.recipients]);
+  const nameFor = useDisplayNames(recipientUids);
 
   useEffect(() => {
     let cancelled = false;
@@ -97,9 +102,9 @@ export default function MessageInfo({ route, navigation }: any) {
     const q = search.trim().toLowerCase();
     return info.recipients.filter(r =>
       statusMatches(tab, r.status) &&
-      (!q || (r.displayName ?? r.uid).toLowerCase().includes(q)),
+      (!q || nameFor(r.uid, { snapshot: r.displayName }).toLowerCase().includes(q)),
     );
-  }, [info?.recipients, tab, search]);
+  }, [info?.recipients, tab, search, nameFor]);
 
   if (err)  return <ErrorState fullPage title="Couldn’t load" description={err} />;
   if (!info) return <LoadingState fullPage title="Loading info…" />;
@@ -197,11 +202,11 @@ export default function MessageInfo({ route, navigation }: any) {
               filtered.map(item => (
                 <View key={item.uid} style={s.recipientRow}>
                   <View style={[s.avatar, { backgroundColor: avatarColor(item.uid) }]}>
-                    <Text style={s.avatarText}>{initials(item.displayName ?? item.uid)}</Text>
+                    <Text style={s.avatarText}>{initials(nameFor(item.uid, { snapshot: item.displayName }))}</Text>
                   </View>
                   <View style={{ flex: 1, minWidth: 0 }}>
                     <View style={s.nameRow}>
-                      <Text style={s.recipientName} numberOfLines={1}>{item.displayName ?? item.uid.slice(0, 6)}</Text>
+                      <Text style={s.recipientName} numberOfLines={1}>{nameFor(item.uid, { snapshot: item.displayName })}</Text>
                       {item.role && item.role !== 'member' ? (
                         <Text style={s.roleBadge}>{item.role.toUpperCase()}</Text>
                       ) : null}

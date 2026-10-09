@@ -30,6 +30,8 @@ import {
 } from '../lib/conversations';
 import { inviteUrl } from '../lib/invite';
 import { maskPhone } from '../lib/phone';
+import { useTranslation } from 'react-i18next';
+import { useDisplayNames } from '../lib/userProfiles';
 import { LOCAL_FIRST_CONVERSATION_ENABLED } from '../config/features';
 import { queueRemoveExternalContactFromGroup, externalMembersRepo, getCurrentUid } from '../localdb';
 import { colors, radius } from '../theme';
@@ -58,6 +60,12 @@ export default function GroupInfo({ route, navigation }: any) {
   // MUST stay above the early returns below — otherwise the hook count
   // changes between loading and loaded renders ("rendered more hooks…").
   const [actionMember, setActionMember] = useState<GroupMember | null>(null);
+  // Member names from the shared resolver (live profile; the join-time
+  // snapshot only while loading). Also above the early returns.
+  const { t } = useTranslation();
+  const memberUids = useMemo(() => (members ?? []).map(m => m.uid), [members]);
+  const nameFor = useDisplayNames(memberUids);
+  const memberName = (m: GroupMember) => nameFor(m.uid, { snapshot: m.displayNameSnapshot });
 
   useEffect(() => {
     return onSnapshot(doc(db, 'conversations', id), snap => {
@@ -124,7 +132,7 @@ export default function GroupInfo({ route, navigation }: any) {
   function confirmRemove(m: GroupMember) {
     Alert.alert(
       'Remove member',
-      `Remove ${m.displayNameSnapshot ?? m.uid} from this group?`,
+      `Remove ${memberName(m)} from this group?`,
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Remove', style: 'destructive', onPress: () => withBusy(() => removeGroupMember(id, m.uid), 'Couldn’t remove') },
@@ -180,7 +188,7 @@ export default function GroupInfo({ route, navigation }: any) {
     const verb = role === 'admin' ? 'Promote to admin' : 'Demote to member';
     Alert.alert(
       verb,
-      `${verb}: ${m.displayNameSnapshot ?? m.uid}?`,
+      `${verb}: ${memberName(m)}?`,
       [
         { text: 'Cancel', style: 'cancel' },
         { text: verb, onPress: () => withBusy(() => changeGroupRole(id, m.uid, role), 'Couldn’t change role') },
@@ -239,7 +247,7 @@ export default function GroupInfo({ route, navigation }: any) {
           {convo.avatarUrl
             ? <Image source={{ uri: convo.avatarUrl }} style={s.avatar} />
             : <View style={s.avatar}><Text style={s.avatarText}>{(convo.name ?? '?').slice(0, 1).toUpperCase()}</Text></View>}
-          <Text style={s.name}>{convo.name ?? 'Group'}</Text>
+          <Text style={s.name}>{convo.name || t('names.group')}</Text>
           <Text style={s.sub}>{members.length + externals.length} member{(members.length + externals.length) === 1 ? '' : 's'}{locked ? ' · locked' : disabled ? ' · disabled' : ''}</Text>
           {convo.description ? <Text style={s.desc}>{convo.description}</Text> : null}
         </View>
@@ -333,12 +341,12 @@ export default function GroupInfo({ route, navigation }: any) {
                 return (
                   <Pressable style={s.memberRow} onPress={() => memberActions(item)}>
                     <View style={s.memberAvatar}>
-                      <Text style={s.memberAvatarText}>{(item.displayNameSnapshot ?? item.uid).slice(0, 1).toUpperCase()}</Text>
+                      <Text style={s.memberAvatarText}>{memberName(item).replace(/^@/, '').slice(0, 1).toUpperCase()}</Text>
                       {/* Registered app users get the badge. */}
                       <RegisteredBadge registered size={15} />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={s.memberName}>{item.displayNameSnapshot ?? item.uid}{isSelf ? ' (you)' : ''}</Text>
+                      <Text style={s.memberName}>{isSelf ? t('names.youSuffix', { name: memberName(item) }) : memberName(item)}</Text>
                     </View>
                     {badge ? (
                       <View style={[s.badge, { backgroundColor: badge.bg }]}>
@@ -389,7 +397,7 @@ export default function GroupInfo({ route, navigation }: any) {
           <Pressable style={s.sheet} onPress={() => { /* swallow */ }}>
             {actionMember ? (
               <>
-                <Text style={s.sheetTitle} numberOfLines={1}>{actionMember.displayNameSnapshot ?? actionMember.uid}</Text>
+                <Text style={s.sheetTitle} numberOfLines={1}>{memberName(actionMember)}</Text>
                 <Pressable style={s.sheetItem} onPress={() => { const m = actionMember!; closeActions(); void openMemberChat(m); }}>
                   <Text style={s.sheetItemText}>Message</Text>
                 </Pressable>

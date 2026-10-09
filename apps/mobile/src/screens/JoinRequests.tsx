@@ -1,12 +1,13 @@
 // JoinRequests — group admins review pending invite join requests.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { View, Text, FlatList, Pressable, StyleSheet, Alert } from 'react-native';
 import {
   JoinRequest, subscribePendingJoinRequests,
   approveGroupJoinRequest, rejectGroupJoinRequest, groupErrorCopy,
 } from '../lib/conversations';
 import { avatarColor, initials } from '../lib/avatar';
+import { useDisplayNames } from '../lib/userProfiles';
 import { colors, radius } from '../theme';
 import { EmptyState } from '../components/state';
 
@@ -16,6 +17,9 @@ export default function JoinRequests({ route, navigation }: any) {
   const [busyId, setBusyId] = useState<string | null>(null);
 
   useEffect(() => subscribePendingJoinRequests(id, setRows), [id]);
+  // Live requester names (the stored requesterName may be stale or, on old
+  // requests, the uid itself — the resolver ignores uid-like snapshots).
+  const nameFor = useDisplayNames(useMemo(() => (rows ?? []).map(r => r.requesterUid), [rows]));
 
   async function act(r: JoinRequest, approve: boolean) {
     setBusyId(r.requestId);
@@ -41,9 +45,9 @@ export default function JoinRequests({ route, navigation }: any) {
         renderItem={({ item }) => (
           <View style={s.row}>
             <View style={[s.avatar, { backgroundColor: avatarColor(item.requesterUid) }]}>
-              <Text style={s.avatarText}>{initials(item.requesterName ?? '?')}</Text>
+              <Text style={s.avatarText}>{initials(nameFor(item.requesterUid, { snapshot: item.requesterName }))}</Text>
             </View>
-            <Text style={s.name} numberOfLines={1}>{item.requesterName}</Text>
+            <Text style={s.name} numberOfLines={1}>{nameFor(item.requesterUid, { snapshot: item.requesterName })}</Text>
             <Pressable style={[s.btn, s.reject]} disabled={busyId === item.requestId} onPress={() => act(item, false)}>
               <Text style={[s.btnText, { color: colors.err }]}>Reject</Text>
             </Pressable>

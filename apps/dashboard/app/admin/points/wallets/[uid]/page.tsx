@@ -13,6 +13,7 @@ import { PermissionState } from '@/components/state';
 import DetailCard from '@/components/admin/DetailCard';
 import MetadataList from '@/components/admin/MetadataList';
 import StatusBadge from '@/components/admin/StatusBadge';
+import { userLabel } from '@/lib/userLabel';
 import WalletFreezeAction from '../WalletFreezeAction';
 
 export const dynamic = 'force-dynamic';
@@ -46,13 +47,13 @@ export default async function WalletDetailPage({ params }: { params: { uid: stri
       <div className="flex items-center gap-3 mb-6">
         <Link href={'/admin/points/wallets' as any} className="text-sm text-ink-500 hover:text-ink-900">← Wallets</Link>
         <span className="text-ink-300">/</span>
-        <span className="text-sm font-semibold text-ink-900 font-mono truncate">{params.uid.slice(0, 14)}…</span>
+        <span className="text-sm font-semibold text-ink-900 truncate" title={params.uid}>{userLabel(user, { uid: params.uid })}</span>
       </div>
 
       <div className="flex items-center gap-4 mb-6">
         <div>
           <h1 className="text-xl font-extrabold tracking-tight text-ink-900">
-            {user?.displayName ?? user?.username ?? 'Unknown user'}
+            {userLabel(user, { uid: params.uid })}
           </h1>
           <p className="text-xs font-mono text-ink-400 mt-0.5">{params.uid}</p>
         </div>

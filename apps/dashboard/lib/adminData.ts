@@ -12,6 +12,8 @@
 
 import { adminDb } from './firebase-admin';
 import { safeDate } from './redaction';
+import { resolveUserNames } from './userNames';
+import { looksLikeUid } from './userLabel';
 
 export type AdminUserRow = {
   uid: string;
@@ -232,12 +234,14 @@ export async function listOrgMembers(orgId: string): Promise<(AdminMemberRow)[]>
     .orderBy('joinedAt', 'desc')
     .limit(50)
     .get();
+  // Org member docs carry no name: resolve from users/{uid} in one batch.
+  const names = await resolveUserNames(snap.docs.map(d => d.id));
   return snap.docs.map(d => {
     const data = d.data();
     return {
       uid:         d.id,
-      displayName: null,
-      username:    null,
+      displayName: names[d.id]?.displayName ?? null,
+      username:    names[d.id]?.username ?? null,
       role:        (data.role as string) ?? 'member',
       status:      'active',
       joinedAt:    safeDate(data.joinedAt),
@@ -325,12 +329,18 @@ export async function listGroupMembers(conversationId: string): Promise<AdminMem
     .orderBy('joinedAt', 'asc')
     .limit(200)
     .get();
+  // Member docs store `displayNameSnapshot` (not `displayName`) and no
+  // username; prefer the live profile (batched getAll) and fall back to the
+  // snapshot, ignoring legacy snapshots that are just the uid.
+  const names = await resolveUserNames(snap.docs.map(d => d.id));
   return snap.docs.map(d => {
     const data = d.data();
+    const snapshot = typeof data.displayNameSnapshot === 'string' && data.displayNameSnapshot.trim()
+      && !looksLikeUid(data.displayNameSnapshot, d.id) ? data.displayNameSnapshot.trim() : null;
     return {
       uid:         d.id,
-      displayName: (data.displayName as string | null) ?? null,
-      username:    (data.username as string | null) ?? null,
+      displayName: names[d.id]?.displayName ?? snapshot,
+      username:    names[d.id]?.username ?? null,
       role:        (data.role as string) ?? 'member',
       status:      (data.status as string) ?? 'active',
       joinedAt:    safeDate(data.joinedAt),

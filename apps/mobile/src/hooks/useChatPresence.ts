@@ -42,7 +42,8 @@ export function formatPresenceSubtitle(
   opts: { isGroup: boolean; t: TFunction; nameFor?: (uid: string) => string; groupFallback?: string },
 ): string {
   const { isGroup, t, nameFor, groupFallback } = opts;
-  const name = (uid: string) => (nameFor ? nameFor(uid) : uid.slice(0, 6));
+  // Never print a uid: without a resolver use the translated generic label.
+  const name = (uid: string) => (nameFor ? nameFor(uid) : t('names.unknownUser'));
 
   if (presence.recordingUids.length > 0) {
     if (!isGroup) return t('presence.recording');

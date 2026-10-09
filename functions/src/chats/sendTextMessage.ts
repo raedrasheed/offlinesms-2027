@@ -26,6 +26,7 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { writeAuditLog } from '../lib/auditLog';
+import { cleanNameSnapshot, publicNameFrom } from '../lib/displayName';
 import { assertDirectNotBlocked } from './blockGuard';
 import { findSticker } from './stickerCatalog';
 import { buildPoll, pollFallbackText, PollError, type PollDoc } from './pollLogic';
@@ -171,14 +172,15 @@ export const sendTextMessage = onCall(async (request) => {
       throw new HttpsError('permission-denied', 'admins-only');
     }
 
-    senderDisplayName = member.displayNameSnapshot ?? null;
+    senderDisplayName = cleanNameSnapshot(member.displayNameSnapshot, uid);
     senderPhotoURL    = member.photoURLSnapshot    ?? null;
 
-    // Fall back to the live user doc if the membership snapshot is empty.
+    // Fall back to the live user doc if the membership snapshot is empty (or
+    // a legacy uid). Never store the uid as a name: null when there is none.
     if (!senderDisplayName) {
       const userSnap = await db.collection('users').doc(uid).get();
-      const u = (userSnap.data() ?? {}) as { displayName?: string; photoURL?: string };
-      senderDisplayName = u.displayName ?? uid;
+      const u = (userSnap.data() ?? {}) as { displayName?: string; username?: string; photoURL?: string };
+      senderDisplayName = publicNameFrom(u, uid);
       senderPhotoURL    = senderPhotoURL ?? u.photoURL ?? null;
     }
   }

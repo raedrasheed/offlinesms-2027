@@ -19,6 +19,7 @@ import { getOrCreateDirectConversation } from '../lib/conversations';
 import { colors, radius } from '../theme';
 import { LoadingState, EmptyState, ErrorState } from '../components/state';
 import { normalizeUsername } from '../lib/username';
+import { useProfileLabel } from '../lib/userProfiles';
 import { avatarColor, initials } from '../lib/avatar';
 
 type UserRow = {
@@ -29,6 +30,7 @@ type UserRow = {
 };
 
 export default function NewChat({ navigation }: any) {
+  const label = useProfileLabel();
   const [term, setTerm]   = useState('');
   const [rows, setRows]   = useState<UserRow[] | null>([]);
   const [busy, setBusy]   = useState(false);
@@ -132,7 +134,7 @@ export default function NewChat({ navigation }: any) {
             keyExtractor={u => u.uid}
             ListHeaderComponent={<Text style={s.sectionLabel}>Recent</Text>}
             renderItem={({ item }) => {
-              const name = item.displayName ?? item.username ?? '—';
+              const name = label(item);
               return (
                 <Pressable style={s.row} onPress={() => pick(item.uid)}>
                   <View style={[s.avatar, { backgroundColor: avatarColor(item.uid) }]}>

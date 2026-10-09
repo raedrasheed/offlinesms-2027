@@ -6,6 +6,7 @@
 // keep using the legacy Firestore path. When the flag is off it is a no-op.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { coalescing } from '../lib/coalesce';
 import { LOCAL_FIRST_CHAT_LIST_ENABLED } from '../config/features';
 import { openLocalDb, conversationsRepo } from '../localdb';
@@ -28,11 +29,14 @@ export function useLocalChatList(uid: string | undefined): LocalChatList {
   const [loading, setLoading] = useState<boolean>(enabled);
   const [error, setError] = useState<string | null>(null);
   const [source, setSource] = useState<ChatListSource>(enabled ? 'local' : 'disabled');
+  const { t } = useTranslation();
+  const groupLabel = t('names.group');
+  const directLabel = t('names.unknownUser');
   // Coalesced (never dropped): a feeder change during a running refresh triggers
   // one more pass instead of being lost until the next unrelated change.
   const runner = useMemo(() => {
     if (!enabled) return null;
-    const mapRows = createChatListMapper();
+    const mapRows = createChatListMapper({ group: groupLabel, direct: directLabel });
     return coalescing(async () => {
       try {
         const rows = await conversationsRepo.listConversations({ includeArchived: false });
@@ -46,7 +50,7 @@ export function useLocalChatList(uid: string | undefined): LocalChatList {
         setLoading(false);
       }
     });
-  }, [enabled, uid]);
+  }, [enabled, uid, groupLabel, directLabel]);
   const refresh = useCallback(async () => { await runner?.(); }, [runner]);
 
   useEffect(() => {
