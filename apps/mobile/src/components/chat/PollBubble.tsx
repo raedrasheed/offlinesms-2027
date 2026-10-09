@@ -25,21 +25,22 @@ export const PollBubble = memo(function PollBubble({
   const v = useMemo(() => pollView(poll, me), [poll, me]);
   const accent = mine ? '#3E7B33' : '#1F7BA8';
   const align = isRTL ? 'right' : 'left';
+  const disabled = poll.closed || !!poll.closingPending;
 
   return (
     <View style={s.root}>
       <Text style={[s.q, { textAlign: align }]}>{poll.question}</Text>
       <Text style={[s.mode, { textAlign: align }]}>
-        {poll.closed ? t('poll.closed') : poll.multiple ? t('poll.selectMany') : t('poll.selectOne')}
+        {poll.closed ? t('poll.closed') : poll.closingPending ? t('poll.ending') : poll.closingFailed ? t('poll.endFailed') : poll.multiple ? t('poll.selectMany') : t('poll.selectOne')}
       </Text>
       {v.options.map(o => (
         <Pressable
           key={o.id}
           style={s.opt}
-          disabled={poll.closed}
+          disabled={disabled}
           onPress={() => onVote(toggleSelection(poll, v.mine, o.id))}
           accessibilityRole={poll.multiple ? 'checkbox' : 'radio'}
-          accessibilityState={{ checked: o.mine, disabled: poll.closed }}
+          accessibilityState={{ checked: o.mine, disabled }}
           accessibilityLabel={`${o.text}, ${t('poll.votes', { count: o.count })}`}
         >
           <View style={s.optRow}>
@@ -58,7 +59,7 @@ export const PollBubble = memo(function PollBubble({
       ))}
       <View style={s.footer}>
         <Text style={s.voters}>{t('poll.voters', { count: v.voterCount })}</Text>
-        {isCreator && !poll.closed ? (
+        {isCreator && !disabled ? (
           <Pressable onPress={onClose} accessibilityRole="button" hitSlop={8}>
             <Text style={[s.close, { color: accent }]}>{t('poll.end')}</Text>
           </Pressable>
@@ -82,3 +83,4 @@ const s = StyleSheet.create({
   voters:  { fontSize: 12, color: '#5B6B7A' },
   close:   { fontSize: 13, fontWeight: '700' },
 });
+

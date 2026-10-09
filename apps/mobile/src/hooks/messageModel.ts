@@ -74,6 +74,7 @@ function mapMedia(row: MessageRow): Message['media'] {
 
 export function mapMessageRow(row: MessageRow): Message {
   const at = tsLike(effectiveTimeMs(row));
+  const poll = row.type === 'poll' ? parsePoll(row.payload_json) : null;
   return {
     // Prefer the canonical remote id (needed for server-side actions); fall
     // back to the local id for still-pending messages.
@@ -109,7 +110,10 @@ export function mapMessageRow(row: MessageRow): Message {
     errorCode: row.error_code ?? null,
     errorMessage: row.error_message ?? null,
     sticker: row.type === 'sticker' ? parseSticker(row.payload_json) : null,
-    poll: row.type === 'poll' ? parsePoll(row.payload_json) : null,
+    poll: poll && row.poll_close_status ? { ...poll,
+      closingPending: !poll.closed && (row.poll_close_status === 'pending' || row.poll_close_status === 'processing'),
+      closingFailed: !poll.closed && (row.poll_close_status === 'dead' || row.poll_close_status === 'failed'),
+    } : poll,
   } as Message;
 }
 
@@ -135,7 +139,7 @@ function rowKey(r: MessageRow): string {
     r.delivered_count, r.read_count, r.viewed_count, r.played_count,
     r.media_upload_status, r.media_upload_progress, r.media_download_url, r.media_thumb_url, r.media_local_uri,
     r.remote_created_at, r.error_code, r.sender_display_name, r.reply_to_message_id, r.reply_to_preview,
-    r.payload_json,
+    r.payload_json, r.poll_close_status,
   ].join('\u0001');
 }
 

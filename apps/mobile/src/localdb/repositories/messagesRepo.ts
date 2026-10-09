@@ -21,7 +21,11 @@ export async function listMessages(conversationId: string, limit = PAGE, beforeC
   // Sort by canonical time when known, else local time. Newest first; the UI
   // reverses for display. deleted_for_me rows are hidden.
   const rows = await getDb().all<MessageRow>(
-    `SELECT * FROM messages
+    `SELECT messages.*, CASE WHEN messages.type = 'poll' THEN (
+        SELECT status FROM outbox WHERE entity_type = 'message' AND entity_id = messages.remote_id
+          AND conversation_id = messages.conversation_id AND type = 'close_poll'
+        LIMIT 1
+      ) ELSE NULL END AS poll_close_status FROM messages
       WHERE conversation_id = ? AND deleted_for_me = 0 ${cursor}
       ORDER BY COALESCE(remote_created_at, created_at) DESC
       LIMIT ?`,
@@ -507,4 +511,11 @@ export async function getPayload(remoteOrLocalId: string): Promise<string | null
     `SELECT payload_json FROM messages WHERE remote_id = ? OR local_id = ?`, [remoteOrLocalId, remoteOrLocalId],
   );
   return r?.payload_json ?? null;
+}
+
+
+/** Server-confirmed close; preserve votes that may have arrived during the call. */
+export async function confirmPollClosed(messageId: string): Promise<void> {
+  await getDb().run(`UPDATE messages SET payload_json = json_set(payload_json, '$.closed', json('true')), updated_at = ?
+    WHERE remote_id = ? AND type = 'poll' AND json_valid(payload_json)`, [Date.now(), messageId]);
 }

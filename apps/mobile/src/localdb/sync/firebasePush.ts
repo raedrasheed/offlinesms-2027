@@ -10,6 +10,7 @@ import * as FileSystem from 'expo-file-system';
 import { app, auth } from '../../lib/firebase';
 import * as messagesRepo from '../repositories/messagesRepo';
 import { setTransferProgress, clearTransfer } from '../../media/transferProgress';
+import { emitLocalMessagesChanged } from '../messageChanges';
 import type { OutboxRow } from '../types';
 
 export interface PushResult {
@@ -180,6 +181,11 @@ export async function pushOutboxItem(item: OutboxRow): Promise<PushResult> {
     case 'vote_poll':
       await call('votePoll', { conversationId: payload.conversationId, messageId: payload.messageId, optionIds: payload.optionIds, seq: payload.seq });
       return { ok: true };
+    case 'close_poll':
+      await call('closePoll', { conversationId: payload.conversationId, messageId: payload.messageId });
+      await messagesRepo.confirmPollClosed(payload.messageId);
+      emitLocalMessagesChanged(payload.conversationId);
+      return { ok: true };
     case 'edit_message':
       await call('editMessage', { conversationId: payload.conversationId, messageId: payload.messageId, text: payload.text });
       return { ok: true };
@@ -223,3 +229,4 @@ export async function pushOutboxItem(item: OutboxRow): Promise<PushResult> {
       throw Object.assign(new Error(`unknown outbox type: ${item.type}`), { code: 'functions/invalid-argument' });
   }
 }
+

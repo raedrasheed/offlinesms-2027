@@ -31,6 +31,7 @@ import { importLegacyQueueOnce } from '../localdb/sync/legacyImport';
 import { createMessageMapper } from './messageModel';
 import { coalescing } from '../lib/coalesce';
 import { openConversation } from './conversationOpen';
+import { onLocalMessagesChanged } from '../localdb/messageChanges';
 import type { Message } from '../lib/conversations';
 
 export type ConversationSource = 'disabled' | 'local' | 'firestoreFallback';
@@ -191,6 +192,9 @@ export function useLocalConversation(
       },
     });
 
+    const stopLocal = onLocalMessagesChanged(changedId => {
+      if (changedId === conversationId) void runner();
+    });
     const stopConn = onConnectivityChange(online => {
       setLive(prev => (online ? (prev === 'offline' ? 'connecting' : prev) : 'offline'));
       if (online) void runner();
@@ -203,6 +207,7 @@ export function useLocalConversation(
       lifecycle.generation++;
       stopOpen();
       stopConn();
+      stopLocal();
       setActiveConversation(undefined);
     };
   }, [enabled, uid, conversationId, runner, revealFocus, lifecycle]);

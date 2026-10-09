@@ -9,6 +9,7 @@ import { pullConversations, pullMessages, pullMembers, pullMessagesBefore } from
 import { pushOutboxItem } from './firebasePush';
 import { isOnline } from './networkState';
 import { isPermanent, errorCode, nextAttemptAt } from './retryPolicy';
+import { emitLocalMessagesChanged } from '../messageChanges';
 import { LOCAL_MESSAGE_RETENTION_LIMIT } from '../../config/features';
 
 let running = false;   // guards the heavy pull + history backfill
@@ -129,7 +130,7 @@ export async function pushOutbox(): Promise<number> {
       console.log(`[outbox] push FAILED ${item.type} ${item.id}: ${code} — ${message} (permanent=${isPermanent(err)})`);
       if (isPermanent(err)) {
         // Permanent: dead-letter immediately and surface on the message.
-        await outboxRepo.markFailed(item.id, code, message, Date.now() + 1e12);
+        await outboxRepo.markFailed(item.id, code, message, Date.now() + 1e12, item.type === 'close_poll');
         if (item.type === 'send_message') {
           const payload = JSON.parse(item.payload_json || '{}');
           if (payload.localId) await messagesRepo.setError(payload.localId, code, message);
@@ -142,6 +143,7 @@ export async function pushOutbox(): Promise<number> {
           if (payload.localId) await messagesRepo.setStatus(payload.localId, 'pending', 'pending');
         }
       }
+      if (item.type === 'close_poll' && item.conversation_id) emitLocalMessagesChanged(item.conversation_id);
     }
   }
   return completed;

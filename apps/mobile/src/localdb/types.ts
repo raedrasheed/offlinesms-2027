@@ -36,6 +36,7 @@ export type OutboxType =
   | 'send_image_message'
   | 'send_voice_message'
   | 'vote_poll'
+  | 'close_poll'
   | 'edit_message'
   | 'delete_message'
   | 'react_message'
@@ -88,6 +89,8 @@ export interface MessageRow {
   preview: string | null;
   /** v7 — sticker reference / poll (JSON), see lib/pollModel. */
   payload_json?: string | null;
+  /** Derived from the durable outbox, not a schema column. */
+  poll_close_status?: OutboxStatus | null;
   created_at: number;
   remote_created_at: number | null;
   updated_at: number;

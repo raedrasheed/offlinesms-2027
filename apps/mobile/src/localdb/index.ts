@@ -22,6 +22,8 @@ import { isOnline, onConnectivityChange } from './sync/networkState';
 import { pullMessageById } from './sync/firebasePull';
 import { createNotificationTargets } from './sync/notificationTarget';
 import type { MessageRow } from './types';
+import { enqueuePollClose } from './pollClose';
+import { emitLocalMessagesChanged } from './messageChanges';
 
 export * from './types';
 export { getDb, getCurrentUid } from './connection';
@@ -183,8 +185,16 @@ export async function queueVotePoll(args: { conversationId: string; messageId: s
     idempotencyKey: idempotencyKey(['vote', deviceId, args.messageId, String(seq)]),
     payload: { conversationId: args.conversationId, messageId: args.messageId, optionIds: args.optionIds, seq },
   });
+  emitLocalMessagesChanged(args.conversationId);
   kick('outbox');
   return { ok: true };
+}
+
+/** Queue closing even offline, and deliver it after reconnect. */
+export async function queueClosePoll(args: { conversationId: string; messageId: string }) {
+  const result = await enqueuePollClose(args);
+  if (result.ok) kick('outbox');
+  return result;
 }
 
 export interface QueueSendImageInput {

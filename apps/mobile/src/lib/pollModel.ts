@@ -11,6 +11,9 @@ export interface PollData {
   options: PollOption[];
   multiple: boolean;
   closed: boolean;
+  /** Local-only: a durable close request is waiting for server confirmation. */
+  closingPending?: boolean;
+  closingFailed?: boolean;
   votes: Record<string, string[]>;
   counts: Record<string, number>;
   voterCount: number;
@@ -115,3 +118,4 @@ export function validatePollDraft(question: string, options: string[]): PollDraf
   if (new Set(opts.map(o => o.toLocaleLowerCase())).size !== opts.length) return 'duplicate';
   return null;
 }
+

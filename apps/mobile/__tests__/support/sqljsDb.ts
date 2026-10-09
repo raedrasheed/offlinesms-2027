@@ -24,9 +24,9 @@ function bindable(params: any[]): any[] {
   return params.map(p => (p === undefined ? null : typeof p === 'boolean' ? (p ? 1 : 0) : p));
 }
 
-export async function createSqlJsDb(opts: { migrate?: boolean } = {}): Promise<CountingDb> {
+export async function createSqlJsDb(opts: { migrate?: boolean; data?: Uint8Array } = {}): Promise<CountingDb> {
   SQL ??= await initSqlJs();
-  const raw = new SQL.Database();
+  const raw = new SQL.Database(opts.data);
   let depth = 0;
   const self: CountingDb = {
     raw,
@@ -83,3 +83,4 @@ export async function createSqlJsDb(opts: { migrate?: boolean } = {}): Promise<C
   }
   return self;
 }
+

@@ -153,6 +153,33 @@ jobs:
           path: apps/mobile-relay/app/build/reports/tests/
           if-no-files-found: ignore
 
+      - name: Configure private relay test APK
+        id: relay-backend
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+        env:
+          MOBILE_GOOGLE_SERVICES_JSON: ${{ secrets.MOBILE_GOOGLE_SERVICES_JSON }}
+          MOBILE_TEST_FIREBASE_PROJECT_ID: ${{ vars.MOBILE_TEST_FIREBASE_PROJECT_ID }}
+          MOBILE_TEST_ALLOW_PRODUCTION_BACKEND: ${{ vars.MOBILE_TEST_ALLOW_PRODUCTION_BACKEND }}
+        run: node scripts/ci/relay-test-backend.mjs
+
+      - name: Build private relay test APK with a stable test key
+        if: steps.relay-backend.outputs.ready == 'true'
+        run: |
+          mkdir -p "$HOME/.android" dist-relay
+          cp apps/mobile/android/app/debug.keystore "$HOME/.android/debug.keystore"
+          gradle -p apps/mobile-relay :app:assembleDebug --no-daemon
+          cp apps/mobile-relay/app/build/outputs/apk/debug/app-debug.apk dist-relay/offlinesms-relay-0.2.0-test.apk
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --print-certs dist-relay/*.apk > dist-relay/signing-cert.txt
+          cp docs/PHONE_TEST_ACTIVATION.md dist-relay/README.md
+
+      - name: Upload private relay test APK
+        if: steps.relay-backend.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: offlinesms-relay-test
+          path: dist-relay/
+          retention-days: 30
+
   # Matched pair of installable TEST builds of the main mobile app
   # (docs/TEST_BUILDS.md): "updated" (this commit) and "baseline" (2a61167 +
   # scripts/test-builds/baseline-instrumentation.patch) — same package
@@ -257,3 +284,4 @@ jobs:
           name: offlinesms-test-${{ matrix.variant }}
           path: dist-apk/
           retention-days: 30
+

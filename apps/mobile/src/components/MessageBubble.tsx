@@ -47,6 +47,7 @@ import {
   queueStarMessage,
   queuePinMessage,
   queueVotePoll,
+  queueClosePoll,
 } from '../localdb';
 
 const EDIT_WINDOW_MS = 15 * 60 * 1000;
@@ -283,7 +284,14 @@ function MessageBubbleImpl({
   function confirmClosePoll() {
     Alert.alert(t('poll.endTitle'), t('poll.endBody'), [
       { text: t('common.cancel'), style: 'cancel' },
-      { text: t('poll.end'), style: 'destructive', onPress: () => { closePoll(context.conversationId, m.id).catch(e => Alert.alert('Poll', e?.message ?? 'try-again')); } },
+      { text: t('poll.end'), style: 'destructive', onPress: () => {
+        const action = context.localFirst
+          ? queueClosePoll({ conversationId: context.conversationId, messageId: m.id }).then(result => {
+            if (!result.ok) throw new Error(result.reason);
+          })
+          : closePoll(context.conversationId, m.id);
+        action.catch(e => Alert.alert(t('poll.endTitle'), e?.message ?? 'try-again'));
+      } },
     ]);
   }
 
@@ -469,6 +477,7 @@ function MessageBubbleImpl({
       />
 
       <EmojiReactionPicker
+        uid={context.myUid}
         visible={emojiPickerOpen}
         onClose={() => setEmojiPickerOpen(false)}
         onSelect={(e) => { setEmojiPickerOpen(false); react(e); }}
@@ -643,3 +652,4 @@ function areBubblePropsEqual(prev: MessageBubbleProps, next: MessageBubbleProps)
 }
 
 export const MessageBubble = memo(MessageBubbleImpl, areBubblePropsEqual);
+

@@ -8,14 +8,14 @@ A test APK works when its two pieces of Firebase configuration point at **one** 
 |---|---|---|---|
 | Sign in (emailed code) | Web config `EXPO_PUBLIC_FIREBASE_*` of that project | `requestEmailOtp` / `verifyEmailOtp` deployed; Resend configured (`RESEND_API_KEY`, `EMAIL_FROM`); email sign-in enabled (`systemSettings/general.emailSignInEnabled`); the functions' service account can mint custom tokens | ✅ in use by the store app |
 | Sync (chats, messages, read state) | Same web config | Rules, indexes and chat callables deployed | ✅ (PR #28 rules and indexes deployed 2026-10-08) |
-| Push notifications (Android) | `google-services.json` of **the same project**, containing an Android app for the **test package** `app.offlinesms.mobile.test`; the device's FCM token is issued for that project | `onMessageCreateNotify` sends through firebase-admin FCM in that project, with `messageId` in the data | ✅ server side. ❌ **The test package is not registered yet.** |
+| Push notifications (Android) | `google-services.json` of **the same project**, containing an Android app for the **test package** `app.offlinesms.mobile.test`; the device's FCM token is issued for that project | `onMessageCreateNotify` sends through firebase-admin FCM in that project, with `messageId` in the data | ✅ test package registered; CI config and production opt-in completed. |
 | Notification tap → that message; sync banner; performance; DB upgrade | Nothing beyond the above (client-only changes) | Nothing new | ✅ |
 | Stickers, polls | Same | **Deploy from this branch:** `sendTextMessage`, `votePoll`, `closePoll`, `deleteMessage`, `onMessageCreate`, `onMessageCreateNotify`. No rules or index change. | ❌ not deployed. Stickers arrive as emoji text and votes fail. |
-| Phone linking / verification SMS | — | — | Disabled, and **stays disabled**. The test app shows "Not available yet". |
+| Phone registration / linking | Existing protected phone flow | Ready relay 0.2.0, deployed purpose env and runtime policy | Owner authorized activation on 2026-10-09; **not activated yet**. See `PHONE_TEST_ACTIVATION.md`. |
 
 ## 2. Technical requirement vs. current CI policy
 
-- **Technical:** the production project already provides everything for sign-in, sync, notifications, tap-to-message, performance and upgrade testing. The only missing piece is the Android app registration for the test package. A **separate project** would need *everything* recreated:
+- **Technical:** the production project already provides everything for sign-in, sync, notifications, tap-to-message, performance and upgrade testing. The test-package registration and CI configuration are now complete. A **separate project** would need *everything* recreated:
   - Blaze billing;
   - all functions, rules, indexes and storage rules;
   - the `PHONE_HASH_PEPPER` secret, which the phone functions bind even while disabled;
@@ -29,9 +29,9 @@ A test APK works when its two pieces of Firebase configuration point at **one** 
 
   Use test accounts that message only each other.
 
-## 3. Exact actions needed from you
+## 3. Backend setup and deployment
 
-**Option A: production backend** (fastest; no server change for items 1–4 of the checklist):
+**Current choice: production backend.** Steps 1–4 below are completed, including explicit production opt-in; they are retained for reproducibility. Both matched APKs passed CI run #448. The feature deployment in step 5 remains pending; the current session could not access Google Cloud/Cloud Shell. See `PHONE_TEST_ACTIVATION.md` for phone activation and the private relay APK.
 1. Firebase console → project `offlinesms-prod-2027` → ⚙ *Project settings* → *General* → *Your apps* → **Add app → Android**:
    - package **`app.offlinesms.mobile.test`**;
    - nickname "OfflineSMS Test";
@@ -44,10 +44,10 @@ A test APK works when its two pieces of Firebase configuration point at **one** 
    - **Variables** from step 2: `MOBILE_TEST_FIREBASE_API_KEY`, `MOBILE_TEST_FIREBASE_AUTH_DOMAIN`, `MOBILE_TEST_FIREBASE_PROJECT_ID`, `MOBILE_TEST_FIREBASE_STORAGE_BUCKET`, `MOBILE_TEST_FIREBASE_APP_ID`, `MOBILE_TEST_FIREBASE_MESSAGING_SENDER_ID`.
    - **Variable** `MOBILE_TEST_ALLOW_PRODUCTION_BACKEND` = `true`. This is the explicit decision described in §2.
 4. *Actions* → *CI* → **Run workflow** on `claude/avatar-visibility-group-chat-r8ahfk`, or push any commit to PR #29. The artifacts `offlinesms-test-updated` and `offlinesms-test-baseline` then contain functional APKs labelled `offlinesms-prod-2027`.
-5. **Only for stickers and polls:** approve and run, from this branch:
+5. **Pending, authorized: stickers and polls.** Run from the exact reviewed commit in an authenticated deployment environment:
    `firebase deploy --project offlinesms-prod-2027 --only functions:sendTextMessage,functions:votePoll,functions:closePoll,functions:deleteMessage,functions:onMessageCreate,functions:onMessageCreateNotify`
    - This touches no phone or SMS function, no rule and no `smsConfig`.
-   - The deploy needs your Firebase credentials. I don't have them.
+   - This session has Firebase console access, but no usable deployment shell or authenticated CLI.
 
 **Option B: separate test project:** the same steps 1–4 in that project, with no production opt-in, after deploying the whole backend there (§2).
 
@@ -87,11 +87,12 @@ Record pass/fail per row, with the APK SHA-256 and the phone models. Phone resul
 | 7 | A creates a **single-choice** poll; A and B vote at the same moment | Both count once; each phone shows "2 people voted"; changing a vote moves it |
 | 8 | A creates a **multiple-choice** poll; B selects 2 options, then removes 1 | A's counts update live |
 | 9 | B votes while **offline**, changes the vote, then goes online | Only the last choice counts |
-| 10 | A ends the poll; B taps an option | Refused; results stay visible |
+| 10 | A goes offline, ends the poll, restarts the app, then reconnects; B taps an option after the close arrives | A shows pending confirmation across restart; closes after reconnect; B cannot vote after server confirmation; results stay visible. A server refusal offers retry |
 | 11 | A opens the **emoji panel** in the composer, searches "heart" and then "قلب", inserts two emoji mid-sentence | Both searches find results; emoji land at the caret; the panel's Recents shows them next time |
-| 12 | B long-presses A's message and reacts with an emoji from a non-default category | A sees the reaction; the push says who reacted |
+| 12 | B long-presses A's message, opens +, searches "قلب" and "heart", and reacts from a non-default category | Full shared emoji catalog and recents; A sees the reaction; the push says who reacted |
 | 13 | The **store app** (2.3.18) on a third phone, in the same group, receives a sticker and a poll | Shows the fallback text ("👋", "📊 question"); no crash; cannot vote |
-| 14 | An **email** account opens Settings → "Add phone number" | Shows "Not available yet" (verification SMS stays suspended); no code is sent |
+| 14 | After phone activation, an **email** account opens Settings → "Add phone number" and completes verification on its test number | Code arrives through the ready relay; number links; cooldown and incorrect-code handling work. Until activation, "Not available yet" is expected |
 | 15 | Performance, same phone and account: §4 with `baseline`, then `updated` installed over it | `updated` cold start and conversation open no slower than `baseline`; chat list and history intact after the upgrade |
 
-Rows 1–5 and 11–15 work against the production backend without any server deploy. Rows 6–10 need §3 step 5.
+Rows 1–5, 11–13 and 15 use the existing backend (row 13 receives the fallback for new content). Rows 6–10 need §3 step 5. Row 14 and new phone registration need `PHONE_TEST_ACTIVATION.md`; do not report them working from a successful APK build alone.
+

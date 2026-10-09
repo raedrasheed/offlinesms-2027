@@ -595,6 +595,8 @@
     "selectOne": "Select one",
     "selectMany": "Select one or more",
     "closed": "Poll ended",
+    "endFailed": "Could not end poll. Try again.",
+    "ending": "Ending poll — waiting for confirmation…",
     "end": "End poll",
     "endTitle": "End this poll?",
     "endBody": "No one will be able to vote after it ends. Results stay visible.",
@@ -613,3 +615,4 @@
     "voters_zero": "No votes yet"
   }
 }
+
