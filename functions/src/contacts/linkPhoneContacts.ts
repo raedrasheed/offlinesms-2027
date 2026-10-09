@@ -15,6 +15,7 @@
 import { onDocumentWritten } from 'firebase-functions/v2/firestore';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { phoneDigits } from '../lib/phone';
+import { publicNameFrom } from '../lib/displayName';
 
 /** Pure: should this user be promoted into the group's real roster? */
 export function shouldPromoteToMember(participantUids: string[] | undefined, uid: string): boolean {
@@ -48,7 +49,7 @@ export const linkPhoneContactsOnUserWrite = onDocumentWritten('users/{uid}/userP
 
   // Non-PII display fields for the promotion snapshot live on the public user doc.
   const userSnap = await db.collection('users').doc(uid).get();
-  const promoDisplayName = (userSnap.get('displayName') as string | undefined) ?? uid;
+  const promoDisplayName = publicNameFrom(userSnap.data(), uid); // null, never the uid
   const promoPhotoURL = (userSnap.get('photoURL') as string | null | undefined) ?? null;
 
   // 1. Flip the owner's private phone contacts that match this number.
