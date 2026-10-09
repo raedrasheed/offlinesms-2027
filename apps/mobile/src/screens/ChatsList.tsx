@@ -62,6 +62,7 @@ export default function ChatsList({ navigation }: any) {
   // below runs unchanged (including as a fallback).
   const local = useLocalChatList(me);
   const useLocal = local.source === 'local';
+  const refreshChats = local.refresh;
 
   // Per-conversation state + peer profile, keyed by conversation id.
   const [states, setStates]   = useState<Record<string, UserState | undefined>>({});
@@ -191,16 +192,18 @@ export default function ChatsList({ navigation }: any) {
 
   useEffect(() => { setUnreadTotal(unreadCounts.all); }, [unreadCounts.all]);
 
+  // Depend on the stable refresh callback, not the result object (which
+  // changes with items/loading). Otherwise every ChatRow loses its memo hit.
   const confirmClearChat = useCallback((cid: string, name: string) => {
     Alert.alert(
       t('chats.clearChatTitle'),
       name ? `${t('chats.clearChatMessage')}\n\n${name}` : t('chats.clearChatMessage'),
       [
         { text: t('common.cancel'), style: 'cancel' },
-        { text: t('chats.clearChat'), style: 'destructive', onPress: () => { void clearChat(cid).then(() => local.refresh?.()); } },
+        { text: t('chats.clearChat'), style: 'destructive', onPress: () => { void clearChat(cid).then(() => refreshChats()); } },
       ],
     );
-  }, [t, local]);
+  }, [t, refreshChats]);
 
   // Stable handlers passed to every ChatRow so the row's memo comparator
   // sees identical references across parent renders.

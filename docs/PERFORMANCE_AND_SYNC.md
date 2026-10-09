@@ -79,6 +79,8 @@ Query plans (from the same run):
 
 **Listener churn (chat list).** The presence and typing subscription key included the **list order**. Every incoming message moved a chat to the top and recreated about 2 Firestore listeners plus a 5-second timer **for every visible chat** (≈100 listeners for 50 chats). The legacy fallback path did the same with `userState` and peer listeners. Both now update by diff (`createKeyedSubscriptions`), so re-ordering starts and stops **0** listeners (unit-tested). Presence updates that change nothing no longer re-render the list.
 
+**Chat-list repaint follow-up.** Two remaining invalidations defeated `ChatRow` memoization in the local-first path: every SQLite refresh recreated every item and its Timestamp wrapper, and the long-press callback depended on the changing `local` result object. A mapper scoped to the signed-in user now preserves unchanged items and no-op list reads; the callback depends only on the stable `refresh` function. Reordered items keep their identities, removed items are evicted, and all displayed/filter fields still invalidate their item. In a 50-chat regression fixture, one incoming message changes **1 item identity instead of 50**. This is an allocation/memoization check, **not a measured device speedup**. The 25 chat-list model tests cover unchanged reads, reordering, removals, user isolation and visible-field updates; three identity regressions fail with the previous `rows.map(mapConversationRow)` behavior.
+
 **Startup.** The first screen no longer waits for the network `users/{uid}` snapshot to decide whether to show profile setup. A per-uid local flag is shown immediately and the live snapshot corrects it.
 
 ## 3. On-device measurement (same device, same network)

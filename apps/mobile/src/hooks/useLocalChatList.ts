@@ -10,7 +10,7 @@ import { coalescing } from '../lib/coalesce';
 import { LOCAL_FIRST_CHAT_LIST_ENABLED } from '../config/features';
 import { openLocalDb, conversationsRepo } from '../localdb';
 import { startChatListFeeder } from '../localdb/sync/chatListFeeder';
-import { mapConversationRow, ChatListItem } from './chatListModel';
+import { createChatListMapper, ChatListItem } from './chatListModel';
 
 export type ChatListSource = 'disabled' | 'local' | 'firestoreFallback';
 
@@ -32,10 +32,11 @@ export function useLocalChatList(uid: string | undefined): LocalChatList {
   // one more pass instead of being lost until the next unrelated change.
   const runner = useMemo(() => {
     if (!enabled) return null;
+    const mapRows = createChatListMapper();
     return coalescing(async () => {
       try {
         const rows = await conversationsRepo.listConversations({ includeArchived: false });
-        setItems(rows.map(mapConversationRow));
+        setItems(mapRows(rows));
         setSource('local');
         setError(null);
       } catch (e: any) {
@@ -45,7 +46,7 @@ export function useLocalChatList(uid: string | undefined): LocalChatList {
         setLoading(false);
       }
     });
-  }, [enabled]);
+  }, [enabled, uid]);
   const refresh = useCallback(async () => { await runner?.(); }, [runner]);
 
   useEffect(() => {
