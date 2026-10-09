@@ -88,3 +88,10 @@ Record pass/fail per row, with the APK SHA-256 and the phone models. Phone resul
 | 8 | A creates a **multiple-choice** poll; B selects 2 options, then removes 1 | A's counts update live |
 | 9 | B votes while **offline**, changes the vote, then goes online | Only the last choice counts |
 | 10 | A ends the poll; B taps an option | Refused; results stay visible |
+| 11 | A opens the **emoji panel** in the composer, searches "heart" and then "قلب", inserts two emoji mid-sentence | Both searches find results; emoji land at the caret; the panel's Recents shows them next time |
+| 12 | B long-presses A's message and reacts with an emoji from a non-default category | A sees the reaction; the push says who reacted |
+| 13 | The **store app** (2.3.18) on a third phone, in the same group, receives a sticker and a poll | Shows the fallback text ("👋", "📊 question"); no crash; cannot vote |
+| 14 | An **email** account opens Settings → "Add phone number" | Shows "Not available yet" (verification SMS stays suspended); no code is sent |
+| 15 | Performance, same phone and account: §4 with `baseline`, then `updated` installed over it | `updated` cold start and conversation open no slower than `baseline`; chat list and history intact after the upgrade |
+
+Rows 1–5 and 11–15 work against the production backend without any server deploy. Rows 6–10 need §3 step 5.

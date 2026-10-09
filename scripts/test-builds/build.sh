@@ -29,8 +29,15 @@ case "$VARIANT" in
     fi
     # Instrumentation must be byte-identical to the updated build's.
     cmp "$SRC/apps/mobile/src/lib/perf.ts" "$REPO/apps/mobile/src/lib/perf.ts"
-    [ -e "$SRC/apps/mobile/node_modules" ] || ln -s "$REPO/apps/mobile/node_modules" "$SRC/apps/mobile/node_modules"
-    [ -e "$SRC/node_modules" ] || ln -s "$REPO/node_modules" "$SRC/node_modules"
+    # Same dependencies as the updated build: the lockfile must be identical.
+    cmp "$SRC/apps/mobile/package-lock.json" "$REPO/apps/mobile/package-lock.json"
+    # Install them inside the baseline checkout. A symlink to this checkout's
+    # node_modules breaks JS bundling: its @offlinesms/design-tokens link then
+    # resolves to THIS checkout's packages/, outside the baseline's Metro
+    # watchFolders ("createBundleReleaseJsAndAssets FAILED").
+    [ -L "$SRC/apps/mobile/node_modules" ] && rm "$SRC/apps/mobile/node_modules"
+    [ -L "$SRC/node_modules" ] && rm "$SRC/node_modules"
+    [ -d "$SRC/apps/mobile/node_modules" ] || npm --prefix "$SRC/apps/mobile" ci --no-audit --no-fund
     [ -f "$REPO/apps/mobile/android/keystore.properties" ] && cp "$REPO/apps/mobile/android/keystore.properties" "$SRC/apps/mobile/android/" || true
     VCODE=900000; SHA=$(git -C "$SRC" rev-parse --short=7 HEAD); VNAME="2.3.18-test-baseline-$SHA" ;;
   updated)
