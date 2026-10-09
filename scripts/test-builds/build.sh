@@ -7,8 +7,9 @@
 # Both: package app.offlinesms.mobile.test ("OfflineSMS Test", installs next to
 # the store app), the same signing key, the same src/lib/perf.ts timing points
 # (EXPO_PUBLIC_PERF_LOG=1), the same backend config, arm64-v8a + x86_64.
-# versionCode baseline 900000 < updated 900001, so "updated" installs OVER
-# "baseline" as an in-place upgrade (real local-DB migration v5 → v7).
+# versionCode baseline 900000 < updated 900000+N (N = commits since the
+# baseline), so "updated" installs OVER "baseline" as an in-place upgrade (real
+# local-DB migration v5 → v7), and a newer updated build over an older one.
 #
 # Backend: the caller exports EXPO_PUBLIC_FIREBASE_* (web config) and
 # MOBILE_GOOGLE_SERVICES_JSON for the same Firebase project, or nothing for a
@@ -57,7 +58,10 @@ case "$VARIANT" in
     [ -f "$REPO/apps/mobile/android/keystore.properties" ] && cp "$REPO/apps/mobile/android/keystore.properties" "$SRC/apps/mobile/android/" || true
     VCODE=900000; SHA=$(git -C "$SRC" rev-parse --short=7 HEAD); VNAME="2.3.18-test-baseline-$SHA" ;;
   updated)
-    SRC="$REPO"; VCODE=900001; SHA=$(git -C "$REPO" rev-parse --short=7 HEAD); VNAME="2.3.18-test-$SHA" ;;
+    # 900000 + commits since the baseline: always above the baseline, and a
+    # later commit installs as an in-place upgrade over an earlier updated build.
+    SRC="$REPO"; VCODE=$((900000 + $(git -C "$REPO" rev-list --count "$BASELINE_COMMIT..HEAD")))
+    SHA=$(git -C "$REPO" rev-parse --short=7 HEAD); VNAME="2.3.18-test-$SHA" ;;
   *) echo "variant must be baseline or updated" >&2; exit 2 ;;
 esac
 

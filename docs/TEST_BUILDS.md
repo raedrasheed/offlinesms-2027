@@ -61,7 +61,7 @@ If your Google Cloud API key has *Application restrictions* set to Android apps,
 | Package / name | `app.offlinesms.mobile.test` / "OfflineSMS Test" | same |
 | Signing | same key: repo debug key, or the secrets `MOBILE_TEST_KEYSTORE_*` | same |
 | Timing | `src/lib/perf.ts`, **byte-identical** (checked by the build), called at the same screen-level points | same |
-| versionCode / name | 900000 / `2.3.18-test-baseline-2a61167` | 900001 / `2.3.18-test-<sha>` |
+| versionCode / name | 900000 / `2.3.18-test-baseline-2a61167` | 900000 + commits since 2a61167 (e.g. 900021) / `2.3.18-test-<sha>` — a newer updated build upgrades in place over an older one (the 9034f31 build is 900001) |
 | Local DB schema | v5 (as production 2.3.18) | v7 |
 
 **Performance:** on one phone, on the same network and account:
