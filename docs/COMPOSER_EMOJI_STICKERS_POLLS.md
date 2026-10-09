@@ -78,3 +78,11 @@ npx serve dist-gallery   # then open /#chat, #emoji, #emoji-search, #stickers, #
 - The gallery renders the **real components** with sample data. It uses no Firebase and no local DB.
 - The language follows the browser (en or ar).
 - `index.js` includes the gallery only when the variable is `1`. The variable is inlined at build time and the dead branch is folded, so app builds never contain it (verified: the gallery bundle contains no app screens).
+
+## 6. Compatibility with an older server
+
+- **Deploy the functions before releasing the app.**
+- If the app is released first:
+  - A sticker or poll sent through the local-first outbox reaches an old `sendTextMessage` as **plain text**: the sticker's emoji, or "📊 question". The old server ignores `kind`, and the outbox sends the fallback text.
+  - On the legacy direct path, the same send is refused with `text-required`.
+  - Votes fail, because `votePoll` doesn't exist on the old server. The queued vote is dead-lettered after its retries, and the next snapshot restores the real tally.

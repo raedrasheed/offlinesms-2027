@@ -13,6 +13,9 @@ const now = () => (typeof performance !== 'undefined' && performance.now ? perfo
 export interface PerfMark { name: string; at: number; data?: Record<string, unknown> }
 
 const MAX = 200;
+// Logged in development, and in test builds made with EXPO_PUBLIC_PERF_LOG=1
+// (on-device measurement: `adb logcat | grep '\[perf\]'`). Off in store builds.
+const LOG = (typeof __DEV__ !== 'undefined' && __DEV__) || process.env.EXPO_PUBLIC_PERF_LOG === '1';
 const marks: PerfMark[] = [];
 const firsts = new Map<string, number>();
 
@@ -21,7 +24,7 @@ export function perfMark(name: string, data?: Record<string, unknown>): number {
   marks.push({ name, at, data });
   if (marks.length > MAX) marks.shift();
   if (!firsts.has(name)) firsts.set(name, at);
-  if (typeof __DEV__ !== 'undefined' && __DEV__) {
+  if (LOG) {
     // eslint-disable-next-line no-console
     console.log(`[perf] ${name} +${at}ms${data ? ' ' + JSON.stringify(data) : ''}`);
   }
