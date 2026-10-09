@@ -5,6 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getAuth } from 'firebase-admin/auth';
 import { FieldValue } from 'firebase-admin/firestore';
+import type { HttpsError } from 'firebase-functions/v2/https';
 import {
   db, resetEmulators, seedPhoneLinkConfig, seedRelayDevice, makeEmailUser, req, expectHttps,
   relayJobs, deliveredCode, sideEffectSnapshot, authUserCount, num, linkReq, CONSENT,
@@ -229,16 +230,156 @@ describe('scenario 5 — guessing, expiry, replay, simultaneous verification', (
     expect((await sideEffectSnapshot(u.uid)).claims).toBe(0);
   });
 
+  // Parallel wrong guesses race on ONE challenge document. Each guess is
+  // evaluated and counted inside the same transaction; when the transaction
+  // can't commit (the emulator — like production — aborts lock-contended
+  // transactions: "10 ABORTED: Transaction lock timeout", and the Admin SDK
+  // gives up after its retries) the caller gets the retryable
+  // `link-interrupted` and that guess was never evaluated. How many of a
+  // 30-way burst abort depends on timing, so the test must not assume every
+  // request was evaluated (it used to, and intermittently saw `pending`).
+  // Instead it checks, deterministically, that NO guess is ever answered
+  // without being counted, then lets the attacker keep retrying until the
+  // challenge locks — exactly at the budget, never beyond it.
   it('parallel guessing cannot exceed the attempt budget', async () => {
+    const MAX = 5;
     const u = await makeEmailUser();
     const r = await request(u.uid, num(81));
     const code = await deliveredCode(r.challengeId);
     const guesses = Array.from({ length: 30 }, (_, i) => String(i).padStart(6, '0')).filter(g => g !== code);
-    await Promise.allSettled(guesses.map(g => verify(u.uid, r.challengeId, g)));
+
+    type Outcome = 'invalid' | 'burned' | 'refused' | 'interrupted';
+    const classify = (x: PromiseSettledResult<unknown>): Outcome => {
+      // A wrong code can never succeed.
+      expect(x.status, 'a wrong guess was accepted').toBe('rejected');
+      const e = (x as PromiseRejectedResult).reason as HttpsError;
+      const k = `${e.code}/${e.message}`;
+      if (k === 'permission-denied/code-invalid') return 'invalid';          // evaluated + counted
+      if (k === 'resource-exhausted/too-many-attempts') return 'burned';     // evaluated + counted (the lock) or refused at budget
+      if (k === 'not-found/challenge-not-found') return 'refused';           // challenge already locked
+      if (k === 'unavailable/link-interrupted') return 'interrupted';        // transaction aborted: not evaluated
+      throw new Error(`unexpected outcome ${k}`);
+    };
+    const attemptsNow = async () => ((await db().collection('phoneLinkChallenges').doc(u.uid).get()).get('attempts') as number) ?? 0;
+
+    // 1. The parallel burst.
+    const burst = (await Promise.allSettled(guesses.map(g => verify(u.uid, r.challengeId, g)))).map(classify);
+    const n = (o: Outcome, list = burst) => list.filter(x => x === o).length;
+    const afterBurst = await attemptsNow();
+    expect(afterBurst).toBeLessThanOrEqual(MAX);
+    // Every "code-invalid" answer corresponds to a committed attempt, and the
+    // counter never moved for a guess that wasn't answered as evaluated.
+    expect(n('invalid')).toBe(Math.min(afterBurst, MAX - 1));
+    expect(afterBurst - n('invalid')).toBeLessThanOrEqual(n('burned'));
+
+    // 2. The attacker retries every interrupted guess (one at a time, so each
+    //    is evaluated) until the challenge refuses everything.
+    const retried: Outcome[] = [];
+    for (const [i, g] of guesses.entries()) {
+      if (burst[i] !== 'interrupted') continue;
+      const o = classify((await Promise.allSettled([verify(u.uid, r.challengeId, g)]))[0]);
+      expect(o, 'a sequential retry was interrupted').not.toBe('interrupted');
+      retried.push(o);
+    }
+
+    // 3. Exactly the budget was spent across burst + retries — never more.
     const ch = await db().collection('phoneLinkChallenges').doc(u.uid).get();
-    expect(ch.get('attempts')).toBeLessThanOrEqual(5);
+    expect(ch.get('attempts')).toBe(MAX);
     expect(ch.get('status')).toBe('locked');
+    expect(n('invalid') + n('invalid', retried)).toBe(MAX - 1);
+    // ...and even the right code is refused now.
     await expectHttps(verify(u.uid, r.challengeId, code), 'not-found', 'challenge-not-found');
+  });
+
+  // Deterministic: the verify transaction is made to fail exactly as an
+  // exhausted lock-contention retry does ("10 ABORTED: Transaction lock
+  // timeout"), at two points — before the guess is evaluated, and AFTER it was
+  // evaluated but before commit (the transaction body ran, then the commit was
+  // aborted). Both a wrong and the CORRECT code are tried at each point. The
+  // caller must get the same retryable answer either way (no oracle), and
+  // nothing may persist: no attempt counted, no account failure, no claim, no
+  // op. The code then still works.
+  describe('interrupted verify (injected transaction abort)', () => {
+    const aborted = () => Object.assign(new Error('10 ABORTED: Transaction lock timeout.'), { code: 10 });
+    type Point = 'before-evaluation' | 'after-evaluation';
+    function injectAbort(point: Point) {
+      const fs = db();
+      const real = fs.runTransaction.bind(fs);
+      return vi.spyOn(fs, 'runTransaction').mockImplementationOnce((async (fn: any, opts?: any) => {
+        if (point === 'before-evaluation') throw aborted();
+        // Run the real transaction body (the guess IS compared), then abort the
+        // commit: throwing from the body rolls the transaction back.
+        let ran = false;
+        await real(async (tx: any) => { await fn(tx); ran = true; throw aborted(); }, opts).catch(e => { if (!ran) throw e; });
+        throw aborted();
+      }) as any);
+    }
+    async function snapshot(uid: string) {
+      const [ch, acct, op] = await Promise.all([
+        db().collection('phoneLinkChallenges').doc(uid).get(),
+        db().collection('smsRateLimits').doc(`acct_${uid}`).get(),
+        db().collection('phoneLinkOps').doc(uid).get(),
+      ]);
+      return {
+        attempts: ch.get('attempts') ?? 0, status: ch.get('status'),
+        acct: JSON.stringify(acct.data() ?? null), op: op.exists,
+        claims: (await db().collection('phoneClaims').get()).size,
+      };
+    }
+
+    for (const point of ['before-evaluation', 'after-evaluation'] as const) {
+      it(`${point}: same answer for a wrong and the correct code, and nothing persists`, async () => {
+        const u = await makeEmailUser();
+        const r = await request(u.uid, num(point === 'before-evaluation' ? 84 : 85));
+        const code = await deliveredCode(r.challengeId);
+        const before = await snapshot(u.uid);
+
+        const answers: string[] = [];
+        for (const guess of [wrong(code), code]) {
+          const spy = injectAbort(point);
+          const e = await expectHttps(verify(u.uid, r.challengeId, guess), 'unavailable', 'link-interrupted');
+          answers.push(`${e.code}/${e.message}/${JSON.stringify(e.details ?? null)}`);
+          expect(spy).toHaveBeenCalled();
+          spy.mockRestore();
+          expect(await snapshot(u.uid)).toEqual(before);
+        }
+        // Indistinguishable: the correct code is not revealed by the abort path.
+        expect(answers[0]).toBe(answers[1]);
+
+        // Without interference the budget is intact and the code still links.
+        await expectHttps(verify(u.uid, r.challengeId, wrong(code)), 'permission-denied', 'code-invalid');
+        expect((await snapshot(u.uid)).attempts).toBe(1);
+        await expect(verify(u.uid, r.challengeId, code)).resolves.toMatchObject({ linked: true });
+      });
+    }
+  });
+
+  it('contention stress: a 100-way parallel burst never exceeds the budget', async () => {
+    // A STRESS test, not a test of any particular outcome: how many of the 100
+    // concurrent transactions the emulator aborts varies with timing (usually
+    // most of them). Whatever the mix, every answer must be one of the four
+    // legitimate outcomes, the committed counter must equal the guesses
+    // answered as evaluated, and the budget can never be exceeded. The abort
+    // path itself is pinned deterministically by the injected tests above.
+    const u = await makeEmailUser();
+    const r = await request(u.uid, num(83));
+    const code = await deliveredCode(r.challengeId);
+    const burst = Array.from({ length: 100 }, (_, i) => String(100 + i).padStart(6, '0')).filter(g => g !== code);
+    const keys = (await Promise.allSettled(burst.map(g => verify(u.uid, r.challengeId, g))))
+      .map(x => (x.status === 'fulfilled' ? 'ok' : `${(x.reason as HttpsError).code}/${(x.reason as HttpsError).message}`));
+    const count = (k: string) => keys.filter(x => x === k).length;
+    for (const k of keys) {
+      expect(['permission-denied/code-invalid', 'resource-exhausted/too-many-attempts',
+        'not-found/challenge-not-found', 'unavailable/link-interrupted']).toContain(k);
+    }
+    const ch = await db().collection('phoneLinkChallenges').doc(u.uid).get();
+    const attempts = (ch.get('attempts') as number) ?? 0;
+    expect(attempts).toBeLessThanOrEqual(5);
+    expect(count('permission-denied/code-invalid')).toBe(Math.min(attempts, 4));
+    expect(ch.get('status')).toBe(attempts === 5 ? 'locked' : 'pending');
+    // Unspent budget stays usable by the owner; a spent one refuses even the right code.
+    if (attempts === 5) await expectHttps(verify(u.uid, r.challengeId, code), 'not-found', 'challenge-not-found');
+    else await expect(verify(u.uid, r.challengeId, code)).resolves.toMatchObject({ linked: true });
   });
 
   it('account-wide wrong-code cap spans challenges', async () => {

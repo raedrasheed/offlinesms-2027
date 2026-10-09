@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { signOut, deleteMyAccount } from '../lib/auth';
 import { getPhoneLinkStatus, type PhoneLinkStatus } from '../lib/phoneLink';
+import { phoneLinkRow } from '../lib/phoneLink.helpers';
 import { auth } from '../lib/firebase';
 import {
   subscribeMe,
@@ -97,8 +98,9 @@ export default function Settings({ navigation }: any) {
   const [busy, setBusy]                 = useState(false);
   const [profile, setProfile]           = useState<{ displayName?: string; username?: string; phoneNumber?: string | null; photoURL?: string | null }>({});
   const [localStats, setLocalStats]     = useState<{ chats: number; messages: number } | null>(null);
-  // "Phone number" row: shown only when the server says phone linking is
-  // available (it is OFF by default). Refreshed whenever Settings regains focus.
+  // "Phone number" row (see phoneLinkRow): offered to every email account
+  // without a number; reads "Not available yet" while the server has linking
+  // switched off. Refreshed whenever Settings regains focus.
   const [phoneLink, setPhoneLink]       = useState<PhoneLinkStatus | null>(null);
   useEffect(() => {
     if (!me) return;
@@ -182,6 +184,7 @@ export default function Settings({ navigation }: any) {
   const s = buildStyles(colors, isRTL);
 
   const phone = profile.phoneNumber || auth.currentUser?.phoneNumber || '';
+  const phoneRow = phoneLinkRow(phoneLink, { hasEmail: !!auth.currentUser?.email, phone: phoneLink?.available ? null : phone });
   const handle = profile.username ? `@${profile.username}` : '';
   const headerSub = [phone, handle].filter(Boolean).join(' • ') || t('settings.editProfileHint');
 
@@ -271,11 +274,12 @@ export default function Settings({ navigation }: any) {
       {/* Account & security */}
       <View style={s.card}>
         {navRow({ icon: 'person-add', color: CHIP.findFriends, label: t('settings.findFriends'), onPress: () => navigation.navigate('FindFriends'), first: true })}
-        {phoneLink?.available ? navRow({
+        {phoneRow !== 'hidden' ? navRow({
           icon: 'call', color: CHIP.phone, label: t('phoneLink.settingsRow'),
-          sub: phoneLink.pendingRecovery ? t('phoneLink.settingsRowRecover')
-            : phoneLink.linked ? t('phoneLink.settingsRowLinked', { phone: phoneLink.maskedPhone ?? '' })
-              : t('phoneLink.settingsRowAdd'),
+          sub: phoneRow === 'recover' ? t('phoneLink.settingsRowRecover')
+            : phoneRow === 'linked' && phoneLink?.available ? t('phoneLink.settingsRowLinked', { phone: phoneLink.maskedPhone ?? '' })
+              : phoneRow === 'unavailable' ? t('phoneLink.settingsRowUnavailable')
+                : t('phoneLink.settingsRowAdd'),
           onPress: () => navigation.navigate('LinkPhone'),
         }) : null}
         {navRow({ icon: 'key', color: CHIP.securityPin, label: t('settings.securityPin'), onPress: () => navigation.navigate('CreatePin') })}

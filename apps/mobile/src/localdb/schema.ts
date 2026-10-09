@@ -3,7 +3,7 @@
 // Pure strings (no native import) so migrations.ts can apply them and tests can
 // assert on them. Booleans are stored as INTEGER 0/1; timestamps as INTEGER ms.
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 7;
 
 // Phase 22C — columns added to `messages` in migration v2 (ALTER, applied on
 // top of the v1 CREATE so existing installs upgrade cleanly).
@@ -214,6 +214,24 @@ export const MESSAGES_V5_COLUMNS = [
   `ALTER TABLE messages ADD COLUMN reply_to_sender_name TEXT;`,
   `ALTER TABLE messages ADD COLUMN reply_to_type TEXT;`,
   `ALTER TABLE messages ADD COLUMN mentions_json TEXT;`,
+];
+
+// v6 — read-path indexes (performance). The conversation screen orders by the
+// canonical time expression below and the chat list by last_message_at; without
+// matching indexes SQLite sorted every row of the conversation (or the whole
+// chat list) in a temporary B-tree on each open and each refresh. The ORDER BY
+// in messagesRepo.listMessages / conversationsRepo.listConversations must use
+// exactly these expressions for SQLite to pick the indexes.
+export const MESSAGE_ORDER_EXPR = 'COALESCE(remote_created_at, created_at)';
+export const READ_PATH_INDEXES_V6 = [
+  `CREATE INDEX IF NOT EXISTS idx_messages_conv_visible_order ON messages(conversation_id, deleted_for_me, ${MESSAGE_ORDER_EXPR});`,
+  `CREATE INDEX IF NOT EXISTS idx_conversations_archived_last ON conversations(archived, last_message_at);`,
+];
+
+// v7 — typed message payloads (sticker reference / poll definition + votes),
+// stored as JSON so new message kinds need no further columns.
+export const MESSAGES_V7_COLUMNS = [
+  `ALTER TABLE messages ADD COLUMN payload_json TEXT;`,
 ];
 
 export const ALL_TABLE_STATEMENTS = [

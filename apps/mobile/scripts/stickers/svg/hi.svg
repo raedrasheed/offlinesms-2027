@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+<defs>
+  <filter id="cut" x="-20%" y="-20%" width="140%" height="140%">
+    <feMorphology in="SourceAlpha" operator="dilate" radius="14" result="grown"/>
+    <feFlood flood-color="#ffffff"/>
+    <feComposite in2="grown" operator="in" result="outline"/>
+    <feGaussianBlur in="grown" stdDeviation="6" result="blur"/>
+    <feOffset in="blur" dy="6" result="sh"/>
+    <feFlood flood-color="#0b2233" flood-opacity="0.28"/>
+    <feComposite in2="sh" operator="in" result="shadow"/>
+    <feMerge><feMergeNode in="shadow"/><feMergeNode in="outline"/><feMergeNode in="SourceGraphic"/></feMerge>
+  </filter>
+  <radialGradient id="shine" cx="35%" cy="30%" r="70%">
+    <stop offset="0" stop-color="#ffffff" stop-opacity="0.35"/>
+    <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+  </radialGradient>
+</defs><g filter="url(#cut)">
+  <path d="M256 70c-106 0-186 72-186 166 0 52 24 97 64 128l-22 62c-3 9 6 17 15 12l74-38c17 4 36 6 55 6 106 0 186-72 186-170S362 70 256 70z" fill="#2E9BD6"/>
+  <path d="M256 70c-106 0-186 72-186 166 0 52 24 97 64 128l-22 62c-3 9 6 17 15 12l74-38c17 4 36 6 55 6 106 0 186-72 186-170S362 70 256 70z" fill="url(#shine)"/><ellipse cx="200" cy="215" rx="17" ry="24" fill="#16324A"/><ellipse cx="312" cy="215" rx="17" ry="24" fill="#16324A"/><circle cx="206" cy="205" r="6" fill="#fff"/><circle cx="318" cy="205" r="6" fill="#fff"/><ellipse cx="170" cy="262" rx="22" ry="13" fill="#FF8FA3" opacity="0.8"/><ellipse cx="342" cy="262" rx="22" ry="13" fill="#FF8FA3" opacity="0.8"/><path d="M222 268q34 34 68 0" stroke="#16324A" stroke-width="12" fill="none" stroke-linecap="round"/><g transform="translate(392 210) rotate(18)"><rect x="-26" y="-34" width="52" height="64" rx="26" fill="#1F7BA8"/><rect x="-24" y="-60" width="14" height="34" rx="7" fill="#1F7BA8"/><rect x="-8" y="-66" width="14" height="40" rx="7" fill="#1F7BA8"/><rect x="8" y="-62" width="14" height="36" rx="7" fill="#1F7BA8"/></g></g></svg>

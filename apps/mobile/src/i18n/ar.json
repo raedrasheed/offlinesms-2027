@@ -196,7 +196,10 @@
     "info": "معلومات المجموعة",
     "create": "إنشاء",
     "memberCount_one": "{{count}} عضو",
-    "memberCount_other": "{{count}} أعضاء"
+    "memberCount_other": "{{count}} عضو",
+    "memberCount_two": "عضوان",
+    "memberCount_few": "{{count}} أعضاء",
+    "memberCount_many": "{{count}} عضوًا"
   },
   "groupErrors": {
     "locked": "المجموعة مقفلة. يمكن للمشرفين فقط الإرسال.",
@@ -518,7 +521,11 @@
       "tooManyAttempts": "رموز خاطئة كثيرة. اطلب رمزًا جديدًا لاحقًا.",
       "network": "مشكلة في الاتصال. تحقّق من الشبكة وأعد المحاولة.",
       "generic": "حدث خطأ ما. يرجى المحاولة مجددًا."
-    }
+    },
+    "settingsRowUnavailable": "غير متاح بعد",
+    "unavailableNote": "يمكنك متابعة استخدام حسابك ببريدك الإلكتروني. عندما تصبح إضافة الرقم متاحة ستجدها هنا.",
+    "codeExpiresIn": "تنتهي صلاحية الرمز خلال {{time}}",
+    "changeNumber": "استخدام رقم آخر"
   },
   "phoneAuth": {
     "errors": {
@@ -540,5 +547,82 @@
       "network": "مشكلة في الاتصال. تحقّق من الشبكة وأعد المحاولة.",
       "generic": "حدث خطأ ما. يرجى المحاولة مجددًا."
     }
+  },
+  "sync": {
+    "loading-message": "جارٍ تحميل هذه الرسالة…",
+    "waiting-network": "بانتظار الاتصال — ستظهر الرسالة عند عودة الاتصال",
+    "missing": "هذه الرسالة لم تعد متاحة",
+    "error": "تعذّر تحميل هذه الرسالة",
+    "offline": "غير متصل — يتم عرض الرسائل المحفوظة",
+    "connecting": "جارٍ الاتصال…"
+  },
+  "composer": {
+    "emoji": "الإيموجي",
+    "stickers": "الملصقات",
+    "keyboard": "إظهار لوحة المفاتيح",
+    "emojiAndStickers": "الإيموجي والملصقات"
+  },
+  "emoji": {
+    "search": "ابحث عن إيموجي",
+    "noResults": "لا توجد نتائج",
+    "cat": {
+      "recent": "المستخدمة مؤخرًا",
+      "animated": "متحركة",
+      "smileys": "الوجوه والمشاعر",
+      "people": "الأشخاص والجسم",
+      "nature": "الحيوانات والطبيعة",
+      "food": "الطعام والشراب",
+      "travel": "السفر والأماكن",
+      "activities": "الأنشطة",
+      "objects": "الأشياء",
+      "symbols": "الرموز",
+      "flags": "الأعلام",
+      "results": "النتائج"
+    }
+  },
+  "stickers": {
+    "recent": "المستخدمة مؤخرًا",
+    "pack": {
+      "simsim": "سمسم"
+    }
+  },
+  "poll": {
+    "create": "استطلاع جديد",
+    "question": "السؤال",
+    "questionPlaceholder": "اكتب سؤالًا",
+    "options": "الخيارات",
+    "optionPlaceholder": "الخيار {{n}}",
+    "removeOption": "حذف الخيار",
+    "optionsHint": "خياران على الأقل، وحتى {{max}} خيارًا.",
+    "allowMultiple": "السماح بأكثر من إجابة",
+    "selectOne": "اختر إجابة واحدة",
+    "selectMany": "اختر إجابة أو أكثر",
+    "closed": "انتهى الاستطلاع",
+    "endFailed": "تعذّر إنهاء الاستطلاع. حاول مرة أخرى.",
+    "waitingToSend": "لم يُرسل الاستطلاع بعد",
+    "ending": "جارٍ إنهاء الاستطلاع — بانتظار التأكيد…",
+    "end": "إنهاء الاستطلاع",
+    "endTitle": "إنهاء هذا الاستطلاع؟",
+    "endBody": "لن يتمكن أحد من التصويت بعد إنهائه، وستبقى النتائج ظاهرة.",
+    "votes_one": "صوت واحد",
+    "votes_other": "{{count}} صوت",
+    "voters_one": "صوّت شخص واحد",
+    "voters_other": "صوّت {{count}} شخص",
+    "errors": {
+      "question": "اكتب سؤالًا.",
+      "tooFew": "أضف خيارين على الأقل.",
+      "tooMany": "استخدم 12 خيارًا كحد أقصى.",
+      "duplicate": "يجب أن يكون كل خيار مختلفًا.",
+      "tooLong": "السؤال أو أحد الخيارات طويل جدًا."
+    },
+    "votes_zero": "لا أصوات",
+    "votes_two": "صوتان",
+    "votes_few": "{{count}} أصوات",
+    "votes_many": "{{count}} صوتًا",
+    "voters_zero": "لم يصوّت أحد بعد",
+    "voters_two": "صوّت شخصان",
+    "voters_few": "صوّت {{count}} أشخاص",
+    "voters_many": "صوّت {{count}} شخصًا"
   }
 }
+

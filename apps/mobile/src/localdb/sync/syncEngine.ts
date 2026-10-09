@@ -9,6 +9,7 @@ import { pullConversations, pullMessages, pullMembers, pullMessagesBefore } from
 import { pushOutboxItem } from './firebasePush';
 import { isOnline } from './networkState';
 import { isPermanent, errorCode, nextAttemptAt } from './retryPolicy';
+import { emitLocalMessagesChanged } from '../messageChanges';
 import { LOCAL_MESSAGE_RETENTION_LIMIT } from '../../config/features';
 
 let running = false;   // guards the heavy pull + history backfill
@@ -129,7 +130,7 @@ export async function pushOutbox(): Promise<number> {
       console.log(`[outbox] push FAILED ${item.type} ${item.id}: ${code} — ${message} (permanent=${isPermanent(err)})`);
       if (isPermanent(err)) {
         // Permanent: dead-letter immediately and surface on the message.
-        await outboxRepo.markFailed(item.id, code, message, Date.now() + 1e12);
+        await outboxRepo.markFailed(item.id, code, message, Date.now() + 1e12, item.type === 'close_poll');
         if (item.type === 'send_message') {
           const payload = JSON.parse(item.payload_json || '{}');
           if (payload.localId) await messagesRepo.setError(payload.localId, code, message);
@@ -142,7 +143,9 @@ export async function pushOutbox(): Promise<number> {
           if (payload.localId) await messagesRepo.setStatus(payload.localId, 'pending', 'pending');
         }
       }
+      if (item.type === 'close_poll' && item.conversation_id) emitLocalMessagesChanged(item.conversation_id);
     }
+    if (item.type === 'send_message' && item.conversation_id) emitLocalMessagesChanged(item.conversation_id);
   }
   return completed;
 }
@@ -183,7 +186,30 @@ export async function flushOutbox(): Promise<void> {
   finally { pushing = false; }
 }
 
+// Targeted catch-up for ONE conversation (opening a chat, a notification tap).
+// Runs immediately under its own per-conversation guard — never skipped because
+// a boot/foreground pull or a long history backfill holds the `running` lock
+// (that skip is what left a freshly-notified message missing on open).
+const targeted = new Map<string, Promise<void>>();
+export function pullConversationNow(conversationId: string): Promise<void> {
+  const inFlight = targeted.get(conversationId);
+  if (inFlight) return inFlight;
+  const p = (async () => {
+    if (!isOnline()) return;
+    try { await pullMessages(conversationId); } catch { /* the feeder still delivers */ }
+    try { await pullMembers(conversationId); } catch { /* best-effort */ }
+  })().finally(() => { targeted.delete(conversationId); });
+  targeted.set(conversationId, p);
+  return p;
+}
+
 export async function syncNow(reason: SyncReason, activeConversationId?: string): Promise<void> {
+  if (reason === 'active-change' && activeConversationId) {
+    // Opening a chat: don't make its catch-up wait behind an outbox drain.
+    void flushOutbox();
+    await pullConversationNow(activeConversationId);
+    return;
+  }
   // Always flush the outbox first, regardless of any in-flight pull/backfill.
   await flushOutbox();
   if (!PULL_REASONS.has(reason)) return;

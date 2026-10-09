@@ -6,6 +6,7 @@
 // yet carry reactions, receipt aggregate counts, senderPhotoURL, or the
 // replyTo sender snapshot, so those map to undefined/null in local mode.
 
+import { parseSticker, parsePoll } from '../lib/pollModel';
 import type { MessageRow } from '../localdb/types';
 import type { Message } from '../lib/conversations';
 import { tsLike } from './chatListModel';
@@ -73,6 +74,7 @@ function mapMedia(row: MessageRow): Message['media'] {
 
 export function mapMessageRow(row: MessageRow): Message {
   const at = tsLike(effectiveTimeMs(row));
+  const poll = row.type === 'poll' ? parsePoll(row.payload_json) : null;
   return {
     // Prefer the canonical remote id (needed for server-side actions); fall
     // back to the local id for still-pending messages.
@@ -107,12 +109,59 @@ export function mapMessageRow(row: MessageRow): Message {
     playedCount: row.played_count ?? 0,
     errorCode: row.error_code ?? null,
     errorMessage: row.error_message ?? null,
+    sticker: row.type === 'sticker' ? parseSticker(row.payload_json) : null,
+    poll: poll && row.poll_close_status ? { ...poll,
+      closingPending: !poll.closed && (row.poll_close_status === 'pending' || row.poll_close_status === 'processing'),
+      closingFailed: !poll.closed && (row.poll_close_status === 'dead' || row.poll_close_status === 'failed'),
+    } : poll,
   } as Message;
 }
 
 /** Map + sort ascending by effective time (the order the chat list renders). */
 export function mapAndOrderMessages(rows: MessageRow[]): Message[] {
-  return [...rows]
-    .sort((a, b) => effectiveTimeMs(a) - effectiveTimeMs(b))
-    .map(mapMessageRow);
+  return [...rows].sort(compareRows).map(mapMessageRow);
+}
+
+/** Deterministic chronological order: canonical time, then local creation
+ *  time, then id — equal timestamps never swap places between refreshes. */
+export function compareRows(a: MessageRow, b: MessageRow): number {
+  return effectiveTimeMs(a) - effectiveTimeMs(b)
+    || (a.created_at ?? 0) - (b.created_at ?? 0)
+    || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+}
+
+/** Every column the rendered message depends on. Two rows with the same key
+ *  render identically, so the previous `Message` object can be reused. */
+function rowKey(r: MessageRow): string {
+  return [
+    r.updated_at, r.remote_id, r.status, r.sync_status, r.text, r.caption, r.type,
+    r.deleted_for_everyone, r.edited_at, r.reactions_json, r.mentions_json,
+    r.delivered_count, r.read_count, r.viewed_count, r.played_count,
+    r.media_upload_status, r.media_upload_progress, r.media_download_url, r.media_thumb_url, r.media_local_uri,
+    r.remote_created_at, r.error_code, r.sender_display_name, r.reply_to_message_id, r.reply_to_preview,
+    r.payload_json, r.poll_close_status,
+  ].join('\u0001');
+}
+
+/**
+ * Structural-sharing mapper for one open conversation. Re-mapping every row on
+ * every refresh produced brand-new `reactions` / `media` / `replyTo` objects,
+ * which MessageBubble's memo compares by reference — so one incoming message
+ * re-rendered every bubble that had reactions, media or a reply. Unchanged rows
+ * now keep the identical `Message` object; only new or changed rows re-render.
+ */
+export function createMessageMapper() {
+  let cache = new Map<string, { key: string; msg: Message }>();
+  return function mapRows(rows: MessageRow[]): Message[] {
+    const next = new Map<string, { key: string; msg: Message }>();
+    const out = [...rows].sort(compareRows).map(r => {
+      const k = rowKey(r);
+      const hit = cache.get(r.id);
+      const entry = hit && hit.key === k ? hit : { key: k, msg: mapMessageRow(r) };
+      next.set(r.id, entry);
+      return entry.msg;
+    });
+    cache = next;
+    return out;
+  };
 }

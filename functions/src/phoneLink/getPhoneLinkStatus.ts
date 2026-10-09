@@ -1,7 +1,8 @@
 // Callable: getPhoneLinkStatus — what the Settings screen needs to decide
 // whether to show "Add phone number", and in which state. Authenticated, read-
 // only, no SMS. While the feature is off (the production default) it returns
-// only `{ available: false }`, so the app hides the entry point entirely.
+// only `{ available: false }`: the app then shows the entry as "Not available
+// yet" (no other detail is disclosed) and never starts the flow.
 
 import { onCall, HttpsError, type CallableRequest } from 'firebase-functions/v2/https';
 import { getFirestore } from 'firebase-admin/firestore';

@@ -62,6 +62,42 @@ export function mapConversationRow(row: ConversationRow): ChatListItem {
 
 export type ChatFilter = 'all' | 'unread' | 'favorites' | 'groups';
 
+// Only fields consumed by mapConversationRow. Sync bookkeeping must not
+// invalidate the list, but names, avatars, filters and presence keys must.
+const CHAT_ITEM_FIELDS = [
+  'type', 'title', 'avatar_url', 'member_count', 'participant_key',
+  'last_message_preview', 'last_message_at', 'unread_count',
+  'pinned', 'muted', 'favorite', 'archived',
+] as const satisfies readonly (keyof ConversationRow)[];
+
+/**
+ * Preserve unchanged items (including Timestamp wrappers) across SQLite reads.
+ * ChatRow's memo comparator can then skip them. Reuse the array too when its
+ * order and contents are unchanged, avoiding a parent render on no-op feeds.
+ * Create one mapper per signed-in user; removed items are evicted each pass.
+ */
+export function createChatListMapper(): (rows: ConversationRow[]) => ChatListItem[] {
+  type Cached = { row: ConversationRow; item: ChatListItem };
+  let previous = new Map<string, Cached>();
+  let previousItems: ChatListItem[] = [];
+  return rows => {
+    const next = new Map<string, Cached>();
+    let sameList = rows.length === previousItems.length;
+    const items = rows.map((row, index) => {
+      const cached = previous.get(row.id);
+      const entry = cached && CHAT_ITEM_FIELDS.every(key => cached.row[key] === row[key])
+        ? cached
+        : { row: { ...row }, item: mapConversationRow(row) };
+      next.set(row.id, entry);
+      if (entry.item !== previousItems[index]) sameList = false;
+      return entry.item;
+    });
+    previous = next;
+    if (!sameList) previousItems = items;
+    return previousItems;
+  };
+}
+
 /** Minimal structural shape so the same filter works on local + Firestore rows. */
 export interface FilterableConv {
   peerName?: string | null;

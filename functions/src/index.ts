@@ -40,6 +40,7 @@ export { updateGroupInfo } from './chats/updateGroupInfo';
 export { editMessage }     from './chats/editMessage';
 export { deleteMessage }   from './chats/deleteMessage';
 export { reactToMessage }  from './chats/reactToMessage';
+export { votePoll, closePoll } from './chats/votePoll';
 export { starMessage }     from './chats/starMessage';
 export { pinMessage }      from './chats/pinMessage';
 export { forwardMessages } from './chats/forwardMessages';

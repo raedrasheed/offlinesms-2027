@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   mapConversationRow,
+  createChatListMapper,
   filterChatList,
   tsLike,
   type ChatListItem,
@@ -48,6 +49,76 @@ describe('mapConversationRow', () => {
   it('falls back to a placeholder name', () => {
     expect(mapConversationRow(row({ type: 'group', title: null })).peerName).toBe('Group');
     expect(mapConversationRow(row({ type: 'direct', title: null })).peerName).toBe('Conversation');
+  });
+});
+
+describe('chat-list identity across database refreshes', () => {
+  const chats = () => Array.from({ length: 50 }, (_, i) => row({
+    id: `c${i}`, title: `Chat ${i}`, last_message_at: 1700000000000 + i,
+  }));
+
+  it('one incoming message changes one item, keeping the other 49 rows and timestamps stable', () => {
+    const map = createChatListMapper();
+    const rows = chats();
+    const before = map(rows);
+    const after = map(rows.map((r, i) => i === 17
+      ? { ...r, last_message_preview: 'New message', last_message_at: 1700000001000, unread_count: 1 }
+      : { ...r }));
+    expect(after.filter((item, i) => item !== before[i])).toHaveLength(1);
+    expect(after[0].lastMessageAt).toBe(before[0].lastMessageAt);
+    expect(after[17].lastMessageText).toBe('New message');
+    expect(after[17].state.unreadCount).toBe(1);
+  });
+
+  it('does not invalidate the list for an identical read or bookkeeping-only changes', () => {
+    const map = createChatListMapper();
+    const rows = chats();
+    const before = map(rows);
+    expect(map(rows.map(r => ({ ...r })))).toBe(before);
+    expect(map(rows.map(r => ({ ...r, local_updated_at: 42, sync_status: 'dirty' })))).toBe(before);
+  });
+
+  it('preserves rows when reordered and evicts removed rows', () => {
+    const map = createChatListMapper();
+    const rows = chats().slice(0, 3);
+    const before = map(rows);
+    const reordered = map([rows[2], rows[0], rows[1]].map(r => ({ ...r })));
+    expect(reordered).not.toBe(before);
+    expect(reordered[0]).toBe(before[2]);
+    expect(reordered[1]).toBe(before[0]);
+    map([rows[0], rows[2]]);
+    const restored = map(rows);
+    expect(restored[0]).toBe(before[0]);
+    expect(restored[1]).not.toBe(before[1]);
+    expect(map([])).toEqual([]);
+  });
+
+  it.each<Partial<ConversationRow>>([
+    { title: 'Renamed' }, { avatar_url: 'https://example.test/avatar.png' },
+    { type: 'group' }, { member_count: 12 }, { participant_key: 'a_b' },
+    { last_message_preview: 'Edited' }, { last_message_at: 123 },
+    { unread_count: 3 }, { pinned: 1 }, { muted: 1 }, { favorite: 1 }, { archived: 1 },
+  ])('keeps visible and filtering changes fresh: %j', change => {
+    const map = createChatListMapper();
+    const original = row({});
+    const before = map([original]);
+    const changed = { ...original, ...change };
+    const after = map([changed]);
+    expect(after[0]).not.toBe(before[0]);
+    // Compare values without Timestamp wrapper function identities.
+    expect(JSON.stringify(after[0])).toBe(JSON.stringify(mapConversationRow(changed)));
+    expect(after[0].lastMessageAt?.toMillis()).toBe(changed.last_message_at ?? undefined);
+  });
+
+  it('does not reuse another user\'s cached items or retain a mutable input row', () => {
+    const firstUser = createChatListMapper();
+    const secondUser = createChatListMapper();
+    const input = row({ title: 'Before' });
+    const before = firstUser([input]);
+    expect(secondUser([{ ...input }])[0]).not.toBe(before[0]);
+    input.title = 'After';
+    expect(firstUser([input])[0].peerName).toBe('After');
+    expect(before[0].peerName).toBe('Before');
   });
 });
 

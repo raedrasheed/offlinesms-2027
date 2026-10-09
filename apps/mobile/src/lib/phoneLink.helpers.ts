@@ -100,3 +100,32 @@ export function stepForStatus(st: LinkStatusLike): LinkStep {
   if (!st.eligible || st.sendingPaused) return 'unavailable';
   return st.reauthRequired ? 'reauth' : 'number';
 }
+
+export type PhoneLinkRowKind = 'hidden' | 'add' | 'linked' | 'recover' | 'unavailable';
+
+/**
+ * The Settings "Phone number" row. Always offered to an email account without a
+ * number, even while the server has phone linking switched off (then it reads
+ * "Not available yet" and the screen explains), so the option is discoverable
+ * without ever bypassing the server's checks. Hidden for phone-first accounts,
+ * which already sign in with their number.
+ */
+export function phoneLinkRow(
+  st: LinkStatusLike | null,
+  account: { hasEmail: boolean; phone: string | null | undefined },
+): PhoneLinkRowKind {
+  if (st?.available) {
+    if (st.pendingRecovery) return 'recover';
+    if (st.linked) return 'linked';
+    return 'add';
+  }
+  if (account.phone || !account.hasEmail) return 'hidden';
+  // Status unknown (offline / loading) → let the user open the flow, which loads it.
+  return st == null ? 'add' : 'unavailable';
+}
+
+/** Seconds until a code expires (0 when expired / unknown). */
+export function secondsLeft(expiresAtMs: number | null | undefined, nowMs: number): number {
+  if (!expiresAtMs) return 0;
+  return Math.max(0, Math.ceil((expiresAtMs - nowMs) / 1000));
+}

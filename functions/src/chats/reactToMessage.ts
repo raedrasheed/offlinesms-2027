@@ -9,20 +9,8 @@ import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { decideReactionForRecipient, buildReactionNotification, type ChatType, type NotifSettings } from '../notifications/notifyLogic';
 import { sendPushToUser } from '../notifications/send';
 
-// Accept any genuine emoji (the client offers a full picker) while still
-// rejecting arbitrary text/abuse: the value must contain a pictographic glyph,
-// carry no letters/digits, and stay short enough to be a single emoji —
-// including skin-tone modifiers, variation selectors, and ZWJ sequences
-// (e.g. 🏳️‍🌈).
-const PICTOGRAPHIC = /\p{Extended_Pictographic}/u;
-const HAS_ALNUM = /[\p{L}\p{N}]/u;
-export function isAllowedReactionEmoji(value: unknown): value is string {
-  if (typeof value !== 'string') return false;
-  const v = value.trim();
-  if (v.length === 0 || v.length > 16) return false; // 16 UTF-16 units covers ZWJ sequences
-  if (HAS_ALNUM.test(v)) return false;
-  return PICTOGRAPHIC.test(v);
-}
+import { isAllowedReactionEmoji } from './reactionEmoji';
+export { isAllowedReactionEmoji } from './reactionEmoji';
 
 export const reactToMessage = onCall(async (request) => {
   const uid = request.auth?.uid;
@@ -109,3 +97,4 @@ export const reactToMessage = onCall(async (request) => {
 
   return { ok: true, emoji, toggledOff };
 });
+

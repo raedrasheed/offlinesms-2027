@@ -102,8 +102,27 @@ android {
         applicationId 'app.offlinesms.mobile'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "0.1.0"
+        versionCode 15
+        versionName "2.3.18"
+        // Store build defaults; the test variant below overrides them.
+        manifestPlaceholders += [
+            appLabel: '@string/app_name', appScheme: 'offlinesms',
+            appLinkHost: 'links.offlinesms.com', appLinkHostLegacy: 'offlinesms.com',
+        ]
+        // Test builds that install NEXT TO the store app (docs/TEST_BUILDS.md):
+        //   -Pofflinesms.testApp=true → app.offlinesms.mobile.test, "OfflineSMS Test",
+        //   its own URL scheme, and no claim on the production https links.
+        //   -Pofflinesms.versionCode / -Pofflinesms.versionName set matching
+        //   baseline/updated versions for in-place upgrade tests.
+        if ((findProperty('offlinesms.testApp') ?: 'false').toString().toBoolean()) {
+            applicationIdSuffix '.test'
+            manifestPlaceholders += [
+                appLabel: 'OfflineSMS Test', appScheme: 'offlinesmstest',
+                appLinkHost: 'links.offlinesms.invalid', appLinkHostLegacy: 'offlinesms.invalid',
+            ]
+        }
+        if (findProperty('offlinesms.versionCode')) versionCode findProperty('offlinesms.versionCode').toString().toInteger()
+        if (findProperty('offlinesms.versionName')) versionName findProperty('offlinesms.versionName').toString()
     }
     signingConfigs {
         debug {

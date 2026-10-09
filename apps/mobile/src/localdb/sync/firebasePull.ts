@@ -11,7 +11,8 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from '../../lib/firebase';
 import { upsertRemoteConversation, applyUserState } from '../repositories/conversationsRepo';
-import { upsertRemoteMessage, markDeletedForEveryone } from '../repositories/messagesRepo';
+import { applyRemoteMessages } from '../repositories/messagesRepo';
+import { remoteMessageInput } from './remoteMessage';
 import { upsertMember } from '../repositories/membersRepo';
 import { getCursor, setCursor } from '../repositories/syncStateRepo';
 
@@ -81,11 +82,11 @@ export async function pullConversations(): Promise<void> {
 /**
  * Pull messages for one conversation created since the last pull. Incremental:
  * queries `createdAt >= cursor` ascending and advances a per-conversation
- * high-water mark (`msg_cursor:<id>`). Maps reactions + receipt counts (same as
- * the realtime feeder) so the catch-up path keeps them consistent. Edits/deletes
- * of older messages are reconciled by the feeder when the chat is opened.
+ * high-water mark (`msg_cursor:<id>`). Uses the shared remote→local mapper and
+ * applies the page in one transaction. Edits/deletes of older messages are
+ * reconciled by the feeder when the chat is opened.
  */
-export async function pullMessages(conversationId: string, max = MSG_PAGE): Promise<void> {
+export async function pullMessages(conversationId: string, max = MSG_PAGE): Promise<number> {
   const cursorKey: `msg_cursor:${string}` = `msg_cursor:${conversationId}`;
   const since = await getCursor(cursorKey);
   // `>=` so messages sharing the boundary millisecond aren't dropped when a page
@@ -97,56 +98,29 @@ export async function pullMessages(conversationId: string, max = MSG_PAGE): Prom
     qlimit(max),
   ));
   let maxTs = since;
-  for (const d of snap.docs) {
-    const m = d.data() as any;
-    const createdMs = ms(m.createdAt);
-    if (createdMs != null && createdMs > maxTs) maxTs = createdMs;
-    if (m.deletedForEveryone) {
-      await markDeletedForEveryone(d.id);
-      continue;
-    }
-    await upsertRemoteMessage({
-      remoteId: d.id,
-      conversationId,
-      senderUid: m.senderUid ?? m.senderId ?? '',
-      senderDisplayName: m.senderDisplayName ?? null,
-      type: m.type ?? 'text',
-      caption: m.caption ?? null,
-      text: m.text ?? null,
-      remoteCreatedAt: createdMs,
-      editedAt: ms(m.editedAt),
-      deletedForEveryone: !!m.deletedForEveryone,
-      replyToMessageId: m.replyTo?.messageId ?? null,
-      replyToPreview: m.replyTo?.preview ?? null,
-      replyToSenderUid: m.replyTo?.senderUid ?? null,
-      replyToSenderName: m.replyTo?.senderDisplayName ?? null,
-      replyToType: m.replyTo?.type ?? null,
-      mentions: Array.isArray(m.mentions) ? m.mentions : null,
-      forwarded: !!m.forwarded,
-      reactions: m.reactions ?? null,
-      counts: {
-        delivered: m.deliveredCount ?? 0,
-        read: m.readCount ?? 0,
-        viewed: m.viewedCount ?? 0,
-        played: m.playedCount ?? 0,
-      },
-      media: m.media ? {
-        mimeType: m.media.mimeType ?? null,
-        sizeBytes: m.media.sizeBytes ?? null,
-        width: m.media.width ?? null,
-        height: m.media.height ?? null,
-        durationMs: m.media.durationMs ?? null,
-        waveform: m.media.waveform ?? null,
-        storagePath: m.media.storagePath ?? null,
-        downloadURL: m.media.downloadURL ?? null,
-        thumbnailPath: m.media.thumbnailPath ?? null,
-        thumbnailURL: m.media.thumbnailURL ?? null,
-        uploadStatus: m.media.uploadStatus ?? null,
-      } : null,
-      status: 'sent',
-    });
-  }
+  const batch = snap.docs.map(d => {
+    const input = remoteMessageInput(d.id, conversationId, d.data());
+    if (input.remoteCreatedAt != null && input.remoteCreatedAt > maxTs) maxTs = input.remoteCreatedAt;
+    return input;
+  });
+  await applyRemoteMessages(batch);
   if (maxTs > since) await setCursor(cursorKey, maxTs);
+  return snap.size;
+}
+
+/**
+ * Fetch ONE message by id and store it locally — the notification path. A push
+ * names the exact message, so opening the chat must not wait for a page pull,
+ * a history backfill or the realtime listener's first snapshot. One document
+ * read; idempotent (keyed by remote id, so it can never duplicate the message
+ * the feeder or a pull also delivers). Returns false if the message doesn't
+ * exist (deleted) or isn't readable.
+ */
+export async function pullMessageById(conversationId: string, messageId: string): Promise<boolean> {
+  const snap = await getDoc(doc(db, 'conversations', conversationId, 'messages', messageId));
+  if (!snap.exists()) return false;
+  await applyRemoteMessages([remoteMessageInput(snap.id, conversationId, snap.data())]);
+  return true;
 }
 
 /**
@@ -169,35 +143,9 @@ export async function pullMessagesBefore(conversationId: string, beforeMs: numbe
     collection(db, 'conversations', conversationId, 'messages'),
     ...constraints,
   ));
-  for (const d of snap.docs) {
-    const m = d.data() as any;
-    if (m.deletedForEveryone) { await markDeletedForEveryone(d.id); continue; }
-    await upsertRemoteMessage({
-      remoteId: d.id,
-      conversationId,
-      senderUid: m.senderUid ?? m.senderId ?? '',
-      senderDisplayName: m.senderDisplayName ?? null,
-      text: m.text ?? null,
-      remoteCreatedAt: ms(m.createdAt),
-      editedAt: ms(m.editedAt),
-      deletedForEveryone: !!m.deletedForEveryone,
-      replyToMessageId: m.replyTo?.messageId ?? null,
-      replyToPreview: m.replyTo?.preview ?? null,
-      replyToSenderUid: m.replyTo?.senderUid ?? null,
-      replyToSenderName: m.replyTo?.senderDisplayName ?? null,
-      replyToType: m.replyTo?.type ?? null,
-      mentions: Array.isArray(m.mentions) ? m.mentions : null,
-      forwarded: !!m.forwarded,
-      reactions: m.reactions ?? null,
-      counts: {
-        delivered: m.deliveredCount ?? 0,
-        read: m.readCount ?? 0,
-        viewed: m.viewedCount ?? 0,
-        played: m.playedCount ?? 0,
-      },
-      status: 'sent',
-    });
-  }
+  // Same mapper as the live path: older photos / voice notes keep their type,
+  // caption and media instead of arriving as empty text rows.
+  await applyRemoteMessages(snap.docs.map(d => remoteMessageInput(d.id, conversationId, d.data())));
   return snap.size;
 }
 

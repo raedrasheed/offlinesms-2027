@@ -20,7 +20,7 @@ import {
   getPhoneLinkStatus, requestPhoneLinkCode, verifyPhoneLinkCode, resumePhoneLink,
   sendReauthEmailCode, reauthenticateWithEmailCode, type PhoneLinkStatus,
 } from '../lib/phoneLink';
-import { phoneLinkErrorInfo, toE164, formatCountdown, stepForStatus } from '../lib/phoneLink.helpers';
+import { phoneLinkErrorInfo, toE164, formatCountdown, stepForStatus, secondsLeft } from '../lib/phoneLink.helpers';
 
 type Step = 'loading' | 'unavailable' | 'linked' | 'recover' | 'reauth' | 'number' | 'code' | 'done';
 const CODE_LEN = 6;
@@ -47,6 +47,7 @@ export default function LinkPhone({ navigation }: any) {
   const [masked, setMasked] = useState('');
   const [code, setCode] = useState('');
   const [resendAt, setResendAt] = useState(0);
+  const [expiresAt, setExpiresAt] = useState(0);
   const [now, setNow] = useState(Date.now());
   const codeRef = useRef<TextInput>(null);
 
@@ -113,6 +114,7 @@ export default function LinkPhone({ navigation }: any) {
     setChallengeId(r.challengeId);
     setMasked(r.maskedPhone);
     setResendAt(Date.now() + r.resendAfterSec * 1000);
+    setExpiresAt(r.expiresAtMs);
     setCode('');
     setStep('code');
     requestAnimationFrame(() => codeRef.current?.focus());
@@ -136,6 +138,7 @@ export default function LinkPhone({ navigation }: any) {
   });
 
   const resendLeft = Math.max(0, Math.ceil((resendAt - now) / 1000));
+  const expiresLeft = secondsLeft(expiresAt, now);
   const canSend = !!country && local.replace(/\D/g, '').length >= 6 && owns && consents && !busy && resendLeft === 0;
 
   function checkbox(value: boolean, set: (v: boolean) => void, label: string) {
@@ -183,6 +186,7 @@ export default function LinkPhone({ navigation }: any) {
               : t('phoneLink.errors.unavailable')
         }</Text>
       ) : null}
+      {step === 'unavailable' ? <Text style={s.fine}>{t('phoneLink.unavailableNote')}</Text> : null}
 
       {step === 'linked' ? <Text style={s.body}>{t('phoneLink.alreadyLinked', { phone: masked })}</Text> : null}
 
@@ -274,14 +278,24 @@ export default function LinkPhone({ navigation }: any) {
             placeholderTextColor={colors.text.disabled}
             accessibilityLabel={t('phoneLink.codeLabel')}
           />
+          <Text style={s.fine} accessibilityLiveRegion="polite">
+            {expiresLeft > 0 ? t('phoneLink.codeExpiresIn', { time: formatCountdown(expiresLeft) }) : t('phoneLink.errors.codeExpired')}
+          </Text>
           <Pressable
-            onPress={() => { setStep('number'); setError(null); }}
+            onPress={() => { void sendCode(); }}
             disabled={resendLeft > 0 || busy}
             accessibilityRole="button"
           >
             <Text style={[s.link, (resendLeft > 0 || busy) && { color: colors.text.disabled }]}>
               {resendLeft > 0 ? t('phoneLink.resendIn', { time: formatCountdown(resendLeft) }) : t('phoneLink.resend')}
             </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => { setStep('number'); setError(null); setCode(''); }}
+            disabled={busy}
+            accessibilityRole="button"
+          >
+            <Text style={s.link}>{t('phoneLink.changeNumber')}</Text>
           </Pressable>
         </>
       ) : null}

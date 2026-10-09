@@ -102,6 +102,9 @@ export const deleteMessage = onCall(async (request) => {
     replyTo:            null,
     // Reactions stay or are dropped? Drop — they reference a now-empty message.
     reactions:          null,
+    // A deleted poll/sticker keeps nothing (votes would otherwise stay readable).
+    poll:               FieldValue.delete(),
+    sticker:            FieldValue.delete(),
   });
 
   // Refresh conversation summary if this was the latest message.

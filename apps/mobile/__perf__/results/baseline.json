@@ -1,0 +1,75 @@
+{
+  "label": "baseline",
+  "dataset": {
+    "conversations": 200,
+    "messagesPerConversation": 200,
+    "heavyConversationId": "c_heavy",
+    "heavyMessages": 20000
+  },
+  "results": [
+    {
+      "name": "chatList.read+map (200 chats)",
+      "medianMs": 2.21,
+      "p95Ms": 3.39,
+      "statements": 1,
+      "runs": 30
+    },
+    {
+      "name": "conversation.open (100 of 20k)",
+      "medianMs": 59.33,
+      "p95Ms": 60.76,
+      "statements": 1,
+      "runs": 30
+    },
+    {
+      "name": "conversation.open (100 of 200)",
+      "medianMs": 2.74,
+      "p95Ms": 3.17,
+      "statements": 1,
+      "runs": 30
+    },
+    {
+      "name": "newMessage.feederApply+refresh",
+      "medianMs": 72.46,
+      "p95Ms": 75.16,
+      "statements": 201,
+      "runs": 15,
+      "note": "server write → feeder committed → re-read"
+    },
+    {
+      "name": "loadOlder.page10 (window 1000)",
+      "medianMs": 86.76,
+      "p95Ms": 90.27,
+      "statements": 1,
+      "runs": 15
+    },
+    {
+      "name": "send.queueSendMessage",
+      "medianMs": 0.39,
+      "p95Ms": 0.56,
+      "statements": 7,
+      "runs": 30
+    },
+    {
+      "name": "chatList.newMessage feederApply+read",
+      "medianMs": 6.92,
+      "p95Ms": 8.21,
+      "statements": 102,
+      "runs": 15,
+      "note": "server write → feeder committed → list re-read"
+    }
+  ],
+  "plans": {
+    "listMessages": [
+      "SEARCH messages USING INDEX idx_messages_conversation_remote_created (conversation_id=?)",
+      "USE TEMP B-TREE FOR ORDER BY"
+    ],
+    "listConversations": [
+      "SEARCH conversations USING INDEX idx_conversations_archived (archived=?)",
+      "USE TEMP B-TREE FOR ORDER BY"
+    ]
+  },
+  "extra": {
+    "changedObjectsAfterOneNewMessage": 100
+  }
+}

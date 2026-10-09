@@ -103,11 +103,12 @@ export async function markFailed(
   errorCode: string | null,
   errorMessage: string | null,
   nextAttemptAt: number,
+  permanent = false,
 ): Promise<OutboxStatus> {
   const row = await getById(id);
   if (!row) return 'dead';
   const attempt = row.attempt_count + 1;
-  const dead = attempt >= row.max_attempts;
+  const dead = permanent || attempt >= row.max_attempts;
   await getDb().run(
     `UPDATE outbox SET status = ?, attempt_count = ?, next_attempt_at = ?,
        last_error_code = ?, last_error_message = ?, updated_at = ? WHERE id = ?`,
@@ -156,3 +157,4 @@ export async function pendingCount(): Promise<number> {
     `SELECT COUNT(*) AS n FROM outbox WHERE status IN ('pending','processing')`);
   return row?.n ?? 0;
 }
+

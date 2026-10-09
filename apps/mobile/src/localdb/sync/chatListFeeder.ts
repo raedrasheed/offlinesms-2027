@@ -10,7 +10,7 @@ import {
   collection, query, where, orderBy, limit as qlimit, onSnapshot, doc, getDoc,
 } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
-import { upsertRemoteConversation, applyUserState } from '../repositories/conversationsRepo';
+import { upsertRemoteConversation, applyUserState, applyRemoteConversations } from '../repositories/conversationsRepo';
 
 function ms(ts: any): number | null {
   return ts?.toMillis?.() ?? null;
@@ -31,21 +31,30 @@ export function startChatListFeeder(uid: string, onChange: () => void): () => vo
     qlimit(50),
   );
 
+  // Serialize applies so snapshots commit in order, and only notify the UI
+  // after the write committed (it used to fire onChange before the un-awaited
+  // upserts ran, so the re-read could miss the change).
+  let chain: Promise<void> = Promise.resolve();
+  let stopped = false;
+  const notify = () => { if (!stopped) onChange(); };
+
   const unsubConvos = onSnapshot(convQuery, (snap) => {
     const present = new Set<string>();
-    snap.forEach((d) => {
-      present.add(d.id);
+    snap.forEach((d) => { present.add(d.id); });
+
+    // Only conversations that actually changed (Firestore re-delivers the whole
+    // 50-row window on every snapshot).
+    const changed = snap.docChanges().filter(ch => ch.type !== 'removed').map(ch => ch.doc);
+    const batch = changed.map((d) => {
       const c = d.data() as any;
       const isGroup = c.type === 'group';
-
-      void upsertRemoteConversation({
+      return {
         id: d.id,
         remote_id: d.id,
-        type: isGroup ? 'group' : 'direct',
+        type: isGroup ? 'group' as const : 'direct' as const,
         title: isGroup ? (c.name ?? null) : null, // direct peer name resolved below
-        // Groups carry their own avatar (Firestore `avatarUrl`); sync it so the
-        // local-first chat list shows it. Direct chats get avatar_url from the
-        // peer-profile resolution step below.
+        // Groups carry their own avatar (Firestore `avatarUrl`); direct chats get
+        // avatar_url from the peer-profile resolution step below.
         avatar_url: isGroup ? (c.avatarUrl ?? null) : null,
         owner_uid: c.ownerUid ?? null,
         status: c.status ?? 'active',
@@ -54,7 +63,13 @@ export function startChatListFeeder(uid: string, onChange: () => void): () => vo
         last_message_preview: c.lastMessageText ?? null,
         last_message_at: ms(c.updatedAt),
         remote_updated_at: ms(c.updatedAt),
-      });
+      };
+    });
+    if (batch.length > 0) chain = chain.then(() => applyRemoteConversations(batch)).then(notify).catch(() => {});
+
+    snap.forEach((d) => {
+      const c = d.data() as any;
+      const isGroup = c.type === 'group';
 
       // Resolve the direct-chat peer display name once and store it as title.
       if (!isGroup && !resolvedTitles.has(d.id)) {
@@ -64,7 +79,7 @@ export function startChatListFeeder(uid: string, onChange: () => void): () => vo
           void getDoc(doc(db, 'users', peerUid)).then((u) => {
             const data = u.data() as { displayName?: string; username?: string; photoURL?: string | null } | undefined;
             const name = data?.displayName || (data?.username ? `@${data.username}` : peerUid.slice(0, 6));
-            void upsertRemoteConversation({ id: d.id, title: name, avatar_url: data?.photoURL ?? null }).then(onChange);
+            chain = chain.then(() => upsertRemoteConversation({ id: d.id, title: name, avatar_url: data?.photoURL ?? null })).then(notify).catch(() => {});
           }).catch(() => { resolvedTitles.delete(d.id); });
         }
       }
@@ -73,13 +88,13 @@ export function startChatListFeeder(uid: string, onChange: () => void): () => vo
       if (!userStateUnsubs.has(d.id)) {
         const u = onSnapshot(doc(db, 'conversations', d.id, 'userState', uid), (us) => {
           const s = (us.data() ?? {}) as any;
-          void applyUserState(d.id, {
+          chain = chain.then(() => applyUserState(d.id, {
             unread_count: s.unreadCount ?? 0,
             muted: s.muted ? 1 : 0,
             pinned: s.pinned ? 1 : 0,
             favorite: s.favorite ? 1 : 0,
             archived: s.archived ? 1 : 0,
-          }).then(onChange);
+          })).then(notify).catch(() => {});
         });
         userStateUnsubs.set(d.id, u);
       }
@@ -90,7 +105,7 @@ export function startChatListFeeder(uid: string, onChange: () => void): () => vo
       if (!present.has(id)) { try { unsub(); } catch { /* noop */ } userStateUnsubs.delete(id); }
     }
 
-    onChange();
+    if (batch.length === 0) notify();
   }, (err) => {
     // Surface only the error code; never message content.
     // eslint-disable-next-line no-console
@@ -98,6 +113,7 @@ export function startChatListFeeder(uid: string, onChange: () => void): () => vo
   });
 
   return () => {
+    stopped = true;
     try { unsubConvos(); } catch { /* noop */ }
     for (const unsub of userStateUnsubs.values()) { try { unsub(); } catch { /* noop */ } }
     userStateUnsubs.clear();

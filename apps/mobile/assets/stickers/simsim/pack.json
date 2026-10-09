@@ -1,0 +1,104 @@
+{
+  "id": "simsim",
+  "version": 1,
+  "license": "CC0-1.0",
+  "size": 384,
+  "stickers": [
+    {
+      "id": "hi",
+      "alt": "👋",
+      "en": "Hi",
+      "ar": "مرحبا"
+    },
+    {
+      "id": "love",
+      "alt": "😍",
+      "en": "Love",
+      "ar": "حب"
+    },
+    {
+      "id": "laugh",
+      "alt": "😂",
+      "en": "Laughing",
+      "ar": "ضحك"
+    },
+    {
+      "id": "thumbs",
+      "alt": "👍",
+      "en": "Thumbs up",
+      "ar": "ممتاز"
+    },
+    {
+      "id": "sad",
+      "alt": "😢",
+      "en": "Sad",
+      "ar": "حزين"
+    },
+    {
+      "id": "angry",
+      "alt": "😠",
+      "en": "Angry",
+      "ar": "غاضب"
+    },
+    {
+      "id": "sleepy",
+      "alt": "😴",
+      "en": "Sleepy",
+      "ar": "نعسان"
+    },
+    {
+      "id": "party",
+      "alt": "🥳",
+      "en": "Party",
+      "ar": "احتفال"
+    },
+    {
+      "id": "thinking",
+      "alt": "🤔",
+      "en": "Thinking",
+      "ar": "أفكر"
+    },
+    {
+      "id": "wow",
+      "alt": "😮",
+      "en": "Wow",
+      "ar": "واو"
+    },
+    {
+      "id": "coffee",
+      "alt": "☕",
+      "en": "Coffee",
+      "ar": "قهوة"
+    },
+    {
+      "id": "heart",
+      "alt": "❤️",
+      "en": "Heart",
+      "ar": "قلب"
+    },
+    {
+      "id": "thanks_ar",
+      "alt": "🙏",
+      "en": "Thank you (Arabic)",
+      "ar": "شكراً"
+    },
+    {
+      "id": "hello_ar",
+      "alt": "👋",
+      "en": "Hello (Arabic)",
+      "ar": "مرحبا"
+    },
+    {
+      "id": "thanks_en",
+      "alt": "🙏",
+      "en": "Thanks",
+      "ar": "شكراً (إنجليزي)"
+    },
+    {
+      "id": "ok_en",
+      "alt": "👌",
+      "en": "OK",
+      "ar": "تمام (إنجليزي)"
+    }
+  ]
+}

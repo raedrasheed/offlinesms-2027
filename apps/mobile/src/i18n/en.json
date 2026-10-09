@@ -518,7 +518,11 @@
       "tooManyAttempts": "Too many incorrect codes. Request a new code later.",
       "network": "Network problem. Check your connection and try again.",
       "generic": "Something went wrong. Please try again."
-    }
+    },
+    "settingsRowUnavailable": "Not available yet",
+    "unavailableNote": "You can keep using your account with your email. When adding a number becomes available, you'll find it here.",
+    "codeExpiresIn": "The code expires in {{time}}",
+    "changeNumber": "Use a different number"
   },
   "phoneAuth": {
     "errors": {
@@ -540,5 +544,76 @@
       "network": "Network problem. Check your connection and try again.",
       "generic": "Something went wrong. Please try again."
     }
+  },
+  "sync": {
+    "loading-message": "Loading this message…",
+    "waiting-network": "Waiting for connection — the message will appear when you're back online",
+    "missing": "This message is no longer available",
+    "error": "Couldn't load this message",
+    "offline": "Offline — showing saved messages",
+    "connecting": "Connecting…"
+  },
+  "composer": {
+    "emoji": "Emoji",
+    "stickers": "Stickers",
+    "keyboard": "Show keyboard",
+    "emojiAndStickers": "Emoji and stickers"
+  },
+  "emoji": {
+    "search": "Search emoji",
+    "noResults": "No emoji found",
+    "cat": {
+      "recent": "Recently used",
+      "animated": "Animated",
+      "smileys": "Smileys & emotion",
+      "people": "People & body",
+      "nature": "Animals & nature",
+      "food": "Food & drink",
+      "travel": "Travel & places",
+      "activities": "Activities",
+      "objects": "Objects",
+      "symbols": "Symbols",
+      "flags": "Flags",
+      "results": "Results"
+    }
+  },
+  "stickers": {
+    "recent": "Recently used",
+    "pack": {
+      "simsim": "Simsim"
+    }
+  },
+  "poll": {
+    "create": "New poll",
+    "question": "Question",
+    "questionPlaceholder": "Ask a question",
+    "options": "Options",
+    "optionPlaceholder": "Option {{n}}",
+    "removeOption": "Remove option",
+    "optionsHint": "At least 2 options, up to {{max}}.",
+    "allowMultiple": "Allow multiple answers",
+    "selectOne": "Select one",
+    "selectMany": "Select one or more",
+    "closed": "Poll ended",
+    "endFailed": "Could not end poll. Try again.",
+    "waitingToSend": "Poll not sent yet",
+    "ending": "Ending poll — waiting for confirmation…",
+    "end": "End poll",
+    "endTitle": "End this poll?",
+    "endBody": "No one will be able to vote after it ends. Results stay visible.",
+    "votes_one": "{{count}} vote",
+    "votes_other": "{{count}} votes",
+    "voters_one": "{{count}} person voted",
+    "voters_other": "{{count}} people voted",
+    "errors": {
+      "question": "Enter a question.",
+      "tooFew": "Add at least 2 options.",
+      "tooMany": "Use at most 12 options.",
+      "duplicate": "Each option must be different.",
+      "tooLong": "The question or an option is too long."
+    },
+    "votes_zero": "No votes",
+    "voters_zero": "No votes yet"
   }
 }
+
