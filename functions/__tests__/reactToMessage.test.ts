@@ -1,7 +1,25 @@
 import { describe, it, expect } from 'vitest';
-import { isAllowedReactionEmoji } from '../src/chats/reactToMessage';
+import { isAllowedReactionEmoji } from '../src/chats/reactionEmoji';
+import { EMOJI_GROUP_DATA } from '../../apps/mobile/src/lib/emojiData';
 
 describe('isAllowedReactionEmoji', () => {
+  it('accepts every emoji offered by the shared client catalog', () => {
+    const all = EMOJI_GROUP_DATA.flatMap(g => g.chars.split('|'));
+    expect(all.length).toBeGreaterThan(1900);
+    expect(all.filter(e => !isAllowedReactionEmoji(e))).toEqual([]);
+  });
+
+  it('accepts complete country flags and keycap emoji', () => {
+    for (const e of ['🇵🇸', '🇯🇴', '🇺🇸', '1️⃣', '0️⃣', '#️⃣', '*️⃣', 'ℹ️']) {
+      expect(isAllowedReactionEmoji(e), e).toBe(true);
+    }
+  });
+
+  it('rejects bare, partial or concatenated flag/keycap syntax and surrounding text', () => {
+    for (const e of ['🇵', '🇵🇸🇯', '🇵🇸🇯🇴', '12️⃣', '1', '#', '*', '1️⃣2️⃣', '🇵🇸 hello', '1️⃣ stars', 'ℹ️ info']) {
+      expect(isAllowedReactionEmoji(e), e).toBe(false);
+    }
+  });
   it('accepts the default quick reactions', () => {
     for (const e of ['👍', '❤️', '😂', '😮', '😢', '🙏', '🔥', '🎉']) {
       expect(isAllowedReactionEmoji(e)).toBe(true);
@@ -34,3 +52,4 @@ describe('isAllowedReactionEmoji', () => {
     expect(isAllowedReactionEmoji(null)).toBe(false);
   });
 });
+

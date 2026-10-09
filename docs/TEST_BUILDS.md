@@ -10,7 +10,7 @@ A test APK works when its two pieces of Firebase configuration point at **one** 
 | Sync (chats, messages, read state) | Same web config | Rules, indexes and chat callables deployed | ✅ (PR #28 rules and indexes deployed 2026-10-08) |
 | Push notifications (Android) | `google-services.json` of **the same project**, containing an Android app for the **test package** `app.offlinesms.mobile.test`; the device's FCM token is issued for that project | `onMessageCreateNotify` sends through firebase-admin FCM in that project, with `messageId` in the data | ✅ test package registered; CI config and production opt-in completed. |
 | Notification tap → that message; sync banner; performance; DB upgrade | Nothing beyond the above (client-only changes) | Nothing new | ✅ |
-| Stickers, polls | Same | **Deploy from this branch:** `sendTextMessage`, `votePoll`, `closePoll`, `deleteMessage`, `onMessageCreate`, `onMessageCreateNotify`. No rules or index change. | ❌ not deployed. Stickers arrive as emoji text and votes fail. |
+| Stickers, polls | Same | **Deploy from this branch:** `sendTextMessage`, `votePoll`, `closePoll`, `deleteMessage`, `onMessageCreate`, `onMessageCreateNotify`, `reactToMessage`. No rules or index change. | ❌ not deployed. Stickers arrive as emoji text and votes fail. |
 | Phone registration / linking | Existing protected phone flow | Ready relay 0.2.0, deployed purpose env and runtime policy | Owner authorized activation on 2026-10-09; **not activated yet**. See `PHONE_TEST_ACTIVATION.md`. |
 
 ## 2. Technical requirement vs. current CI policy
@@ -25,7 +25,7 @@ A test APK works when its two pieces of Firebase configuration point at **one** 
 - **Policy (this repository's CI, not a technical limit):** the build refuses the production project unless `MOBILE_TEST_ALLOW_PRODUCTION_BACKEND=true` is set. Opting in means:
   - test phones sign into **real accounts** and read and write **real data**;
   - test messages notify real recipients;
-  - stickers and polls additionally need the six functions above deployed **to production**, which changes behavior for every user, because `sendTextMessage` handles all sends.
+  - stickers and polls additionally need the seven functions above deployed **to production**, which changes behavior for every user, because `sendTextMessage` handles all sends.
 
   Use test accounts that message only each other.
 
@@ -45,7 +45,7 @@ A test APK works when its two pieces of Firebase configuration point at **one** 
    - **Variable** `MOBILE_TEST_ALLOW_PRODUCTION_BACKEND` = `true`. This is the explicit decision described in §2.
 4. *Actions* → *CI* → **Run workflow** on `claude/avatar-visibility-group-chat-r8ahfk`, or push any commit to PR #29. The artifacts `offlinesms-test-updated` and `offlinesms-test-baseline` then contain functional APKs labelled `offlinesms-prod-2027`.
 5. **Pending, authorized: stickers and polls.** Run from the exact reviewed commit in an authenticated deployment environment:
-   `firebase deploy --project offlinesms-prod-2027 --only functions:sendTextMessage,functions:votePoll,functions:closePoll,functions:deleteMessage,functions:onMessageCreate,functions:onMessageCreateNotify`
+   `firebase deploy --project offlinesms-prod-2027 --only functions:sendTextMessage,functions:votePoll,functions:closePoll,functions:deleteMessage,functions:onMessageCreate,functions:onMessageCreateNotify,functions:reactToMessage`
    - This touches no phone or SMS function, no rule and no `smsConfig`.
    - This session has Firebase console access, but no usable deployment shell or authenticated CLI.
 
@@ -94,5 +94,5 @@ Record pass/fail per row, with the APK SHA-256 and the phone models. Phone resul
 | 14 | After phone activation, an **email** account opens Settings → "Add phone number" and completes verification on its test number | Code arrives through the ready relay; number links; cooldown and incorrect-code handling work. Until activation, "Not available yet" is expected |
 | 15 | Performance, same phone and account: §4 with `baseline`, then `updated` installed over it | `updated` cold start and conversation open no slower than `baseline`; chat list and history intact after the upgrade |
 
-Rows 1–5, 11–13 and 15 use the existing backend (row 13 receives the fallback for new content). Rows 6–10 need §3 step 5. Row 14 and new phone registration need `PHONE_TEST_ACTIVATION.md`; do not report them working from a successful APK build alone.
+Rows 1–5, 11, 13 and 15 use the existing backend (row 13 receives the fallback for new content). Rows 6–10 and full reaction support in row 12 need §3 step 5. Row 14 and new phone registration need `PHONE_TEST_ACTIVATION.md`; do not report them working from a successful APK build alone.
 

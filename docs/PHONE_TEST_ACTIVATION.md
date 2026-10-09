@@ -28,12 +28,14 @@ this session, and no authenticated Firebase/gcloud CLI session was present.
 No functions or runtime flags were changed during this attempt.
 
 From an authorized deployment environment, check out the exact reviewed PR #29
-commit and install its dependencies (`npm ci`). For stickers and polls, the
+commit and install its dependencies (`npm ci`). For stickers, polls and all emoji reactions, the
 scoped deployment is:
 
 ```sh
-npx firebase deploy --project offlinesms-prod-2027 --only functions:sendTextMessage,functions:votePoll,functions:closePoll,functions:deleteMessage,functions:onMessageCreate,functions:onMessageCreateNotify
+npx firebase deploy --project offlinesms-prod-2027 --only functions:sendTextMessage,functions:votePoll,functions:closePoll,functions:deleteMessage,functions:onMessageCreate,functions:onMessageCreateNotify,functions:reactToMessage
 ```
+
+`reactToMessage` additionally admits complete country flags, keycaps and the information emoji; a regression checks every entry in the client catalog while malformed sequences and text remain refused. The client APK from commit `344d076` already contains the full picker; this follow-up changes server validation only.
 
 This command changes no SMS policy, phone function, rule or index. Verify the
 deployed revision and smoke-test creation, voting and closing with the two test

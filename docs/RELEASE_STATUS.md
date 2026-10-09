@@ -10,7 +10,7 @@
 | Notification → message fixes, sync banner | PR #29 (app) | unit, real SQLite | **No** (needs an app release) |
 | Responsiveness (v6 indexes, mapper, listeners) | PR #29 (app) | in-process harness | **No** |
 | Local DB v7 + atomic, self-healing upgrades | PR #29 (app) | real SQLite, upgrades from v1–v5 | **No.** Production 2.3.18 still has the non-atomic upgrade bug, which this fixes. |
-| Emoji picker and full searchable reactions | PR #29 (app) | catalog/search unit tests; web gallery | **No store release** |
+| Emoji picker and full searchable reactions | PR #29 (app + reaction validation) | catalog/search and full-catalog admission unit tests; web gallery | **No store release.** Deploy `reactToMessage` for flags/keycaps/information emoji |
 | Stickers | PR #29 (app + `sendTextMessage` `kind`) | unit, emulators | **No.** The server is not deployed. A new app talking to the current server sends a sticker as its emoji text. |
 | Polls | PR #29 (app + `sendTextMessage` `kind`, `votePoll`, `closePoll`) | unit, emulators (incl. concurrency) | **No.** Without the deployed functions, a new app sends the poll as text "📊 question" and votes fail. |
 | Test APK pair | PR #29 CI jobs, package `app.offlinesms.mobile.test` | both passed run #448 before the current additions | Production backend configured with owner approval; installs alongside the store app. New feature backend still needs deployment |
@@ -20,7 +20,7 @@ The current additions also queue poll closing offline, persist its pending/failu
 ## Release order (store release not requested)
 1. Merge PR #28, then PR #29.
 2. Use the owner-approved production backend with controlled test accounts and run `docs/DEVICE_VALIDATION.md` §3–§6 on physical devices.
-3. Deploy the functions to production: `sendTextMessage`, `votePoll`, `closePoll`, `deleteMessage`, `onMessageCreate`, `onMessageCreateNotify`.
+3. Deploy the functions to production: `sendTextMessage`, `votePoll`, `closePoll`, `deleteMessage`, `onMessageCreate`, `onMessageCreateNotify`, `reactToMessage`.
 4. Release the app, with the version bumped from 2.3.18 / versionCode 15. Older apps keep working: they show stickers as emoji and polls as text.
 5. Complete the already-authorized phone activation from `PHONE_TEST_ACTIVATION.md`, verifying the physical relay and protected policy before claiming availability. This session could not deploy functions or activate sending.
 
