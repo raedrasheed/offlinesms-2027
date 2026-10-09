@@ -29,8 +29,24 @@ case "$VARIANT" in
     fi
     # Instrumentation must be byte-identical to the updated build's.
     cmp "$SRC/apps/mobile/src/lib/perf.ts" "$REPO/apps/mobile/src/lib/perf.ts"
-    # Same dependencies as the updated build: the lockfile must be identical.
-    cmp "$SRC/apps/mobile/package-lock.json" "$REPO/apps/mobile/package-lock.json"
+    # Same shipped dependencies as the updated build: every non-dev package in
+    # the two lockfiles must resolve to the same version. Dev-only packages
+    # (test tooling) never reach the APK, so they may differ.
+    node -e '
+      const fs = require("fs");
+      const shipped = f => {
+        const pk = JSON.parse(fs.readFileSync(f, "utf8")).packages || {};
+        return Object.fromEntries(Object.entries(pk)
+          .filter(([k, v]) => k && !v.dev && !v.devOptional)
+          .map(([k, v]) => [k, v.version || v.resolved || ""]));
+      };
+      const [a, b] = process.argv.slice(1).map(shipped);
+      const diff = [...new Set([...Object.keys(a), ...Object.keys(b)])].filter(k => a[k] !== b[k]);
+      if (diff.length) {
+        console.error("baseline and updated ship different dependencies:");
+        for (const k of diff.slice(0, 20)) console.error("  " + k + ": " + (a[k] || "-") + " vs " + (b[k] || "-"));
+        process.exit(1);
+      }' "$SRC/apps/mobile/package-lock.json" "$REPO/apps/mobile/package-lock.json"
     # Install them inside the baseline checkout. A symlink to this checkout's
     # node_modules breaks JS bundling: its @offlinesms/design-tokens link then
     # resolves to THIS checkout's packages/, outside the baseline's Metro
