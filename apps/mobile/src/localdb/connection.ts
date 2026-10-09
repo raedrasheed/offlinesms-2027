@@ -59,6 +59,24 @@ async function ensureDeviceId(db: LocalDatabase): Promise<void> {
 }
 
 /**
+ * Runs one migration statement. `ALTER TABLE t ADD COLUMN c` is skipped when
+ * `c` already exists, so a database left half-upgraded by an older app build
+ * (which bumped user_version only AFTER committing — an app killed in between
+ * kept the new columns at the old version, and every later launch failed with
+ * "duplicate column name") upgrades cleanly instead of staying unopenable.
+ * Every other statement in the migrations is already idempotent (IF NOT EXISTS).
+ */
+const ADD_COLUMN = /^\s*ALTER\s+TABLE\s+(\w+)\s+ADD\s+COLUMN\s+(\w+)/i;
+async function migrationExec(db: LocalDatabase, sql: string): Promise<void> {
+  const m = ADD_COLUMN.exec(sql);
+  if (m) {
+    const cols = await db.all<{ name: string }>(`PRAGMA table_info(${m[1]})`);
+    if (cols.some(c => c.name === m[2])) return;
+  }
+  await db.exec(sql);
+}
+
+/**
  * Open (or reuse) the local DB for a user, running migrations. If a different
  * user's DB is open it is closed first so we never read another account's data.
  */
@@ -74,11 +92,16 @@ export async function openForUser(uid: string): Promise<LocalDatabase> {
   const versionRow = (await raw.getFirstAsync('PRAGMA user_version')) as { user_version: number } | null;
   const currentVersion = versionRow?.user_version ?? 0;
   if (currentVersion < LATEST_VERSION) {
+    // The version bump commits atomically WITH the schema changes. It used to
+    // be written after the commit: an app killed in between re-ran the
+    // migrations on next launch, and the non-idempotent `ALTER TABLE … ADD
+    // COLUMN` failed ("duplicate column name"), leaving the DB unopenable.
+    // (user_version lives in the DB header and is transactional.)
     await db.transaction(async () => {
-      await applyMigrations(currentVersion, (sql) => db.exec(sql));
+      await applyMigrations(currentVersion, (sql) => migrationExec(db, sql));
+      // PRAGMA user_version does not accept bound params.
+      await db.exec(`PRAGMA user_version = ${LATEST_VERSION};`);
     });
-    // PRAGMA user_version does not accept bound params.
-    await raw.execAsync(`PRAGMA user_version = ${LATEST_VERSION};`);
   }
 
   await db.run(
