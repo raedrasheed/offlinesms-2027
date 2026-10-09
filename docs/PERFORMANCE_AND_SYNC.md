@@ -83,6 +83,8 @@ Query plans (from the same run):
 
 **Startup.** The first screen no longer waits for the network `users/{uid}` snapshot to decide whether to show profile setup. A per-uid local flag is shown immediately and the live snapshot corrects it.
 
+**Conversation-open follow-up.** A device tester reported that opening a direct chat or group still felt slow even after notification taps showed the message correctly. The local-first hook still awaited outbox housekeeping and legacy-queue migration before its first message query, and started catch-up writes before that query. It now opens the DB, reads the clear-chat watermark, and reads saved messages first. The live feed and notification target start next; scheduler initialization and legacy migration run independently, with a refresh after migration so pending sends appear offline too. Connectivity/focus refreshes wait for the watermark, cancelled opens cannot attach late listeners, and late SQLite results are ignored across user/chat changes and effect restarts. Maintenance failures keep the local view intact. Twelve regression tests cover ordering, a stalled migration, clear-chat ordering, cancellation at each opening stage, listener cleanup and fallback. This removes a demonstrated dependency from the first local read; **no physical-device opening-time improvement has been measured for this follow-up**.
+
 ## 3. On-device measurement (same device, same network)
 
 `src/lib/perf.ts` records these marks; they are logged in development builds and readable through `perfReport()`:

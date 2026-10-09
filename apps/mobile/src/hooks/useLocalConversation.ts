@@ -1,8 +1,9 @@
 // Phase 22C — local-first conversation hook (flag-gated).
 //
-// When LOCAL_FIRST_CONVERSATION_ENABLED is on, opens the per-user DB + sync
-// scheduler (so the outbox drains), serves messages from the local DB, and
-// starts the Firestore→local message feeder. Falls back to `firestoreFallback`
+// When LOCAL_FIRST_CONVERSATION_ENABLED is on, opens the per-user DB and
+// serves messages from it before starting sync housekeeping and
+// legacy-queue migration, and attaches the Firestore→local message feeder.
+// Falls back to `firestoreFallback`
 // (the legacy Conversation path) if the local DB can't initialise. No-op when
 // the flag is off.
 //
@@ -20,7 +21,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LOCAL_FIRST_CONVERSATION_ENABLED } from '../config/features';
 import {
-  initLocalDb, messagesRepo, setActiveConversation, clearChat, getChatClearedAt,
+  openLocalDb, initLocalDb, messagesRepo, setActiveConversation, clearChat, getChatClearedAt,
   notificationTargets, type TargetState,
 } from '../localdb';
 import { startConversationFeeder } from '../localdb/sync/conversationFeeder';
@@ -29,6 +30,7 @@ import { isOnline, onConnectivityChange } from '../localdb/sync/networkState';
 import { importLegacyQueueOnce } from '../localdb/sync/legacyImport';
 import { createMessageMapper } from './messageModel';
 import { coalescing } from '../lib/coalesce';
+import { openConversation } from './conversationOpen';
 import type { Message } from '../lib/conversations';
 
 export type ConversationSource = 'disabled' | 'local' | 'firestoreFallback';
@@ -75,13 +77,22 @@ export function useLocalConversation(
   const focusRef = useRef<string | undefined>(focusMessageId);
   focusRef.current = focusMessageId;
 
+  // A separate lifecycle for each user/chat prevents a late SQLite result from
+  // a previous screen from replacing this screen's messages. The generation
+  // also covers an effect cleanup/restart with the same dependencies.
+  const lifecycle = useMemo(() => ({ active: false, ready: false, generation: 0 }), [enabled, uid, conversationId]);
+
   // One mapper + one coalescing runner per open conversation.
   const runner = useMemo(() => {
     if (!enabled || !conversationId) return null;
     const mapRows = createMessageMapper();
     return coalescing(async () => {
+      if (!lifecycle.active || !lifecycle.ready) return;
+      const generation = lifecycle.generation;
+      const current = () => lifecycle.active && lifecycle.generation === generation;
       try {
         const all = await messagesRepo.listMessages(conversationId, limitRef.current);
+        if (!current()) return;
         // Hide messages whose SERVER time is at/older than the "cleared"
         // watermark. Rows without a server time yet (own pending sends) stay.
         const rows = clearedAtRef.current > 0
@@ -93,70 +104,92 @@ export function useLocalConversation(
         setMessages(mapRows(rows));
         setSource('local');
       } catch {
-        setSource('firestoreFallback');
+        if (current()) setSource('firestoreFallback');
       } finally {
-        setLoading(false);
+        if (current()) setLoading(false);
       }
     });
-  }, [enabled, conversationId]);
+  }, [enabled, conversationId, lifecycle]);
 
   const refresh = useCallback(() => { void runner?.(); }, [runner]);
 
   /** Grow the window so a focused message is rendered, then mark it found. */
   const revealFocus = useCallback(async (messageId: string): Promise<boolean> => {
-    if (!conversationId || !runner) return false;
+    if (!conversationId || !runner || !lifecycle.active || !lifecycle.ready) return false;
+    const generation = lifecycle.generation;
+    const current = () => lifecycle.active && lifecycle.generation === generation;
     const pos = await messagesRepo.positionFromNewest(conversationId, messageId);
-    if (pos == null) return false;
+    if (pos == null || !current()) return false;
     if (pos + FOCUS_CONTEXT > limitRef.current) limitRef.current = pos + FOCUS_CONTEXT;
     await runner();
-    if (focusRef.current === messageId) setFocus({ messageId, state: 'ready' });
+    if (current() && focusRef.current === messageId) setFocus({ messageId, state: 'ready' });
     return true;
-  }, [conversationId, runner]);
+  }, [conversationId, runner, lifecycle]);
 
   useEffect(() => {
     if (!enabled || !uid || !conversationId || !runner) { setLoading(false); setSource('disabled'); return; }
-    let stopFeeder: (() => void) | null = null;
-    let stopTargets: (() => void) | null = null;
     let cancelled = false;
+    lifecycle.active = true;
+    lifecycle.ready = false;
+    lifecycle.generation++;
+    setLoading(true);
+    setMessages([]);
+    setSource('local');
+    setLive(isOnline() ? 'connecting' : 'offline');
+    limitRef.current = PAGE;
+    reachedStartRef.current = false;
 
-    (async () => {
-      try {
-        await initLocalDb(uid);
-        setActiveConversation(conversationId);
-        await importLegacyQueueOnce(uid);
-        clearedAtRef.current = await getChatClearedAt(conversationId);
-        // Fresh window each time the chat (re)opens.
-        limitRef.current = PAGE;
-        reachedStartRef.current = false;
-        if (cancelled) return;
+    const stopOpen = openConversation({
+      openDb: () => openLocalDb(uid),
+      readClearedAt: () => getChatClearedAt(conversationId),
+      showLocal: async clearedAt => {
+        clearedAtRef.current = clearedAt;
+        lifecycle.ready = true;
         await runner();
-        stopFeeder = startConversationFeeder(conversationId, (change) => {
+      },
+      startLive: () => {
+        // Catch-up starts only after the saved messages have been read.
+        setActiveConversation(conversationId);
+        const stopFeeder = startConversationFeeder(conversationId, (change) => {
+          if (cancelled) return;
           if (!change.fromCache) setLive('live');
           void runner().then(() => {
             const f = focusRef.current;
-            if (f && change.ids.includes(f)) void revealFocus(f);
+            if (!cancelled && f && change.ids.includes(f)) void revealFocus(f);
           });
         });
+        const stopTargets = notificationTargets.subscribe((c, m, state) => {
+          if (cancelled || c !== conversationId || m !== focusRef.current) return;
+          if (state === 'ready') void revealFocus(m);
+          else setFocus({ messageId: m, state });
+        });
+        // Notification work is independent of background maintenance, including
+        // the initial target (the later-focus effect may run before DB ready).
         const target = focusRef.current;
-        if (target) {
-          stopTargets = notificationTargets.subscribe((c, m, state) => {
-            if (c !== conversationId || m !== focusRef.current) return;
-            if (state === 'ready') void revealFocus(m);
-            else setFocus({ messageId: m, state });
-          });
-          // Already local? Reveal immediately; otherwise fetch the one message.
-          if (!(await revealFocus(target))) {
-            const s = await notificationTargets.request(conversationId, target);
-            if (s === 'ready') await revealFocus(target);
-            else if (!cancelled) setFocus({ messageId: target, state: s });
-          }
-        }
-      } catch {
+        if (target) void (async () => {
+          if (await revealFocus(target)) return;
+          if (cancelled || focusRef.current !== target) return;
+          const state = await notificationTargets.request(conversationId, target);
+          if (cancelled || focusRef.current !== target) return;
+          if (state === 'ready') await revealFocus(target);
+          else setFocus({ messageId: target, state });
+        })().catch(() => {
+          if (!cancelled && focusRef.current === target) setFocus({ messageId: target, state: 'error' });
+        });
+        return () => { stopFeeder(); stopTargets(); };
+      },
+      maintain: async () => {
+        await initLocalDb(uid);
         if (cancelled) return;
+        await importLegacyQueueOnce(uid);
+        // Imported pending sends must appear even without a remote snapshot.
+        if (!cancelled) await runner();
+      },
+      onReadError: () => {
         setSource('firestoreFallback');
         setLoading(false);
-      }
-    })();
+      },
+    });
 
     const stopConn = onConnectivityChange(online => {
       setLive(prev => (online ? (prev === 'offline' ? 'connecting' : prev) : 'offline'));
@@ -165,25 +198,33 @@ export function useLocalConversation(
 
     return () => {
       cancelled = true;
-      stopFeeder?.();
-      stopTargets?.();
+      lifecycle.active = false;
+      lifecycle.ready = false;
+      lifecycle.generation++;
+      stopOpen();
       stopConn();
       setActiveConversation(undefined);
     };
-  }, [enabled, uid, conversationId, runner, revealFocus]);
+  }, [enabled, uid, conversationId, runner, revealFocus, lifecycle]);
 
   // A new focus target on an already-open conversation (second notification tap).
   useEffect(() => {
     if (!focusMessageId) { setFocus(null); return; }
     setFocus({ messageId: focusMessageId, state: 'locating' });
-    if (!runner || !conversationId) return;
+    if (!runner || !conversationId || !lifecycle.ready) return;
+    let cancelled = false;
     void (async () => {
       if (await revealFocus(focusMessageId)) return;
+      if (cancelled) return;
       const s = await notificationTargets.request(conversationId, focusMessageId);
+      if (cancelled) return;
       if (s === 'ready') await revealFocus(focusMessageId);
       else if (focusRef.current === focusMessageId) setFocus({ messageId: focusMessageId, state: s });
-    })();
-  }, [focusMessageId, runner, conversationId, revealFocus]);
+    })().catch(() => {
+      if (!cancelled && focusRef.current === focusMessageId) setFocus({ messageId: focusMessageId, state: 'error' });
+    });
+    return () => { cancelled = true; };
+  }, [focusMessageId, runner, conversationId, revealFocus, lifecycle]);
 
   const retryFocus = useCallback(() => {
     const f = focusRef.current;
