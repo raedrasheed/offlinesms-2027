@@ -32,7 +32,7 @@ export type GroupMember = {
   uid:                 string;
   role:                GroupRole;
   status?:             MemberStatus;
-  displayNameSnapshot?: string;
+  displayNameSnapshot?: string | null;
   photoURLSnapshot?:   string | null;
   joinedAt?:           any;
   addedBy?:            string;
@@ -499,7 +499,7 @@ export type InviteSettings = {
 export type JoinRequest = {
   requestId: string;
   requesterUid: string;
-  requesterName: string;
+  requesterName: string | null;
   requesterPhotoURL?: string | null;
   status: 'pending' | 'approved' | 'rejected' | 'cancelled';
   requestedAt?: any;
