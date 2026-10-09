@@ -93,10 +93,11 @@ export interface LinkStatusLike {
  * re-authentication (the recovery call itself will ask if it needs it), so an
  * interrupted link can never strand the user on a blocked number-entry screen.
  */
-export function stepForStatus(st: LinkStatusLike): LinkStep {
+export function stepForStatus(st: LinkStatusLike, opts: { change?: boolean } = {}): LinkStep {
   if (!st.available) return 'unavailable';
   if (st.pendingRecovery) return 'recover';
-  if (st.linked) return 'linked';
+  // An account that already has a number may replace it ("Edit" in Settings).
+  if (st.linked && !opts.change) return 'linked';
   if (!st.eligible || st.sendingPaused) return 'unavailable';
   return st.reauthRequired ? 'reauth' : 'number';
 }

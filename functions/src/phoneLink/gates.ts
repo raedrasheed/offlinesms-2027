@@ -61,10 +61,16 @@ export function profileIsActive(exists: boolean, status: unknown): boolean {
   return status === undefined || status === null || status === 'active';
 }
 
+/** Pure: does the Auth record carry a verified email or a phone number? */
+export function hasVerifiedSignInMethod(user: { email?: string | null; emailVerified?: boolean; phoneNumber?: string | null }): boolean {
+  return (!!user.email && user.emailVerified === true) || !!user.phoneNumber;
+}
+
 /**
- * The caller must be: authenticated; a person (not a relay device); signed in
- * through an email account; recently (re)authenticated; Auth-enabled; holding a
- * VERIFIED email per the Admin user record; and `active` in users/{uid}.
+ * The caller must be: authenticated; a person (not a relay device); not an
+ * anonymous/native-phone sign-in; recently (re)authenticated; Auth-enabled;
+ * holding a verified sign-in method (verified email, or a phone number) per the
+ * Admin user record; and `active` in users/{uid}.
  */
 export async function requireEligibleCaller(
   request: CallableRequest<unknown>,
@@ -89,7 +95,10 @@ export async function requireEligibleCaller(
   if (authFreshness(token.auth_time, nowMs, maxAuthAgeSec, user.tokensValidAfterTime) !== 'ok') {
     throw new HttpsError('unauthenticated', 'reauth-required');
   }
-  if (!user.email || user.emailVerified !== true) {
+  // The account must already hold a verified sign-in method: a verified email
+  // (email-registered) or a phone number (phone-registered: Auth only carries
+  // a number after a verified code).
+  if (!hasVerifiedSignInMethod(user)) {
     throw new HttpsError('failed-precondition', 'email-not-verified');
   }
   const profile = await db.collection('users').doc(auth.uid).get();

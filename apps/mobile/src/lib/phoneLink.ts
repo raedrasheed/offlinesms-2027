@@ -4,8 +4,7 @@
 // calls them and re-authenticates the CURRENT user when the server asks.
 
 import { getFunctions, httpsCallable } from 'firebase/functions';
-import { signInWithCustomToken } from 'firebase/auth';
-import { app, auth } from './firebase';
+import { app } from './firebase';
 
 const fns = () => getFunctions(app, 'us-central1');
 
@@ -59,26 +58,6 @@ export async function resumePhoneLink(): Promise<{ linked: true; maskedPhone: st
   return res.data;
 }
 
-/**
- * Re-authenticate the signed-in user with an emailed code (the account's sign-in
- * method), refreshing `auth_time`. Refuses — without signing in — if the code
- * belongs to any account other than the current one, so this step can never
- * switch accounts.
- */
-export async function reauthenticateWithEmailCode(code: string): Promise<void> {
-  const me = auth.currentUser;
-  if (!me?.email) throw new Error('reauth-required');
-  const res = await httpsCallable<{ email: string; code: string }, { customToken: string; uid: string }>(
-    fns(), 'verifyEmailOtp',
-  )({ email: me.email, code });
-  if (res.data?.uid !== me.uid) throw new Error('reauth-required');
-  await signInWithCustomToken(auth, res.data.customToken);
-  await auth.currentUser?.getIdToken(true);
-}
-
-/** Send the re-authentication code to the current user's own email. */
-export async function sendReauthEmailCode(): Promise<void> {
-  const email = auth.currentUser?.email;
-  if (!email) throw new Error('reauth-required');
-  await httpsCallable<{ email: string }, { ok: boolean }>(fns(), 'requestEmailOtp')({ email });
-}
+// Re-authentication lives in ./signInMethods (email or phone, whichever the
+// account has); re-exported here for existing callers.
+export { sendReauthEmailCode, reauthenticateWithEmailCode } from './signInMethods';

@@ -1,5 +1,7 @@
 // Callables: verifyPhoneLinkOtp, resumePhoneLink — prove possession of the
-// number and attach it to the CALLER'S EXISTING account.
+// number and attach it to the CALLER'S EXISTING account (adding a number, or
+// replacing the current one: the Auth record then carries only the new number,
+// so the old one no longer signs in to this account).
 //
 // No account is created or merged and nothing else on the account changes: the
 // uid, conversations, memberships, wallet/points and profile stay as they are.
@@ -93,6 +95,7 @@ export async function handleVerifyPhoneLinkOtp(request: CallableRequest<unknown>
 
   const now = Date.now();
   const L = cfg.limits;
+  const previousPhoneKey = caller.user.phoneNumber ? phoneHmac(pepper, caller.user.phoneNumber) : null;
 
   // An infrastructure failure of this transaction (contention retries
   // exhausted, a commit whose response was lost) leaves it unknown whether the
@@ -161,6 +164,8 @@ export async function handleVerifyPhoneLinkOtp(request: CallableRequest<unknown>
     tx.set(opRef, {
       uid, stage: 'claimed', challengeId,
       phoneKey: ch.phoneKey, phoneE164: ch.phoneE164,
+      // Replacing a number: the old claim is released when the link completes.
+      previousPhoneKey: previousPhoneKey && previousPhoneKey !== ch.phoneKey ? previousPhoneKey : null,
       startedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
     });
     return { kind: 'proceed' };
@@ -282,11 +287,16 @@ export async function completeLink(uid: string, pepper?: string): Promise<{ link
       if (opS.get('stage') === 'done') return;
       if (!NONTERMINAL.has(opS.get('stage'))) throw new Error('op-terminal');
       if (!claimS.exists || claimS.get('uid') !== uid) throw new Error('claim-lost');
+      const prevKey = opS.get('previousPhoneKey') as string | null | undefined;
+      const prevClaimRef = prevKey && prevKey !== phoneKey ? db.collection(C.claims).doc(prevKey) : null;
+      const prevClaimS = prevClaimRef ? await tx.get(prevClaimRef) : null;
       tx.set(userPrivateProfileRef(db, uid), {
         phoneNumber: e164, phoneVerifiedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
       }, { merge: true });
       tx.set(db.collection('users').doc(uid), { phoneVerified: true, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
       tx.update(claimRef, { state: 'active', linkedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
+      // The replaced number no longer belongs to this account.
+      if (prevClaimS?.exists && prevClaimS.get('uid') === uid) tx.delete(prevClaimRef!);
       tx.update(opRef, {
         stage: 'done', completedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
         phoneE164: FieldValue.delete(), lastError: FieldValue.delete(),

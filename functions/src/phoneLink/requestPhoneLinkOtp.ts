@@ -1,10 +1,10 @@
-// Callable: requestPhoneLinkOtp — send a verification code so a signed-in,
-// email-verified account can add ITS OWN phone number.
+// Callable: requestPhoneLinkOtp — send a verification code so a signed-in
+// account can add ITS OWN phone number, or replace the one it has.
 //
 // This is NOT sign-in and never creates an account. Order of checks:
 //   1. authenticated → feature enabled (env + runtime doc) → purpose is 'link'
-//   2. eligible caller: email account, verified email, Auth-enabled, profile
-//      active, signed in within reauthMaxAgeSec
+//   2. eligible caller: holds a verified email or a phone number, Auth-enabled,
+//      profile active, signed in within reauthMaxAgeSec
 //   3. explicit ownership confirmation + SMS consent (versioned)
 //   4. number normalizes to a supported E.164 mobile number
 //   5. not emergency-stopped; relay org configured and covering the country
@@ -79,8 +79,10 @@ export async function handleRequestPhoneLinkOtp(request: CallableRequest<unknown
   if (cfg.emergencyStop || !cfg.businessId) throw new HttpsError('unavailable', 'service-paused');
   const pepper = requirePepper();
 
-  // One verified phone per account; changing it is out of scope.
-  if (caller.user.phoneNumber) {
+  // One verified phone per account. An account that already has one may
+  // REPLACE it: the current number keeps signing in until the new one is
+  // verified (see completeLink). Asking for the number it already has is a no-op.
+  if (caller.user.phoneNumber === num.e164) {
     const op = await db.collection(C.ops).doc(uid).get();
     const stage = op.exists ? op.get('stage') : 'done';
     throw new HttpsError('failed-precondition', stage === 'done' || stage === 'failed' ? 'already-linked' : 'link-pending-recovery');

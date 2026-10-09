@@ -48,6 +48,12 @@ export async function phoneAuthFlow(reset = false): Promise<PhoneAuthFlow> {
   return flow;
 }
 
+/** A separate flow for confirming the CURRENT account's number (re-auth), so
+ *  it never disturbs an in-progress sign-in flow. */
+export async function newPhoneAuthFlow(): Promise<PhoneAuthFlow> {
+  return new PhoneAuthFlow(api, (nonce, e164, bits) => solvePow(nonce, e164, bits), await installationId());
+}
+
 /** Countries phone sign-in is open for right now (empty ⇒ unavailable). */
 export async function getPhoneAuthAvailability(): Promise<{ available: boolean; countries: string[] }> {
   const res = await httpsCallable<{ v: 2 }, { available?: boolean; countries?: string[] }>(fns(), 'getSupportedPhoneCountries')({ v: 2 });

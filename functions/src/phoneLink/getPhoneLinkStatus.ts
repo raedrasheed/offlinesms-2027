@@ -1,5 +1,5 @@
 // Callable: getPhoneLinkStatus — what the Settings screen needs to decide
-// whether to show "Add phone number", and in which state. Authenticated, read-
+// whether to show "Add phone number" / "Change phone number", and in which state. Authenticated, read-
 // only, no SMS. While the feature is off (the production default) it returns
 // only `{ available: false }`: the app then shows the entry as "Not available
 // yet" (no other detail is disclosed) and never starts the flow.
@@ -11,7 +11,7 @@ import { appCheckOptions } from '../lib/appCheck';
 import { loadActiveRelayDevices } from '../sms/countryRouting';
 import { supportedCountriesForDevices } from '../sms/relayLogic';
 import { loadPhoneLinkConfig, phoneLinkSendingAllowed } from './config';
-import { authFreshness, profileIsActive, PHONE_LINK_COLLECTIONS as C } from './gates';
+import { authFreshness, profileIsActive, hasVerifiedSignInMethod, PHONE_LINK_COLLECTIONS as C } from './gates';
 import { maskPhone } from './crypto';
 import { REGION } from './shared';
 
@@ -41,7 +41,7 @@ export async function handleGetPhoneLinkStatus(request: CallableRequest<unknown>
     linked: !!user.phoneNumber && (stage === null || stage === 'done' || stage === 'failed'),
     maskedPhone: user.phoneNumber ? maskPhone(user.phoneNumber) : null,
     pendingRecovery: stage === 'claimed' || stage === 'auth-updated',
-    eligible: !user.disabled && !!user.email && user.emailVerified === true
+    eligible: !user.disabled && hasVerifiedSignInMethod(user)
       && profileIsActive(profile.exists, profile.get('status')),
     emailVerified: user.emailVerified === true,
     reauthRequired: authFreshness(token.auth_time, Date.now(), cfg.limits.reauthMaxAgeSec, user.tokensValidAfterTime) !== 'ok',

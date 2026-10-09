@@ -515,6 +515,21 @@ service cloud.firestore {
     //   phoneClaims/{phoneHmac}    — number ownership: admin read-only.
     //   phoneLinkOps/{uid}         — link progress / recovery: admin read-only.
     //   smsRateLimits/{key}        — abuse counters: admin read-only.
+    // Email add/change for existing accounts — backend only, like phone linking.
+    //   emailChangeChallenges/{uid} — hashed codes: unreadable by anyone.
+    //   emailChangeOps/{uid}        — change progress / recovery: admin read-only.
+    //   emailChangeLimits/{key}     — abuse counters: admin read-only.
+    match /emailChangeChallenges/{uid} {
+      allow read, write: if false;
+    }
+    match /emailChangeOps/{uid} {
+      allow read:  if isAdmin();
+      allow write: if false;
+    }
+    match /emailChangeLimits/{key} {
+      allow read:  if isAdmin();
+      allow write: if false;
+    }
     match /phoneLinkChallenges/{uid} {
       allow read, write: if false;
     }

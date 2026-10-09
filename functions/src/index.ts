@@ -137,3 +137,9 @@ export { deleteMyAccount } from './auth/deleteAccount';
 export { requestPhoneLinkOtp } from './phoneLink/requestPhoneLinkOtp';
 export { verifyPhoneLinkOtp, resumePhoneLink } from './phoneLink/verifyPhoneLinkOtp';
 export { getPhoneLinkStatus } from './phoneLink/getPhoneLinkStatus';
+
+// Add or change the email of an EXISTING account (code sent to the new
+// address; never creates or merges accounts). Uses the email sign-in switch.
+export { requestEmailChangeCode } from './emailChange/requestEmailChangeCode';
+export { verifyEmailChangeCode, resumeEmailChange } from './emailChange/verifyEmailChangeCode';
+export { getSignInMethods } from './emailChange/getSignInMethods';

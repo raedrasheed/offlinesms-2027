@@ -1,7 +1,9 @@
-// "Add phone number" — attach a verified phone number to the signed-in,
-// email-verified account. Reached only from Settings, and only when the server
-// reports the feature available. Steps:
-//   status → (reauth: emailed code) → number + ownership/SMS consent → code → done
+// "Add phone number" / "Change phone number" — attach a verified phone number
+// to the signed-in account, or replace the one it has (route param
+// mode: 'change'). Reached from Settings. Steps:
+//   status → (reauth: code to the account's email or current number)
+//   → number + ownership/SMS consent → code → done
+// The current number keeps signing in until the new one is verified.
 // plus a "finish adding your number" recovery step after an interruption.
 // All checks are enforced server-side; this screen just walks the user through.
 
@@ -14,18 +16,18 @@ import { useTranslation } from 'react-i18next';
 import { useTheme } from '../context/ThemeContext';
 import { isRTL } from '../i18n';
 import { radius } from '../theme';
-import { auth } from '../lib/firebase';
+import ReauthPanel from '../components/ReauthPanel';
 import { availableCountries, flagEmoji, type Country } from '../lib/countries';
 import {
-  getPhoneLinkStatus, requestPhoneLinkCode, verifyPhoneLinkCode, resumePhoneLink,
-  sendReauthEmailCode, reauthenticateWithEmailCode, type PhoneLinkStatus,
+  getPhoneLinkStatus, requestPhoneLinkCode, verifyPhoneLinkCode, resumePhoneLink, type PhoneLinkStatus,
 } from '../lib/phoneLink';
 import { phoneLinkErrorInfo, toE164, formatCountdown, stepForStatus, secondsLeft } from '../lib/phoneLink.helpers';
 
 type Step = 'loading' | 'unavailable' | 'linked' | 'recover' | 'reauth' | 'number' | 'code' | 'done';
 const CODE_LEN = 6;
 
-export default function LinkPhone({ navigation }: any) {
+export default function LinkPhone({ navigation, route }: any) {
+  const [changing, setChanging] = useState<boolean>(route?.params?.mode === 'change');
   const { t } = useTranslation();
   const { colors } = useTheme();
   const s = useMemo(() => buildStyles(colors, isRTL), [colors]);
@@ -34,9 +36,6 @@ export default function LinkPhone({ navigation }: any) {
   const [step, setStep] = useState<Step>('loading');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const [reauthSent, setReauthSent] = useState(false);
-  const [reauthCode, setReauthCode] = useState('');
 
   const [country, setCountry] = useState<Country | null>(null);
   const [local, setLocal] = useState('');
@@ -58,7 +57,7 @@ export default function LinkPhone({ navigation }: any) {
 
   const showError = useCallback((e: unknown) => {
     const info = phoneLinkErrorInfo(e);
-    if (info.needsReauth) { setReauthSent(false); setReauthCode(''); setStep('reauth'); }
+    if (info.needsReauth) setStep('reauth');
     if (info.canResume) setStep('recover');
     if (info.retryAfterSec) setResendAt(Date.now() + info.retryAfterSec * 1000);
     setError(t(info.key, {
@@ -73,11 +72,11 @@ export default function LinkPhone({ navigation }: any) {
       const st = await getPhoneLinkStatus();
       setStatus(st);
       if (st.available && st.linked) setMasked(st.maskedPhone ?? '');
-      setStep(stepForStatus(st));
+      setStep(stepForStatus(st, { change: changing }));
     } catch (e) {
       setStep('unavailable'); showError(e);
     }
-  }, [showError]);
+  }, [showError, changing]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -95,17 +94,12 @@ export default function LinkPhone({ navigation }: any) {
     try { await fn(); } catch (e) { showError(e); } finally { setBusy(false); }
   }
 
-  const sendReauth = () => run(async () => { await sendReauthEmailCode(); setReauthSent(true); });
   // After re-authenticating, ask the server where we are (R7): a pending
   // recovery resumes; otherwise continue to number entry if sending is allowed.
-  const confirmReauth = () => run(async () => {
-    await reauthenticateWithEmailCode(reauthCode);
-    setReauthCode('');
-    setReauthSent(false);
+  const afterReauth = () => run(async () => {
     const st = await getPhoneLinkStatus();
     setStatus(st);
-    const next = stepForStatus({ ...st, reauthRequired: false } as typeof st);
-    setStep(next);
+    setStep(stepForStatus({ ...st, reauthRequired: false } as typeof st, { change: changing }));
   });
 
   const sendCode = () => run(async () => {
@@ -175,7 +169,7 @@ export default function LinkPhone({ navigation }: any) {
       <Pressable style={s.back} onPress={() => navigation.goBack()} hitSlop={12} accessibilityLabel={t('common.back')}>
         <Ionicons name={isRTL ? 'chevron-forward' : 'chevron-back'} size={24} color={colors.text.primary} />
       </Pressable>
-      <Text style={s.h1}>{t('phoneLink.title')}</Text>
+      <Text style={s.h1}>{t(changing ? 'phoneLink.titleChange' : 'phoneLink.title')}</Text>
 
       {step === 'loading' ? <ActivityIndicator style={{ marginTop: 24 }} color={colors.action.primary} /> : null}
 
@@ -188,7 +182,14 @@ export default function LinkPhone({ navigation }: any) {
       ) : null}
       {step === 'unavailable' ? <Text style={s.fine}>{t('phoneLink.unavailableNote')}</Text> : null}
 
-      {step === 'linked' ? <Text style={s.body}>{t('phoneLink.alreadyLinked', { phone: masked })}</Text> : null}
+      {step === 'linked' ? (
+        <>
+          <Text style={s.body}>{t('phoneLink.alreadyLinked', { phone: masked })}</Text>
+          {status && status.available && status.eligible && !status.sendingPaused
+            ? primary(t('phoneLink.changeButton'), () => { setChanging(true); setError(null); })
+            : null}
+        </>
+      ) : null}
 
       {step === 'recover' ? (
         <>
@@ -197,32 +198,11 @@ export default function LinkPhone({ navigation }: any) {
         </>
       ) : null}
 
-      {step === 'reauth' ? (
-        <>
-          <Text style={s.body}>{t('phoneLink.reauthBody', { email: auth.currentUser?.email ?? '' })}</Text>
-          {!reauthSent ? primary(t('phoneLink.reauthSend'), sendReauth) : (
-            <>
-              <TextInput
-                style={s.input}
-                value={reauthCode}
-                onChangeText={v => setReauthCode(v.replace(/\D/g, '').slice(0, CODE_LEN))}
-                keyboardType="number-pad"
-                textContentType="oneTimeCode"
-                autoComplete="one-time-code"
-                maxLength={CODE_LEN}
-                placeholder={t('phoneLink.codePlaceholder')}
-                placeholderTextColor={colors.text.disabled}
-                accessibilityLabel={t('phoneLink.reauthCodeLabel')}
-              />
-              {primary(t('phoneLink.reauthConfirm'), confirmReauth, reauthCode.length === CODE_LEN)}
-            </>
-          )}
-        </>
-      ) : null}
+      {step === 'reauth' ? <ReauthPanel onDone={afterReauth} /> : null}
 
       {step === 'number' ? (
         <>
-          <Text style={s.body}>{t('phoneLink.numberBody')}</Text>
+          <Text style={s.body}>{t(changing ? 'phoneLink.numberBodyChange' : 'phoneLink.numberBody')}</Text>
           {countries.length === 0 ? <Text style={s.body}>{t('phoneLink.errors.countryUnavailable')}</Text> : (
             <View style={s.chipRow}>
               {countries.map(c => (
@@ -302,7 +282,7 @@ export default function LinkPhone({ navigation }: any) {
 
       {step === 'done' ? (
         <>
-          <Text style={s.body}>{t('phoneLink.done', { phone: masked })}</Text>
+          <Text style={s.body}>{t(changing ? 'phoneLink.doneChange' : 'phoneLink.done', { phone: masked })}</Text>
           {primary(t('phoneLink.doneButton'), () => navigation.goBack())}
         </>
       ) : null}
