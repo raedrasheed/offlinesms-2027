@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   emailChangeVerifier, emailChangeCodeMatches, checkEmailChangeAccount, applyEmailChangeAccount,
   emailChangeVerifyExhausted, applyEmailChangeVerifyFailure, maskEmail, EMAIL_CHANGE_LIMITS as L,
-  recoveryAllowed, recoveryKeyHash,
+  recoveryAllowed, recoveryKeyHash, ownRevocationMarker,
 } from '../src/emailChange/logic';
 import { hasVerifiedSignInMethod } from '../src/phoneLink/gates';
 import { liveWrites, writeOutcomeUnknown, ABANDON_MS } from '../src/emailChange/authWrites';
@@ -113,5 +113,25 @@ describe('Auth-write ledger (pure)', () => {
     expect(writeOutcomeUnknown({ code: 'auth/internal-error' })).toBe(true);
     expect(writeOutcomeUnknown({ code: 'app/network-timeout' })).toBe(true);
     expect(writeOutcomeUnknown(new Error('ECONNRESET'))).toBe(true);
+  });
+});
+
+describe('own revocation marker (pure, R3-1)', () => {
+  const start = Date.parse('2026-10-09T12:00:00.400Z');
+  const end = start + 300;
+  const at = (ms: number) => new Date(ms).toUTCString();
+  it("keeps a marker inside the write call's own seconds (±1s skew)", () => {
+    expect(ownRevocationMarker(at(start), start, end)).toBe(at(start));
+    expect(ownRevocationMarker(at(start - 1_000), start, end)).toBe(at(start - 1_000));
+    expect(ownRevocationMarker(at(end + 1_000), start, end)).toBe(at(end + 1_000));
+  });
+  it('drops a later independent revocation read back after the write', () => {
+    for (const d of [2, 10, 24, 60]) expect(ownRevocationMarker(at(end + d * 1000), start, end)).toBeNull();
+    expect(ownRevocationMarker(at(start - 5_000), start, end)).toBeNull(); // the write did not move it
+  });
+  it('drops anything when the write call was too slow to bound, or the marker is missing', () => {
+    expect(ownRevocationMarker(at(start), start, start + 2_500)).toBeNull();
+    expect(ownRevocationMarker(undefined, start, end)).toBeNull();
+    expect(ownRevocationMarker('garbage', start, end)).toBeNull();
   });
 });

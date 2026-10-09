@@ -678,7 +678,9 @@
       "codeExpired": "That code has expired. Request a new one.",
       "tooManyAttempts": "Too many incorrect codes. Request a new code later.",
       "network": "Network problem. Check your connection and try again.",
-      "generic": "Something went wrong. Please try again."
+      "generic": "Something went wrong. Please try again.",
+      "conflict": "This change couldn't be completed safely. Please contact support.",
+      "addressReplaced": "That email was replaced on this account and can't be used to confirm it's you."
     }
   },
   "names": {

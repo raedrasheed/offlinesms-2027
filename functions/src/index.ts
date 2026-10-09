@@ -144,3 +144,4 @@ export { requestEmailChangeCode } from './emailChange/requestEmailChangeCode';
 export { verifyEmailChangeCode, resumeEmailChange } from './emailChange/verifyEmailChangeCode';
 export { getSignInMethods } from './emailChange/getSignInMethods';
 export { reconcileEmailChangeWrites } from './emailChange/reconcileEmailChangeWrites';
+export { guardEmailSignIn, guardEmailSent } from './emailChange/emailSignInBlocking';

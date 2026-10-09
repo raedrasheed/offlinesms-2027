@@ -40,6 +40,7 @@ import {
 import { handleGetSignInMethods } from '../src/emailChange/getSignInMethods';
 import { userPrivateProfileRef } from '../src/lib/userPrivate';
 import { runReconcilePass } from '../src/emailChange/authWrites';
+import { handleBeforeSignIn, handleBeforeEmailSent } from '../src/emailChange/signInGuard';
 
 const FAST = { powBits: 8, powMaxBits: 8 };
 const PEPPER = process.env.PHONE_HASH_PEPPER!;
@@ -700,4 +701,122 @@ describe('stale Auth writers cannot bring back an earlier address (R2-2)', () =>
     await resume(u.uid, { challengeId: r.challengeId });
     expect(await authEmail(u.uid)).toBe('x@example.test');
   });
+
+  // ── Round 3 (review of 87fc9fe) ──────────────────────────────────────────
+
+  it('R3-2: a repair that Auth refuses is never reported as success, and no token is issued', async () => {
+    const u = await makeEmailUser();
+    const r = await requestEmail(u.uid, 'b@example.test');
+    emailChangeDeps.afterAuthCheck = async uid => {
+      emailChangeDeps.afterAuthCheck = origAfterAuthCheck;
+      await origSetAuthEmail(uid, u.email);                     // a late write puts the old address back
+      await getAuth().createUser({ email: 'b@example.test' });  // the freed address is claimed by another account
+    };
+    await expectHttps(verifyEmail(u.uid, r.challengeId, lastCodeTo('b@example.test')), 'aborted', 'change-conflict');
+    expect(await authEmail(u.uid)).toBe(u.email);
+    expect((await ledger(u.uid)).conflict?.code).toBe('auth/email-already-exists');
+    const audit = (await db().collection('auditLogs').get()).docs.map(d => d.data());
+    expect(audit.some(a => a.action === 'emailChange.authEmailRepairRejected' && a.result === 'failure')).toBe(true);
+    expect(audit.some(a => a.action === 'emailChange.authEmailRepaired' && a.result === 'success')).toBe(false);
+    expect(audit.some(a => a.action === 'emailChange.completed')).toBe(false);
+    // Retrying never turns it into a success …
+    await expectHttps(resume(u.uid, { challengeId: r.challengeId }, { authAgeSec: -2 }), 'aborted', 'change-conflict');
+    // … and the replaced address cannot sign in meanwhile.
+    await requestEmailOtp.run(req(null, { email: u.email }));
+    await expectHttps(verifyEmailOtp.run(req(null, { email: u.email, code: lastCodeTo(u.email) })), 'permission-denied', 'address-replaced');
+  });
+
+  it('R3-2: a repair whose outcome is unknown is not success either', async () => {
+    const u = await makeEmailUser();
+    const r = await requestEmail(u.uid, 'b@example.test');
+    emailChangeDeps.afterAuthCheck = async uid => {
+      emailChangeDeps.afterAuthCheck = origAfterAuthCheck;
+      await origSetAuthEmail(uid, u.email);
+      emailChangeDeps.setAuthEmail = async () => { throw Object.assign(new Error('timeout'), { code: 'app/network-timeout' }); };
+    };
+    await expectHttps(verifyEmail(u.uid, r.challengeId, lastCodeTo('b@example.test')), 'unavailable', 'change-interrupted');
+    expect(await authEmail(u.uid)).toBe(u.email);
+    emailChangeDeps.setAuthEmail = origSetAuthEmail;
+    const out = await resume(u.uid, { challengeId: r.challengeId }, { authAgeSec: -2 });
+    expect(out.email).toBe('b@example.test');
+    expect(await authEmail(u.uid)).toBe('b@example.test');
+  });
+
+  it('R3-3: the replaced address cannot sign in by code, password or reset during a stale window, nor overwrite the settled one', async () => {
+    const { u } = await stalledA({ dead: true });
+    const rB = await bAfterAbandon(u);
+    await verifyEmail(u.uid, rB.challengeId, lastCodeTo('b@example.test'));
+    expect(await privEmail(u.uid)).toBe('b@example.test');
+    expect((await ledger(u.uid)).settledEmail).toBe('b@example.test');
+
+    // The lost worker's request for the old address lands; nobody reports it.
+    await origSetAuthEmail(u.uid, 'a@example.test');
+    // Email-code sign-in with the old address: refused, Auth repaired at once, profile untouched.
+    await requestEmailOtp.run(req(null, { email: 'a@example.test' }));
+    await expectHttps(verifyEmailOtp.run(req(null, { email: 'a@example.test', code: lastCodeTo('a@example.test') })), 'permission-denied', 'address-replaced');
+    expect(await authEmail(u.uid)).toBe('b@example.test');
+    expect(await privEmail(u.uid)).toBe('b@example.test');
+
+    // Password sign-in and a password-reset email for the old address: refused (and repaired).
+    await origSetAuthEmail(u.uid, 'a@example.test');
+    await expect(handleBeforeSignIn({ data: { uid: u.uid, email: 'a@example.test' }, additionalUserInfo: { providerId: 'password' } }))
+      .rejects.toMatchObject({ message: 'address-replaced' });
+    expect(await authEmail(u.uid)).toBe('b@example.test');
+    await origSetAuthEmail(u.uid, 'a@example.test');
+    await expect(handleBeforeEmailSent({ emailType: 'PASSWORD_RESET', additionalUserInfo: { email: 'a@example.test' } }))
+      .rejects.toMatchObject({ message: 'address-replaced' });
+    expect(await authEmail(u.uid)).toBe('b@example.test');
+    // Once repaired the old address resolves to no account (Firebase sends nothing); the settled one works.
+    await handleBeforeEmailSent({ emailType: 'PASSWORD_RESET', additionalUserInfo: { email: 'a@example.test' } });
+    await handleBeforeSignIn({ data: { uid: u.uid, email: 'b@example.test' }, additionalUserInfo: { providerId: 'password' } });
+    await handleBeforeSignIn({ data: { uid: u.uid, email: 'a@example.test' }, additionalUserInfo: { providerId: 'custom' } });
+
+    // The scheduled passes keep the settled address and only then retire the uncertain write.
+    await origSetAuthEmail(u.uid, 'a@example.test');
+    await runReconcilePass(Date.now() + 16 * 60_000);
+    expect(await authEmail(u.uid)).toBe('b@example.test');
+    expect(Object.keys((await ledger(u.uid)).uncertain ?? {})).toHaveLength(1);
+    await runReconcilePass(Date.now() + 25 * 3600_000);
+    expect(Object.keys((await ledger(u.uid)).uncertain ?? {})).toHaveLength(0);
+    expect(await authEmail(u.uid)).toBe('b@example.test');
+    expect(await privEmail(u.uid)).toBe('b@example.test');
+  });
+
+  it('R3-3: accounts that never used the change flow sign in as before', async () => {
+    const u = await makeEmailUser();
+    await handleBeforeSignIn({ data: { uid: u.uid, email: u.email }, additionalUserInfo: { providerId: 'password' } });
+    await handleBeforeEmailSent({ emailType: 'PASSWORD_RESET', additionalUserInfo: { email: u.email } });
+    expect((await emailSignIn(u.email)).uid).toBe(u.uid);
+  });
+});
+
+describe('R3-1: a revocation between the write and its read-back is never taken for the change', () => {
+  const origAfterAuthWrite = emailChangeDeps.afterAuthWrite;
+  afterEach(() => { emailChangeDeps.afterAuthWrite = origAfterAuthWrite; });
+
+  for (const d of [2, 10, 24]) {
+    it(`independent revocation +${d}s before marker capture: no marker, the revoked device must sign in again`, async () => {
+      const u = await makeEmailUser();
+      const session = { claims: { auth_time: Math.floor(Date.now() / 1000) - 5 } };
+      const r = await requestEmail(u.uid, 'x@example.test', session);
+      emailChangeDeps.afterAuthWrite = async uid => {
+        emailChangeDeps.afterAuthWrite = origAfterAuthWrite;
+        await setValidSince(uid, Math.floor(Date.now() / 1000) + d);
+      };
+      emailChangeDeps.beforeFinalize = async () => {
+        emailChangeDeps.beforeFinalize = origBeforeFinalize;
+        throw new Error('interrupted before finalize');
+      };
+      await expectHttps(
+        handleVerifyEmailChangeCode(req(u.uid, { challengeId: r.challengeId, code: lastCodeTo('x@example.test'), recoveryKey: KEY }, session)),
+        'unavailable', 'change-interrupted');
+      const op = (await db().collection('emailChangeOps').doc(u.uid).get()).data()!;
+      expect(op.stage).toBe('auth-updated');
+      expect(op.changeValidAfter ?? null).toBeNull();
+      await expectHttps(resume(u.uid, { challengeId: r.challengeId, recoveryKey: KEY }, session), 'unauthenticated', 'reauth-required');
+      // A fresh sign-in still finishes the change.
+      const out = await resume(u.uid, { challengeId: r.challengeId }, { claims: { auth_time: Math.floor(Date.now() / 1000) + d + 1 } });
+      expect(out.email).toBe('x@example.test');
+    });
+  }
 });

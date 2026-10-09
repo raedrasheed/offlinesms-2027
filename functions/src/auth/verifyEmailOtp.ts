@@ -11,6 +11,7 @@ import { verifyOtpHash, isOtpExpired, OTP_MAX_ATTEMPTS, OTP_CODE_LENGTH } from '
 import { normalizeEmail, emailKey } from './emailOtpLogic';
 import { appCheckOptions } from '../lib/appCheck';
 import { writeUserPrivateProfile } from '../lib/userPrivate';
+import { requireCurrentAddress } from '../emailChange/signInGuard';
 
 const REGION = 'us-central1';
 
@@ -66,6 +67,9 @@ export const verifyEmailOtp = onCall({ region: REGION, ...appCheckOptions() }, a
     uid = (await adminAuth.createUser({ email, emailVerified: true })).uid;
     created = true;
   }
+  // An address this account replaced may still be on its Auth record after a
+  // stale write; it must neither sign in nor become the profile's address.
+  if (!created) await requireCurrentAddress(uid, email, 'email-otp');
 
   const userRef = db.collection('users').doc(uid);
   if (created) {

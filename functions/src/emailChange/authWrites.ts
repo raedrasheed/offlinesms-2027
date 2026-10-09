@@ -13,12 +13,17 @@
 //     vanished (pending past ABANDON_MS) is kept as `uncertain` and the
 //     account is reconciled against its settled address on every later step
 //     and by a scheduled sweep, until UNCERTAIN_KEEP_MS has passed.
+//
+// The settled address is `settledEmail` on this ledger: written only by the
+// email-change flow (at acceptance when absent, and in the finalize
+// transaction), never by sign-in. Sign-in routes refuse any address that is
+// not the settled one (./signInGuard.ts), so a stale Auth mapping can neither
+// sign anyone in nor overwrite what the repair restores.
 
 import { randomBytes } from 'node:crypto';
 import { getFirestore, FieldValue, type Firestore, type Transaction, type DocumentReference } from 'firebase-admin/firestore';
 import { getAuth } from 'firebase-admin/auth';
 import { writeAuditLog } from '../lib/auditLog';
-import { userPrivateProfileRef } from '../lib/userPrivate';
 import { authErrorCode } from '../phoneLink/shared';
 import { EMAIL_CHANGE_COLLECTIONS as C } from './logic';
 
@@ -36,7 +41,16 @@ export interface Ledger {
   pending?: Record<string, WriteEntry>;
   uncertain?: Record<string, WriteEntry & { sinceMs: number }>;
   reconcileAtMs?: number;
+  /** The account's settled (authoritative) email address, lowercased. */
+  settledEmail?: string;
+  /** A repair Auth refused (e.g. the address was claimed meanwhile): needs support. */
+  conflict?: { code: string; atMs: number } | null;
 }
+
+export type ReconcileResult = 'consistent' | 'no-authority' | 'dirty' | 'in-progress' | 'repaired' | 'rejected' | 'unknown';
+
+export const settledEmailOf = (l: Ledger | undefined): string | null =>
+  typeof l?.settledEmail === 'string' && l.settledEmail ? l.settledEmail.toLowerCase() : null;
 
 /** Seams for adversarial tests. Production never reassigns them. */
 export const authWriteDeps = {
@@ -105,19 +119,21 @@ export async function sweepAbandoned(uid: string, now = Date.now()): Promise<boo
 }
 
 /**
- * Make Auth carry the account's settled address. While a change is in progress
- * it is only marked dirty: that change re-runs its own write before it may
- * finalize. Once settled (done/failed/no change), Auth is set back to the
- * address in the private profile through a recorded (fenced) write. Safe to
- * call any number of times.
+ * Make Auth carry the account's settled address (ledger.settledEmail). While a
+ * change is in progress it is only marked dirty: that change re-runs its own
+ * write before it may finalize. Once settled, Auth is set back through a
+ * recorded (fenced) write and then READ BACK; only a read-back that shows the
+ * settled address counts as repaired. A definite refusal from Auth is
+ * `rejected` (recorded as a conflict for support), an unknown outcome is
+ * `unknown`; neither ever counts as success. Safe to call any number of times.
  */
 export async function reconcileAuthEmail(
   uid: string, opts: { markDirty?: boolean } = {}, depth = 0,
-): Promise<'consistent' | 'dirty' | 'in-progress' | 'repaired' | 'unknown'> {
+): Promise<ReconcileResult> {
   const db = getFirestore();
   const opRef = db.collection(C.ops).doc(uid);
   const lRef = ledgerRef(db, uid);
-  const [opS, priv] = await Promise.all([opRef.get(), userPrivateProfileRef(db, uid).get()]);
+  const [opS, lS] = await Promise.all([opRef.get(), lRef.get()]);
   if (opS.exists && NONTERMINAL.has(opS.get('stage'))) {
     // That change's own finalize re-reads Auth; a stale writer that reports in
     // also marks it dirty so it re-writes before finishing.
@@ -128,39 +144,65 @@ export async function reconcileAuthEmail(
     });
     return 'dirty';
   }
-  const settled = priv.get('email') as string | undefined;
-  if (!settled) return 'unknown';
+  const settled = settledEmailOf(lS.exists ? (lS.data() as Ledger) : undefined);
+  if (!settled) return 'no-authority'; // no email has ever been settled by this flow
   let current: string;
-  try { current = (await getAuth().getUser(uid)).email ?? ''; } catch { return 'unknown'; }
-  if (current.toLowerCase() === settled.toLowerCase()) return 'consistent';
+  try { current = ((await getAuth().getUser(uid)).email ?? '').toLowerCase(); } catch { return 'unknown'; }
+  if (current === settled) {
+    if (lS.get('conflict')) await lRef.update({ conflict: FieldValue.delete(), updatedAt: FieldValue.serverTimestamp() }).catch(() => {});
+    return 'consistent';
+  }
 
   // Fenced restore: recorded first, only while the account is still settled on `settled`.
   const writeId = newWriteId();
   const now = Date.now();
   const ok = await db.runTransaction(async tx => {
-    const [s, p, l] = await tx.getAll(opRef, userPrivateProfileRef(db, uid), lRef);
+    const [s, l] = await tx.getAll(opRef, lRef);
     if (s.exists && NONTERMINAL.has(s.get('stage'))) return false;
-    if ((p.get('email') as string | undefined) !== settled) return false;
-    recordPending(tx, lRef, l.exists ? (l.data() as Ledger) : undefined, writeId, { email: settled, challengeId: (s.get('challengeId') as string) ?? 'restore', kind: 'restore', atMs: now });
+    const ld = l.exists ? (l.data() as Ledger) : undefined;
+    if (settledEmailOf(ld) !== settled) return false;
+    recordPending(tx, lRef, ld, writeId, { email: settled, challengeId: (s.get('challengeId') as string) ?? 'restore', kind: 'restore', atMs: now });
     return true;
   });
   if (!ok) return depth < 2 ? reconcileAuthEmail(uid, opts, depth + 1) : 'unknown';
-  let unknown = false;
+
+  let outcome: 'applied' | 'rejected' | 'unknown' = 'applied';
+  let code = '';
   try {
     await authWriteDeps.setAuthEmail(uid, settled);
   } catch (e) {
-    unknown = writeOutcomeUnknown(e);
-    console.warn('[emailChange] repair write failed', { uid, code: authErrorCode(e) });
+    code = authErrorCode(e) || 'error';
+    outcome = writeOutcomeUnknown(e) ? 'unknown' : 'rejected';
+    console.warn('[emailChange] repair write failed', { uid, code });
+  }
+  if (outcome === 'applied') {
+    // Trust only what Auth now says.
+    try {
+      if (((await getAuth().getUser(uid)).email ?? '').toLowerCase() !== settled) { outcome = 'unknown'; code = 'readback-mismatch'; }
+    } catch { outcome = 'unknown'; code = 'readback-failed'; }
   }
   const stillSettled = await db.runTransaction(async tx => {
-    const [s, p, l] = await tx.getAll(opRef, userPrivateProfileRef(db, uid), lRef);
-    resolvePending(tx, lRef, l.exists ? (l.data() as Ledger) : undefined, writeId, unknown, Date.now());
-    return !(s.exists && NONTERMINAL.has(s.get('stage'))) && (p.get('email') as string | undefined) === settled;
+    const [s, l] = await tx.getAll(opRef, lRef);
+    const ld = l.exists ? (l.data() as Ledger) : undefined;
+    // A refused write never happened; an unknown one may still land.
+    resolvePending(tx, lRef, ld, writeId, outcome === 'unknown', Date.now());
+    if (outcome !== 'applied' && l.exists) {
+      tx.update(lRef, {
+        reconcileAtMs: Math.min(ld?.reconcileAtMs ?? Infinity, Date.now() + RECONCILE_EVERY_MS),
+        ...(outcome === 'rejected' ? { conflict: { code, atMs: Date.now() } } : {}),
+      });
+    }
+    return !(s.exists && NONTERMINAL.has(s.get('stage'))) && settledEmailOf(ld) === settled;
   });
-  await writeAuditLog({ action: 'emailChange.authEmailRepaired', actor: { uid }, target: { type: 'account', id: uid }, result: unknown ? 'failure' : 'success' });
+  await writeAuditLog({
+    action: outcome === 'rejected' ? 'emailChange.authEmailRepairRejected' : 'emailChange.authEmailRepaired',
+    actor: { uid }, target: { type: 'account', id: uid },
+    result: outcome === 'applied' ? 'success' : 'failure',
+    ...(outcome === 'applied' ? {} : { metadata: { code } }),
+  });
   // The settled address moved on while this repair was in flight: repair again.
   if (!stillSettled && depth < 2) return reconcileAuthEmail(uid, opts, depth + 1);
-  return unknown ? 'unknown' : 'repaired';
+  return outcome === 'applied' ? 'repaired' : outcome;
 }
 
 /** Sweep abandoned writes and, when any write is uncertain, reconcile. */
@@ -190,7 +232,9 @@ export async function runReconcilePass(now = Date.now(), limit = 200): Promise<n
           if (state === 'consistent' && now - e.sinceMs >= UNCERTAIN_KEEP_MS) patch[`uncertain.${id}`] = FieldValue.delete();
           else left++;
         }
-        patch.reconcileAtMs = left || Object.keys(l.pending ?? {}).length ? now + RECONCILE_EVERY_MS : FieldValue.delete();
+        // Keep looking while anything is unresolved or Auth is not (yet) back on the settled address.
+        const open = left || Object.keys(l.pending ?? {}).length || !['consistent', 'repaired', 'no-authority'].includes(state);
+        patch.reconcileAtMs = open ? now + RECONCILE_EVERY_MS : FieldValue.delete();
         tx.update(d.ref, patch);
       });
     } catch (e) {

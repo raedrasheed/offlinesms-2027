@@ -19,6 +19,8 @@ const ERROR_KEYS: Record<string, string> = {
   'change-interrupted': 'interrupted',
   'cooldown': 'cooldown',
   'change-settling': 'cooldown',
+  'change-conflict': 'conflict',
+  'address-replaced': 'addressReplaced',
   'rate-limited': 'rateLimited',
   'too-many-numbers': 'tooManyAddresses',
   'code-invalid': 'codeInvalid',

@@ -98,6 +98,7 @@ export function emailOtpErrorCopy(reason?: string): string {
     case 'otp-too-many-attempts':  return 'Too many attempts — request a new code.';
     case 'otp-incorrect':
     case 'code-invalid':           return 'Incorrect code. Try again.';
+    case 'address-replaced':       return 'This email was replaced on its account and no longer signs in. Use your current email or phone number.';
     default:                       return 'Something went wrong. Please try again.';
   }
 }

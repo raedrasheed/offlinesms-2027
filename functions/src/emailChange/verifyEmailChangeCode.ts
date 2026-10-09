@@ -40,12 +40,12 @@ import { authErrorCode } from '../phoneLink/shared';
 import {
   EMAIL_CHANGE_COLLECTIONS as C, EMAIL_CHANGE_LIMITS as L, EMAIL_CHANGE_PURPOSE, EMAIL_CHANGE_FN_TIMEOUT_SEC,
   emailChangeCodeMatches, emailChangeVerifyExhausted, applyEmailChangeVerifyFailure, maskEmail,
-  recoveryAllowed, recoveryKeyHash, RECOVERY_KEY_RE,
+  recoveryAllowed, recoveryKeyHash, ownRevocationMarker, RECOVERY_KEY_RE,
   type EmailChangeAccountCounter,
 } from './logic';
 import {
   authWriteDeps, ledgerRef, liveWrites, newWriteId, recordPending, resolvePending, writeOutcomeUnknown,
-  reconcileAuthEmail, settleUncertain, type Ledger,
+  reconcileAuthEmail, settleUncertain, settledEmailOf, type Ledger, type ReconcileResult,
 } from './authWrites';
 
 const REGION = 'us-central1';
@@ -59,6 +59,8 @@ export const emailChangeDeps = {
   get setAuthEmail() { return authWriteDeps.setAuthEmail; },
   set setAuthEmail(f: (uid: string, email: string) => Promise<void>) { authWriteDeps.setAuthEmail = f; },
   beforeAuthWrite: async (_uid: string): Promise<void> => { /* no-op */ },
+  /** Between the change's Auth write returning and its marker read-back. */
+  afterAuthWrite: async (_uid: string): Promise<void> => { /* no-op */ },
   beforeFinalize: async (_uid: string): Promise<void> => { /* no-op */ },
   /** Between finalize's Auth read and its Firestore transaction. */
   afterAuthCheck: async (_uid: string): Promise<void> => { /* no-op */ },
@@ -76,11 +78,11 @@ const ms = (v: unknown): number => (v as Timestamp | undefined)?.toMillis?.() ??
  */
 async function callerForChange(
   request: CallableRequest<unknown>, challengeId: string, recoveryKey: string | null,
-): Promise<{ uid: string; email: string | null }> {
+): Promise<{ uid: string; email: string | null; emailVerified: boolean }> {
   const db = getFirestore();
   try {
     const c = await requireEligibleCaller(request, db, L.reauthMaxAgeSec + L.codeTtlSec);
-    return { uid: c.uid, email: c.user.email ?? null };
+    return { uid: c.uid, email: c.user.email ?? null, emailVerified: c.user.emailVerified === true };
   } catch (e) {
     if (!(e instanceof HttpsError) || e.message !== 'reauth-required') throw e;
     if (!recoveryKey || !CHALLENGE_ID_RE.test(challengeId)) throw e;
@@ -100,7 +102,7 @@ async function callerForChange(
       return allowed;
     });
     if (!ok) throw e;
-    return { uid: c.uid, email: c.user.email ?? null };
+    return { uid: c.uid, email: c.user.email ?? null, emailVerified: c.user.emailVerified === true };
   }
 }
 
@@ -176,6 +178,12 @@ export async function handleVerifyEmailChangeCode(request: CallableRequest<unkno
         return burned ? { kind: 'error', code: 'too-many-attempts' } : { kind: 'error', code: 'code-invalid', attemptsLeft: maxAttempts - next };
       }
 
+      // The address the account is settled on until this change finalizes —
+      // recorded once, from the verified Auth email, never from sign-in.
+      const ld = lS.exists ? (lS.data() as Ledger) : undefined;
+      if (!settledEmailOf(ld) && previousEmail && caller.emailVerified) {
+        tx.set(ledgerRef(db, uid), { settledEmail: previousEmail.toLowerCase(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      }
       // Correct code: single use from here on, whatever happens next.
       tx.update(chRef, { status: 'used', usedAt: FieldValue.serverTimestamp(), codeHash: FieldValue.delete() });
       tx.set(opRef, {
@@ -283,6 +291,7 @@ async function fencedChangeWrite(uid: string, challengeId: string, email: string
     await resolve('none', null);
     throw new HttpsError('unavailable', 'change-interrupted');
   }
+  const writeStart = Date.now();
   try {
     await authWriteDeps.setAuthEmail(uid, email);
   } catch (e) {
@@ -295,14 +304,32 @@ async function fencedChangeWrite(uid: string, challengeId: string, email: string
     }
     throw e;
   }
+  const writeEnd = Date.now();
+  await emailChangeDeps.afterAuthWrite(uid);
+  // Keep the read-back marker only if this write can have produced it; a
+  // revocation between the write and this read must never pass for our own.
   let marker: string | null = null;
-  try { marker = (await getAuth().getUser(uid)).tokensValidAfterTime ?? null; } catch { marker = null; }
+  try { marker = ownRevocationMarker((await getAuth().getUser(uid)).tokensValidAfterTime, writeStart, writeEnd); } catch { marker = null; }
   if (await resolve('written', marker) === 'stale') {
     // This write lost to a newer change: undo it (or make that change re-write).
     await reconcileAuthEmail(uid);
     throw new HttpsError('not-found', 'challenge-not-found');
   }
   return true;
+}
+
+/**
+ * Success (and a token) only when Auth was read to carry the settled address.
+ * A repair Auth refused is a conflict for support; anything else is retried.
+ */
+function requireAuthSettled(uid: string, r: ReconcileResult): void {
+  // no-authority: nothing was ever settled by this flow (older ops); nothing contradicts Auth.
+  if (r === 'consistent' || r === 'repaired' || r === 'no-authority') return;
+  if (r === 'rejected') {
+    console.warn('[emailChange] Auth refused the settled address; needs support', { uid });
+    throw new HttpsError('aborted', 'change-conflict');
+  }
+  throw new HttpsError('unavailable', 'change-interrupted');
 }
 
 export async function completeEmailChange(uid: string, challengeId: string, depth = 0): Promise<ChangeResult> {
@@ -313,9 +340,10 @@ export async function completeEmailChange(uid: string, challengeId: string, dept
   const stage = op.get('stage') as string;
   if (stage === 'failed') throw new HttpsError('already-exists', 'email-unavailable');
   if (stage === 'done') {
-    if (await reconcileAuthEmail(uid, { markDirty: false }) === 'unknown') throw new HttpsError('unavailable', 'change-interrupted');
-    const email = (await userPrivateProfileRef(db, uid).get()).get('email') as string | undefined;
-    return withToken(uid, email ?? '');
+    requireAuthSettled(uid, await reconcileAuthEmail(uid, { markDirty: false }));
+    const settled = settledEmailOf((await ledgerRef(db, uid).get()).data() as Ledger | undefined)
+      ?? ((await userPrivateProfileRef(db, uid).get()).get('email') as string | undefined);
+    return withToken(uid, settled ?? '');
   }
   const email = op.get('email') as string;
 
@@ -363,6 +391,8 @@ export async function completeEmailChange(uid: string, challengeId: string, dept
         tx.update(opRef, { stage: 'verified', authDirty: FieldValue.delete(), updatedAt: FieldValue.serverTimestamp() });
         return 'dirty';
       }
+      // The new address becomes the settled one in the same transaction.
+      tx.set(ledgerRef(db, uid), { settledEmail: email.toLowerCase(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
       tx.set(userPrivateProfileRef(db, uid), {
         email, emailVerifiedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
       }, { merge: true });
@@ -384,8 +414,7 @@ export async function completeEmailChange(uid: string, challengeId: string, dept
 
   // Never report success while Auth carries another address: a write that
   // landed after the transaction is undone now (the change is the settled one).
-  const after = await reconcileAuthEmail(uid, { markDirty: false });
-  if (after === 'unknown') throw new HttpsError('unavailable', 'change-interrupted');
+  requireAuthSettled(uid, await reconcileAuthEmail(uid, { markDirty: false }));
 
   await writeAuditLog({
     action: 'emailChange.completed', actor: { uid }, target: { type: 'account', id: uid }, result: 'success',
