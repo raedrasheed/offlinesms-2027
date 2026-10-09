@@ -33,9 +33,10 @@ import { requireEligibleCaller } from '../phoneLink/gates';
 import { DAY_MS } from '../phoneLink/limits';
 import {
   EMAIL_CHANGE_COLLECTIONS as C, EMAIL_CHANGE_LIMITS as L, EMAIL_CHANGE_PURPOSE,
-  checkEmailChangeAccount, applyEmailChangeAccount, emailChangeVerifier, maskEmail, unsettled, settleWaitSec,
+  checkEmailChangeAccount, applyEmailChangeAccount, emailChangeVerifier, maskEmail,
   type EmailChangeAccountCounter,
 } from './logic';
+import { ledgerRef, liveWrites, settleUncertain, type Ledger } from './authWrites';
 
 const REGION = 'us-central1';
 
@@ -92,13 +93,14 @@ export async function handleRequestEmailChangeCode(request: CallableRequest<unkn
   const acctRef = db.collection(C.limits).doc(`acct_${uid}`);
   const destRef = db.collection('emailOtpLimits').doc(key);
 
+  await settleUncertain(uid);
   const out = await db.runTransaction<TxOut>(async tx => {
-    const [opS, acctS, destS] = await tx.getAll(opRef, acctRef, destRef);
+    const [opS, acctS, destS, lS] = await tx.getAll(opRef, acctRef, destRef, ledgerRef(db, uid));
     const stage = opS.exists ? (opS.get('stage') as string) : null;
     if (stage && stage !== 'done' && stage !== 'failed') return { kind: 'reject', code: 'change-pending-recovery' };
-    // The previous change's Auth write may still be in flight somewhere.
-    const opData = opS.exists ? opS.data()! : null;
-    if (unsettled(opData, now)) return { kind: 'limit', code: 'change-settling', retryAfterSec: settleWaitSec(opData, now) };
+    // An earlier Auth write is still in flight: no new change until it resolves.
+    const live = liveWrites(lS.exists ? (lS.data() as Ledger) : undefined, now);
+    if (live.count) return { kind: 'limit', code: 'change-settling', retryAfterSec: live.retryAfterSec };
 
     const acct = (acctS.data() ?? {}) as EmailChangeAccountCounter;
     const rej = checkEmailChangeAccount(acct, key, now);

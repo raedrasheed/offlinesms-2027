@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   emailChangeVerifier, emailChangeCodeMatches, checkEmailChangeAccount, applyEmailChangeAccount,
   emailChangeVerifyExhausted, applyEmailChangeVerifyFailure, maskEmail, EMAIL_CHANGE_LIMITS as L,
-  recoveryAllowed, recoveryKeyHash, unsettled, settleWaitSec,
+  recoveryAllowed, recoveryKeyHash,
 } from '../src/emailChange/logic';
 import { hasVerifiedSignInMethod } from '../src/phoneLink/gates';
+import { liveWrites, writeOutcomeUnknown, ABANDON_MS } from '../src/emailChange/authWrites';
 import { renderOtpEmail } from '../src/lib/email/template';
 
 const b = { challengeId: 'a'.repeat(32), uid: 'u1', emailKey: 'k1' };
@@ -66,25 +67,29 @@ describe('helpers', () => {
 describe('revoked-session recovery (pure)', () => {
   const key = 'ab'.repeat(32);
   const t0 = Date.parse('2026-10-09T12:00:00Z');
+  const own = new Date(t0 + 2_000).toUTCString();
   const base = {
-    op: { uid: 'u1', stage: 'done', challengeId: 'c'.repeat(32), recoveryHash: recoveryKeyHash(key), recoveryUses: 0, startedAtMs: t0, authClaimAtMs: t0 + 1_000 },
+    op: { uid: 'u1', stage: 'done', challengeId: 'c'.repeat(32), recoveryHash: recoveryKeyHash(key), recoveryUses: 0, startedAtMs: t0, changeValidAfter: own },
     uid: 'u1', challengeId: 'c'.repeat(32), recoveryKey: key,
-    authTimeSec: t0 / 1000 - 30, tokensValidAfterTime: new Date(t0 + 2_000).toUTCString(), nowMs: t0 + 60_000,
+    authTimeSec: t0 / 1000 - 30, tokensValidAfterTime: own, nowMs: t0 + 60_000,
   };
-  it('allows only the revocation this change caused, with the key, for the same challenge', () => {
+  it("allows only this change's own revocation marker, with the key, for the same challenge", () => {
     expect(recoveryAllowed(base)).toBe(true);
     expect(recoveryAllowed({ ...base, recoveryKey: 'cd'.repeat(32) })).toBe(false);
     expect(recoveryAllowed({ ...base, recoveryKey: undefined })).toBe(false);
     expect(recoveryAllowed({ ...base, challengeId: 'd'.repeat(32) })).toBe(false);
     expect(recoveryAllowed({ ...base, uid: 'u2' })).toBe(false);
     expect(recoveryAllowed({ ...base, op: { ...base.op, recoveryHash: null } })).toBe(false);
-    // Later revocation (sign-out everywhere, suspension …).
-    expect(recoveryAllowed({ ...base, tokensValidAfterTime: new Date(t0 + 60_000).toUTCString() })).toBe(false);
+    // Any other revocation — even within seconds of the change's own — ends it.
+    for (const d of [1, 2, 10, 24, 60]) {
+      expect(recoveryAllowed({ ...base, tokensValidAfterTime: new Date(t0 + 2_000 + d * 1000).toUTCString() })).toBe(false);
+    }
     // Not revoked at all → the normal gate decides (no bypass for an aged session).
     expect(recoveryAllowed({ ...base, tokensValidAfterTime: undefined })).toBe(false);
     expect(recoveryAllowed({ ...base, authTimeSec: t0 / 1000 + 10 })).toBe(false);
-    // No Auth write was ever claimed.
-    expect(recoveryAllowed({ ...base, op: { ...base.op, authClaimAtMs: undefined } })).toBe(false);
+    // The change's own marker was never recorded → ambiguous → refused.
+    expect(recoveryAllowed({ ...base, op: { ...base.op, changeValidAfter: null } })).toBe(false);
+    expect(recoveryAllowed({ ...base, op: { ...base.op, stage: 'verified' } })).toBe(false);
   });
   it('bounded by uses, window, stage and session age', () => {
     expect(recoveryAllowed({ ...base, op: { ...base.op, recoveryUses: 3 } })).toBe(false);
@@ -92,10 +97,21 @@ describe('revoked-session recovery (pure)', () => {
     expect(recoveryAllowed({ ...base, op: { ...base.op, stage: 'failed' } })).toBe(false);
     expect(recoveryAllowed({ ...base, authTimeSec: t0 / 1000 - 1300 })).toBe(false);
   });
-  it('settle window after an Auth-write claim', () => {
-    expect(unsettled({ authClaimAtMs: t0 }, t0 + 149_000)).toBe(true);
-    expect(unsettled({ authClaimAtMs: t0 }, t0 + 151_000)).toBe(false);
-    expect(unsettled(null, t0)).toBe(false);
-    expect(settleWaitSec({ authClaimAtMs: t0 }, t0 + 100_000)).toBe(50);
+});
+
+describe('Auth-write ledger (pure)', () => {
+  const t0 = 1_000_000_000;
+  it('only live pending writes block; abandoned ones do not', () => {
+    expect(liveWrites(undefined, t0).count).toBe(0);
+    const l = { pending: { a: { email: 'a@x.y', challengeId: 'c', kind: 'change' as const, atMs: t0 } } };
+    expect(liveWrites(l, t0 + 1_000)).toEqual({ count: 1, retryAfterSec: 599 });
+    expect(liveWrites(l, t0 + ABANDON_MS).count).toBe(0);
+  });
+  it('only definite Auth refusals count as a certain outcome', () => {
+    expect(writeOutcomeUnknown({ code: 'auth/email-already-exists' })).toBe(false);
+    expect(writeOutcomeUnknown({ code: 'auth/invalid-email' })).toBe(false);
+    expect(writeOutcomeUnknown({ code: 'auth/internal-error' })).toBe(true);
+    expect(writeOutcomeUnknown({ code: 'app/network-timeout' })).toBe(true);
+    expect(writeOutcomeUnknown(new Error('ECONNRESET'))).toBe(true);
   });
 });

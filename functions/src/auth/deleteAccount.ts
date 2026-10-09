@@ -110,6 +110,7 @@ export const deleteMyAccount = onCall({ region: REGION }, async (request) => {
     batch.delete(db.collection('phoneLinkChallenges').doc(uid));
     batch.delete(db.collection('emailChangeOps').doc(uid));
     batch.delete(db.collection('emailChangeChallenges').doc(uid));
+    batch.delete(db.collection('emailChangeAuthWrites').doc(uid));
     await batch.commit();
   } catch { /* best-effort; a dead owner's claim is treated as stale */ }
 

@@ -34,13 +34,8 @@ export const EMAIL_CHANGE_LIMITS = {
   maxRecoveryUses: 3,
   /** A worker must start its Auth write within this long of claiming it, or not at all. */
   authWriteDeadlineMs: 20_000,
-  /** No new change is accepted this soon after the last Auth-write claim. Over
-   *  twice the callables' timeout, so no claimant of the previous change can
-   *  still be running when the next one starts. */
-  settleMs: 150_000,
 } as const;
 
-/** Timeout of the change callables; keep settleMs above twice this. */
 export const EMAIL_CHANGE_FN_TIMEOUT_SEC = 60;
 
 export interface EmailChangeAccountCounter {
@@ -115,9 +110,13 @@ export function maskEmail(email: string): string {
 // Firebase revokes every session when the account's email changes, including
 // the one making the change. If the response that carries the replacement token
 // is lost, the device may finish with a dedicated recovery proof — a random key
-// it generated and sent with the verify — and only while the revocation it
-// holds is the one THIS change caused. Any later revocation (sign-out
-// everywhere, suspension, password reset) ends the recovery.
+// it generated and sent with the verify — and only while the account's
+// revocation marker (tokensValidAfterTime) is EXACTLY the one this change's own
+// Auth write produced, as read back by that write's worker. Any other
+// revocation (sign-out everywhere, password change, a repair write, a later
+// change) moves the marker and ends the recovery; when the change's own marker
+// was never recorded (worker lost after the write) recovery is refused and the
+// device signs in again normally.
 
 export const RECOVERY_KEY_RE = /^[0-9a-f]{64}$/;
 
@@ -132,15 +131,16 @@ export function recoveryKeyMatches(key: unknown, hash: unknown): boolean {
 
 export interface RecoveryOp {
   uid?: unknown; stage?: unknown; challengeId?: unknown; recoveryHash?: unknown;
-  recoveryUses?: unknown; startedAtMs: number; authClaimAtMs?: unknown;
+  recoveryUses?: unknown; startedAtMs: number; changeValidAfter?: unknown;
 }
 
+const parseTime = (v: unknown): number => (typeof v === 'string' && v ? Date.parse(v) : NaN);
+
 /**
- * Pure: may a caller whose session is NOT fresh/valid continue this op? Only
- * the device that accepted the change (holds the recovery key), for the same
- * challenge, whose sign-in predates the change, within the window and use
- * budget, and whose session was revoked by this change's own Auth write and by
- * nothing since.
+ * Pure: may a caller whose session is revoked continue this op? Only the device
+ * that accepted the change (holds the recovery key), for the same challenge,
+ * whose sign-in predates the change, within the window and use budget, and
+ * whose session was revoked by this change's own Auth write and by nothing else.
  */
 export function recoveryAllowed(a: {
   op: RecoveryOp | null; uid: string; challengeId: string; recoveryKey: unknown;
@@ -149,7 +149,7 @@ export function recoveryAllowed(a: {
   const L = EMAIL_CHANGE_LIMITS;
   const op = a.op;
   if (!op || op.uid !== a.uid || op.challengeId !== a.challengeId) return false;
-  if (!['verified', 'auth-updated', 'done'].includes(op.stage as string)) return false;
+  if (!['auth-updated', 'done'].includes(op.stage as string)) return false;
   if (!recoveryKeyMatches(a.recoveryKey, op.recoveryHash)) return false;
   if (typeof op.recoveryUses === 'number' && op.recoveryUses >= L.maxRecoveryUses) return false;
   if (!(op.startedAtMs > 0) || a.nowMs - op.startedAtMs > L.recoveryWindowSec * 1000) return false;
@@ -157,16 +157,10 @@ export function recoveryAllowed(a: {
   if (typeof a.authTimeSec !== 'number' || !Number.isFinite(a.authTimeSec)) return false;
   const authMs = a.authTimeSec * 1000;
   if (authMs > op.startedAtMs + 5_000 || op.startedAtMs - authMs > (L.reauthMaxAgeSec + L.codeTtlSec) * 1000) return false;
-  // The session is revoked, and only by this change's own Auth write.
-  const claimAt = typeof op.authClaimAtMs === 'number' ? op.authClaimAtMs : 0;
-  const validAfterMs = a.tokensValidAfterTime ? Date.parse(a.tokensValidAfterTime) : NaN;
-  if (!claimAt || !Number.isFinite(validAfterMs)) return false;
-  if (validAfterMs < authMs) return false; // not revoked → the normal gate decides
-  return validAfterMs >= claimAt - 5_000 && validAfterMs <= claimAt + L.authWriteDeadlineMs + 5_000;
+  // Revoked, and the marker is exactly the one this change's write produced.
+  const own = parseTime(op.changeValidAfter);
+  const current = parseTime(a.tokensValidAfterTime);
+  if (!Number.isFinite(own) || !Number.isFinite(current)) return false;
+  if (current <= authMs) return false; // not revoked → the normal gate decides
+  return current === own;
 }
-
-/** Is a previous change's Auth-write claimant possibly still running? */
-export const unsettled = (op: Record<string, unknown> | null, now: number): boolean =>
-  !!op && typeof op.authClaimAtMs === 'number' && now - op.authClaimAtMs < EMAIL_CHANGE_LIMITS.settleMs;
-export const settleWaitSec = (op: Record<string, unknown> | null, now: number): number =>
-  Math.max(1, Math.ceil(((op?.authClaimAtMs as number) + EMAIL_CHANGE_LIMITS.settleMs - now) / 1000));

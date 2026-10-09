@@ -519,10 +519,15 @@ service cloud.firestore {
     //   emailChangeChallenges/{uid} — hashed codes: unreadable by anyone.
     //   emailChangeOps/{uid}        — change progress / recovery: admin read-only.
     //   emailChangeLimits/{key}     — abuse counters: admin read-only.
+    //   emailChangeAuthWrites/{uid} — ledger of Auth email writes: admin read-only.
     match /emailChangeChallenges/{uid} {
       allow read, write: if false;
     }
     match /emailChangeOps/{uid} {
+      allow read:  if isAdmin();
+      allow write: if false;
+    }
+    match /emailChangeAuthWrites/{uid} {
       allow read:  if isAdmin();
       allow write: if false;
     }

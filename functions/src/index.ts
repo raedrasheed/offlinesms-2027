@@ -143,3 +143,4 @@ export { getPhoneLinkStatus } from './phoneLink/getPhoneLinkStatus';
 export { requestEmailChangeCode } from './emailChange/requestEmailChangeCode';
 export { verifyEmailChangeCode, resumeEmailChange } from './emailChange/verifyEmailChangeCode';
 export { getSignInMethods } from './emailChange/getSignInMethods';
+export { reconcileEmailChangeWrites } from './emailChange/reconcileEmailChangeWrites';

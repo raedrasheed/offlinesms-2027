@@ -33,4 +33,14 @@ describe('emailChange collections', () => {
     await assertSucceeds(getDoc(doc(db, 'emailChangeOps', 'u-1')));
     await assertFails(setDoc(doc(db, 'emailChangeOps', 'u-1'), { stage: 'failed' }));
   });
+
+  it('the Auth-write ledger: no client access; admins read only', async () => {
+    await seed(async db => { await setDoc(doc(db, 'emailChangeAuthWrites', 'u-1'), { pending: {} }); });
+    const user = await asUser('u-1');
+    await assertFails(getDoc(doc(user, 'emailChangeAuthWrites', 'u-1')));
+    await assertFails(setDoc(doc(user, 'emailChangeAuthWrites', 'u-1'), { pending: {} }));
+    const admin = await asAdmin();
+    await assertSucceeds(getDoc(doc(admin, 'emailChangeAuthWrites', 'u-1')));
+    await assertFails(setDoc(doc(admin, 'emailChangeAuthWrites', 'u-1'), { pending: {} }));
+  });
 });

@@ -39,6 +39,7 @@ import {
 } from '../src/emailChange/verifyEmailChangeCode';
 import { handleGetSignInMethods } from '../src/emailChange/getSignInMethods';
 import { userPrivateProfileRef } from '../src/lib/userPrivate';
+import { runReconcilePass } from '../src/emailChange/authWrites';
 
 const FAST = { powBits: 8, powMaxBits: 8 };
 const PEPPER = process.env.PHONE_HASH_PEPPER!;
@@ -124,7 +125,9 @@ beforeEach(async () => {
 });
 const origBeforeAuthWrite = emailChangeDeps.beforeAuthWrite;
 const origBeforeFinalize = emailChangeDeps.beforeFinalize;
+const origAfterAuthCheck = emailChangeDeps.afterAuthCheck;
 afterEach(() => {
+  emailChangeDeps.afterAuthCheck = origAfterAuthCheck;
   vi.useRealTimers();
   emailChangeDeps.setAuthEmail = origSetAuthEmail;
   emailChangeDeps.beforeAuthWrite = origBeforeAuthWrite;
@@ -525,68 +528,155 @@ describe('revoked session after an email change: recovery needs its own proof', 
   });
 });
 
-describe('stale Auth writers cannot bring back an earlier address', () => {
+describe('revocation inside the change window is not mistaken for the change (R2-1)', () => {
+  for (const d of [2, 10, 24, 60]) {
+    it(`an independent revocation ${d}s after the change's own ends recovery`, async () => {
+      const { u, r, session } = await changeAndLoseReply();
+      const own = (await db().collection('emailChangeOps').doc(u.uid).get()).get('changeValidAfter') as string;
+      expect(own).toBe((await getAuth().getUser(u.uid)).tokensValidAfterTime);
+      await setValidSince(u.uid, Math.floor(Date.parse(own) / 1000) + d);
+      await expectHttps(resume(u.uid, { challengeId: r.challengeId, recoveryKey: KEY }, session), 'unauthenticated', 'reauth-required');
+    });
+  }
+
+  it('without a recorded marker (worker lost after the write) recovery is refused', async () => {
+    const { u, r, session } = await changeAndLoseReply();
+    await db().collection('emailChangeOps').doc(u.uid).update({ changeValidAfter: null });
+    await expectHttps(resume(u.uid, { challengeId: r.challengeId, recoveryKey: KEY }, session), 'unauthenticated', 'reauth-required');
+  });
+});
+
+describe('stale Auth writers cannot bring back an earlier address (R2-2)', () => {
   const stage = async (uid: string) => (await db().collection('emailChangeOps').doc(uid).get()).get('stage');
   const privEmail = async (uid: string) => (await userPrivateProfileRef(db(), uid).get()).get('email');
+  const authEmail = async (uid: string) => (await getAuth().getUser(uid)).email;
+  const ledger = async (uid: string) => (await db().collection('emailChangeAuthWrites').doc(uid).get()).data() ?? {};
 
   /** Change A whose first worker stalls INSIDE its Auth write while a second worker completes A. */
-  async function stalledA() {
+  async function stalledA(o: { dead?: boolean } = {}) {
     const u = await makeEmailUser();
     const rA = await requestEmail(u.uid, 'a@example.test');
     const release = gate(); const reached = gate();
     let first = true;
     emailChangeDeps.setAuthEmail = async (uid, email) => {
-      if (first && email === 'a@example.test') { first = false; reached.open(); await release.p; }
+      if (first && email === 'a@example.test') {
+        first = false; reached.open(); await release.p;
+        if (o.dead) await new Promise(() => { /* worker lost: never returns */ });
+      }
       return origSetAuthEmail(uid, email);
     };
     const slow = verifyEmail(u.uid, rA.challengeId, lastCodeTo('a@example.test'));
     await reached.p;
     await resume(u.uid, { challengeId: rA.challengeId });
     expect(await stage(u.uid)).toBe('done');
-    expect((await getAuth().getUser(u.uid)).email).toBe('a@example.test');
+    expect(await authEmail(u.uid)).toBe('a@example.test');
     return { u, slow, release };
   }
+  /** A, then B accepted once A's stalled write is abandoned (its worker never reported). */
+  async function bAfterAbandon(u: { uid: string }) {
+    await advance(11 * 60_000);
+    return requestEmail(u.uid, 'b@example.test');
+  }
 
-  it('a new change waits until no writer of the previous one can still be running', async () => {
+  it('a new change waits while an earlier Auth write is pending — not just for a while', async () => {
     const { u, slow, release } = await stalledA();
     await expectHttps(requestEmail(u.uid, 'b@example.test', { authAgeSec: -2 }), 'resource-exhausted', 'change-settling');
+    await advance(151_000);
+    await expectHttps(requestEmail(u.uid, 'b@example.test'), 'resource-exhausted', 'change-settling');
+    expect(Object.keys((await ledger(u.uid)).pending ?? {})).toHaveLength(1);
     release.open();
-    await slow.catch(() => {});
+    await slow; // same address as the settled one: completes harmlessly
+    // Resolved by its own worker: nothing pending, and the next change may start.
+    expect(Object.keys((await ledger(u.uid)).pending ?? {})).toHaveLength(0);
+    await advance(61_000);
+    await requestEmail(u.uid, 'b@example.test');
   });
 
-  it('a late write after the newer change completed is undone; the newer address stays', async () => {
+  it("Codex R2-2 ordering: A lands between B's Auth read and B's finalize; B does not report success on a wrong Auth", async () => {
     const { u, slow, release } = await stalledA();
-    await advance(151_000);
-    await changeEmail(u.uid, 'b@example.test');
-    expect((await getAuth().getUser(u.uid)).email).toBe('b@example.test');
-    release.open();
-    await expectHttps(slow, 'not-found', 'challenge-not-found');
-    expect((await getAuth().getUser(u.uid)).email).toBe('b@example.test');
+    const rB = await bAfterAbandon(u);
+    expect(Object.keys((await ledger(u.uid)).uncertain ?? {})).toHaveLength(1);
+    emailChangeDeps.afterAuthCheck = async () => {
+      emailChangeDeps.afterAuthCheck = async () => {};
+      release.open();
+      await slow.catch(() => {});
+      expect(await authEmail(u.uid)).toBe('a@example.test');
+    };
+    await expectHttps(verifyEmail(u.uid, rB.challengeId, lastCodeTo('b@example.test')), 'unavailable', 'change-interrupted');
+    expect(await stage(u.uid)).toBe('verified');
+    expect(await privEmail(u.uid)).toBe('a@example.test');
+    await resume(u.uid, { challengeId: rB.challengeId }, { authAgeSec: -2 });
+    expect(await authEmail(u.uid)).toBe('b@example.test');
     expect(await privEmail(u.uid)).toBe('b@example.test');
     expect(await stage(u.uid)).toBe('done');
+  });
+
+  it('same ordering with the stale worker lost (it never reports): B repairs Auth before reporting success', async () => {
+    const { u } = await stalledA({ dead: true });
+    const rB = await bAfterAbandon(u);
+    emailChangeDeps.afterAuthCheck = async uid => {
+      emailChangeDeps.afterAuthCheck = async () => {};
+      await origSetAuthEmail(uid, 'a@example.test'); // the lost worker's request lands now
+    };
+    const out = await verifyEmail(u.uid, rB.challengeId, lastCodeTo('b@example.test'));
+    expect(out.email).toBe('b@example.test');
+    expect(await authEmail(u.uid)).toBe('b@example.test');
+    expect(await privEmail(u.uid)).toBe('b@example.test');
     const audit = (await db().collection('auditLogs').get()).docs.map(d => d.get('action'));
-    expect(audit).toContain('emailChange.staleWriteUndone');
-    // The old address no longer resolves to this account.
+    expect(audit).toContain('emailChange.authEmailRepaired');
+  });
+
+  it('a lost worker whose write lands after B completed is repaired by the scheduled pass', async () => {
+    const { u } = await stalledA({ dead: true });
+    const rB = await bAfterAbandon(u);
+    await verifyEmail(u.uid, rB.challengeId, lastCodeTo('b@example.test'));
+    await origSetAuthEmail(u.uid, 'a@example.test'); // lands late, nobody reports it
+    expect(await authEmail(u.uid)).toBe('a@example.test');
+    expect(await runReconcilePass(Date.now() + 16 * 60_000)).toBeGreaterThan(0);
+    expect(await authEmail(u.uid)).toBe('b@example.test');
+    expect(await privEmail(u.uid)).toBe('b@example.test');
+    // The uncertain write stays on the books until it ages out with Auth consistent.
+    expect(Object.keys((await ledger(u.uid)).uncertain ?? {})).toHaveLength(1);
+    await runReconcilePass(Date.now() + 25 * 3600_000);
+    expect(Object.keys((await ledger(u.uid)).uncertain ?? {})).toHaveLength(0);
+  });
+
+  it('a live stale worker reporting after B completed undoes its own write', async () => {
+    const { u, slow, release } = await stalledA();
+    const rB = await bAfterAbandon(u);
+    await verifyEmail(u.uid, rB.challengeId, lastCodeTo('b@example.test'));
+    release.open();
+    await expectHttps(slow, 'not-found', 'challenge-not-found');
+    expect(await authEmail(u.uid)).toBe('b@example.test');
+    expect(await privEmail(u.uid)).toBe('b@example.test');
     await expect(getAuth().getUserByEmail('a@example.test')).rejects.toBeTruthy();
   });
 
-  it('a late write that lands before the newer change finalizes is caught; the newer change still completes', async () => {
+  it('a late write that lands before B reads Auth is caught by the read', async () => {
     const { u, slow, release } = await stalledA();
-    await advance(151_000);
-    const rB = await requestEmail(u.uid, 'b@example.test');
+    const rB = await bAfterAbandon(u);
     emailChangeDeps.beforeFinalize = async () => {
       emailChangeDeps.beforeFinalize = origBeforeFinalize;
       release.open();
       await slow.catch(() => {});
-      expect((await getAuth().getUser(u.uid)).email).toBe('a@example.test');
     };
     await expectHttps(verifyEmail(u.uid, rB.challengeId, lastCodeTo('b@example.test')), 'unavailable', 'change-interrupted');
-    expect(await stage(u.uid)).toBe('verified');
-    await advance(1_000);
-    await resume(u.uid, { challengeId: rB.challengeId });
-    expect((await getAuth().getUser(u.uid)).email).toBe('b@example.test');
-    expect(await privEmail(u.uid)).toBe('b@example.test');
+    await resume(u.uid, { challengeId: rB.challengeId }, { authAgeSec: -2 });
+    expect(await authEmail(u.uid)).toBe('b@example.test');
     expect(await stage(u.uid)).toBe('done');
+  });
+
+  it('a write whose outcome is unknown (timeout) is kept as uncertain, not dropped', async () => {
+    const u = await makeEmailUser();
+    const r = await requestEmail(u.uid, 'x@example.test');
+    emailChangeDeps.setAuthEmail = async () => { throw Object.assign(new Error('timeout'), { code: 'app/network-timeout' }); };
+    await expectHttps(verifyEmail(u.uid, r.challengeId, lastCodeTo('x@example.test')), 'unavailable', 'change-interrupted');
+    const l = await ledger(u.uid);
+    expect(Object.keys(l.pending ?? {})).toHaveLength(0);
+    expect(Object.keys(l.uncertain ?? {})).toHaveLength(1);
+    emailChangeDeps.setAuthEmail = origSetAuthEmail;
+    await resume(u.uid, { challengeId: r.challengeId });
+    expect(await authEmail(u.uid)).toBe('x@example.test');
   });
 
   it('a worker that stalls past its claim deadline does not write', async () => {
@@ -605,8 +695,9 @@ describe('stale Auth writers cannot bring back an earlier address', () => {
     release.open();
     await expectHttps(slow, 'unavailable', 'change-interrupted');
     expect(writes).toEqual([]);
-    expect((await getAuth().getUser(u.uid)).email).toBe(u.email);
+    expect(await authEmail(u.uid)).toBe(u.email);
+    expect(Object.keys((await ledger(u.uid)).pending ?? {})).toHaveLength(0);
     await resume(u.uid, { challengeId: r.challengeId });
-    expect((await getAuth().getUser(u.uid)).email).toBe('x@example.test');
+    expect(await authEmail(u.uid)).toBe('x@example.test');
   });
 });
