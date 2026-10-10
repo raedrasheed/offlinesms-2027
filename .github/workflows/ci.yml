@@ -2,6 +2,13 @@ name: CI
 
 on:
   pull_request:
+  workflow_dispatch:
+    inputs:
+      test_backend:
+        description: 'Backend for the mobile test APKs: default (MOBILE_TEST_* settings) or staging (MOBILE_STAGING_* settings, a non-production project)'
+        type: choice
+        options: [default, staging]
+        default: default
   push:
     branches:
       - main
