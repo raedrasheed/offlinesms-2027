@@ -1,0 +1,74 @@
+name: Delete test artifacts
+
+# Frees Actions artifact storage without deleting any run or log: deletes the
+# artifacts of every run except the runs listed in keep_runs. Artifacts less
+# than 2 hours old are always kept (a build may still be uploading).
+# dry_run (default) only lists what would be deleted and its total size.
+# GitHub recalculates the storage used every 6-12 hours.
+on:
+  workflow_dispatch:
+    inputs:
+      keep_runs:
+        description: 'Run ids whose artifacts are kept (comma or space separated)'
+        required: true
+      dry_run:
+        description: 'Preview only, do not delete'
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete artifacts of the runs not kept
+        uses: actions/github-script@v7
+        env:
+          KEEP_RUNS: ${{ inputs.keep_runs }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        with:
+          script: |
+            const keep = (process.env.KEEP_RUNS || '').split(/[\s,]+/).filter(Boolean);
+            const dryRun = process.env.DRY_RUN !== 'false';
+            if (!keep.length || !keep.every(id => /^\d+$/.test(id))) {
+              core.setFailed('keep_runs must list the run ids whose artifacts stay');
+              return;
+            }
+
+            const artifacts = (await github.paginate(github.rest.actions.listArtifactsForRepo, {
+              owner: context.repo.owner, repo: context.repo.repo, per_page: 100,
+            })).filter(a => !a.expired);
+            const runOf = a => String(a.workflow_run?.id ?? '');
+
+            // A mistyped id would silently keep nothing: every kept run must have live artifacts.
+            const missing = keep.filter(id => !artifacts.some(a => runOf(a) === id));
+            if (missing.length) {
+              core.setFailed(`no live artifacts for run(s) ${missing.join(', ')}: check keep_runs`);
+              return;
+            }
+
+            const recent = Date.now() - 2 * 60 * 60 * 1000;
+            const mb = list => (list.reduce((n, a) => n + a.size_in_bytes, 0) / 1e6).toFixed(1);
+            const kept = artifacts.filter(a => keep.includes(runOf(a)) || new Date(a.created_at).getTime() > recent);
+            const doomed = artifacts.filter(a => !kept.includes(a));
+
+            core.info(`Dry run: ${dryRun}`);
+            for (const a of kept) core.info(`keep    run ${runOf(a)} ${a.workflow_run?.head_sha?.slice(0, 7)} ${a.name} (${(a.size_in_bytes / 1e6).toFixed(1)} MB)`);
+            for (const a of doomed) {
+              core.info(`${dryRun ? 'would delete' : 'delete'} run ${runOf(a)} ${a.workflow_run?.head_sha?.slice(0, 7)} ${a.name} (${(a.size_in_bytes / 1e6).toFixed(1)} MB)`);
+              if (!dryRun) await github.rest.actions.deleteArtifact({ owner: context.repo.owner, repo: context.repo.repo, artifact_id: a.id });
+            }
+
+            await core.summary
+              .addHeading('Artifact cleanup')
+              .addTable([
+                [{ data: '', header: true }, { data: 'Artifacts', header: true }, { data: 'MB', header: true }],
+                ['Kept', String(kept.length), mb(kept)],
+                [dryRun ? 'Would delete' : 'Deleted', String(doomed.length), mb(doomed)],
+              ])
+              .addRaw(`Kept runs: ${keep.join(', ')}. Runs and logs are not deleted.`)
+              .write();
