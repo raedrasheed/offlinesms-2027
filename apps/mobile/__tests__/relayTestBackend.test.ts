@@ -2,7 +2,6 @@
 // APK is configured from the MOBILE_STAGING_* settings only: anything missing or
 // pointing elsewhere fails the job, and it never falls back to the default
 // settings. Identity Toolkit is stubbed: key "K-<owner>" belongs to <owner>.
-// scripts/ci/check-apk-backend.sh — reads the project back from a built APK.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
@@ -10,7 +9,6 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 const SCRIPT = resolve(__dirname, '../../../scripts/ci/relay-test-backend.mjs');
-const APK_CHECK = resolve(__dirname, '../../../scripts/ci/check-apk-backend.sh');
 let dir = '';
 let stub = '';
 
@@ -122,42 +120,5 @@ describe('relay test APK backend, default (unchanged)', () => {
     const r = run({ ...base, MOBILE_TEST_ALLOW_PRODUCTION_BACKEND: 'true' });
     expect(r.code).toBe(0);
     expect(r.outputs).toBe('ready=true\nproject=offlinesms-prod-2027\n');
-  });
-});
-
-describe('APK backend check', () => {
-  // A minimal "APK": resources.arsc and, for the main app, the JS bundle.
-  function apk(arsc: string, bundle?: string) {
-    const d = mkdtempSync(join(dir, 'apk-'));
-    const py = `import zipfile,sys\nz=zipfile.ZipFile(sys.argv[1],'w')\nz.writestr('resources.arsc',sys.argv[2])\n` +
-      (bundle === undefined ? '' : `z.writestr('assets/index.android.bundle',sys.argv[3])\n`) + 'z.close()\n';
-    const file = join(d, 'test.apk');
-    const r = spawnSync('python3', ['-c', py, file, `res project_id ${arsc}`, ...(bundle === undefined ? [] : [bundle])]);
-    expect(r.status).toBe(0);
-    return file;
-  }
-  const check = (file: string, expected: string) => {
-    const r = spawnSync('bash', [APK_CHECK, file, expected], { encoding: 'utf8' });
-    return { code: r.status, out: `${r.stdout}${r.stderr}` };
-  };
-
-  it('passes when the resources and the JS bundle name the expected project', () => {
-    const r = check(apk('offlinesms-staging-2027', 'projectId:"offlinesms-staging-2027"'), 'offlinesms-staging-2027');
-    expect(r.code).toBe(0);
-    expect(r.out).toContain('talks to offlinesms-staging-2027');
-  });
-
-  it('fails when a staging build carries production or the placeholder anywhere', () => {
-    const prodBundle = check(apk('offlinesms-staging-2027', 'projectId:"offlinesms-prod-2027"'), 'offlinesms-staging-2027');
-    expect(prodBundle.code).toBe(1);
-    expect(prodBundle.out).toContain('JS bundle (EXPO_PUBLIC_FIREBASE_*) does not name offlinesms-staging-2027');
-    expect(prodBundle.out).toContain('JS bundle (EXPO_PUBLIC_FIREBASE_*) names the production project');
-    const placeholder = check(apk('offlinesms-staging-2027 demo-offlinesms-ci'), 'offlinesms-staging-2027');
-    expect(placeholder.code).toBe(1);
-    expect(placeholder.out).toContain('placeholder project');
-  });
-
-  it('accepts production only when production is the expected project', () => {
-    expect(check(apk('offlinesms-prod-2027', 'offlinesms-prod-2027'), 'offlinesms-prod-2027').code).toBe(0);
   });
 });

@@ -151,13 +151,17 @@ jobs:
       - name: Build relay APK and run its tests
         run: gradle -p apps/mobile-relay :app:assembleDebug :app:testDebugUnitTest --no-daemon
 
+      # Diagnostics only: kept when the tests fail, for 3 days, and an upload
+      # failure (e.g. artifact storage full) never fails the job.
       - name: Relay test reports
-        if: always()
+        if: failure()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: relay-test-reports
           path: apps/mobile-relay/app/build/reports/tests/
           if-no-files-found: ignore
+          retention-days: 3
 
       # Run workflow with test_backend=staging: only the MOBILE_STAGING_* settings
       # are passed, and anything missing or pointing elsewhere fails the job (no
@@ -184,7 +188,9 @@ jobs:
           gradle -p apps/mobile-relay :app:assembleDebug --no-daemon
           APK="dist-relay/offlinesms-relay-0.2.0-test-$PROJECT.apk"
           cp apps/mobile-relay/app/build/outputs/apk/debug/app-debug.apk "$APK"
-          bash scripts/ci/check-apk-backend.sh "$APK" "$PROJECT"
+          # The values the APK actually carries must be exactly this project's relay app config.
+          node scripts/ci/check-apk-backend.mjs --apk "$APK" --project "$PROJECT" \
+            --google-services apps/mobile-relay/app/google-services.json --package app.offlinesms.business
           "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --print-certs "$APK" > dist-relay/signing-cert.txt
           {
             echo "Firebase project: $PROJECT (test_backend=${{ inputs.test_backend || 'default' }})"
@@ -202,7 +208,8 @@ jobs:
         with:
           name: offlinesms-relay-test
           path: dist-relay/
-          retention-days: 30
+          # Builds asked for with Run workflow are kept 30 days, pull request builds 7.
+          retention-days: ${{ github.event_name == 'workflow_dispatch' && 30 || 7 }}
 
   # Matched pair of installable TEST builds of the main mobile app
   # (docs/TEST_BUILDS.md): "updated" (this commit) and "baseline" (2a61167 +
@@ -223,7 +230,8 @@ jobs:
   # project instead: secret MOBILE_STAGING_GOOGLE_SERVICES_JSON and vars
   # MOBILE_STAGING_FIREBASE_* (same names); production is refused for it. The
   # same run builds the private relay (relay-android) from those settings; the
-  # secret then also needs the Android app app.offlinesms.business.
+  # secret then also needs the Android app app.offlinesms.business. A staging
+  # run builds only "updated" (no baseline pair).
   # Optional private signing key (else the repo debug key) — secrets
   #   MOBILE_TEST_KEYSTORE_BASE64, MOBILE_TEST_KEYSTORE_PASSWORD,
   #   MOBILE_TEST_KEY_ALIAS, MOBILE_TEST_KEY_PASSWORD.
@@ -235,7 +243,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [updated, baseline]
+        # A staging run is for the phone test of this commit: no baseline pair.
+        variant: ${{ inputs.test_backend == 'staging' && fromJSON('["updated"]') || fromJSON('["updated", "baseline"]') }}
     env:
       BACKEND_VARS: ${{ inputs.test_backend == 'staging' && 'MOBILE_STAGING' || 'MOBILE_TEST' }}
       MOBILE_GOOGLE_SERVICES_JSON: ${{ inputs.test_backend == 'staging' && secrets.MOBILE_STAGING_GOOGLE_SERVICES_JSON || inputs.test_backend != 'staging' && secrets.MOBILE_GOOGLE_SERVICES_JSON || '' }}
@@ -331,12 +340,16 @@ jobs:
         run: |
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs dist-apk/*.apk | grep -E "SHA-256 digest" | tee dist-apk/signing-cert.txt
 
-      # Read the project back from the APK itself (native config and JS bundle).
+      # Read the Firebase config back from the APK itself (native resources and
+      # the Hermes JS bundle) and compare every value exactly with the settings.
       - name: APK backend
         if: env.MOBILE_GOOGLE_SERVICES_JSON != ''
         run: |
           APK=$(ls dist-apk/*.apk)
-          bash scripts/ci/check-apk-backend.sh "$APK" "$EXPO_PUBLIC_FIREBASE_PROJECT_ID"
+          printf '%s' "$MOBILE_GOOGLE_SERVICES_JSON" > "$RUNNER_TEMP/google-services.json"
+          node scripts/ci/check-apk-backend.mjs --apk "$APK" --project "$EXPO_PUBLIC_FIREBASE_PROJECT_ID" \
+            --google-services "$RUNNER_TEMP/google-services.json" --package app.offlinesms.mobile.test --web-config-env
+          rm -f "$RUNNER_TEMP/google-services.json"
           {
             echo "Firebase project: $EXPO_PUBLIC_FIREBASE_PROJECT_ID (test_backend=${{ inputs.test_backend || 'default' }})"
             echo "Commit: $GITHUB_SHA"
@@ -350,5 +363,5 @@ jobs:
         with:
           name: offlinesms-test-${{ matrix.variant }}
           path: dist-apk/
-          retention-days: 30
+          retention-days: ${{ github.event_name == 'workflow_dispatch' && 30 || 7 }}
 

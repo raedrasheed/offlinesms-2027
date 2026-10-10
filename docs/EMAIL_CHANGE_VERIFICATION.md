@@ -204,9 +204,18 @@ Below, `$STAGING` stands for that id and `$NUM` for its project number.
    project (`scripts/ci/relay-test-backend.mjs`), or if the settings point at
    production.
 
-   After building, CI reads the project back from each APK
-   (`scripts/ci/check-apk-backend.sh`): the native Firebase config and, for the user
-   app, the JS bundle must name `$STAGING` and must not name production. Artifacts:
+   After building, CI reads the Firebase config each APK actually carries
+   (`scripts/ci/check-apk-backend.mjs`) and compares every value exactly:
+   - native resources: `project_id`, `google_app_id`, `google_api_key`,
+     `gcm_defaultSenderId` and `google_storage_bucket` must equal `$STAGING` and
+     that app's entry in the staging google-services.json;
+   - the user app's JS bundle: the six web config values must be strings of the
+     bundle, and no other API key, app id, auth domain, bucket, or the production
+     project id may be.
+
+   A project name merely appearing in the file is not accepted. Artifacts (a
+   staging run builds no baseline; artifacts of Run workflow builds are kept 30
+   days, pull request builds 7):
    - `offlinesms-test-updated`: `offlinesms-test-updated-<sha>-$STAGING.apk`;
    - `offlinesms-relay-test`: `offlinesms-relay-0.2.0-test-$STAGING.apk`.
 
