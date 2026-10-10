@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   emailChangeVerifier, emailChangeCodeMatches, checkEmailChangeAccount, applyEmailChangeAccount,
-  emailChangeVerifyExhausted, applyEmailChangeVerifyFailure, maskEmail, EMAIL_CHANGE_LIMITS as L,
+  emailChangeVerifyExhausted, applyEmailChangeVerifyFailure, maskEmail, EMAIL_CHANGE_LIMITS as L, testFaultsAllowed,
 } from '../src/emailChange/logic';
 import { hasVerifiedSignInMethod, authFreshness } from '../src/phoneLink/gates';
 import { liveWrites, writeOutcomeUnknown, ABANDON_MS } from '../src/emailChange/authWrites';
@@ -74,6 +74,23 @@ describe('revoked sessions (pure, R4-1)', () => {
   });
   it('a sign-in after the revocation is a fresh session', () => {
     expect(authFreshness(signedIn + 12, now, L.reauthMaxAgeSec + L.codeTtlSec, at(signedIn + 11))).toBe('ok');
+  });
+});
+
+describe('staging test fault gate (pure)', () => {
+  const cfg = (projectId: string) => JSON.stringify({ projectId });
+  it('only a non-production project with EMAIL_CHANGE_TEST_FAULTS=on honors it', () => {
+    expect(testFaultsAllowed({ EMAIL_CHANGE_TEST_FAULTS: 'on', GCLOUD_PROJECT: 'offlinesms-staging' })).toBe(true);
+    expect(testFaultsAllowed({ EMAIL_CHANGE_TEST_FAULTS: 'on', FIREBASE_CONFIG: cfg('offlinesms-staging') })).toBe(true);
+    expect(testFaultsAllowed({ GCLOUD_PROJECT: 'offlinesms-staging' })).toBe(false);
+    expect(testFaultsAllowed({ EMAIL_CHANGE_TEST_FAULTS: 'off', GCLOUD_PROJECT: 'offlinesms-staging' })).toBe(false);
+  });
+  it('production, or an unknown project, never does', () => {
+    expect(testFaultsAllowed({ EMAIL_CHANGE_TEST_FAULTS: 'on', GCLOUD_PROJECT: 'offlinesms-prod-2027' })).toBe(false);
+    expect(testFaultsAllowed({ EMAIL_CHANGE_TEST_FAULTS: 'on', FIREBASE_CONFIG: cfg('offlinesms-prod-2027') })).toBe(false);
+    expect(testFaultsAllowed({ EMAIL_CHANGE_TEST_FAULTS: 'on', GCLOUD_PROJECT: 'offlinesms-staging', FIREBASE_CONFIG: cfg('offlinesms-prod-2027') })).toBe(false);
+    expect(testFaultsAllowed({ EMAIL_CHANGE_TEST_FAULTS: 'on' })).toBe(false);
+    expect(testFaultsAllowed({ EMAIL_CHANGE_TEST_FAULTS: 'on', FIREBASE_CONFIG: 'not json' })).toBe(false);
   });
 });
 

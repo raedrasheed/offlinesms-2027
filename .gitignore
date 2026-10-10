@@ -18,6 +18,8 @@ functions/lib/
 .env
 .env.local
 .env*.local
+# Per-project Cloud Functions env (functions/.env.<project-id>) can hold API keys.
+functions/.env.*
 
 # Firebase
 .firebase/

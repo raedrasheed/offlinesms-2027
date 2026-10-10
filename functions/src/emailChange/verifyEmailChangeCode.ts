@@ -47,7 +47,7 @@ import { requireEligibleCaller, profileIsActive } from '../phoneLink/gates';
 import { authErrorCode } from '../phoneLink/shared';
 import {
   EMAIL_CHANGE_COLLECTIONS as C, EMAIL_CHANGE_LIMITS as L, EMAIL_CHANGE_PURPOSE, EMAIL_CHANGE_FN_TIMEOUT_SEC,
-  emailChangeCodeMatches, emailChangeVerifyExhausted, applyEmailChangeVerifyFailure, maskEmail,
+  emailChangeCodeMatches, emailChangeVerifyExhausted, applyEmailChangeVerifyFailure, maskEmail, testFaultsAllowed,
   type EmailChangeAccountCounter,
 } from './logic';
 import {
@@ -180,7 +180,8 @@ export async function handleVerifyEmailChangeCode(request: CallableRequest<unkno
     if (res.code === 'change-pending-recovery') throw new HttpsError('failed-precondition', 'change-pending-recovery');
     throw new HttpsError('not-found', res.code);
   }
-  return completeEmailChange(uid, challengeId);
+  const stopBeforeFinalize = data.testStopBeforeFinalize === true && testFaultsAllowed();
+  return completeEmailChange(uid, challengeId, 0, { stopBeforeFinalize });
 }
 
 async function advanceOp(uid: string, challengeId: string, from: string[], patch: Record<string, unknown>): Promise<boolean> {
@@ -301,7 +302,9 @@ function requireAuthSettled(uid: string, r: ReconcileResult): void {
   throw new HttpsError('unavailable', 'change-interrupted');
 }
 
-export async function completeEmailChange(uid: string, challengeId: string, depth = 0): Promise<ChangeResult> {
+export async function completeEmailChange(
+  uid: string, challengeId: string, depth = 0, opts: { stopBeforeFinalize?: boolean } = {},
+): Promise<ChangeResult> {
   const db = getFirestore();
   const opRef = db.collection(C.ops).doc(uid);
   const op = await opRef.get();
@@ -326,7 +329,7 @@ export async function completeEmailChange(uid: string, challengeId: string, dept
       }
       if (!await fencedChangeWrite(uid, challengeId, email)) {
         if (depth >= 2) throw new HttpsError('unavailable', 'change-interrupted');
-        return completeEmailChange(uid, challengeId, depth + 1);
+        return completeEmailChange(uid, challengeId, depth + 1, opts);
       }
     }
   } catch (e) {
@@ -339,6 +342,10 @@ export async function completeEmailChange(uid: string, challengeId: string, dept
   // Step 2 → done, atomically. The old address's pending sign-in code (if any)
   // is voided so it cannot be used after the change.
   try {
+    if (opts.stopBeforeFinalize) {
+      console.warn('[emailChange] test fault: stopping before finalize', { uid });
+      throw new Error('test-stop-before-finalize');
+    }
     await emailChangeDeps.beforeFinalize(uid);
     // A stale writer may have overwritten the address since step 1: send the
     // op back to `verified` so the fenced write runs again.

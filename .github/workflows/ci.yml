@@ -3,6 +3,12 @@ name: CI
 on:
   pull_request:
   workflow_dispatch:
+    inputs:
+      test_backend:
+        description: 'Backend for the mobile test APKs: default (MOBILE_TEST_* settings) or staging (MOBILE_STAGING_* settings, a non-production project)'
+        type: choice
+        options: [default, staging]
+        default: default
   push:
     branches:
       - main
@@ -195,6 +201,9 @@ jobs:
   #   var      MOBILE_TEST_ALLOW_PRODUCTION_BACKEND=true  required if it is
   #            offlinesms-prod-2027 (owner decision)
   #   none     → placeholder backend (installs/opens; no sign-in or push)
+  # Run workflow with test_backend=staging to build against a NON-production
+  # project instead: secret MOBILE_STAGING_GOOGLE_SERVICES_JSON and vars
+  # MOBILE_STAGING_FIREBASE_* (same names); production is refused for it.
   # Optional private signing key (else the repo debug key) — secrets
   #   MOBILE_TEST_KEYSTORE_BASE64, MOBILE_TEST_KEYSTORE_PASSWORD,
   #   MOBILE_TEST_KEY_ALIAS, MOBILE_TEST_KEY_PASSWORD.
@@ -208,9 +217,18 @@ jobs:
       matrix:
         variant: [updated, baseline]
     env:
-      MOBILE_GOOGLE_SERVICES_JSON: ${{ secrets.MOBILE_GOOGLE_SERVICES_JSON }}
-      MOBILE_TEST_ALLOW_PRODUCTION_BACKEND: ${{ vars.MOBILE_TEST_ALLOW_PRODUCTION_BACKEND }}
+      BACKEND_VARS: ${{ inputs.test_backend == 'staging' && 'MOBILE_STAGING' || 'MOBILE_TEST' }}
+      MOBILE_GOOGLE_SERVICES_JSON: ${{ inputs.test_backend == 'staging' && secrets.MOBILE_STAGING_GOOGLE_SERVICES_JSON || inputs.test_backend != 'staging' && secrets.MOBILE_GOOGLE_SERVICES_JSON || '' }}
+      # Never for staging: if its settings point at production, the build refuses.
+      MOBILE_TEST_ALLOW_PRODUCTION_BACKEND: ${{ inputs.test_backend != 'staging' && vars.MOBILE_TEST_ALLOW_PRODUCTION_BACKEND || '' }}
     steps:
+      - name: Staging settings present
+        if: inputs.test_backend == 'staging'
+        run: |
+          [ -n "$MOBILE_GOOGLE_SERVICES_JSON" ] || { echo "secret MOBILE_STAGING_GOOGLE_SERVICES_JSON missing" >&2; exit 1; }
+          [ -n "${{ vars.MOBILE_STAGING_FIREBASE_PROJECT_ID }}" ] || { echo "variable MOBILE_STAGING_FIREBASE_PROJECT_ID missing" >&2; exit 1; }
+          [ "${{ vars.MOBILE_STAGING_FIREBASE_PROJECT_ID }}" != offlinesms-prod-2027 ] || { echo "staging must not be the production project" >&2; exit 1; }
+
       - name: Checkout (full history for the baseline commit)
         uses: actions/checkout@v4
         with:
@@ -237,14 +255,14 @@ jobs:
         run: |
           if [ -n "$MOBILE_GOOGLE_SERVICES_JSON" ]; then
             {
-              echo "EXPO_PUBLIC_FIREBASE_API_KEY=${{ vars.MOBILE_TEST_FIREBASE_API_KEY }}"
-              echo "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN=${{ vars.MOBILE_TEST_FIREBASE_AUTH_DOMAIN }}"
-              echo "EXPO_PUBLIC_FIREBASE_PROJECT_ID=${{ vars.MOBILE_TEST_FIREBASE_PROJECT_ID }}"
-              echo "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET=${{ vars.MOBILE_TEST_FIREBASE_STORAGE_BUCKET }}"
-              echo "EXPO_PUBLIC_FIREBASE_APP_ID=${{ vars.MOBILE_TEST_FIREBASE_APP_ID }}"
-              echo "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=${{ vars.MOBILE_TEST_FIREBASE_MESSAGING_SENDER_ID }}"
+              echo "EXPO_PUBLIC_FIREBASE_API_KEY=${{ vars[format('{0}_FIREBASE_API_KEY', env.BACKEND_VARS)] }}"
+              echo "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN=${{ vars[format('{0}_FIREBASE_AUTH_DOMAIN', env.BACKEND_VARS)] }}"
+              echo "EXPO_PUBLIC_FIREBASE_PROJECT_ID=${{ vars[format('{0}_FIREBASE_PROJECT_ID', env.BACKEND_VARS)] }}"
+              echo "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET=${{ vars[format('{0}_FIREBASE_STORAGE_BUCKET', env.BACKEND_VARS)] }}"
+              echo "EXPO_PUBLIC_FIREBASE_APP_ID=${{ vars[format('{0}_FIREBASE_APP_ID', env.BACKEND_VARS)] }}"
+              echo "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=${{ vars[format('{0}_FIREBASE_MESSAGING_SENDER_ID', env.BACKEND_VARS)] }}"
             } >> "$GITHUB_ENV"
-            [ -n "${{ vars.MOBILE_TEST_FIREBASE_PROJECT_ID }}" ] || { echo "MOBILE_TEST_FIREBASE_PROJECT_ID variable missing" >&2; exit 1; }
+            [ -n "${{ vars[format('{0}_FIREBASE_PROJECT_ID', env.BACKEND_VARS)] }}" ] || { echo "${BACKEND_VARS}_FIREBASE_PROJECT_ID variable missing" >&2; exit 1; }
           fi
 
       - name: Private test signing key (optional)

@@ -49,7 +49,7 @@ A test APK works when its two pieces of Firebase configuration point at **one** 
    - This touches no phone or SMS function, no rule and no `smsConfig`.
    - This session has Firebase console access, but no usable deployment shell or authenticated CLI.
 
-**Option B: separate test project:** the same steps 1–4 in that project, with no production opt-in, after deploying the whole backend there (§2).
+**Option B: separate test project:** the same steps 1–4 in that project, with no production opt-in, after deploying the whole backend there (§2). For it, CI reads `MOBILE_STAGING_*` settings when run with `test_backend=staging`; `EMAIL_CHANGE_VERIFICATION.md` §1 lists them and uses this for the email-change device checks.
 
 If your Google Cloud API key has *Application restrictions* set to Android apps, add `app.offlinesms.mobile.test` with the test signing certificate's SHA-1. CI prints the certificate in the job log and in `signing-cert.txt`. Unrestricted keys need nothing.
 

@@ -614,6 +614,47 @@ describe('R4-1: a revoked session never continues a change; signing in again to 
   });
 });
 
+describe('staging device-test fault: stop right after the Auth write', () => {
+  afterEach(() => { delete process.env.EMAIL_CHANGE_TEST_FAULTS; vi.restoreAllMocks(); });
+  const verifyStopping = (uid: string, challengeId: string, code: string, o: Parameters<typeof req>[2] = {}) =>
+    handleVerifyEmailChangeCode(req(uid, { challengeId, code, testStopBeforeFinalize: true }, o));
+
+  it('stops like a request that died after its write; signing in with the new address and resuming finishes it', async () => {
+    process.env.EMAIL_CHANGE_TEST_FAULTS = 'on';
+    const u = await makeEmailUser();
+    const session = { claims: { auth_time: Math.floor(Date.now() / 1000) - 5 } };
+    const r = await requestEmail(u.uid, 'x@example.test', session);
+    const tokens = mintedTokens();
+    await expectHttps(verifyStopping(u.uid, r.challengeId, lastCodeTo('x@example.test'), session), 'unavailable', 'change-interrupted');
+    expect(tokens).not.toHaveBeenCalled();
+    expect((await db().collection('emailChangeOps').doc(u.uid).get()).get('stage')).toBe('auth-updated');
+    expect((await getAuth().getUser(u.uid)).email).toBe('x@example.test');
+    await expectHttps(resume(u.uid, { challengeId: r.challengeId }, session), 'unauthenticated', 'reauth-required');
+    await advance(61_000);
+    expect((await emailSignIn('x@example.test')).uid).toBe(u.uid);
+    const done = await resume(u.uid, { challengeId: r.challengeId }, await freshAfter(u.uid));
+    expect(done.email).toBe('x@example.test');
+    expect((await db().collection('emailChangeOps').doc(u.uid).get()).get('stage')).toBe('done');
+  });
+
+  it('ignored unless EMAIL_CHANGE_TEST_FAULTS=on: the change completes in the same request', async () => {
+    const u = await makeEmailUser();
+    const r = await requestEmail(u.uid, 'x@example.test');
+    const res = await verifyStopping(u.uid, r.challengeId, lastCodeTo('x@example.test')) as { email: string };
+    expect(res.email).toBe('x@example.test');
+    expect((await db().collection('emailChangeOps').doc(u.uid).get()).get('stage')).toBe('done');
+  });
+
+  it('a resume never carries the fault', async () => {
+    process.env.EMAIL_CHANGE_TEST_FAULTS = 'on';
+    const u = await makeEmailUser();
+    const r = await requestEmail(u.uid, 'x@example.test');
+    await expectHttps(verifyStopping(u.uid, r.challengeId, lastCodeTo('x@example.test')), 'unavailable', 'change-interrupted');
+    const done = await handleResumeEmailChange(req(u.uid, { challengeId: r.challengeId, testStopBeforeFinalize: true }, await freshAfter(u.uid))) as { email: string };
+    expect(done.email).toBe('x@example.test');
+  });
+});
+
 describe('stale Auth writers cannot bring back an earlier address (R2-2)', () => {
   const stage = async (uid: string) => (await db().collection('emailChangeOps').doc(uid).get()).get('stage');
   const privEmail = async (uid: string) => (await userPrivateProfileRef(db(), uid).get()).get('email');

@@ -43,8 +43,38 @@ async function continueSession(r: ChangeResult): Promise<ChangeResult> {
   return r;
 }
 
+// Test builds only (EXPO_PUBLIC_TEST_FAULTS=1, set by scripts/test-builds/build.sh
+// and never by store builds), each armed for the next verify only — for the
+// device checks in docs/EMAIL_CHANGE_VERIFICATION.md:
+//   - lose the reply AFTER the server has answered it, as a dropped connection
+//     would (whatever the answer was);
+//   - ask the server to stop right after its Auth write, as a request that dies
+//     there would. Honored only by a staging backend with
+//     EMAIL_CHANGE_TEST_FAULTS=on; production ignores it.
+let dropNextReply = false;
+let stopNextBeforeFinish = false;
+export const testFaults = process.env.EXPO_PUBLIC_TEST_FAULTS === '1'
+  ? {
+      setDropNextEmailChangeReply(on: boolean) { dropNextReply = on; },
+      setStopNextEmailChangeBeforeFinish(on: boolean) { stopNextBeforeFinish = on; },
+    }
+  : null;
+
 export async function verifyEmailChangeCode(challengeId: string, code: string): Promise<ChangeResult> {
-  const res = await httpsCallable<{ challengeId: string; code: string }, ChangeResult>(fns(), 'verifyEmailChangeCode')({ challengeId, code });
+  const drop = testFaults !== null && dropNextReply;
+  const stop = testFaults !== null && stopNextBeforeFinish;
+  dropNextReply = false;
+  stopNextBeforeFinish = false;
+  const lost = () => Object.assign(new Error('reply lost (test build)'), { code: 'functions/unavailable' });
+  let res;
+  try {
+    res = await httpsCallable<{ challengeId: string; code: string; testStopBeforeFinalize?: true }, ChangeResult>(fns(), 'verifyEmailChangeCode')(
+      { challengeId, code, ...(stop ? { testStopBeforeFinalize: true as const } : {}) },
+    );
+  } catch (e) {
+    throw drop ? lost() : e;
+  }
+  if (drop) throw lost();
   return continueSession(res.data);
 }
 

@@ -13,7 +13,7 @@ import { isRTL } from '../i18n';
 import { radius } from '../theme';
 import ReauthPanel from '../components/ReauthPanel';
 import {
-  getSignInMethods, requestEmailChangeCode, verifyEmailChangeCode, resumeEmailChange, type SignInMethods,
+  getSignInMethods, requestEmailChangeCode, verifyEmailChangeCode, resumeEmailChange, testFaults, type SignInMethods,
 } from '../lib/signInMethods';
 import { emailChangeErrorInfo, isPlausibleEmail } from '../lib/signInMethods.helpers';
 import { formatCountdown, secondsLeft } from '../lib/phoneLink.helpers';
@@ -37,11 +37,17 @@ export default function ChangeEmail({ navigation }: any) {
   const [resendAt, setResendAt] = useState(0);
   const [expiresAt, setExpiresAt] = useState(0);
   const [now, setNow] = useState(Date.now());
+  const [faults, setFaults] = useState({ drop: false, stop: false }); // test builds only
   const codeRef = useRef<TextInput>(null);
 
   useEffect(() => {
     const i = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(i);
+  }, []);
+  // Test switches left armed must not carry over to a later visit.
+  useEffect(() => () => {
+    testFaults?.setDropNextEmailChangeReply(false);
+    testFaults?.setStopNextEmailChangeBeforeFinish(false);
   }, []);
 
   const showError = useCallback((e: unknown) => {
@@ -97,6 +103,7 @@ export default function ChangeEmail({ navigation }: any) {
   const submitCode = (value: string) => run(async () => {
     if (!challengeId) return;
     try {
+      setFaults({ drop: false, stop: false }); // the switches arm one request only
       const r = await verifyEmailChangeCode(challengeId, value);
       setMasked(r.email || r.maskedEmail);
       setStep('done');
@@ -200,6 +207,22 @@ export default function ChangeEmail({ navigation }: any) {
           <Pressable onPress={() => { setStep('email'); setError(null); setCode(''); }} disabled={busy} accessibilityRole="button">
             <Text style={s.link}>{t('emailChange.useDifferent')}</Text>
           </Pressable>
+          {testFaults ? ([
+            { key: 'drop', on: faults.drop, arm: testFaults.setDropNextEmailChangeReply, label: 'testDropReply' },
+            { key: 'stop', on: faults.stop, arm: testFaults.setStopNextEmailChangeBeforeFinish, label: 'testStopServer' },
+          ] as const).map(f => (
+            <Pressable
+              key={f.key}
+              onPress={() => { f.arm(!f.on); setFaults(prev => ({ ...prev, [f.key]: !f.on })); }}
+              disabled={busy}
+              accessibilityRole="switch"
+              accessibilityState={{ checked: f.on }}
+            >
+              <Text style={[s.fine, f.on && { color: colors.text.primary }]}>
+                {t(`emailChange.${f.label}${f.on ? 'Armed' : ''}`)}
+              </Text>
+            </Pressable>
+          )) : null}
         </>
       ) : null}
 

@@ -110,3 +110,22 @@ export function maskEmail(email: string): string {
 // So a revoked session never continues a change on its own proof: the device
 // signs in again to the same account (any method it has, including the new,
 // already verified address) and resumes with that fresh session.
+
+// ── Staging device tests ─────────────────────────────────────────────────────
+const PRODUCTION_PROJECT = 'offlinesms-prod-2027';
+
+/**
+ * Staging device tests only. With EMAIL_CHANGE_TEST_FAULTS=on in the functions
+ * env of a project other than production, a verify request carrying
+ * `testStopBeforeFinalize: true` stops right after its Auth write, as a request
+ * that dies there would (stage `auth-updated`, sessions revoked, no token). It
+ * only interrupts the caller's own change and grants nothing. Production, an
+ * unknown project, or the flag unset: the field is ignored.
+ */
+export function testFaultsAllowed(env: NodeJS.ProcessEnv = process.env): boolean {
+  if ((env.EMAIL_CHANGE_TEST_FAULTS ?? '').trim().toLowerCase() !== 'on') return false;
+  let configured = '';
+  try { configured = String((JSON.parse(env.FIREBASE_CONFIG ?? '{}') as { projectId?: unknown }).projectId ?? ''); } catch { /* unreadable: not trusted */ }
+  const ids = [env.GCLOUD_PROJECT ?? '', configured].filter(Boolean);
+  return ids.length > 0 && !ids.includes(PRODUCTION_PROJECT);
+}

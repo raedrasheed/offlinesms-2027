@@ -7,6 +7,8 @@
 # Both: package app.offlinesms.mobile.test ("OfflineSMS Test", installs next to
 # the store app), the same signing key, the same src/lib/perf.ts timing points
 # (EXPO_PUBLIC_PERF_LOG=1), the same backend config, arm64-v8a + x86_64.
+# Test-only switches (EXPO_PUBLIC_TEST_FAULTS=1) are compiled in; store builds
+# never set it.
 # versionCode baseline 900000 < updated 900000+N (N = commits since the
 # baseline), so "updated" installs OVER "baseline" as an in-place upgrade (real
 # local-DB migration v5 → v7), and a newer updated build over an older one.
@@ -80,7 +82,7 @@ bash "$REPO/scripts/ci/mobile-google-services.sh" "$SRC"
 cd "$SRC/apps/mobile/android"
 # Gradle does not track env vars: drop the JS bundle so EXPO_PUBLIC_* are re-inlined.
 rm -rf app/build/generated/assets/createBundleReleaseJsAndAssets app/build/generated/res/createBundleReleaseJsAndAssets
-NODE_ENV=production EXPO_PUBLIC_PERF_LOG=1 ./gradlew assembleRelease \
+NODE_ENV=production EXPO_PUBLIC_PERF_LOG=1 EXPO_PUBLIC_TEST_FAULTS=1 ./gradlew assembleRelease \
   -Pofflinesms.testApp=true -Pofflinesms.versionCode="$VCODE" -Pofflinesms.versionName="$VNAME" \
   -PreactNativeArchitectures=arm64-v8a,x86_64 --no-daemon --console=plain ${GRADLE_ARGS:-}
 
