@@ -3,9 +3,8 @@
 // replace its current one. This is NOT sign-in and never creates an account.
 //
 // Order of checks:
-//   1. authenticated; email delivery switched on (systemSettings/general
-//      .emailSignInEnabled — the same switch as email sign-in, since an address
-//      that can't sign in is useless as a sign-in method)
+//   1. authenticated; the change switched on (./settings.ts: its own
+//      emailChangeEnabled AND emailSignInEnabled)
 //   2. eligible caller (see phoneLink/gates.requireEligibleCaller): a person,
 //      Auth-enabled, active profile, holding a verified sign-in method, and
 //      signed in within reauthMaxAgeSec
@@ -37,14 +36,10 @@ import {
   type EmailChangeAccountCounter,
 } from './logic';
 import { ledgerRef, liveWrites, settleUncertain, type Ledger } from './authWrites';
+import { readEmailSettings } from './settings';
 
 const REGION = 'us-central1';
 
-export async function readEmailSettings(db: FirebaseFirestore.Firestore): Promise<{ enabled: boolean; supportEmail: string | null }> {
-  const snap = await db.collection('systemSettings').doc('general').get();
-  const d = snap.exists ? snap.data()! : {};
-  return { enabled: d.emailSignInEnabled === true, supportEmail: (d.supportEmail as string | undefined)?.trim() || null };
-}
 
 /** Record the provider outcome for ONE send generation (a late result never touches a newer challenge). */
 async function settle(db: FirebaseFirestore.Firestore, ref: FirebaseFirestore.DocumentReference, generation: string, status: 'pending' | 'send-failed') {

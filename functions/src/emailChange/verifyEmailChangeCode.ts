@@ -54,6 +54,7 @@ import {
   authWriteDeps, ledgerRef, liveWrites, newWriteId, recordPending, resolvePending, writeOutcomeUnknown,
   reconcileAuthEmail, settleUncertain, settledEmailOf, type Ledger, type ReconcileResult,
 } from './authWrites';
+import { readEmailSettings } from './settings';
 
 const REGION = 'us-central1';
 const CHALLENGE_ID_RE = /^[0-9a-f]{32}$/;
@@ -99,6 +100,9 @@ export async function handleVerifyEmailChangeCode(request: CallableRequest<unkno
   if (!CODE_RE.test(code)) throw new HttpsError('invalid-argument', 'code-invalid');
 
   await settleUncertain(uid);
+  // Switched off: no new code is accepted. A change already accepted still
+  // finishes (a retry here, or resume), so no account is left mid-way.
+  const changeEnabled = (await readEmailSettings(db)).enabled;
   const chRef = db.collection(C.challenges).doc(uid);
   const opRef = db.collection(C.ops).doc(uid);
   const acctRef = db.collection(C.limits).doc(`acct_${uid}`);
@@ -124,6 +128,7 @@ export async function handleVerifyEmailChangeCode(request: CallableRequest<unkno
       }
       if (ch.uid !== uid || ch.purpose !== EMAIL_CHANGE_PURPOSE) return { kind: 'error', code: 'challenge-not-found' };
       if (op && NONTERMINAL.has(op.stage)) return { kind: 'error', code: 'change-pending-recovery' };
+      if (!changeEnabled) return { kind: 'error', code: 'email-change-disabled' };
       // An earlier Auth write is still in flight: it must resolve first.
       const live = liveWrites(lS.exists ? (lS.data() as Ledger) : undefined, now);
       if (live.count) return { kind: 'error', code: 'change-settling', retryAfterSec: live.retryAfterSec };
@@ -178,6 +183,7 @@ export async function handleVerifyEmailChangeCode(request: CallableRequest<unkno
     if (res.code === 'code-expired') throw new HttpsError('deadline-exceeded', 'code-expired');
     if (res.code === 'change-settling') throw new HttpsError('resource-exhausted', 'change-settling', { retryAfterSec: res.retryAfterSec });
     if (res.code === 'change-pending-recovery') throw new HttpsError('failed-precondition', 'change-pending-recovery');
+    if (res.code === 'email-change-disabled') throw new HttpsError('failed-precondition', 'email-change-disabled');
     throw new HttpsError('not-found', res.code);
   }
   const stopBeforeFinalize = data.testStopBeforeFinalize === true && testFaultsAllowed();

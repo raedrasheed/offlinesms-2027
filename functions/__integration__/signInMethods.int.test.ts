@@ -122,7 +122,7 @@ beforeEach(async () => {
   failSend = false;
   await seedPolicy({ signin: { enabled: true, limits: FAST }, link: { enabled: true } });
   await seedRelayDevice();
-  await db().collection('systemSettings').doc('general').set({ emailSignInEnabled: true });
+  await db().collection('systemSettings').doc('general').set({ emailSignInEnabled: true, emailChangeEnabled: true });
 });
 const origBeforeAuthWrite = emailChangeDeps.beforeAuthWrite;
 const origBeforeFinalize = emailChangeDeps.beforeFinalize;
@@ -365,10 +365,46 @@ describe('re-authentication, availability, limits, concurrency, interruption', (
   });
 
   it('switched off: refused, nothing sent', async () => {
-    await db().collection('systemSettings').doc('general').set({ emailSignInEnabled: false });
+    await db().collection('systemSettings').doc('general').set({ emailSignInEnabled: false, emailChangeEnabled: true });
     const u = await makeEmailUser();
     await expectHttps(requestEmail(u.uid, 'x@example.test'), 'failed-precondition', 'email-change-disabled');
     expect(sent).toHaveLength(0);
+  });
+
+  it('the change has its own switch, off unless set: email sign-in keeps working', async () => {
+    await db().collection('systemSettings').doc('general').set({ emailSignInEnabled: true });
+    const u = await makeEmailUser();
+    await expectHttps(requestEmail(u.uid, 'x@example.test'), 'failed-precondition', 'email-change-disabled');
+    expect((await handleGetSignInMethods(req(u.uid, {}))).emailChange.available).toBe(false);
+    expect(sent).toHaveLength(0);
+    expect((await emailSignIn('someone@example.test')).uid).toBeTruthy();
+  });
+
+  it('switched off after the code was sent: the code is not accepted, nothing changes, and it still works once back on', async () => {
+    const u = await makeEmailUser();
+    const r = await requestEmail(u.uid, 'x@example.test');
+    const code = lastCodeTo('x@example.test');
+    await db().collection('systemSettings').doc('general').set({ emailChangeEnabled: false }, { merge: true });
+    await expectHttps(verifyEmail(u.uid, r.challengeId, code), 'failed-precondition', 'email-change-disabled');
+    expect((await getAuth().getUser(u.uid)).email).toBe(u.email);
+    expect((await db().collection('emailChangeOps').doc(u.uid).get()).exists).toBe(false);
+    await db().collection('systemSettings').doc('general').set({ emailChangeEnabled: true }, { merge: true });
+    expect((await verifyEmail(u.uid, r.challengeId, code)).email).toBe('x@example.test');
+  });
+
+  it('switched off after the code was accepted: that change still finishes', async () => {
+    const u = await makeEmailUser();
+    const r = await requestEmail(u.uid, 'x@example.test');
+    emailChangeDeps.beforeFinalize = async () => {
+      emailChangeDeps.beforeFinalize = origBeforeFinalize;
+      throw new Error('interrupted before finalize');
+    };
+    await expectHttps(verifyEmail(u.uid, r.challengeId, lastCodeTo('x@example.test')), 'unavailable', 'change-interrupted');
+    await db().collection('systemSettings').doc('general').set({ emailChangeEnabled: false }, { merge: true });
+    const m = await getAuth().getUser(u.uid);
+    const fresh = { claims: { auth_time: Math.floor(Date.parse(m.tokensValidAfterTime!) / 1000) + 1 } };
+    expect((await handleResumeEmailChange(req(u.uid, { challengeId: r.challengeId }, fresh)) as { email: string }).email).toBe('x@example.test');
+    expect((await db().collection('emailChangeOps').doc(u.uid).get()).get('stage')).toBe('done');
   });
 
   it('the address the account already has (verified) is refused as already linked', async () => {

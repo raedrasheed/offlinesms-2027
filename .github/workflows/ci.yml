@@ -226,8 +226,17 @@ jobs:
         if: inputs.test_backend == 'staging'
         run: |
           [ -n "$MOBILE_GOOGLE_SERVICES_JSON" ] || { echo "secret MOBILE_STAGING_GOOGLE_SERVICES_JSON missing" >&2; exit 1; }
-          [ -n "${{ vars.MOBILE_STAGING_FIREBASE_PROJECT_ID }}" ] || { echo "variable MOBILE_STAGING_FIREBASE_PROJECT_ID missing" >&2; exit 1; }
-          [ "${{ vars.MOBILE_STAGING_FIREBASE_PROJECT_ID }}" != offlinesms-prod-2027 ] || { echo "staging must not be the production project" >&2; exit 1; }
+          for v in API_KEY AUTH_DOMAIN PROJECT_ID STORAGE_BUCKET APP_ID MESSAGING_SENDER_ID; do
+            n="STAGING_$v"; [ -n "${!n:-}" ] || { echo "variable MOBILE_STAGING_FIREBASE_$v missing" >&2; exit 1; }
+          done
+          [ "$STAGING_PROJECT_ID" != offlinesms-prod-2027 ] || { echo "staging must not be the production project" >&2; exit 1; }
+        env:
+          STAGING_API_KEY: ${{ vars.MOBILE_STAGING_FIREBASE_API_KEY }}
+          STAGING_AUTH_DOMAIN: ${{ vars.MOBILE_STAGING_FIREBASE_AUTH_DOMAIN }}
+          STAGING_PROJECT_ID: ${{ vars.MOBILE_STAGING_FIREBASE_PROJECT_ID }}
+          STAGING_STORAGE_BUCKET: ${{ vars.MOBILE_STAGING_FIREBASE_STORAGE_BUCKET }}
+          STAGING_APP_ID: ${{ vars.MOBILE_STAGING_FIREBASE_APP_ID }}
+          STAGING_MESSAGING_SENDER_ID: ${{ vars.MOBILE_STAGING_FIREBASE_MESSAGING_SENDER_ID }}
 
       - name: Checkout (full history for the baseline commit)
         uses: actions/checkout@v4
@@ -264,6 +273,12 @@ jobs:
             } >> "$GITHUB_ENV"
             [ -n "${{ vars[format('{0}_FIREBASE_PROJECT_ID', env.BACKEND_VARS)] }}" ] || { echo "${BACKEND_VARS}_FIREBASE_PROJECT_ID variable missing" >&2; exit 1; }
           fi
+
+      # Every staging value must belong to ONE non-production project, and each
+      # API key must resolve to it (Auth requests go where the key belongs).
+      - name: Staging backend is one project (keys checked with Identity Toolkit)
+        if: inputs.test_backend == 'staging'
+        run: node scripts/ci/check-backend-config.mjs --staging
 
       - name: Private test signing key (optional)
         env:

@@ -1,63 +1,132 @@
 # Email change: operational verification and production activation
 
-Covers the email add/change flow of PR #30 (`functions/src/emailChange/*`) and its two
-sign-in guards, `guardEmailSignIn` (beforeSignIn) and `guardEmailSent` (beforeSendEmail).
+Covers the email add/change flow of PR #30 (`functions/src/emailChange/*`) and what protects
+a replaced address:
+- `guardEmailSignIn` (beforeSignIn): email + password and email-link sign-in;
+- `guardEmailSent` (beforeSendEmail): password-reset and sign-in-link emails;
+- the check inside `verifyEmailOtp`: the app's email-code sign-in.
 
-- Production (`offlinesms-prod-2027`) stays undeployed until §2 and §3 pass on a
-  non-production project **and** the owner approves §4.
-- Nothing here touches the SMS verification suspension, the phone functions or
-  `smsConfig`.
+Production (`offlinesms-prod-2027`) stays undeployed until §3 and §4 pass on a
+non-production project **and** the owner approves §5. Nothing here touches the SMS
+verification suspension, the phone functions or `smsConfig`.
+
+**Blocking functions never run for the app's own sign-in.** Firebase: "Anonymous and
+custom authentication do not trigger blocking functions." The app signs in with custom
+tokens (email code and phone). So a code sign-in after a deploy proves nothing about the
+guards. The email-code route is protected by `verifyEmailOtp` itself, and is checked
+separately (§4).
 
 ## 0. Already verified without a real project
 
 - Unit, rules and emulator integration suites run in CI on every push. The handoff file
   records the counts per review round.
-- **Password sign-in guard, through real Identity Toolkit requests on the local
-  emulators.** `scripts/verifyEmailSignInGuards.ts` creates the replaced-address state, then
-  signs in over REST the way the SDKs do:
+- **Real requests on the local emulators.** `scripts/verifyEmailSignInGuards.ts` creates
+  the replaced-address state, then calls Identity Toolkit over REST the way the SDKs do,
+  and the `verifyEmailOtp` callable the way the app does:
 
   ```
-  PASS  password sign-in with the replaced address is refused (address-replaced) — refused: BLOCKING_FUNCTION_ERROR_RESPONSE … HTTP error 403 … (1661 ms)
+  PASS  an account that never changed its email signs in with its password (the key reaches this project) — accepted (1744 ms)
+  PASS  password sign-in with the replaced address is refused (address-replaced) — refused: BLOCKING_FUNCTION_ERROR_RESPONSE … HTTP error 403 … (219 ms)
   PASS  the refusal repaired the Auth record to the settled address
   SKIP  password reset to the replaced address — the Auth emulator does not run beforeSendEmail; run against a test project
-  PASS  password sign-in with the settled address is accepted — accepted (25 ms)
-  PASS  custom-token sign-in (the app's own path) is accepted — accepted (6 ms)
-  PASS  an account that never changed its email signs in with its password — accepted (22 ms)
+  PASS  password sign-in with the settled address is accepted — accepted (22 ms)
+  PASS  email-code sign-in (verifyEmailOtp) with the replaced address is refused (address-replaced) — refused: address-replaced (1679 ms)
+  PASS  …and the Auth record was repaired again
+  PASS  email-code sign-in (verifyEmailOtp) with the settled address is accepted — accepted (87 ms)
   GO: all checks passed
   ```
 
-- **Emulator limits** (firebase-tools 13.35.1). Neither applies to a deployed project; §3
-  checks the real registration.
+  **Negative control:** the same run with no guard loaded ends in NO-GO. The replaced
+  address signs in with its password, so the check is not vacuous.
+- **Emulator limits** (firebase-tools 13.35.1). Neither applies to a deployed project; §2
+  and §4 check the real registration.
   1. The Auth emulator never calls `beforeSendEmail`, so the reset guard needs a real
      project.
   2. The Functions emulator registers every non-create blocking trigger as `beforeSignIn`.
      With both guards loaded, the last one wins. The emulator run therefore loads a wrapper
-     that exports only `guardEmailSignIn`. Build `functions/lib` first, then:
+     that exports only `guardEmailSignIn` and the `verifyEmailOtp` callable. Build
+     `functions/lib` first, then:
 
      ```sh
-     # W: scratch dir with firebase.json (auth 9099, firestore 8080, functions 5001; source "src")
-     #    and src/index.js: initializeApp(); exports.guardEmailSignIn =
-     #    require('<repo>/functions/lib/emailChange/emailSignInBlocking.js').guardEmailSignIn;
-     #    src/node_modules -> <repo>/node_modules
+     # W: scratch dir with firebase.json (auth 9099, firestore 8080, functions 5001; source "src"),
+     #    src/node_modules -> <repo>/node_modules, and src/index.js:
+     #    require('firebase-admin/app').initializeApp();
+     #    exports.guardEmailSignIn = require('<repo>/functions/lib/emailChange/emailSignInBlocking.js').guardEmailSignIn;
+     #    exports.verifyEmailOtp = require('<repo>/functions/lib/auth/verifyEmailOtp.js').verifyEmailOtp;
      cd $W && npx --prefix $REPO firebase emulators:exec --config $W/firebase.json \
        --project demo-offlinesms --only auth,firestore,functions \
        "cd $REPO && npx tsx scripts/verifyEmailSignInGuards.ts --project demo-offlinesms"
      ```
 - **Not provable on emulators:**
-  - Identity Platform registration of the guards;
+  - Identity Platform registration;
   - `beforeSendEmail`;
   - the 7-second blocking deadline with a cold start;
   - real session revocation seen by a real device.
 
-  §1–§3 cover these.
+## 1. Who needs which access
 
-## 1. Staging project (one time)
+Setup, deploy and test are separate. None of them needs Owner except setup, which the
+project owner does with their own login.
+
+**1. Setup** — the project owner, in the console or Cloud Shell, with their own login. No
+key. Covers everything in §1.1 below: creating the project, Identity Platform, providers,
+APIs, the secret, the switches, and creating the two identities that follow.
+
+**2. Deploy identity**, in the staging project only. Used for `firebase deploy` in §2.
+
+| Role | Why |
+| --- | --- |
+| Cloud Functions Admin `roles/cloudfunctions.admin` | Create and update the functions, and let anyone invoke the callables. Firebase documents this role, with the next one, for deploying functions. |
+| Service Account User `roles/iam.serviceAccountUser`, granted **on the functions' runtime account only** (`<project-number>-compute@developer.gserviceaccount.com`) | Deploy functions that run as that account. |
+| Firebase Rules Admin `roles/firebaserules.admin` | `firestore:rules` |
+| Cloud Datastore Index Admin `roles/datastore.indexAdmin` | `firestore:indexes` |
+| Firebase Authentication Admin `roles/firebaseauth.admin` | Register beforeSignIn and beforeSendEmail in the Identity Platform config during deploy. |
+| Cloud Scheduler Admin `roles/cloudscheduler.admin` | Scheduled functions: `reconcileEmailChangeWrites` and the existing sweeps. |
+| Secret Manager Viewer `roles/secretmanager.viewer` | The deploy checks that `PHONE_HASH_PEPPER` exists. Setup grants the runtime account access to it once, so deploy never changes secret IAM. |
+| Service Usage Consumer `roles/serviceusage.serviceUsageConsumer` | The CLI checks that the APIs are on. Setup turns them on. |
+
+If a deploy still stops on a missing permission, add only the role that grants the
+permission it names, and record it here. Examples: Cloud Run Admin for
+`run.services.setIamPolicy`, or Eventarc Admin for the Firestore-triggered functions.
+
+**3. Verify identity**, in the staging project only. Used for the checks in §2.6 and §4,
+and for the drain check.
+
+| Role | Why |
+| --- | --- |
+| Firebase Authentication Admin `roles/firebaseauth.admin` | Create, repair and delete the throwaway users; read the Identity Platform config for the registration check. |
+| Cloud Datastore User `roles/datastore.user` | Write and delete the throwaway ledger, code and profile documents; read them for the drain check. |
+
+It has no deploy rights and no token signing: the script mints no custom tokens.
+
+**Production checks (§5)** run with the owner's own login in Cloud Shell. No production
+key is created or stored anywhere.
+
+**Temporary credentials:**
+- **Preferred: no key.** Run §2 and §4 yourself in Cloud Shell with your own login. Its
+  tokens are short-lived and there is nothing to revoke.
+- **If Claude runs them.** This cloud environment stores credentials only as fixed values
+  (environment variables or network secrets); it cannot impersonate an account or use
+  federation. So:
+  1. Create a key for each staging-only identity right before the run.
+  2. Add the keys in Project settings → Cloud environment → the gear by the environment:
+     - `STAGING_DEPLOY_SA_JSON` and `STAGING_VERIFY_SA_JSON` (the key files);
+     - `STAGING_FIREBASE_PROJECT_ID`;
+     - `STAGING_FIREBASE_WEB_API_KEY`;
+     - `STAGING_RESEND_API_KEY`;
+     - `STAGING_EMAIL_FROM`.
+
+     A new session picks them up. Keys never go in chat.
+  3. Delete both keys as soon as the run is reported. A deleted key stops working at once:
+     `gcloud iam service-accounts keys delete <key-id> --iam-account <account> --project $STAGING`.
+
+### 1.1 Staging project setup (owner, once)
 
 Any project id other than `offlinesms-prod-2027` works, for example `offlinesms-staging`.
-Below, `$STAGING` stands for that id.
+Below, `$STAGING` stands for that id and `$NUM` for its project number.
 
 1. **Project.** Firebase console → Add project.
-   - Plan: **Blaze**. Functions v2, Cloud Scheduler and blocking functions need it.
+   - Plan: **Blaze**.
    - Authentication → Settings: **upgrade to Firebase Authentication with Identity
      Platform**. Blocking functions need it; production already has it, since
      `onUserCreate` is a blocking function.
@@ -68,45 +137,48 @@ Below, `$STAGING` stands for that id.
    - **Android**, package `app.offlinesms.mobile.test`. Download its `google-services.json`.
    - **Web**. Copy `apiKey`, `authDomain`, `projectId`, `storageBucket`, `appId` and
      `messagingSenderId`.
-   - If the web API key has Android *Application restrictions*, also add the test signing
-     SHA-1 (CI prints it in `signing-cert.txt`).
-3. **Functions configuration.** Create `functions/.env.$STAGING`; git ignores it:
-
-   ```
-   EMAIL_PROVIDER=resend
-   RESEND_API_KEY=<a Resend API key>
-   EMAIL_FROM=OfflineSMS <noreply@your-verified-domain>
-   EMAIL_CHANGE_TEST_FAULTS=on
-   ```
-
-   `EMAIL_CHANGE_TEST_FAULTS=on` enables the "stop the server" switch of §2b on this
-   project only. The code ignores it on `offlinesms-prod-2027`.
-
-   Then set the phone-hash secret to a fresh random value, never production's:
+   - The CI check (step 7) asks Identity Toolkit which project each API key belongs to.
+     Keep Firebase's default key settings; a key restricted to Android apps cannot be
+     checked, and the build stops.
+3. **APIs:**
 
    ```sh
-   openssl rand -base64 32 | firebase functions:secrets:set PHONE_HASH_PEPPER --project $STAGING --data-file -
+   gcloud services enable cloudfunctions.googleapis.com run.googleapis.com cloudbuild.googleapis.com \
+     artifactregistry.googleapis.com eventarc.googleapis.com pubsub.googleapis.com cloudscheduler.googleapis.com \
+     secretmanager.googleapis.com identitytoolkit.googleapis.com firestore.googleapis.com \
+     firebaserules.googleapis.com --project $STAGING
    ```
-4. **Deploy the reviewed commit** to staging. The predeploy step builds the functions.
+4. **Secret.** Use a fresh random value, never production's, and give the runtime
+   account read access:
 
    ```sh
-   git fetch origin claude/phone-email-login-display-names-pu9nez && git checkout <reviewed sha>
-   npm ci
-   firebase deploy --project $STAGING --only functions,firestore:rules,firestore:indexes
+   openssl rand -base64 32 | gcloud secrets create PHONE_HASH_PEPPER --data-file=- --project $STAGING
+   gcloud secrets add-iam-policy-binding PHONE_HASH_PEPPER --project $STAGING \
+     --member serviceAccount:$NUM-compute@developer.gserviceaccount.com --role roles/secretmanager.secretAccessor
    ```
-5. **Turn email sign-in on.** In Firestore, create `systemSettings/general` with
-   `emailSignInEnabled: true` (boolean). Leave every phone or SMS setting unset.
-6. **Check registration:**
+5. **Switches.** In Firestore, create `systemSettings/general` with both booleans:
+   - `emailSignInEnabled: true`;
+   - `emailChangeEnabled: true`.
+
+   Leave every phone or SMS setting unset.
+6. **Identities**, only if Claude runs §2 and §4. Create `staging-deploy` and
+   `staging-verify` with the roles in the tables above:
 
    ```sh
-   GOOGLE_APPLICATION_CREDENTIALS=<staging service-account.json> \
-     npx tsx scripts/verifyEmailSignInGuards.ts --project $STAGING --registration-only
+   for r in cloudfunctions.admin firebaserules.admin datastore.indexAdmin firebaseauth.admin \
+            cloudscheduler.admin secretmanager.viewer serviceusage.serviceUsageConsumer; do
+     gcloud projects add-iam-policy-binding $STAGING --role roles/$r \
+       --member serviceAccount:staging-deploy@$STAGING.iam.gserviceaccount.com; done
+   gcloud iam service-accounts add-iam-policy-binding $NUM-compute@developer.gserviceaccount.com --project $STAGING \
+     --role roles/iam.serviceAccountUser --member serviceAccount:staging-deploy@$STAGING.iam.gserviceaccount.com
+   for r in firebaseauth.admin datastore.user; do
+     gcloud projects add-iam-policy-binding $STAGING --role roles/$r \
+       --member serviceAccount:staging-verify@$STAGING.iam.gserviceaccount.com; done
    ```
 
-   Expect GO, with three routes registered:
-   - beforeSignIn → guardEmailSignIn;
-   - beforeSendEmail → guardEmailSent;
-   - beforeCreate → onUserCreate.
+   Create the two accounts first with
+   `gcloud iam service-accounts create staging-deploy --project $STAGING`, and the same for
+   `staging-verify`.
 7. **Staging test APK.** In GitHub → Settings → Secrets and variables → Actions:
    - **Secret** `MOBILE_STAGING_GOOGLE_SERVICES_JSON`: the file from step 2.
    - **Variables** from the staging Web app: `MOBILE_STAGING_FIREBASE_API_KEY`,
@@ -115,31 +187,55 @@ Below, `$STAGING` stands for that id.
      `MOBILE_STAGING_FIREBASE_MESSAGING_SENDER_ID`.
 
    Then Actions → CI → **Run workflow** on `claude/phone-email-login-display-names-pu9nez`,
-   with `test_backend` = **staging**.
-   - The job fails if a staging setting is missing or points at production.
-   - Artifact `offlinesms-test-updated` holds `offlinesms-test-updated-<sha>-$STAGING.apk`.
-   - Test APKs compile in the test switches (`EXPO_PUBLIC_TEST_FAULTS=1`); store builds
-     never do.
+   with `test_backend` = **staging**. Before building, CI
+   (`scripts/ci/check-backend-config.mjs`) stops if:
+   - any value is missing;
+   - the Android config and the web config name different projects;
+   - the sender id, an app id or the bucket belongs to another project;
+   - either API key resolves (via Identity Toolkit) to another project, or cannot be
+     resolved;
+   - the auth domain is not authorized for that project;
+   - anything points at production.
 
-**To have Claude run §1.3–§1.6 and §3 itself**, the session needs a staging-only
-credential:
-- a service account in `$STAGING` (Owner on that project only, **never** on production);
-- its JSON key, the staging web `apiKey` and a Resend key, stored as environment
-  variables of the cloud environment (Project settings → Cloud environment → the gear by
-  the environment):
-  - `STAGING_FIREBASE_SA_JSON` (the whole key file);
-  - `STAGING_FIREBASE_PROJECT_ID`;
-  - `STAGING_FIREBASE_WEB_API_KEY`;
-  - `STAGING_RESEND_API_KEY`;
-  - `STAGING_EMAIL_FROM`.
+   The artifact `offlinesms-test-updated` holds
+   `offlinesms-test-updated-<sha>-$STAGING.apk`. Test APKs compile in the test switches
+   (`EXPO_PUBLIC_TEST_FAULTS=1`); store builds never do.
 
-A new session picks them up. Keys never go in chat. Step 7 (GitHub secret and variables)
-stays with the repository owner.
+## 2. Deploy to staging (deploy identity, or your own login)
 
-## 2. Device check: the reply is lost, then sign in with the new email and finish in the app
+1. **Functions configuration.** Create `functions/.env.$STAGING`; git ignores it:
+
+   ```
+   EMAIL_PROVIDER=resend
+   RESEND_API_KEY=<a Resend API key>
+   EMAIL_FROM=OfflineSMS <noreply@your-verified-domain>
+   EMAIL_CHANGE_TEST_FAULTS=on
+   ```
+
+   `EMAIL_CHANGE_TEST_FAULTS=on` enables the "stop the server" switch of §3b on this
+   project only. The code ignores it on `offlinesms-prod-2027`.
+2. **Deploy the reviewed commit.** The predeploy step builds the functions.
+
+   ```sh
+   git fetch origin claude/phone-email-login-display-names-pu9nez && git checkout <reviewed sha>
+   npm ci
+   firebase deploy --project $STAGING --only functions,firestore:rules,firestore:indexes
+   ```
+3. **Check registration** (verify identity):
+
+   ```sh
+   npx tsx scripts/verifyEmailSignInGuards.ts --project $STAGING --registration-only
+   ```
+
+   Expect GO, with three routes registered:
+   - beforeSignIn → guardEmailSignIn;
+   - beforeSendEmail → guardEmailSent;
+   - beforeCreate → onUserCreate.
+
+## 3. Device check: the reply is lost, then sign in with the new email and finish in the app
 
 You need:
-- the staging APK from §1.7;
+- the staging APK from §1.1 step 7;
 - one Android phone;
 - two inboxes you can read, A and B.
 
@@ -150,7 +246,7 @@ per-address cooldown: if the app says "Please wait a moment", wait and send agai
 The test switches appear under the code field of the change-email screen. Each switch
 applies to the next code entry only.
 
-### 2a. The server finished; only the reply was lost
+### 3a. The server finished; only the reply was lost
 
 1. Sign in by email code with **A**. Finish the profile with a name.
 2. Settings → Email → **Edit**. Enter **B** → Send code.
@@ -164,13 +260,13 @@ applies to the next code entry only.
    - Expect the screen to show "Current email: B".
    - The name, chats and groups are unchanged.
 
-### 2b. The server stopped after writing the new address; the reply was lost
+### 3b. The server stopped after writing the new address; the reply was lost
 
 This is the reviewed path. A device whose reply was lost signs in again to the same
 account with the new address, then finishes the change by its challenge id.
 
-1. Continue from 2a, on the same account, now on B. Settings → Email → **Edit**. Confirm
-   it's you if asked. Enter **A** → Send code. A is free again after 2a.
+1. Continue from 3a, on the same account, now on B. Settings → Email → **Edit**. Confirm
+   it's you if asked. Enter **A** → Send code. A is free again after 3a.
 2. Arm **both** switches:
    - "lose the reply to the next code" ✓;
    - "stop the server right after it writes the new address" ✓.
@@ -187,7 +283,7 @@ account with the new address, then finishes the change by its challenge id.
    - Expect "Done! You now sign in with A…"
    - Settings shows A; the name and chats are unchanged.
 
-**Variant (sign in from the start screen):** repeat 2b with B as the target. Use a second
+**Variant (sign in from the start screen):** repeat 3b with B as the target. Use a second
 account or wait an hour, since an account gets 3 change codes per hour. After step 3, sign
 out.
 - On the start screen, sign in by email code with **B**. Expect the same account, with the
@@ -195,55 +291,63 @@ out.
 - Open Settings → Email. Expect **Finish changing my email**. Tap it; expect "Done! You now
   sign in with B…"
 
-### 2c. The replaced address no longer opens the account
+### 3c. The replaced address no longer opens the account
 
 1. Sign out. Sign in by email code with the address replaced last.
 2. Expect a **new, empty** account (the profile step), not the original one.
 3. Leave it on staging, or delete it from Settings to clean up.
 
-Record, for §6:
+Record, for §7:
 - the APK file name and sha256;
 - the phone model and Android version;
 - the staging commit;
-- pass or fail per step, with screenshots of 2a.5–6 and 2b.4–6.
+- pass or fail per step, with screenshots of 3a.5–6 and 3b.4–6.
 
-## 3. Both guards through real Firebase requests (staging)
+## 4. All three routes through real requests (staging, verify identity)
 
 ```sh
-GOOGLE_APPLICATION_CREDENTIALS=<staging service-account.json> FIREBASE_WEB_API_KEY=<staging web apiKey> \
+FIREBASE_WEB_API_KEY=<staging web apiKey> \
   npx tsx scripts/verifyEmailSignInGuards.ts --project $STAGING --reset-inbox <an inbox you read>
 ```
 
 Expected, ending in GO:
 
-| Check | Expected |
-| --- | --- |
-| Registration | beforeSignIn, beforeSendEmail and beforeCreate PASS |
-| Password sign-in with the replaced address | refused `address-replaced`; Auth repaired to the settled address |
-| Password-reset email to the replaced address | refused `address-replaced`; Auth repaired again |
-| Password sign-in with the settled address | accepted |
-| Custom-token sign-in (the app's path) | accepted |
-| Account that never changed its email | accepted |
-| `--reset-inbox` | accepted, and the reset email arrives |
+| Check | Route | Expected |
+| --- | --- | --- |
+| Registration | | beforeSignIn, beforeSendEmail and beforeCreate PASS |
+| Account that never changed its email | password | accepted. This proves the key reaches this project; the run stops otherwise. |
+| Replaced address | password (guardEmailSignIn) | refused `address-replaced`; Auth repaired to the settled address |
+| Replaced address | reset email (guardEmailSent) | refused `address-replaced`; Auth repaired again |
+| Settled address | password | accepted |
+| Replaced address | email code (verifyEmailOtp) | refused `address-replaced`; Auth repaired again |
+| Settled address | email code (verifyEmailOtp) | accepted, with a token |
+| `--reset-inbox` | reset email | accepted, and the email arrives |
 
-Timing: every line prints the request's round trip. Run once after at least 20 minutes
-with no calls (a cold start) and once right after.
-- Accepted sign-ins must stay well under Identity Platform's 7-second limit for blocking
-  functions.
-- If the cold run comes near that limit, decide on `minInstances` for `guardEmailSignIn`
-  before §4. It runs on every sign-in, and custom tokens pass straight through it.
+The code for the email-code rows is planted as a hashed challenge, as `requestEmailOtp`
+stores it, so no email is sent. The callable is called without an App Check token, like
+the current app; with `APPCHECK_ENFORCE=on` on that project those rows would be refused
+before the check runs (it is off everywhere until the app ships App Check).
 
-The script deletes the users and ledger documents it created, and prints no password,
-token or code.
+**Timing:** every line prints the request's round trip. Run once after at least 20
+minutes with no calls (a cold start) and once right after.
+- Only password sign-ins and reset or sign-in-link emails wait on a guard. Those must stay
+  well under the 7-second limit.
+- If the cold run comes near it, decide on `minInstances` for the guards before §5.
 
-## 4. Production activation
+The script deletes the users and documents it created. Audit rows of the refusals stay. It
+prints no password, token or code.
 
-Only after §2 and §3 pass, and with the owner's explicit go-ahead.
+## 5. Production activation
+
+Only after §3 and §4 pass, and with the owner's explicit go-ahead. Run every command with
+the owner's own login, in Cloud Shell.
 
 **What it changes:**
-- Accounts on an app version that has the change screen can add or change their email.
-- From stage B on, every password sign-in, every custom-token sign-in (passed straight
-  through) and every reset or sign-in-link email goes through the guards.
+- From stage A on, every password sign-in and every reset or sign-in-link email goes
+  through a guard. Code and phone sign-ins do not (custom tokens); their route is
+  `verifyEmailOtp`.
+- From stage C on, accounts on an app version that has the change screen can add or
+  change their email.
 
 **Not part of this activation:**
 - phone sign-in and linking;
@@ -256,45 +360,66 @@ function names from this branch**: it would redeploy every function, phone and S
 included.
 
 **Pre-checks** (read-only):
-1. Authentication → Settings → Blocking functions shows only beforeCreate → onUserCreate.
-   - Or run `--registration-only` on production. Before stage B it should show the two
-     guard lines FAIL and beforeCreate PASS.
-2. Deploy from the environment and `functions/.env.offlinesms-prod-2027` that deployed
-   `requestEmailOtp`. It must provide `RESEND_API_KEY` and `EMAIL_FROM`, and must not
-   set `EMAIL_CHANGE_TEST_FAULTS` (production ignores it anyway).
-3. Note `systemSettings/general.emailSignInEnabled`. The change flow follows the same
-   switch as email sign-in.
+1. `npx tsx scripts/verifyEmailSignInGuards.ts --project offlinesms-prod-2027 --registration-only`
+   - Expect beforeCreate → onUserCreate PASS, and the two guard lines FAIL: nothing
+     else is registered yet.
+2. `systemSettings/general.emailChangeEnabled` is absent or false. Absent means off; the
+   change stays off through stages A and B.
+3. Deploy from the environment and `functions/.env.offlinesms-prod-2027` that deployed
+   `requestEmailOtp`.
+   - It must provide `RESEND_API_KEY` and `EMAIL_FROM`.
+   - It must not set `EMAIL_CHANGE_TEST_FAULTS` (production ignores it anyway).
 4. Check out the exact reviewed commit, then run `npm ci`.
-5. `verifyEmailOtp` and `deleteMyAccount` already run in production. Stage A replaces them
-   with this branch's version, which also carries this branch's earlier changes to them.
-   Confirm that is intended, or drop them from stage A and accept the narrower guarantee
-   noted there.
 
-**Stage A — the change flow and its scheduled repair:**
+**Stage A — protection first:**
 
 ```sh
-firebase deploy --project offlinesms-prod-2027 --only functions:requestEmailChangeCode,functions:verifyEmailChangeCode,functions:resumeEmailChange,functions:getSignInMethods,functions:reconcileEmailChangeWrites,functions:verifyEmailOtp,functions:deleteMyAccount
+firebase deploy --project offlinesms-prod-2027 --only functions:guardEmailSignIn,functions:guardEmailSent,functions:verifyEmailOtp,functions:deleteMyAccount,functions:reconcileEmailChangeWrites
 ```
 
-- `verifyEmailOtp` refuses a replaced address on the email-code route.
-- `deleteMyAccount` removes the new per-account documents.
+All five are required; none is optional.
+- `verifyEmailOtp` protects the email-code route.
+- `deleteMyAccount` removes the per-account change documents.
+- `reconcileEmailChangeWrites` is the scheduled repair.
 
-Without these two:
-- a replaced address could sign in by code during a stale-write window, until the
-  scheduled repair;
-- deleted accounts would leave their change ledger behind.
+`verifyEmailOtp` and `deleteMyAccount` already run in production. This replaces them with
+this branch's versions, which also carry the branch's earlier changes to them. Those
+changes are part of this PR's review.
 
-**Stage B — the guards, last** (they sit on every sign-in):
+**Check A** — all of these must pass before stage B:
+1. Registration: run the command from pre-check 1. Expect GO.
+2. **The three routes, through real requests on production:**
+
+   ```sh
+   FIREBASE_WEB_API_KEY=<production web apiKey> \
+     npx tsx scripts/verifyEmailSignInGuards.ts --project offlinesms-prod-2027 --allow-production
+   ```
+
+   - Expect GO, with the same rows as §4 (no `--reset-inbox` needed).
+   - It creates throwaway users at `example.com`, refuses them on the password, reset
+     and email-code routes, and deletes them.
+3. On a phone with the store app, sign in by email code. Expect normal entry. This checks
+   `verifyEmailOtp`'s normal path only; no guard runs for it.
+4. Check `firebase functions:log --only guardEmailSignIn,guardEmailSent,verifyEmailOtp`.
+   Expect no errors and no `signin-unavailable` or `email-unavailable`.
+
+**Stage B — the change functions, still switched off:**
 
 ```sh
-firebase deploy --project offlinesms-prod-2027 --only functions:guardEmailSignIn,functions:guardEmailSent
+firebase deploy --project offlinesms-prod-2027 --only functions:requestEmailChangeCode,functions:verifyEmailChangeCode,functions:resumeEmailChange,functions:getSignInMethods
 ```
 
-Right after stage B:
-1. Run `--registration-only` on production. Expect GO.
-2. Sign in on a phone with the store app by email code. Expect normal entry.
-3. Check `firebase functions:log --only guardEmailSignIn`. Expect no errors and no
-   `signin-unavailable`.
+**Check B:**
+- `npx tsx scripts/emailChangeDrainStatus.ts --project offlinesms-prod-2027` shows the
+  switch off and zero changes.
+- In the production-backed test app, Settings → Email → Edit says the change is
+  unavailable.
+
+**Stage C — turn the change on:**
+1. Set `systemSettings/general.emailChangeEnabled = true` in the Firestore console.
+2. Optional, your call: change the email of a test account once, with the
+   production-backed test app.
+3. Run the stage-A route check again. Expect GO.
 
 **Rules and indexes:**
 - The new collections need no rule to work. Unmatched paths are already denied to
@@ -302,20 +427,31 @@ Right after stage B:
 - The admin-read rules for them ship with the PR #29/#30 rules review, not here.
 - No new index.
 
-**Rollback:**
-- **Guards:** run
-  `firebase functions:delete guardEmailSignIn guardEmailSent --project offlinesms-prod-2027 --region us-central1 --force`.
-  Then confirm that Blocking functions lists no beforeSignIn or beforeSendEmail. Remove a
-  leftover there: a registration pointing at a deleted function blocks every sign-in.
-- **Change flow:** delete its five functions. The app then shows the change as
-  unavailable.
-- `verifyEmailOtp` and `deleteMyAccount`: redeploy them from the previously deployed
-  commit.
+**Rollback** — in this order:
+1. **Turn the change off:** set `emailChangeEnabled = false`. This needs no deploy and
+   takes effect at once.
+   - No new change starts, and no new code is accepted.
+   - Changes already accepted can still finish, so no account is stranded mid-way.
+   - The scheduled repair keeps running.
+2. **Keep everything else deployed**: the guards, `verifyEmailOtp`, `deleteMyAccount`,
+   the change functions and the scheduled repair. Removing any of them while a change or
+   an Auth write can still land would reopen the replaced-address window, or strand an
+   account mid-way.
+3. **Drain.** Run `npx tsx scripts/emailChangeDrainStatus.ts --project offlinesms-prod-2027`
+   until it reports DRAINED: switch off, nothing mid-way, no pending or uncertain write,
+   nothing scheduled. It is read-only and prints counts only.
+4. **A faulty guard** (for example, refusing valid password sign-ins):
+   - Code and phone sign-ins are unaffected.
+   - Fix it forward by redeploying a corrected guard.
+   - Delete a guard only after DRAINED. Then confirm that Authentication → Settings →
+     Blocking functions no longer names it: a registration pointing at a deleted function
+     blocks every password sign-in or email on that route.
+5. `verifyEmailOtp` is never rolled back to a version without its check.
 
 The store app release is separate. Until a store version has the change screen, only test
-builds call these functions.
+builds call the change functions.
 
-## 5. Documented limit (kept)
+## 6. Documented limit (kept)
 
 The one token issued without a new sign-in is the reply of the request that performed the
 Auth write.
@@ -330,17 +466,19 @@ Auth write.
 Every other step (verify retry, resume) refuses a revoked session with `reauth-required`
 and no token.
 
-## 6. Results record
+## 7. Results record
 
 | Item | Value |
 | --- | --- |
 | Staging project / commit | |
 | APK file / sha256 | |
 | Phone / Android | |
-| 2a lost reply, server finished | pass / fail |
-| 2b lost reply, server stopped, finish in app | pass / fail |
-| 2b variant, start screen | pass / fail |
-| 2c replaced address opens a new account only | pass / fail |
-| §3 script result (cold / warm ms) | GO / NO-GO |
+| 3a lost reply, server finished | pass / fail |
+| 3b lost reply, server stopped, finish in app | pass / fail |
+| 3b variant, start screen | pass / fail |
+| 3c replaced address opens a new account only | pass / fail |
+| §4 result (cold / warm ms) | GO / NO-GO |
 | Reset email received (`--reset-inbox`) | yes / no |
-| Owner go-ahead for §4 | date |
+| Owner go-ahead for §5 | date |
+| Check A (production routes) | GO / NO-GO |
+| Stage C switch on | date |

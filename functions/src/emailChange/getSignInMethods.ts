@@ -8,7 +8,7 @@ import { getFirestore } from 'firebase-admin/firestore';
 import { getAuth } from 'firebase-admin/auth';
 import { appCheckOptions } from '../lib/appCheck';
 import { authFreshness } from '../phoneLink/gates';
-import { readEmailSettings } from './requestEmailChangeCode';
+import { readEmailSettings } from './settings';
 import { EMAIL_CHANGE_COLLECTIONS as C, EMAIL_CHANGE_LIMITS as L } from './logic';
 
 export async function handleGetSignInMethods(request: CallableRequest<unknown>) {
