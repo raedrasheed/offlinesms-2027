@@ -207,11 +207,13 @@ Below, `$STAGING` stands for that id and `$NUM` for its project number.
    After building, CI reads the Firebase config each APK actually carries
    (`scripts/ci/check-apk-backend.mjs`) and compares every value exactly:
    - native resources: `project_id`, `google_app_id`, `google_api_key`,
-     `gcm_defaultSenderId` and `google_storage_bucket` must equal `$STAGING` and
-     that app's entry in the staging google-services.json;
+     `gcm_defaultSenderId` and `google_storage_bucket` must be plain strings in
+     every configuration (no locale or other qualifier may turn one into a
+     reference, `@null` or a bag), and must equal `$STAGING` and that app's
+     entry in the staging google-services.json;
    - the user app's JS bundle: the six web config values must be strings of the
      bundle, and no other API key, app id, auth domain, bucket, or the production
-     project id may be.
+     project id may be. A user APK without a JS bundle fails.
 
    A project name merely appearing in the file is not accepted. Artifacts (a
    staging run builds no baseline; Run workflow artifacts are kept 30 days, or

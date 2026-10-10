@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { arscStringResources, checkApk, hermesStrings, nativeExpectation } from '../../../scripts/ci/check-apk-backend.mjs';
+import { arscStringEntries, arscStringResources, checkApk, hermesStrings, nativeExpectation } from '../../../scripts/ci/check-apk-backend.mjs';
 
 const SCRIPT = resolve(__dirname, '../../../scripts/ci/check-apk-backend.mjs');
 const PROD = 'offlinesms-prod-2027';
@@ -43,35 +43,41 @@ function stringPool(strings: string[], utf16 = false) {
   ]);
 }
 
-type Value = string | { color: number };
+/** A string, or what else a resource entry can hold: @color, @ref (a reference), @null, a bag. */
+type Value = string | { color: number } | { ref: number } | { nul: true } | { bag: true };
 type Config = Record<string, Value>;
 
 /**
  * A resource table with one package. `configs` are the configurations of the
- * `string` type (default, values-ar, …); `other` is a `color` type whose names
- * may repeat string resource names (it must be ignored).
+ * `string` type, default first; `locales[i]` qualifies configs[i] (e.g. "ar"
+ * for values-ar). `other` is a `color` type whose names may repeat string
+ * resource names (it must be ignored).
  */
-function arsc(configs: Config[], opts: { utf16?: boolean; compact?: boolean; other?: Config } = {}) {
+function arsc(configs: Config[], opts: { utf16?: boolean; compact?: boolean; other?: Config; locales?: (string | undefined)[] } = {}) {
   const names = [...new Set([...configs.flatMap(Object.keys), ...Object.keys(opts.other ?? {})])];
   const values: string[] = [];
   const valueIndex = (s: string) => { const i = values.indexOf(s); return i >= 0 ? i : values.push(s) - 1; };
 
-  const typeChunk = (typeId: number, config: Config) => {
+  const typeChunk = (typeId: number, config: Config, locale?: string) => {
     const entries: Buffer[] = [], offsets: number[] = [];
     let at = 0;
     for (const name of names) {
       if (!(name in config)) { offsets.push(0xffffffff); continue; }
       const v = config[name];
-      const [dataType, data] = typeof v === 'string' ? [0x03, valueIndex(v)] : [0x1c, v.color];
-      const e = opts.compact
-        ? Buffer.concat([u16(names.indexOf(name)), u16((dataType << 8) | 0x08), u32(data)])
-        : Buffer.concat([u16(8), u16(0), u32(names.indexOf(name)), u16(8), Buffer.from([0, dataType]), u32(data)]);
+      const [dataType, data] = typeof v === 'string' ? [0x03, valueIndex(v)]
+        : 'ref' in v ? [0x01, v.ref] : 'nul' in v ? [0x00, 0] : 'color' in v ? [0x1c, v.color] : [-1, 0];
+      const e = dataType < 0
+        ? Buffer.concat([u16(16), u16(0x0001), u32(names.indexOf(name)), u32(0), u32(0)]) // a bag with no items
+        : opts.compact
+          ? Buffer.concat([u16(names.indexOf(name)), u16((dataType << 8) | 0x08), u32(data)])
+          : Buffer.concat([u16(8), u16(0), u32(names.indexOf(name)), u16(8), Buffer.from([0, dataType]), u32(data)]);
       offsets.push(at);
       entries.push(e);
       at += e.length;
     }
     const header = 84, entriesStart = header + names.length * 4;
     const resConfig = Buffer.concat([u32(64), Buffer.alloc(60)]);
+    if (locale) resConfig.write(locale, 8, 'ascii');
     const body = Buffer.concat(entries);
     return Buffer.concat([
       u16(0x0201), u16(header), u32(entriesStart + body.length), Buffer.from([typeId, 0]), u16(0),
@@ -80,7 +86,7 @@ function arsc(configs: Config[], opts: { utf16?: boolean; compact?: boolean; oth
   };
 
   const types = [
-    ...configs.map(c => typeChunk(1, c)),
+    ...configs.map((c, i) => typeChunk(1, c, opts.locales?.[i])),
     ...(opts.other ? [typeChunk(2, opts.other)] : []),
   ];
   const typeStrings = stringPool(['string', 'color'], opts.utf16);
@@ -275,6 +281,43 @@ describe('APK backend check, exact values', () => {
     expect(checkStaging({ arsc: arsc([noKey]), bundle: bundleFor(staging) })).toEqual(['native google_api_key: missing']);
   });
 
+  it('refuses a Firebase resource that a configuration makes a reference, @null or a bag (Codex R5-1)', () => {
+    const prod: Project = { id: PROD, number: '997465194705', tag: 'prod' };
+    const firebase = ['project_id', 'google_app_id', 'google_api_key', 'gcm_defaultSenderId', 'google_storage_bucket'];
+    // values-ar points every Firebase resource at a resource holding production's value.
+    const base: Config = { ...nativeValues(staging) };
+    for (const n of firebase) base[`alt_${n}`] = nativeValues(prod)[n];
+    const names = Object.keys(base);
+    const ar: Config = Object.fromEntries(firebase.map(n => [n, { ref: 0x7f010000 + names.indexOf(`alt_${n}`) }]));
+    for (const compact of [false, true]) {
+      const problems = checkStaging({ arsc: arsc([base, ar], { locales: [undefined, 'ar'], compact }), bundle: bundleFor(staging) });
+      expect(problems).toEqual(firebase.map(n => `native ${n}: in configuration ar it is a reference, not a plain string`));
+    }
+    // Every resource still reads as staging's in the default configuration.
+    expect(arscStringResources(arsc([base, ar], { locales: [undefined, 'ar'] })).get('project_id')).toEqual(new Set([STAGING]));
+
+    const other = (v: Value, locale?: string) => checkStaging({
+      arsc: arsc([nativeValues(staging), { project_id: v }], { locales: [undefined, locale] }), bundle: bundleFor(staging),
+    });
+    expect(other({ nul: true }, 'en')).toEqual(['native project_id: in configuration en it is @null, not a plain string']);
+    expect(other({ bag: true })).toEqual(['native project_id: in configuration default it is a bag (complex entry), not a plain string']);
+    expect(other({ ref: 0x7f010000 }, undefined)).toEqual(['native project_id: in configuration default it is a reference, not a plain string']);
+    // A non-Firebase resource may be anything.
+    expect(checkStaging({ arsc: arsc([{ ...nativeValues(staging), app_name: { ref: 0x7f010000 } }]), bundle: bundleFor(staging) })).toEqual([]);
+  });
+
+  it('lists each configuration of a resource with what it holds', () => {
+    const entries = arscStringEntries(arsc([nativeValues(staging), { project_id: STAGING }, { project_id: { ref: 1 } }], { locales: [undefined, 'en', 'ar'] }));
+    expect(entries.get('project_id')).toEqual([
+      { config: 'default', string: STAGING }, { config: 'en', string: STAGING }, { config: 'ar', other: 'a reference' },
+    ]);
+  });
+
+  it('refuses a web config with no JS bundle to check it in (Codex R5-2)', () => {
+    expect(checkStaging({ arsc: arsc([nativeValues(staging)]), bundle: null }))
+      .toEqual(['a web config was given but the APK has no JS bundle (assets/index.android.bundle) to check it in']);
+  });
+
   it('refuses an APK with a JS bundle when no web config is given to check it against', () => {
     const problems = checkApk({
       arsc: arsc([nativeValues(staging)]), bundle: bundleFor(staging), project: STAGING,
@@ -348,6 +391,20 @@ describe('APK backend check, command line', () => {
     const unchecked = cli(['--apk', apk('user', { arsc: arsc([nativeValues(staging)]), bundle: bundleFor(staging) })]);
     expect(unchecked.code).toBe(1);
     expect(unchecked.out).toContain('no web config was given');
+  });
+
+  it('exits 1 for a values-ar override pointing the Firebase resources at production, and for --web-config-env without a bundle (Codex R5)', () => {
+    const prod: Project = { id: PROD, number: '997465194705', tag: 'prod' };
+    const base: Config = { ...nativeValues(staging), alt_project_id: PROD, alt_google_app_id: nativeValues(prod).google_app_id };
+    const names = Object.keys(base);
+    const ar: Config = { project_id: { ref: 0x7f010000 + names.indexOf('alt_project_id') }, google_app_id: { ref: 0x7f010000 + names.indexOf('alt_google_app_id') } };
+    const localized = cli(['--apk', apk('localized', { arsc: arsc([base, ar], { locales: [undefined, 'ar'] }), bundle: bundleFor(staging) }), '--web-config-env'], webConfig(staging));
+    expect(localized).toEqual({ code: 1, out: [
+      'APK backend: native project_id: in configuration ar it is a reference, not a plain string',
+      'APK backend: native google_app_id: in configuration ar it is a reference, not a plain string', '',
+    ].join('\n') });
+    const noBundle = cli(['--apk', apk('no-js', { arsc: arsc([nativeValues(staging)]) }), '--web-config-env'], webConfig(staging));
+    expect(noBundle).toEqual({ code: 1, out: 'APK backend: a web config was given but the APK has no JS bundle (assets/index.android.bundle) to check it in\n' });
   });
 
   it('fails on a file that is not an APK, and on missing arguments', () => {

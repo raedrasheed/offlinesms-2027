@@ -10,8 +10,10 @@
 // Native config (resources.arsc, written by the google-services plugin, used
 // by the native Firebase SDK: FCM, the relay's callables): the string
 // resources project_id, google_app_id, google_api_key, gcm_defaultSenderId and
-// google_storage_bucket must each have exactly one value, equal to the
-// project and to that package's client in the given google-services.json.
+// google_storage_bucket must be a plain string in every configuration (a
+// locale or other qualifier may not swap in a reference, @null or a bag), with
+// exactly one value across all of them, equal to the project and to that
+// package's client in the given google-services.json.
 //
 // JS config (assets/index.android.bundle, Hermes bytecode; the user app's
 // Firebase JS SDK: Auth, Firestore, callables): with --web-config-env, the
@@ -19,7 +21,8 @@
 // no other string of the bundle may look like a Firebase config value (an
 // API key, app id, *.firebaseapp.com auth domain or storage bucket), or be
 // the production or CI placeholder project id. An APK with a JS bundle and no
-// --web-config-env fails: its JS config would go unchecked.
+// --web-config-env fails: its JS config would go unchecked. So does
+// --web-config-env on an APK without a JS bundle: nothing was checked.
 //
 // Prints the project and which parts were checked; never prints key values.
 import { execFileSync } from 'node:child_process';
@@ -31,7 +34,8 @@ const PLACEHOLDER = 'demo-offlinesms-ci';
 
 // ── resources.arsc (AOSP ResourceTypes.h) ─────────────────────────────────────
 const RES_STRING_POOL = 0x0001, RES_TABLE = 0x0002, RES_TABLE_PACKAGE = 0x0200, RES_TABLE_TYPE = 0x0201;
-const TYPE_STRING = 0x03;
+const TYPE_NULL = 0x00, TYPE_REFERENCE = 0x01, TYPE_STRING = 0x03;
+const VALUE_KIND = { [TYPE_NULL]: '@null', [TYPE_REFERENCE]: 'a reference', 0x07: 'a reference', 0x02: 'an attribute' };
 const FLAG_SPARSE = 0x01, FLAG_OFFSET16 = 0x02;
 const ENTRY_COMPLEX = 0x0001, ENTRY_COMPACT = 0x0008;
 
@@ -66,8 +70,12 @@ function readStringPool(buf, start) {
   return out;
 }
 
-/** Every string-typed value of every `string` resource, by name, across all configurations. */
-export function arscStringResources(buf) {
+/**
+ * Every entry of every `string` resource, by name, across all configurations:
+ * { config, string } for a plain string value, { config, other } (what it is
+ * instead) for anything else.
+ */
+export function arscStringEntries(buf) {
   need(buf.length >= 12 && buf.readUInt16LE(0) === RES_TABLE, 'resource table expected');
   const result = new Map();
   const tableEnd = Math.min(buf.readUInt32LE(4), buf.length);
@@ -94,9 +102,33 @@ function readPackage(buf, start, globals, result) {
   }
 }
 
+/** Every plain string value of every `string` resource, by name, across all configurations. */
+export function arscStringResources(buf) {
+  const out = new Map();
+  for (const [name, entries] of arscStringEntries(buf)) {
+    const strings = entries.filter(e => 'string' in e).map(e => e.string);
+    if (strings.length) out.set(name, new Set(strings));
+  }
+  return out;
+}
+
+/** "default", a locale such as "ar" or "en-rUS", or "a qualified configuration". */
+function configLabel(buf, cfg) {
+  const size = buf.readUInt32LE(cfg);
+  const body = buf.subarray(cfg + 4, cfg + Math.max(4, size));
+  if (body.every(b => b === 0)) return 'default';
+  const ascii = (o, n) => {
+    const t = buf.toString('latin1', cfg + o, cfg + o + n);
+    return /^[a-zA-Z]{2}$/.test(t) ? t : '';
+  };
+  const lang = ascii(8, 2), region = ascii(10, 2);
+  return lang ? `${lang}${region ? `-r${region}` : ''}` : 'a qualified configuration';
+}
+
 function readType(buf, start, globals, keys, result) {
   const headerSize = buf.readUInt16LE(start + 2), end = start + buf.readUInt32LE(start + 4);
   const flags = buf[start + 9];
+  const config = configLabel(buf, start + 20);
   const count = buf.readUInt32LE(start + 12);
   const entries = start + buf.readUInt32LE(start + 16);
   for (let i = 0; i < count; i++) {
@@ -107,19 +139,28 @@ function readType(buf, start, globals, keys, result) {
     const e = entries + off;
     need(e + 8 <= end, 'entry bounds');
     const eflags = buf.readUInt16LE(e + 2);
-    let key, dataType, data;
+    let key, entry;
     if (eflags & ENTRY_COMPACT) {
-      key = buf.readUInt16LE(e); dataType = eflags >> 8; data = buf.readUInt32LE(e + 4);
+      key = buf.readUInt16LE(e);
+      entry = value(eflags >> 8, buf.readUInt32LE(e + 4));
+    } else if (eflags & ENTRY_COMPLEX) {
+      key = buf.readUInt32LE(e + 4);
+      entry = { other: 'a bag (complex entry)' };
     } else {
-      if (eflags & ENTRY_COMPLEX) continue;
       const v = e + buf.readUInt16LE(e);
       need(v + 8 <= end, 'value bounds');
-      key = buf.readUInt32LE(e + 4); dataType = buf[v + 3]; data = buf.readUInt32LE(v + 4);
+      key = buf.readUInt32LE(e + 4);
+      entry = value(buf[v + 3], buf.readUInt32LE(v + 4));
     }
-    if (dataType !== TYPE_STRING) continue;
-    need(key < keys.length && data < globals.length, 'string reference');
-    if (!result.has(keys[key])) result.set(keys[key], new Set());
-    result.get(keys[key]).add(globals[data]);
+    need(key < keys.length, 'key reference');
+    if (!result.has(keys[key])) result.set(keys[key], []);
+    result.get(keys[key]).push({ config, ...entry });
+  }
+
+  function value(dataType, data) {
+    if (dataType !== TYPE_STRING) return { other: VALUE_KIND[dataType] ?? `a value of type 0x${dataType.toString(16)}` };
+    need(data < globals.length, 'string reference');
+    return { string: globals[data] };
   }
 }
 
@@ -187,14 +228,17 @@ export function checkApk({ arsc, bundle, project, native, web }) {
   const problems = [];
   if (native.project_id !== project) problems.push(`google-services.json is for ${native.project_id}, not ${project}`);
 
-  const res = arscStringResources(arsc);
+  const res = arscStringEntries(arsc);
   for (const [name, fromFile] of Object.entries(native)) {
     const want = name === 'project_id' ? project : fromFile;
-    const got = [...(res.get(name) ?? [])];
+    const entries = res.get(name) ?? [];
+    for (const e of entries) if ('other' in e) problems.push(`native ${name}: in configuration ${e.config} it is ${e.other}, not a plain string`);
+    const got = [...new Set(entries.filter(e => 'string' in e).map(e => e.string))];
     if (got.length !== 1) problems.push(`native ${name}: ${got.length ? `${got.length} different values` : 'missing'}`);
     else if (got[0] !== want) problems.push(`native ${name} is not the expected value${name === 'google_api_key' ? '' : ` (found "${got[0]}")`}`);
   }
 
+  if (web && !bundle) problems.push('a web config was given but the APK has no JS bundle (assets/index.android.bundle) to check it in');
   if (bundle) {
     if (!web) problems.push('the APK has a JS bundle but no web config was given to check it against');
     else {
