@@ -159,24 +159,42 @@ jobs:
           path: apps/mobile-relay/app/build/reports/tests/
           if-no-files-found: ignore
 
+      # Run workflow with test_backend=staging: only the MOBILE_STAGING_* settings
+      # are passed, and anything missing or pointing elsewhere fails the job (no
+      # fallback to the default settings). Otherwise the MOBILE_TEST_* settings.
       - name: Configure private relay test APK
         id: relay-backend
         if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
         env:
-          MOBILE_GOOGLE_SERVICES_JSON: ${{ secrets.MOBILE_GOOGLE_SERVICES_JSON }}
-          MOBILE_TEST_FIREBASE_PROJECT_ID: ${{ vars.MOBILE_TEST_FIREBASE_PROJECT_ID }}
-          MOBILE_TEST_ALLOW_PRODUCTION_BACKEND: ${{ vars.MOBILE_TEST_ALLOW_PRODUCTION_BACKEND }}
+          TEST_BACKEND: ${{ inputs.test_backend == 'staging' && 'staging' || 'default' }}
+          MOBILE_GOOGLE_SERVICES_JSON: ${{ inputs.test_backend != 'staging' && secrets.MOBILE_GOOGLE_SERVICES_JSON || '' }}
+          MOBILE_TEST_FIREBASE_PROJECT_ID: ${{ inputs.test_backend != 'staging' && vars.MOBILE_TEST_FIREBASE_PROJECT_ID || '' }}
+          MOBILE_TEST_ALLOW_PRODUCTION_BACKEND: ${{ inputs.test_backend != 'staging' && vars.MOBILE_TEST_ALLOW_PRODUCTION_BACKEND || '' }}
+          MOBILE_STAGING_GOOGLE_SERVICES_JSON: ${{ inputs.test_backend == 'staging' && secrets.MOBILE_STAGING_GOOGLE_SERVICES_JSON || '' }}
+          MOBILE_STAGING_FIREBASE_PROJECT_ID: ${{ inputs.test_backend == 'staging' && vars.MOBILE_STAGING_FIREBASE_PROJECT_ID || '' }}
         run: node scripts/ci/relay-test-backend.mjs
 
       - name: Build private relay test APK with a stable test key
         if: steps.relay-backend.outputs.ready == 'true'
+        env:
+          PROJECT: ${{ steps.relay-backend.outputs.project }}
         run: |
           mkdir -p "$HOME/.android" dist-relay
           cp apps/mobile/android/app/debug.keystore "$HOME/.android/debug.keystore"
           gradle -p apps/mobile-relay :app:assembleDebug --no-daemon
-          cp apps/mobile-relay/app/build/outputs/apk/debug/app-debug.apk dist-relay/offlinesms-relay-0.2.0-test.apk
-          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --print-certs dist-relay/*.apk > dist-relay/signing-cert.txt
-          cp docs/PHONE_TEST_ACTIVATION.md dist-relay/README.md
+          APK="dist-relay/offlinesms-relay-0.2.0-test-$PROJECT.apk"
+          cp apps/mobile-relay/app/build/outputs/apk/debug/app-debug.apk "$APK"
+          bash scripts/ci/check-apk-backend.sh "$APK" "$PROJECT"
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --print-certs "$APK" > dist-relay/signing-cert.txt
+          {
+            echo "Firebase project: $PROJECT (test_backend=${{ inputs.test_backend || 'default' }})"
+            echo "Commit: $GITHUB_SHA"
+            "$ANDROID_HOME/build-tools/34.0.0/aapt2" dump badging "$APK" | head -1
+            ( cd dist-relay && sha256sum "$(basename "$APK")" )
+            grep -E "SHA-256 digest" dist-relay/signing-cert.txt
+          } | tee dist-relay/BUILD-INFO.txt
+          # The activation notes describe the production relay; a staging build has BUILD-INFO only.
+          if [ "${{ inputs.test_backend }}" != staging ]; then cp docs/PHONE_TEST_ACTIVATION.md dist-relay/README.md; fi
 
       - name: Upload private relay test APK
         if: steps.relay-backend.outputs.ready == 'true'
@@ -203,7 +221,9 @@ jobs:
   #   none     → placeholder backend (installs/opens; no sign-in or push)
   # Run workflow with test_backend=staging to build against a NON-production
   # project instead: secret MOBILE_STAGING_GOOGLE_SERVICES_JSON and vars
-  # MOBILE_STAGING_FIREBASE_* (same names); production is refused for it.
+  # MOBILE_STAGING_FIREBASE_* (same names); production is refused for it. The
+  # same run builds the private relay (relay-android) from those settings; the
+  # secret then also needs the Android app app.offlinesms.business.
   # Optional private signing key (else the repo debug key) — secrets
   #   MOBILE_TEST_KEYSTORE_BASE64, MOBILE_TEST_KEYSTORE_PASSWORD,
   #   MOBILE_TEST_KEY_ALIAS, MOBILE_TEST_KEY_PASSWORD.
@@ -310,6 +330,20 @@ jobs:
       - name: Signing certificate (must match between baseline and updated)
         run: |
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs dist-apk/*.apk | grep -E "SHA-256 digest" | tee dist-apk/signing-cert.txt
+
+      # Read the project back from the APK itself (native config and JS bundle).
+      - name: APK backend
+        if: env.MOBILE_GOOGLE_SERVICES_JSON != ''
+        run: |
+          APK=$(ls dist-apk/*.apk)
+          bash scripts/ci/check-apk-backend.sh "$APK" "$EXPO_PUBLIC_FIREBASE_PROJECT_ID"
+          {
+            echo "Firebase project: $EXPO_PUBLIC_FIREBASE_PROJECT_ID (test_backend=${{ inputs.test_backend || 'default' }})"
+            echo "Commit: $GITHUB_SHA"
+            "$ANDROID_HOME/build-tools/36.0.0/aapt2" dump badging "$APK" | head -1
+            cat dist-apk/*.sha256
+            cat dist-apk/signing-cert.txt
+          } | tee dist-apk/BUILD-INFO.txt
 
       - name: Upload APK
         uses: actions/upload-artifact@v4

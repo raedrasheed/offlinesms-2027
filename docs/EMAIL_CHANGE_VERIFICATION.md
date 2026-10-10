@@ -197,9 +197,28 @@ Below, `$STAGING` stands for that id and `$NUM` for its project number.
    - the auth domain is not authorized for that project;
    - anything points at production.
 
-   The artifact `offlinesms-test-updated` holds
-   `offlinesms-test-updated-<sha>-$STAGING.apk`. Test APKs compile in the test switches
-   (`EXPO_PUBLIC_TEST_FAULTS=1`); store builds never do.
+   The same run builds the private relay against staging. The secret must therefore
+   also contain the Android app `app.offlinesms.business`. The relay build uses only
+   the `MOBILE_STAGING_*` settings and fails if any is missing; it never falls back to
+   the default settings. It also fails if its app id or API key belongs to another
+   project (`scripts/ci/relay-test-backend.mjs`), or if the settings point at
+   production.
+
+   After building, CI reads the project back from each APK
+   (`scripts/ci/check-apk-backend.sh`): the native Firebase config and, for the user
+   app, the JS bundle must name `$STAGING` and must not name production. Artifacts:
+   - `offlinesms-test-updated`: `offlinesms-test-updated-<sha>-$STAGING.apk`;
+   - `offlinesms-relay-test`: `offlinesms-relay-0.2.0-test-$STAGING.apk`.
+
+   Each artifact has a `BUILD-INFO.txt` with the project, commit, package and
+   version, sha256 and signing certificate.
+
+   Test APKs compile in the test switches (`EXPO_PUBLIC_TEST_FAULTS=1`); store builds
+   never do.
+
+   The staging relay has the production relay's package (`app.offlinesms.business`).
+   Install it only on a phone without the production relay, so no enrollment or
+   pending job of the production relay is replaced.
 
 ## 2. Deploy to staging (deploy identity, or your own login)
 

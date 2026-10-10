@@ -20,6 +20,8 @@
 //   - with --staging: the production project.
 // Prints no key values.
 
+import { apiKeyProject, appIdNumber, keyBelongsTo } from './firebase-api-key.mjs';
+
 const PROD = 'offlinesms-prod-2027';
 const TEST_PKG = 'app.offlinesms.mobile.test';
 const staging = process.argv.includes('--staging');
@@ -57,10 +59,9 @@ if (gs) {
 
 if (project && web.projectId && project !== web.projectId) fail('google-services.json belongs to another project than FIREBASE_PROJECT_ID');
 if (number && web.messagingSenderId && number !== web.messagingSenderId) fail('FIREBASE_MESSAGING_SENDER_ID is not this project\'s number');
-const appNumber = id => /^1:(\d+):(web|android|ios):[0-9a-f]+$/i.exec(id)?.[1] ?? null;
-if (web.appId && number && appNumber(web.appId) !== number) fail('FIREBASE_APP_ID is not an app of this project');
+if (web.appId && number && appIdNumber(web.appId) !== number) fail('FIREBASE_APP_ID is not an app of this project');
 const androidAppId = client?.client_info?.mobilesdk_app_id ?? '';
-if (client && number && appNumber(androidAppId) !== number) fail(`the ${TEST_PKG} app id is not an app of this project`);
+if (client && number && appIdNumber(androidAppId) !== number) fail(`the ${TEST_PKG} app id is not an app of this project`);
 const bucket = gs?.project_info?.storage_bucket;
 if (web.storageBucket && project && (bucket ? web.storageBucket !== bucket : !web.storageBucket.startsWith(`${project}.`))) {
   fail('FIREBASE_STORAGE_BUCKET is not this project\'s bucket');
@@ -68,21 +69,10 @@ if (web.storageBucket && project && (bucket ? web.storageBucket !== bucket : !we
 if (staging && (project === PROD || web.projectId === PROD)) fail('staging settings point at the production project');
 
 async function keyProject(label, key) {
-  let r;
-  try {
-    r = await fetch(`https://identitytoolkit.googleapis.com/v1/projects?key=${encodeURIComponent(key)}`);
-  } catch (e) {
-    fail(`${label}: could not reach Identity Toolkit to check the key (${e.message})`);
-    return null;
-  }
-  const body = await r.json().catch(() => ({}));
-  if (!r.ok) {
-    fail(`${label}: Identity Toolkit refused the key (${body?.error?.message ?? `HTTP ${r.status}`}); its project cannot be verified`);
-    return null;
-  }
-  const owner = String(body.projectId ?? '');
-  if (owner !== project && owner !== number) fail(`${label} belongs to another project`);
-  return body;
+  const res = await apiKeyProject(key);
+  if (!res.ok) { fail(`${label}: ${res.reason}`); return null; }
+  if (!keyBelongsTo(res, project, number)) fail(`${label} belongs to another project`);
+  return res;
 }
 
 if (!errors.length) {
