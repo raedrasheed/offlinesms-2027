@@ -1,9 +1,16 @@
 name: Delete test artifacts
 
 # Frees Actions artifact storage without deleting any run or log: deletes the
-# artifacts of every run except the runs listed in keep_runs. Artifacts less
-# than 2 hours old are always kept (a build may still be uploading).
-# dry_run (default) only lists what would be deleted and its total size.
+# artifacts of every run except the runs listed in keep_runs.
+#
+# 1. Dry run (default): lists the artifacts that would be deleted, with sizes,
+#    and prints created_before (now minus 2 hours: a build may still be
+#    uploading) and plan (a fingerprint of that exact list).
+# 2. Real run: dry_run unchecked, the same keep_runs, and the created_before
+#    and plan the dry run printed. Only artifacts created before
+#    created_before are candidates, and the run stops without deleting
+#    anything unless the candidates are exactly the previewed list.
+#
 # GitHub recalculates the storage used every 6-12 hours.
 on:
   workflow_dispatch:
@@ -16,6 +23,14 @@ on:
         required: true
         default: true
         type: boolean
+      created_before:
+        description: 'Real run: the created_before its dry run printed (dry run: leave empty)'
+        required: false
+        default: ''
+      plan:
+        description: 'Real run: the plan its dry run printed (dry run: leave empty)'
+        required: false
+        default: ''
 
 permissions:
   actions: write
@@ -30,12 +45,27 @@ jobs:
         env:
           KEEP_RUNS: ${{ inputs.keep_runs }}
           DRY_RUN: ${{ inputs.dry_run }}
+          CREATED_BEFORE: ${{ inputs.created_before }}
+          PLAN: ${{ inputs.plan }}
         with:
           script: |
+            const crypto = require('crypto');
+            const MIN_AGE_MS = 2 * 60 * 60 * 1000;
             const keep = (process.env.KEEP_RUNS || '').split(/[\s,]+/).filter(Boolean);
             const dryRun = process.env.DRY_RUN !== 'false';
+            const given = (process.env.CREATED_BEFORE || '').trim();
+            const plan = (process.env.PLAN || '').trim();
             if (!keep.length || !keep.every(id => /^\d+$/.test(id))) {
               core.setFailed('keep_runs must list the run ids whose artifacts stay');
+              return;
+            }
+            if (!dryRun && (!given || !plan)) {
+              core.setFailed('a real run needs the created_before and plan printed by its dry run');
+              return;
+            }
+            const cutoff = given ? new Date(given) : new Date(Date.now() - MIN_AGE_MS);
+            if (Number.isNaN(cutoff.getTime()) || cutoff.getTime() > Date.now() - MIN_AGE_MS) {
+              core.setFailed('created_before must be a date (ISO 8601) at least 2 hours ago');
               return;
             }
 
@@ -51,16 +81,28 @@ jobs:
               return;
             }
 
-            const recent = Date.now() - 2 * 60 * 60 * 1000;
+            const doomed = artifacts.filter(a => !keep.includes(runOf(a)) && new Date(a.created_at) < cutoff);
+            const kept = artifacts.filter(a => !doomed.includes(a));
+            const fingerprint = crypto.createHash('sha256')
+              .update(doomed.map(a => a.id).sort((x, y) => x - y).join(','))
+              .digest('hex').slice(0, 16);
             const mb = list => (list.reduce((n, a) => n + a.size_in_bytes, 0) / 1e6).toFixed(1);
-            const kept = artifacts.filter(a => keep.includes(runOf(a)) || new Date(a.created_at).getTime() > recent);
-            const doomed = artifacts.filter(a => !kept.includes(a));
+            const line = a => `run ${runOf(a)} ${a.workflow_run?.head_sha?.slice(0, 7)} ${a.name} (${(a.size_in_bytes / 1e6).toFixed(1)} MB)`;
 
             core.info(`Dry run: ${dryRun}`);
-            for (const a of kept) core.info(`keep    run ${runOf(a)} ${a.workflow_run?.head_sha?.slice(0, 7)} ${a.name} (${(a.size_in_bytes / 1e6).toFixed(1)} MB)`);
-            for (const a of doomed) {
-              core.info(`${dryRun ? 'would delete' : 'delete'} run ${runOf(a)} ${a.workflow_run?.head_sha?.slice(0, 7)} ${a.name} (${(a.size_in_bytes / 1e6).toFixed(1)} MB)`);
-              if (!dryRun) await github.rest.actions.deleteArtifact({ owner: context.repo.owner, repo: context.repo.repo, artifact_id: a.id });
+            core.info(`created_before: ${cutoff.toISOString()}`);
+            core.info(`plan: ${fingerprint}`);
+            for (const a of kept) core.info(`keep          ${line(a)}`);
+            for (const a of doomed) core.info(`${dryRun ? 'would delete' : 'delete      '}  ${line(a)}`);
+
+            if (!dryRun && plan !== fingerprint) {
+              core.setFailed('the artifacts to delete are not the list the dry run showed; nothing was deleted. Run the dry run again.');
+              return;
+            }
+            if (!dryRun) {
+              for (const a of doomed) {
+                await github.rest.actions.deleteArtifact({ owner: context.repo.owner, repo: context.repo.repo, artifact_id: a.id });
+              }
             }
 
             await core.summary
@@ -70,5 +112,8 @@ jobs:
                 ['Kept', String(kept.length), mb(kept)],
                 [dryRun ? 'Would delete' : 'Deleted', String(doomed.length), mb(doomed)],
               ])
-              .addRaw(`Kept runs: ${keep.join(', ')}. Runs and logs are not deleted.`)
+              .addRaw(`Kept runs: ${keep.join(', ')}. Runs and logs are not deleted.`, true)
+              .addRaw(dryRun
+                ? `To delete exactly this list: dry_run off, keep_runs ${keep.join(' ')}, created_before ${cutoff.toISOString()}, plan ${fingerprint}.`
+                : `created_before ${cutoff.toISOString()}, plan ${fingerprint}.`, true)
               .write();
