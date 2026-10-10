@@ -214,8 +214,8 @@ Below, `$STAGING` stands for that id and `$NUM` for its project number.
      project id may be.
 
    A project name merely appearing in the file is not accepted. Artifacts (a
-   staging run builds no baseline; artifacts of Run workflow builds are kept 30
-   days, pull request builds 7):
+   staging run builds no baseline; Run workflow artifacts are kept 30 days, or
+   less if the repository's artifact retention setting is lower, now 7):
    - `offlinesms-test-updated`: `offlinesms-test-updated-<sha>-$STAGING.apk`;
    - `offlinesms-relay-test`: `offlinesms-relay-0.2.0-test-$STAGING.apk`.
 

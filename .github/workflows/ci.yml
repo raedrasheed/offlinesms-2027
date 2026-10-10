@@ -212,8 +212,9 @@ jobs:
         with:
           name: offlinesms-relay-test
           path: dist-relay/
-          # Builds asked for with Run workflow are kept 30 days, pull request builds 7.
-          retention-days: ${{ github.event_name == 'workflow_dispatch' && 30 || 7 }}
+          # Run workflow builds: 30 days, capped by the repository's artifact
+          # retention setting (7 days now). Pull request builds: 3 days.
+          retention-days: ${{ github.event_name == 'workflow_dispatch' && 30 || 3 }}
 
   # Matched pair of installable TEST builds of the main mobile app
   # (docs/TEST_BUILDS.md): "updated" (this commit) and "baseline" (2a61167 +
@@ -368,5 +369,5 @@ jobs:
         with:
           name: offlinesms-test-${{ matrix.variant }}
           path: dist-apk/
-          retention-days: ${{ github.event_name == 'workflow_dispatch' && 30 || 7 }}
+          retention-days: ${{ github.event_name == 'workflow_dispatch' && 30 || 3 }}
 
