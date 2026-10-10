@@ -332,7 +332,13 @@ jobs:
       - name: Build ${{ matrix.variant }} test APK
         env:
           BASELINE_DIR: ${{ github.workspace }}/../offlinesms-baseline
+          GRADLE_ARGS: --stacktrace
         run: |
+          # Release packaging ran the Gradle daemon out of Metaspace with the
+          # project's 2 GiB heap / 512 MiB Metaspace (:app:packageRelease failed).
+          # The user-level gradle.properties overrides it for both variants.
+          mkdir -p ~/.gradle
+          echo 'org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g' >> ~/.gradle/gradle.properties
           if [ "${COPY_KEYSTORE:-}" = 1 ]; then
             # build.sh creates the baseline worktree; give it the same key.
             git worktree add -f "$BASELINE_DIR" 2a61167
