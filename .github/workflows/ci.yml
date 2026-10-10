@@ -202,8 +202,12 @@ jobs:
           # The activation notes describe the production relay; a staging build has BUILD-INFO only.
           if [ "${{ inputs.test_backend }}" != staging ]; then cp docs/PHONE_TEST_ACTIVATION.md dist-relay/README.md; fi
 
+      # A Run workflow build is the deliverable: its upload must succeed. A pull
+      # request build is verified above either way, so a full artifact storage
+      # only leaves a warning there.
       - name: Upload private relay test APK
         if: steps.relay-backend.outputs.ready == 'true'
+        continue-on-error: ${{ github.event_name != 'workflow_dispatch' }}
         uses: actions/upload-artifact@v4
         with:
           name: offlinesms-relay-test
@@ -359,6 +363,7 @@ jobs:
           } | tee dist-apk/BUILD-INFO.txt
 
       - name: Upload APK
+        continue-on-error: ${{ github.event_name != 'workflow_dispatch' }}
         uses: actions/upload-artifact@v4
         with:
           name: offlinesms-test-${{ matrix.variant }}
