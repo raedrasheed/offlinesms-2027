@@ -36,3 +36,15 @@ allprojects {
 
 apply plugin: "expo-root-project"
 apply plugin: "com.facebook.react.rootproject"
+
+// ── Google Play target-API requirement ──────────────────────────────────────
+// Target Android 16 (API level 36). Overrides the Expo SDK 53 defaults (API 35)
+// set by the expo-root-project plugin above so every module compiles against —
+// and the app targets — API 36, per the Play Console requirement
+// (must target Android 16 to publish updates after 2026-08-31).
+ext {
+  compileSdkVersion = 36
+  targetSdkVersion = 36
+  buildToolsVersion = "36.0.0"
+}
+
