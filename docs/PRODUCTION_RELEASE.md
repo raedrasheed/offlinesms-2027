@@ -213,8 +213,10 @@ gone, so the six pepper-bound functions keep `PHONE_HASH_PEPPER:1`. `--forbid` a
 if any function after the deploy, new or existing, carries `PHONE_AUTH_ENABLED` or
 `PHONE_LINK_ENABLED`: the flags stay unset until stage 7 (§2). It refuses (exit 2) an empty
 file or a row that is not a `function-env-names.sh` row. Expect `New functions (9), with all
-their names`, each listed with its variables and secrets. Among the added names,
-`FUNCTION_SIGNATURE_TYPE` is set by Cloud Functions.
+their names`, each listed with its variables and secrets. Platform-managed names
+(`FUNCTION_SIGNATURE_TYPE`, `FIREBASE_CONFIG`, `LOG_EXECUTION_ID` and the other names a
+`.env` cannot set) are listed apart and do not fail it: on staging `FUNCTION_SIGNATURE_TYPE`
+appeared on 55 functions and left one callable (`NODE22_UPGRADE.md` §2).
 
 **Rollback:** see §11.2.
 

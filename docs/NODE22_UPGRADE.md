@@ -131,14 +131,22 @@ nothing.
 `env-names-diff.mjs` compares the names of each function's variables and secrets (never
 their values; a secret with its version). It lists names added, grouped by name, and each new
 function with all its names. It fails (exit 1) if a function, a variable name or a secret is
-gone, and refuses (exit 2) an empty file or a malformed row. Staging runs it without
-`--forbid`, because the staging `.env` sets the phone flags; production stage 2 forbids them. On staging on 2026-10-11 it found only
-additions:
-- `PHONE_AUTH_ENABLED` and `PHONE_LINK_ENABLED`: they are in the staging `.env` since the
-  phone test (`STAGING_PHONE_SMS_TEST.md` §2), and were only on the functions deployed then.
-  Every function is now deployed from that file, so each one has them. Nothing changes while
-  `smsConfig/otp` stays stopped.
-- `FUNCTION_SIGNATURE_TYPE`: set by Cloud Functions itself.
+gone, and refuses (exit 2) an empty file or a malformed row. Platform-managed names (those
+firebase-tools refuses in a `.env` file, such as `FUNCTION_SIGNATURE_TYPE` or
+`FIREBASE_CONFIG`, and `LOG_EXECUTION_ID`) are listed apart and never fail it. Staging runs it
+without `--forbid`, because the staging `.env` sets the phone flags; production stage 2
+forbids them.
+
+On staging on 2026-10-11 (`1c5a40c` and later):
+- `PHONE_AUTH_ENABLED` and `PHONE_LINK_ENABLED` added on 82 functions. They are in the
+  staging `.env` since the phone test (`STAGING_PHONE_SMS_TEST.md` §2), and were only on the
+  functions deployed then. Every function is now deployed from that file, so each one has
+  them. Nothing changes while `smsConfig/otp` stays stopped.
+- `FUNCTION_SIGNATURE_TYPE` added on 55 functions and gone from `createPhoneContact`.
+  firebase-tools sets it (`cloudevent`) on event-triggered functions only, and a `.env` cannot
+  set it. Callables such as `addMembers` gained it and `createPhoneContact` lost it in the same
+  deploy, so the platform sets it on callables by a rule we could not find documented. Without
+  it the Functions Framework uses `http`, the right type for a callable.
 
 ## 3. Checks on staging
 

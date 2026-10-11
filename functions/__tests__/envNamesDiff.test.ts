@@ -34,8 +34,31 @@ describe('env-names-diff.mjs', () => {
       [['addMembers', 'nodejs22', `${BASE},FUNCTION_SIGNATURE_TYPE,PHONE_AUTH_ENABLED`], ['claimRelayJobs', 'nodejs22', `${BASE},FUNCTION_SIGNATURE_TYPE,PHONE_AUTH_ENABLED`, 'PHONE_HASH_PEPPER:1']],
     );
     expect(r.status, r.out).toBe(0);
-    expect(r.out).toContain('Names added to existing functions:\n  FUNCTION_SIGNATURE_TYPE on 2 functions\n  PHONE_AUTH_ENABLED on 1 function\n');
+    expect(r.out).toContain('Names added to existing functions:\n  PHONE_AUTH_ENABLED on 1 function\n');
+    expect(r.out).toContain('  + FUNCTION_SIGNATURE_TYPE on 2 functions');
     expect(r.out).toContain('OK: no function, variable name or secret removed (2 before, 2 after)');
+  });
+
+  it('lists platform-managed names apart and does not fail when one goes, as FUNCTION_SIGNATURE_TYPE did on staging', () => {
+    const r = run(
+      [['createPhoneContact', 'nodejs20', `${BASE},FUNCTION_SIGNATURE_TYPE,RESEND_API_KEY`], ['onMessageCreate', 'nodejs20', `${BASE},FIREBASE_CONFIG`]],
+      [['createPhoneContact', 'nodejs22', `${BASE},RESEND_API_KEY`], ['onMessageCreate', 'nodejs22', `${BASE},EVENTARC_CLOUD_EVENT_SOURCE`]],
+    );
+    expect(r.status, r.out).toBe(0);
+    expect(r.out).toContain('Platform-managed names changed (set by the Firebase CLI or Cloud Functions, not by .env; not counted):');
+    expect(r.out).toContain('  + EVENTARC_CLOUD_EVENT_SOURCE on 1 function');
+    expect(r.out).toContain('  - FIREBASE_CONFIG from 1: onMessageCreate');
+    expect(r.out).toContain('  - FUNCTION_SIGNATURE_TYPE from 1: createPhoneContact');
+    expect(r.out).not.toContain('Names removed');
+  });
+
+  it('still fails on a .env name removed next to a platform-managed one', () => {
+    const r = run(
+      [['createPhoneContact', 'nodejs20', `${BASE},FUNCTION_SIGNATURE_TYPE,RESEND_API_KEY`]],
+      [['createPhoneContact', 'nodejs22', BASE]],
+    );
+    expect(r.status).toBe(1);
+    expect(r.out).toContain('Names removed (1):\n  createPhoneContact: RESEND_API_KEY');
   });
 
   it('ignores the runtime column and passes with no change at all', () => {
