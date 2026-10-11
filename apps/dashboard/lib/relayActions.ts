@@ -18,6 +18,7 @@ import { isSupportedCountry } from 'libphonenumber-js';
 import { randomInt } from 'node:crypto';
 import { normalizePhoneAndCountry } from './phoneCountry';
 import { loadOrgRelayCoverage } from './relayCoverage';
+import { parseOtpLimits, parseRelayCaps, type OtpLimitValues, type RelayCaps } from './otpLimits';
 
 export type RelayActionState = { error?: string; success?: boolean; code?: string; expiresAt?: number };
 
@@ -172,6 +173,49 @@ export async function setOtpPolicyAction(patch: OtpPolicyPatch): Promise<RelayAc
   }
   await audit('relay.otp.policy.set', session, 'smsConfig/otp', { ...patch, policyVersion });
   revalidatePath('/admin/settings');
+  return { success: true };
+}
+
+/** Send budgets for verification SMS (smsConfig/otp signin.limits, link.limits,
+ *  shared). Only the fields in OTP_LIMIT_FIELDS, as whole numbers within the
+ *  functions' bounds; null removes an override (the functions' default applies).
+ *  Budgets are read on every request, so no policyVersion bump: queued codes
+ *  stay valid. */
+export async function setOtpLimitsAction(values: OtpLimitValues): Promise<RelayActionState> {
+  const session = await authorize();
+  if ('error' in session) return session;
+  const denied = platformOnly(session);
+  if (denied) return { error: denied };
+  const parsed = parseOtpLimits(values);
+  if ('error' in parsed) return { error: parsed.error };
+  const update: Record<string, unknown> = { updatedAt: FieldValue.serverTimestamp() };
+  for (const [path, v] of Object.entries(parsed.values)) update[path] = v === null ? FieldValue.delete() : v;
+  const ref = adminDb.collection('smsConfig').doc('otp');
+  try {
+    // update() fails on a missing doc: set the sender (which creates it) first.
+    await ref.update(update);
+  } catch {
+    return { error: 'Could not save the limits. Set the OTP organization first.' };
+  }
+  await audit('relay.otp.limits.set', session, 'smsConfig/otp', { limits: parsed.values });
+  revalidatePath('/admin/settings');
+  return { success: true };
+}
+
+/** Per-device send caps (relayDevices/{id}.caps). Every claimed job, verification
+ *  codes included, counts against them. Platform admins only: the caps are the
+ *  last limit on what one SIM can send. */
+export async function setRelayCapsAction(deviceId: string, caps: RelayCaps): Promise<RelayActionState> {
+  const session = await authorize();
+  if ('error' in session) return session;
+  if (getAdminScope(session).organizationId !== undefined) return { error: 'Only a platform admin can change relay caps.' };
+  const parsed = parseRelayCaps(caps);
+  if ('error' in parsed) return { error: parsed.error };
+  const loaded = await loadDeviceScoped(session, deviceId);
+  if ('error' in loaded) return { error: loaded.error };
+  await loaded.ref.update({ caps: parsed.caps, updatedAt: FieldValue.serverTimestamp() });
+  await audit('relay.device.caps.set', session, deviceId, { businessId: loaded.businessId, caps: parsed.caps });
+  revalidatePath('/admin/relay');
   return { success: true };
 }
 

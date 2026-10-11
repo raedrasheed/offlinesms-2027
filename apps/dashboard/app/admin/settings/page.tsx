@@ -12,6 +12,7 @@ import { adminDb } from '@/lib/firebase-admin';
 import { PermissionState } from '@/components/state';
 import SettingsForm from './SettingsForm';
 import OtpSenderSetting, { type OtpPolicyState } from './OtpSenderSetting';
+import { readOtpLimits } from '@/lib/otpLimits';
 import { updateSystemSettings } from '@/lib/settingsActions';
 
 export const dynamic = 'force-dynamic';
@@ -47,6 +48,7 @@ export default async function SettingsPage() {
         signinEnabled: d?.signin?.enabled === true,
         linkEnabled: d?.link?.enabled === true,
         policyVersion: typeof d?.policyVersion === 'number' ? d.policyVersion : 0,
+        limits: readOtpLimits(d),
       };
     } catch { /* soft-fail: the component shows "unknown" */ }
   }
