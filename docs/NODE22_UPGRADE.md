@@ -129,8 +129,10 @@ when any function is on another runtime. On a failure, stop and send the output;
 nothing.
 
 `env-names-diff.mjs` compares the names of each function's variables and secrets (never
-their values; a secret with its version). It lists names added, grouped by name, and fails
-if a function, a variable name or a secret is gone. On staging on 2026-10-11 it found only
+their values; a secret with its version). It lists names added, grouped by name, and each new
+function with all its names. It fails (exit 1) if a function, a variable name or a secret is
+gone, and refuses (exit 2) an empty file or a malformed row. Staging runs it without
+`--forbid`, because the staging `.env` sets the phone flags; production stage 2 forbids them. On staging on 2026-10-11 it found only
 additions:
 - `PHONE_AUTH_ENABLED` and `PHONE_LINK_ENABLED`: they are in the staging `.env` since the
   phone test (`STAGING_PHONE_SMS_TEST.md` §2), and were only on the functions deployed then.

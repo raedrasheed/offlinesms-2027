@@ -201,18 +201,20 @@ After 2e:
 ```sh
 bash scripts/release/check-runtime.sh offlinesms-prod-2027      # OK: exactly the 94 functions, all on nodejs22
 bash scripts/release/function-env-names.sh offlinesms-prod-2027 > $B/functions-after.tsv
-node scripts/release/env-names-diff.mjs $B/functions-before.tsv $B/functions-after.tsv
+node scripts/release/env-names-diff.mjs --forbid PHONE_AUTH_ENABLED,PHONE_LINK_ENABLED $B/functions-before.tsv $B/functions-after.tsv
 ```
 `check-runtime.sh` compares the deployed names with the functions this source exports and
 fails on a missing function, a deployed function this source does not have, a name deployed
 twice, or another runtime (`NODE22_UPGRADE.md` §2). On a failure, stop; delete nothing.
 
 `env-names-diff.mjs` compares names only, never values, and ignores the runtime. It must
-end `OK`: it fails if a function, a variable name or a secret (with its version) is gone, so
-the six pepper-bound functions keep `PHONE_HASH_PEPPER:1`. Expect `New functions (9)`.
-Among the added names, `FUNCTION_SIGNATURE_TYPE` is set by Cloud Functions. Stop if the
-added names include `PHONE_AUTH_ENABLED` or `PHONE_LINK_ENABLED`: the flags stay unset until
-stage 7 (§2).
+end `OK`. It fails (exit 1) if a function, a variable name or a secret (with its version) is
+gone, so the six pepper-bound functions keep `PHONE_HASH_PEPPER:1`. `--forbid` also fails it
+if any function after the deploy, new or existing, carries `PHONE_AUTH_ENABLED` or
+`PHONE_LINK_ENABLED`: the flags stay unset until stage 7 (§2). It refuses (exit 2) an empty
+file or a row that is not a `function-env-names.sh` row. Expect `New functions (9), with all
+their names`, each listed with its variables and secrets. Among the added names,
+`FUNCTION_SIGNATURE_TYPE` is set by Cloud Functions.
 
 **Rollback:** see §11.2.
 
