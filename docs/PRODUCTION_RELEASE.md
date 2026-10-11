@@ -153,7 +153,7 @@ npx firebase deploy --project offlinesms-prod-2027 --only firestore:rules,firest
   index is unchanged.
 - If the CLI still offers to **delete** an index that is not in the file, answer **No**.
 - **Check:** `firebase firestore:indexes` matches `$B/indexes-before.json` plus that index,
-  and `gcloud firestore indexes composite list --project offlinesms-prod-2027 --filter="collectionGroup=smsBatches"`
+  and `gcloud firestore indexes composite list --project offlinesms-prod-2027 --filter="name~smsBatches"`
   shows it `READY` (it builds in the background; the rest of the release does not wait on
   it). The app still opens chats.
 - **Rollback:** `cp $B/firestore.rules.before firestore.rules` in a scratch checkout and

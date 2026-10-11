@@ -155,7 +155,7 @@ lists `__name__`; with it, the deploy offered to delete that live index and then
 HTTP 409 "index already exists" (`PRODUCTION_RELEASE.md` §3).
 ```sh
 npx firebase deploy --project offlinesms-staging-2027 --only firestore:indexes   # expect no delete prompt; if one appears, answer No
-gcloud firestore indexes composite list --project offlinesms-staging-2027 --filter="collectionGroup=smsBatches"
+gcloud firestore indexes composite list --project offlinesms-staging-2027 --filter="name~smsBatches"
 gcloud scheduler jobs run firebase-schedule-reapStuckBatches-us-central1 --project offlinesms-staging-2027 --location us-central1
 ```
 
