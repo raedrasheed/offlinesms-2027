@@ -7,7 +7,7 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { verifySession } from '@/lib/session';
 import { canDo } from '@/lib/adminPermissions';
-import { getAdminScope } from '@/lib/adminScope';
+import { isPlatformAdmin as isPlatformRole } from '@/lib/adminScope';
 import { createOrganizationAccount } from '@/lib/orgMessagingActions';
 import { PermissionState } from '@/components/state';
 import CreateOrgAccountForm from './CreateOrgAccountForm';
@@ -21,7 +21,7 @@ export default async function NewOrgAccountPage() {
   if (session.state !== 'authorized') redirect('/login?next=/admin/organization-messaging/new');
 
   const isPlatformAdmin = canDo(session.role, 'manage:organization_messaging')
-    && getAdminScope(session).organizationId === undefined;
+    && isPlatformRole(session);
   if (!isPlatformAdmin) {
     return <div className="p-8"><PermissionState title="Super admin required" description="Only platform super admins can create organization accounts." /></div>;
   }

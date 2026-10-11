@@ -4,17 +4,17 @@
 // account (org doc + Firebase Auth admin user + custom claims). Phase 1.
 //
 // Auth model: this is a platform action, so it requires the
-// manage:organization_messaging capability AND an UNRESTRICTED scope
-// (organizationId === undefined). That blocks organization_admins — who are
-// org-scoped — from creating organizations, while super_admin / legacy /
-// bootstrap admins can. Mirrors the isPlatformAdmin pattern in the settings page.
+// manage:organization_messaging capability AND a platform admin role, named
+// explicitly (isPlatformAdmin: super_admin or the legacy admin claim), never
+// inferred from a missing organizationId (Codex R6-1). Same check as the
+// settings page and relay caps.
 
 import { cookies } from 'next/headers';
 import { FieldValue } from 'firebase-admin/firestore';
 import { adminAuth, adminDb } from './firebase-admin';
 import { verifySession } from './session';
 import { canDo } from './adminPermissions';
-import { getAdminScope, canViewOrganization } from './adminScope';
+import { getAdminScope, canViewOrganization, isPlatformAdmin } from './adminScope';
 import {
   validateOrgAccountInput, deriveOrgSlug, validateOrgSendInput,
   validateEscalationSettings, DEFAULT_ESCALATION,
@@ -35,7 +35,7 @@ export async function createOrganizationAccount(
   const session = await verifySession(cookie);
   if (session.state !== 'authorized'
       || !canDo(session.role, 'manage:organization_messaging')
-      || getAdminScope(session).organizationId !== undefined) {
+      || !isPlatformAdmin(session)) {
     return { error: 'Only platform super admins can create organization accounts.' };
   }
 

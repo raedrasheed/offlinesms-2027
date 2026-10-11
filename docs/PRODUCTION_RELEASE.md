@@ -191,6 +191,7 @@ written here):
 - Settings → Verification SMS (switches, limits, emergency stop) needs a platform admin:
   `super_admin`, or the legacy `admin` claim. The check names these two roles explicitly
   (`isPlatformAdmin`, `apps/dashboard/lib/adminScope.ts`); every other role is refused.
+  Creating an organization account uses the same check.
 - Relay caps also need a platform admin. Pairing, pause, resume, revoke and countries need
   `manage:relay`.
 - An `organization_admin` must carry a non-empty `organizationId` claim. Without one the
