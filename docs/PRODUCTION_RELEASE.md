@@ -40,10 +40,12 @@ Project `offlinesms-prod-2027`. Every Firebase command names it with `--project`
 | Verification SMS | Suspended (`enabled:false`, `emergencyStop:true`) | Suspended until stage 7 opens it with small limits |
 | Email change | Not deployed | Deployed switched off; turned on in stage 5 |
 
-`functions/src`, the rules and the indexes are unchanged since `925b812`, the commit whose
-functions ran on staging for the phone test. Check before stage 1:
+The rules and the indexes are unchanged since `925b812`, the commit whose functions ran on
+staging for the phone test. `functions/src` changed in one place only: `votePoll` retries
+its transaction up to 15 times instead of Firestore's default 5. Fifty simultaneous votes
+on one poll had failed with "Transaction lock timeout". Check before stage 1:
 `git diff --stat 925b812 <final> -- functions/src firestore.rules firestore.indexes.json`
-must print nothing.
+must list only `functions/src/chats/votePoll.ts`.
 
 ---
 

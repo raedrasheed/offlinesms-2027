@@ -45,6 +45,9 @@ function ids(data: Record<string, unknown>) {
   return { conversationId: data.conversationId, messageId: data.messageId };
 }
 
+/** Transaction attempts for one vote (Firestore's default is 5). */
+const VOTE_TX_ATTEMPTS = 15;
+
 export const votePoll = onCall(async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'sign-in-required');
@@ -62,6 +65,10 @@ export const votePoll = onCall(async (request) => {
   const pre = await convoRef.get();
   if (pre.exists) await assertDirectNotBlocked(db, pre.data() as Convo, uid);
 
+  // Every vote on a poll writes the same message document, so a busy group
+  // poll contends for one lock. Firestore aborts a waiting transaction
+  // ("Transaction lock timeout"); the SDK retries it with backoff, and its
+  // default of 5 attempts was not enough for 50 simultaneous votes.
   const result = await db.runTransaction(async (tx) => {
     await assertMember(tx, convoRef, uid);
     const [msgSnap, voterSnap] = await Promise.all([tx.get(msgRef), tx.get(voterRef)]);
@@ -90,7 +97,7 @@ export const votePoll = onCall(async (request) => {
     // can't make a later sequenced vote look stale.
     tx.set(voterRef, { optionIds: selection, seq: seq > 0 ? seq : Math.max(lastSeq, 0), updatedAt: FieldValue.serverTimestamp() });
     return { unchanged, stale: false, poll: next, selection };
-  });
+  }, { maxAttempts: VOTE_TX_ATTEMPTS });
 
   return {
     ok: true,
