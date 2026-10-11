@@ -87,6 +87,7 @@ the version CI tests (`nvm use 22` again after a reconnect):
 
 ```sh
 nvm install 22 && nvm use 22 && node --version     # v22.x
+export GOOGLE_CLOUD_QUOTA_PROJECT=offlinesms-prod-2027   # NODE22_UPGRADE.md §1: blocking-trigger registration
 cd ~ && git clone https://github.com/raedrasheed/offlinesms-2027.git release && cd release
 git checkout <final>            # the exact final commit
 npm ci                          # installs every workspace, functions included
@@ -163,6 +164,10 @@ group works on either.
 ```sh
 D() { npx firebase deploy --project offlinesms-prod-2027 --only "$(node scripts/release/deploy-only.mjs "$1")"; }
 ```
+
+Each step must end with `Deploy complete!`. If 2a reports "Failed to register blocking
+trigger function", `GOOGLE_CLOUD_QUOTA_PROJECT` (§2) is not set in this shell. Set it and
+run `D email-guards` again before Check A; the guards are not registered until then.
 
 | Step | Command | Check before the next step |
 |---|---|---|

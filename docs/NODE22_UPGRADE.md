@@ -46,6 +46,7 @@ If the `.env` file is missing, stop and send the output.
 
 ```sh
 nvm install 22 && nvm use 22 && node --version          # v22.x
+export GOOGLE_CLOUD_QUOTA_PROJECT=offlinesms-staging-2027  # see below
 cd ~ && git clone https://github.com/raedrasheed/offlinesms-2027.git offlinesms-node22
 cd ~/offlinesms-node22 && git checkout --detach <reviewed commit>
 cp ~/offlinesms-staging-847ddf0/functions/.env.offlinesms-staging-2027 functions/
@@ -55,7 +56,16 @@ mkdir -p ~/node22 && N=~/node22
 ```
 
 `git status` shows nothing: Git ignores the copied `.env` file. After a Cloud Shell
-reconnect, run `nvm use 22`, `cd ~/offlinesms-node22`, and define `N` (and `S` in §2) again.
+reconnect, run `nvm use 22`, the `export` line, `cd ~/offlinesms-node22`, and define `N`
+(and `S` in §2) again.
+
+**Why `GOOGLE_CLOUD_QUOTA_PROJECT`:** without `firebase login`, the Firebase CLI in Cloud Shell
+uses Application Default Credentials. The Identity Platform admin API refuses those without a
+quota project (HTTP 403, "requires a quota project"). The deploy then updates
+`guardEmailSignIn` and `guardEmailSent` but stops at "Failed to register blocking trigger".
+The failing request only reads the Auth config, so nothing in it changes. firebase-tools
+13.35.1 sends `GOOGLE_CLOUD_QUOTA_PROJECT` as the quota project on every request. Seen on
+staging on 2026-10-11.
 
 1. **Environment file.** Keep the copied `functions/.env.offlinesms-staging-2027` exactly as it is
    (`EMAIL_CHANGE_VERIFICATION.md` §2 and `STAGING_PHONE_SMS_TEST.md` §2). The deploy reads
