@@ -8,7 +8,7 @@ This guide covers promoting the **first** OfflineSMS admin. Long-term role manag
 
 - A Firebase project with at least one signed-in user (e.g. through the mobile phone-OTP flow, or seeded via `npm run seed`).
 - A service account key with the `Firebase Authentication Admin` IAM role.
-- Node 20 + the repo installed (`npm install` at the root).
+- Node 22 + the repo installed (`npm install` at the root).
 
 The service account is **only** used locally by this script and by the dashboard's server runtime. It should never be checked into the repository.
 
