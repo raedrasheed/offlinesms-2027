@@ -172,10 +172,14 @@ D() { npx firebase deploy --project offlinesms-prod-2027 --only "$(node scripts/
 
 After 2e:
 ```sh
-bash scripts/release/check-runtime.sh offlinesms-prod-2027      # all 94 on nodejs22
+bash scripts/release/check-runtime.sh offlinesms-prod-2027      # OK: exactly the 94 functions, all on nodejs22
 bash scripts/release/function-env-names.sh offlinesms-prod-2027 > $B/functions-after.tsv
 diff <(cut -f1,3,4 $B/functions-before.tsv) <(cut -f1,3,4 $B/functions-after.tsv)
 ```
+`check-runtime.sh` compares the deployed names with the functions this source exports and
+fails on a missing function, a deployed function this source does not have, a name deployed
+twice, or another runtime (`NODE22_UPGRADE.md` §2). On a failure, stop; delete nothing.
+
 The `diff` leaves out the runtime column, which changes on every row. Expect 9 new rows
 and no variable or secret name removed from an existing function. The six pepper-bound
 functions must still show `PHONE_HASH_PEPPER:1`.
@@ -530,7 +534,8 @@ checkout of the previous source, with the same `.env` file, **on Node.js 22**:
   merges, `366128a`.
 
 Both commits say `"node": "20"` in `functions/package.json`. In the scratch checkout, set it
-to `"22"` before deploying, and check with `check-runtime.sh` afterwards. Node.js 20 can't
+to `"22"` before deploying. Afterwards run `check-runtime.sh` from the release checkout
+(`<final>`), which keeps the full list of 94: the older source has no such list. Node.js 20 can't
 be deployed from 2026-10-30; before then, going back to it would only bring the deadline
 back. That older source has not run on Node.js 22: deploy it to staging first when there
 is time.

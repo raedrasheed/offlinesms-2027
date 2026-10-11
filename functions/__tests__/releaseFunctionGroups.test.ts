@@ -4,6 +4,7 @@
 // functions that read the phone purpose flags.
 import { describe, it, expect } from 'vitest';
 import { readFileSync, statSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { resolve, dirname, join } from 'node:path';
 
 const ROOT = resolve(__dirname, '../..');
@@ -28,6 +29,11 @@ describe('production deploy groups', () => {
     expect(new Set(listed).size).toBe(listed.length);
     expect([...listed].sort()).toEqual([...exported.keys()].sort());
     expect(Object.keys(groups).filter(k => !k.startsWith('_')).sort()).toEqual([...DEPLOY_ORDER, 'phone-flags'].sort());
+  });
+
+  it('expected-functions.mjs (check-runtime.sh) lists exactly the exported functions', () => {
+    const out = execFileSync('node', [join(ROOT, 'scripts/release/expected-functions.mjs')], { encoding: 'utf8' }).trim().split('\n');
+    expect(out).toEqual([...exported.keys()].sort());
   });
 
   it('phone-flags lists exactly the functions whose code reads PHONE_AUTH_ENABLED / PHONE_LINK_ENABLED', () => {

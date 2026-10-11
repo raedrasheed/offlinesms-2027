@@ -25,12 +25,33 @@ suspension stays as it is.
 
 ## 1. Before deploying (Cloud Shell)
 
+Work in the staging checkout that already exists, `~/offlinesms-staging-847ddf0`. Its
+`functions/.env.offlinesms-staging-2027` is the one staging runs with.
+
+**1a. Check the folder first, changing nothing:**
+
 ```sh
-cd ~/release && git fetch origin claude/phone-email-login-display-names-pu9nez
-git checkout <reviewed commit>
+cd ~/offlinesms-staging-847ddf0
+git remote get-url origin          # github.com/raedrasheed/offlinesms-2027
+git log -1 --format='%h %s'        # the commit staging was last deployed from
+git status --short                 # expect no output
+ls -l functions/.env.offlinesms-staging-2027   # present; Git ignores it
+```
+
+If `git status` prints anything, or the `.env` file is missing, stop and send the output.
+Nothing is deleted or reset.
+
+**1b. Move to the reviewed commit:**
+
+```sh
+git fetch origin claude/phone-email-login-display-names-pu9nez
+git checkout --detach <reviewed commit>
+git status --short                 # still no output
 npm ci
 mkdir -p ~/node22 && N=~/node22
 ```
+
+After a Cloud Shell reconnect, `cd` back to the folder and define `N` (and `S` in §2) again.
 
 1. **Environment file.** Keep `functions/.env.offlinesms-staging-2027` exactly as it is
    (`EMAIL_CHANGE_VERIFICATION.md` §2 and `STAGING_PHONE_SMS_TEST.md` §2). The deploy reads
@@ -69,10 +90,16 @@ S email-change
 Then:
 
 ```sh
-bash scripts/release/check-runtime.sh offlinesms-staging-2027            # expect: all 94 on nodejs22
+bash scripts/release/check-runtime.sh offlinesms-staging-2027            # expect: OK, exactly the 94 functions, all on nodejs22
 bash scripts/release/function-env-names.sh offlinesms-staging-2027 > $N/staging-after.tsv
 diff <(cut -f1,3,4 $N/staging-before.tsv) <(cut -f1,3,4 $N/staging-after.tsv)   # names of variables and secrets
 ```
+
+`check-runtime.sh` compares the deployed names with the 94 functions this source exports
+(`scripts/release/expected-functions.mjs`). It fails, listing the names, when a function is
+missing, when a deployed function is not in this source, when a name is deployed twice, or
+when any function is on another runtime. On a failure, stop and send the output; delete
+nothing.
 
 The `diff` must print nothing, except new rows if staging lacked a function before.
 No variable or secret name may disappear.
@@ -88,11 +115,15 @@ No variable or secret name may disappear.
 | 3.5 | Phone, stopped | Open the phone sign-in screen and Settings → Add phone | No countries offered; linking reported unavailable. No job in `relayJobs` |
 | 3.6 | Relay | Dashboard → Relay | The staging device shows a fresh heartbeat after `S relay` (`relayHeartbeat` on Node 22) |
 | 3.7 | Phone and Relay with one SMS | Open the window as in `STAGING_PHONE_SMS_TEST.md` §4, sign in with number B, then stop as in its §6 | **1 SMS.** The code arrives through the relay (`claimRelayJobs`, `authorizeRelaySend`, `reportRelayDelivery`), sign-in opens B's account. Afterwards: `emergencyStop: true`, relay `paused` |
-| 3.8 | Scheduled functions | `gcloud scheduler jobs list --project offlinesms-staging-2027 --location us-central1`, then for each job `gcloud scheduler jobs run <job> --project offlinesms-staging-2027 --location us-central1`, then `npx firebase functions:log --project offlinesms-staging-2027 --only relayReaper,escalateOrgBatches,sweepExpiredMessages,reapStuckBatches,reconcileEmailChangeWrites` | 5 jobs `ENABLED` (`firebase-schedule-<function>-us-central1`); each run logs a start and no error |
+| 3.8 | Scheduled functions | `gcloud scheduler jobs list --project offlinesms-staging-2027 --location us-central1`, then for each of the four jobs `gcloud scheduler jobs run firebase-schedule-<function>-us-central1 --project offlinesms-staging-2027 --location us-central1`, then `npx firebase functions:log --project offlinesms-staging-2027 --only escalateOrgBatches,relayReaper,reapStuckBatches,reconcileEmailChangeWrites` | 4 jobs `ENABLED`: `escalateOrgBatches` (every minute), `relayReaper` (every minute), `reconcileEmailChangeWrites` (every 15 minutes), `reapStuckBatches` (every 30 minutes). Each run logs a start and no error. No job for `sweepExpiredMessages`: it is deliberately not exported (`functions/src/index.ts`) and stays off |
 | 3.9 | Firestore triggers | During 3.4 and 3.7 | `onMessageCreate` and `onMessageCreateNotify` run for each message; writing the stop in 3.7 runs `onOtpPolicyWritten` with no error |
 
 Logs throughout: `npx firebase functions:log --project offlinesms-staging-2027` must show no
 error other than the refusals the checks expect.
+
+**3.8 runs only jobs that already run on their schedule.** Running one by hand brings its
+next run forward; it enables nothing. `sweepExpiredMessages` is not deployed, scheduled or
+run by this upgrade.
 
 **3.7 is the only step that sends an SMS.** Skip it if the relay phone is not at hand;
 3.1 to 3.6 then still cover the runtime, and production stage 7 keeps its own monitored
@@ -115,7 +146,8 @@ before then and plan the next move early.
 
 | Check | Result | Notes |
 |---|---|---|
-| 2 runtime: all 94 on nodejs22 | | |
+| 1a folder state | | commit, `git status` |
+| 2 runtime: exactly the 94, all on nodejs22 | | |
 | 2 names diff empty | | |
 | 3.1 Auth guards | GO / NO-GO | cold and warm round trips |
 | 3.2 Sign-in | | |
@@ -124,5 +156,5 @@ before then and plan the next move early.
 | 3.5 Phone, stopped | | |
 | 3.6 Relay heartbeat | | |
 | 3.7 One SMS (optional) | | |
-| 3.8 Scheduled functions | | |
+| 3.8 Scheduled functions (4 jobs) | | |
 | 3.9 Firestore triggers | | |
