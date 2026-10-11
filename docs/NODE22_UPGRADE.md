@@ -119,7 +119,7 @@ Then:
 ```sh
 bash scripts/release/check-runtime.sh offlinesms-staging-2027            # expect: OK, exactly the 94 functions, all on nodejs22
 bash scripts/release/function-env-names.sh offlinesms-staging-2027 > $N/staging-after.tsv
-diff <(cut -f1,3,4 $N/staging-before.tsv) <(cut -f1,3,4 $N/staging-after.tsv)   # names of variables and secrets
+node scripts/release/env-names-diff.mjs $N/staging-before.tsv $N/staging-after.tsv   # names of variables and secrets
 ```
 
 `check-runtime.sh` compares the deployed names with the 94 functions this source exports
@@ -128,8 +128,15 @@ missing, when a deployed function is not in this source, when a name is deployed
 when any function is on another runtime. On a failure, stop and send the output; delete
 nothing.
 
-The `diff` must print nothing, except new rows if staging lacked a function before.
-No variable or secret name may disappear.
+`env-names-diff.mjs` compares the names of each function's variables and secrets (never
+their values; a secret with its version). It lists names added, grouped by name, and fails
+if a function, a variable name or a secret is gone. On staging on 2026-10-11 it found only
+additions:
+- `PHONE_AUTH_ENABLED` and `PHONE_LINK_ENABLED`: they are in the staging `.env` since the
+  phone test (`STAGING_PHONE_SMS_TEST.md` §2), and were only on the functions deployed then.
+  Every function is now deployed from that file, so each one has them. Nothing changes while
+  `smsConfig/otp` stays stopped.
+- `FUNCTION_SIGNATURE_TYPE`: set by Cloud Functions itself.
 
 ## 3. Checks on staging
 
