@@ -189,9 +189,13 @@ written here):
 
 **Access:**
 - Settings → Verification SMS (switches, limits, emergency stop) needs a platform admin:
-  `super_admin`, or the legacy `admin` claim.
+  `super_admin`, or the legacy `admin` claim. The check names these two roles explicitly
+  (`isPlatformAdmin`, `apps/dashboard/lib/adminScope.ts`); every other role is refused.
 - Relay caps also need a platform admin. Pairing, pause, resume, revoke and countries need
   `manage:relay`.
+- An `organization_admin` must carry a non-empty `organizationId` claim. Without one the
+  session is refused at sign-in (`apps/dashboard/lib/session.ts`), and the org scope throws
+  rather than falling back to unrestricted.
 - Confirm your own claim before emptying the bootstrap list. Sign in and check the role:
   it must be `super_admin` or `admin`, not `bootstrap_admin`. If it is the bootstrap role,
   first run `npm run promote:admin -- <your email>` (`docs/admin-bootstrap.md`).
@@ -231,12 +235,19 @@ Redeploy). The Dashboard writes only through Firestore, so an older Dashboard ke
 - a package other than `app.offlinesms.mobile`;
 - versions that differ from the source;
 - a debuggable build;
-- native libraries not aligned to 16 KB.
+- a build that is not 16 KB page compatible (`scripts/release/check-16kb.sh`):
+  - any LOAD segment of an arm64-v8a or x86_64 library below 16 KB alignment, in the APK
+    or the AAB;
+  - APK libraries not 16 KB zip-aligned;
+  - an AAB whose BundleConfig does not keep native libraries uncompressed with
+    `PAGE_ALIGNMENT_16K` (what Play uses to build the APKs it serves);
+  - the arm64-v8a or x86_64 APKs that bundletool 1.17.2 (pinned SHA-256) builds from the
+    AAB failing either check.
 
 **Artifact `offlinesms-production-user-app`:** the AAB, an APK of the same build, and
 `BUILD-INFO.txt`. BUILD-INFO records the package, version, project, commit, run, both
-signatures, the expected fingerprint, the signature schemes, the alignment and SHA-256 of
-each file. **Codex reviews BUILD-INFO before anything is uploaded.**
+signatures, the expected fingerprint, the signature schemes, each 16 KB check and the
+SHA-256 of each file. **Codex reviews BUILD-INFO before anything is uploaded.**
 
 **Release:**
 1. Play Console → Internal testing → upload the AAB.
@@ -285,8 +296,17 @@ email once, then run the stage-A route check again.
   adb pull <that path> installed-relay.apk
   apksigner verify --print-certs installed-relay.apk | grep 'certificate SHA-256'
   ```
-- Put that fingerprint in `RELAY_RELEASE_CERT_SHA256` and the matching keystore in the
-  `RELAY_RELEASE_*` secrets.
+- Put that fingerprint in `RELAY_RELEASE_CERT_SHA256`.
+- **The fingerprint and the installed APK cannot sign anything.** Signing needs the
+  matching keystore file (`.jks` or `.keystore`), its store password, the key alias and the
+  key password. Only Raed can find them, on the computer the old Relay was built on.
+  - Never upload the keystore to the project, a chat or the repository, and never send its
+    passwords in a message.
+  - From that computer (or Cloud Shell, with the file uploaded there and deleted after),
+    put it straight into GitHub → Settings → Environments → `production` as the
+    `RELAY_RELEASE_*` secrets (§13.2).
+  - The workflow checks the keystore's certificate against `RELAY_RELEASE_CERT_SHA256`
+    before building, so a wrong file stops the build.
 - **If that keystore no longer exists**, an update in place is impossible. Re-enrollment is
   a separate decision:
   1. drain;
@@ -352,29 +372,67 @@ production phone, so going back to the old build means uninstalling and pairing 
    - Add phone off;
    - resume the relay.
 
-### 9.3 Monitored test (at most 6 SMS, Raed's own numbers only)
+### 9.3 Monitored test (4 SMS, Raed's own numbers only)
 
 Keep Dashboard → Relay (queue) and
 `npx firebase functions:log --project offlinesms-prod-2027 --only requestPhoneAuthCode,verifyPhoneAuthCode,requestPhoneLinkOtp,verifyPhoneLinkOtp,claimRelayJobs,authorizeRelaySend,reportRelayDelivery`
 open throughout.
 
-| # | Action | Expected | SMS |
-|---|---|---|---|
-| P1 | New account with number B | code arrives on B; account created | 1 |
-| P2 | Sign out; sign in with B; enter a wrong code once, then the right one | `code-invalid` with attempts left, then the same account | 1 |
-| P3 | Request again for B twice quickly | the third request of the hour is refused `rate-limited` (destination 2/h); no job | 1 |
-| P4 | Turn on Add phone. On an email-only account, add number C | code arrives; number linked | 1 |
-| P5 | Sign out; sign in with C | the same account as the email (same UID, chats, name) | 1 |
-| P6 | Emergency stop in the Dashboard, then request a code | `service-paused`; no job; nothing queued | 0 |
+**Setup:**
+- Phone 1 on Wi-Fi; phone 2 on **mobile data**. They are separate installations and
+  separate request sources, so each has its own install and source budget.
+- Number B and number C: Raed's own, neither linked to any account yet.
+- An email-only account for P4 (no phone number).
+
+**How the budgets count:**
+- Only a code that is sent counts. A refused request writes no counter and creates no
+  job (`requestPhoneAuthCode.ts` and `requestPhoneLinkOtp.ts` update the counters only on
+  the admit path).
+- The destination counter is shared by sign-in and add-phone: P4 and P5 both count on C.
+- A second request for the same number within 60 s is refused `cooldown` (session and
+  destination cooldowns). Each row below waits at least 60 s after the previous code.
+
+| # | Where | Action | Expected | SMS |
+|---|---|---|---|---|
+| P1 | Phone 1 | New account with number B | code arrives on B; account created | 1 |
+| P2 | Phone 1 | Sign out; sign in with B; enter a wrong code once, then the right one | `code-invalid` with attempts left, then the same account as P1 | 1 |
+| P3 | Phone 1 | Sign out; request a code for B | refused: the log shows `rate-limited`, scope `destination` (B has had 2 codes this hour, the limit). No job, nothing queued. **This refusal is the pass** | 0 |
+| P4 | Phone 2 | Turn on Add phone in the Dashboard. Sign in to the email-only account and add number C | code arrives on C; number linked | 1 |
+| P5 | Phone 2 | Sign out; sign in with C | the same account as the email (same UID, chats, name) | 1 |
+| P6 | Phone 2 | Emergency stop in the Dashboard; reopen the phone screen and request a code | no countries offered, or `service-paused`; no job; nothing queued | 0 |
+
+**Budget after each row** (limits from §9.2; "h" = this hour):
+
+| After | Destination B | Destination C | Install, phone 1 | Install, phone 2 | Sign-in source, phone 1 | Sign-in source, phone 2 | Sign-in global | Add-phone account | Shared |
+|---|---|---|---|---|---|---|---|---|---|
+| P1 | 1/2 h | 0 | 1/3 day | 0 | 1/3 h | 0 | 1/5 h | — | 1/5 h |
+| P2 | 2/2 h | 0 | 2/3 day | 0 | 2/3 h | 0 | 2/5 h | — | 2/5 h |
+| P3 | 2/2 h (refused, unchanged) | 0 | 2/3 day | 0 | 2/3 h | 0 | 2/5 h | — | 2/5 h |
+| P4 | 2/2 h | 1/2 h | 2/3 day | 0 | 2/3 h | 0 | 2/5 h | 1/2 h | 3/5 h |
+| P5 | 2/2 h | 2/2 h | 2/3 day | 1/3 day | 2/3 h | 1/3 h | 3/5 h | 1/2 h | 4/5 h |
+| P6 | unchanged: the stop is checked before any limit | | | | | | | | |
+
+Every send stays under every limit, and the only refusals are the expected ones in P3 and
+P6. The relay sends 4 of its 5 per hour (caps 1/5/20); the 60 s wait also keeps it at 1 per
+minute.
+
+**If a code does not arrive, do not request another.** A resend takes the budget of a
+later row (B and C have 2 codes per hour each). Stop, check the relay queue and the logs,
+and continue only after the cause is known. To repeat a row, wait an hour.
+
+Expired codes, too many wrong attempts, the global and shared budgets, a paused relay and
+the stop with a queued job are covered on staging (T3–T13), where the limits can be set to
+0 without spending SMS. Production repeats only what needs the real relay and real
+numbers.
 
 **Stop at once, using the emergency stop, if any of these happens:**
 - an SMS goes to a number not in the test;
 - a job stays `queued` or `claimed` for more than 2 minutes;
 - `failed` rises without a reason;
-- an error appears in the logs;
+- an error appears in the logs, other than the expected refusals in P3 and P6;
 - any expected row does not match.
 
-After P6, lift the stop only if P1–P5 matched.
+After P6, lift the stop only if P1–P5 matched, P3 included.
 
 ### 9.4 After the test
 
@@ -439,10 +497,11 @@ while a change is mid-way would reopen the replaced address. The snapshot's
 
 ### 11.4 Node.js 20 deadline
 
-Google decommissions the Node.js 20 runtime for Cloud Functions on **2026-10-30**. After
-that date no Node.js 20 function can be deployed: neither this release nor a rollback to
-older source. This release stays on Node.js 20 so the runtime does not change together with
-the code.
+From **2026-10-30**, Cloud Functions no longer lets anyone create or redeploy a function
+on Node.js 20. Functions already deployed are not guaranteed to be switched off on that
+date, but none of them can be updated on Node.js 20 any more: neither this release, nor a
+fix, nor a rollback to older source. This release stays on Node.js 20 so the runtime does
+not change together with the code.
 
 The move to Node.js 22 is the next change. It is its own PR: `functions/package.json`
 engines, CI on 22, a staging deploy, then production. It must be in production before
@@ -461,13 +520,15 @@ engines, CI on 22, a staging deploy, then production. It must be in production b
    - The production workflow refuses this key.
 2. **Production certificates are not yet confirmed.**
    - The user app's upload key fingerprint comes from Play Console.
-   - The production Relay's fingerprint comes from an installed phone (§8). If its
-     keystore is lost, re-enrollment is needed.
+   - The production Relay's fingerprint comes from an installed phone (§8). That proves
+     which key to match, not that the key still exists: signing needs the matching
+     keystore file, its passwords and alias, and nothing yet shows they are kept. If they
+     are lost, re-enrollment is needed.
 3. **Dashboard rate limiting is in memory** (`apps/dashboard/lib/rateLimit.ts`): per
    process, reset on restart, not shared between instances. It is acceptable only while the
    Dashboard runs as one instance.
 4. **`BOOTSTRAP_ADMIN_EMAILS`.** The allow-list grants a bootstrap admin role by email
-   without checking that the email is verified (`apps/dashboard/lib/session.ts:85`). It must
+   without checking that the email is verified (`apps/dashboard/lib/session.ts:91`). It must
    be empty in production once a claim exists (§5).
 5. **App Check is not enforced** (`APPCHECK_ENFORCE` unset). The phone flows rely on
    proof-of-work, attestation settings, per-scope budgets and the relay caps instead.
@@ -510,7 +571,9 @@ required reviewer and limit it to the `main` branch. Then add these to that envi
 If the builds were made with EAS, the keystore comes from
 `npx eas-cli credentials -p android` → production → Keystore → Download.
 
-**Relay key**
+**Relay key.** The keystore file of the Relay installed on the production phones (`.jks`
+or `.keystore`), from the computer it was built on, with its passwords and alias (§8).
+Set these from that computer; don't upload the file or send its passwords anywhere else.
 
 | Kind | Name |
 |---|---|
@@ -531,6 +594,8 @@ Set secrets from files in Cloud Shell, so nothing is pasted into a chat:
 
 ```sh
 gh secret set MOBILE_UPLOAD_KEYSTORE_BASE64 --env production < <(base64 -w0 upload.keystore)
+gh secret set RELAY_RELEASE_KEYSTORE_BASE64 --env production < <(base64 -w0 relay.keystore)
+gh secret set RELAY_RELEASE_KEYSTORE_PASSWORD --env production   # prompts; nothing in history
 ```
 
 ### 13.3 Raed: Cloud Shell
