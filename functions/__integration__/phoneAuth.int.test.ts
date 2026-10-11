@@ -10,13 +10,14 @@ import { createHash, randomBytes } from 'node:crypto';
 import { HttpsError } from 'firebase-functions/v2/https';
 import {
   db, resetEmulators, seedPolicy, seedRelayDevice, req, expectHttps, relayJobs, deliveredCode,
-  authUserCount, num, makeEmailUser, linkReq, type ReqOpts,
+  authUserCount, num, makeEmailUser, linkReq, DEVICE, type ReqOpts,
 } from './harness';
 import { handleStartPhoneAuth } from '../src/phoneAuth/startPhoneAuth';
 import { handleRequestPhoneAuthCode } from '../src/phoneAuth/requestPhoneAuthCode';
 import { handleVerifyPhoneAuthCode, phoneAuthDeps } from '../src/phoneAuth/verifyPhoneAuthCode';
 import { handleRequestPhoneLinkOtp } from '../src/phoneLink/requestPhoneLinkOtp';
 import { solvePow } from '../src/phoneAuth/pow';
+import { getSupportedPhoneCountries } from '../src/auth/getSupportedPhoneCountries';
 
 type Pow = { nonce: string; bits: number; expiresAtMs: number };
 interface Sess { sessionToken: string; expiresAtMs: number; pow: Pow; ip: string }
@@ -454,6 +455,25 @@ describe('A17 + N2 — store-review access: designated demo only, no phone side 
     expect((await getAuth().getUser(demo)).phoneNumber).toBeUndefined();
     expect((await db().collection('users').doc(demo).get()).get('phoneVerified')).toBeUndefined();
     expect((await db().collection('users').doc(demo).collection('userPrivate').doc('profile').get()).exists).toBe(false);
+  });
+
+  it('the review number\'s country is offered even when no relay covers it', async () => {
+    const countries = async () => getSupportedPhoneCountries.run(req(null, { v: 2 }));
+    await seedRelayDevice('JO');
+    expect(await countries()).toEqual({ available: true, countries: ['JO'] });
+    const demo = await demoAccount();
+    await enableReview(demo);
+    expect(await countries()).toEqual({ available: true, countries: ['JO', 'PS'] });
+    await db().collection('relayDevices').doc(DEVICE).delete();
+    expect(await countries()).toEqual({ available: true, countries: ['PS'] });
+    // Only the review number skips relay coverage; any other number in PS is refused.
+    const s = await start();
+    await expectHttps(send(s, num(141)), 'failed-precondition', 'no-relay-for-country');
+    const rs = await start();
+    const r = await send(rs, REVIEW);
+    expect(await verify(rs, r.challengeId, CODE)).toMatchObject({ uid: demo, isNewUser: false });
+    await enableReview(demo, { enabled: false });
+    expect(await countries()).toEqual({ available: false, countries: [] });
   });
 
   it('a non-designated or privileged target is refused at runtime (no token)', async () => {

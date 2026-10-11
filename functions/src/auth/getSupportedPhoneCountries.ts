@@ -7,6 +7,9 @@
 //   • `{ v: 2 }` (current builds) get the live list ONLY while sign-in sending
 //     is allowed by the verification policy (env PHONE_AUTH_ENABLED + smsConfig/otp
 //     master/stop/sender + signin.enabled) and a live relay covers the country.
+//     The store-review number's country is listed too while review access is
+//     on: requestPhoneAuthCode never queues an SMS for that number, so it
+//     needs no relay, and the picker offers only listed countries.
 //     Any config read failure ⇒ unavailable (fail closed).
 
 import { onCall } from 'firebase-functions/v2/https';
@@ -15,6 +18,7 @@ import { loadActiveRelayDevices } from '../sms/countryRouting';
 import { supportedCountriesForDevices } from '../sms/relayLogic';
 import { appCheckOptions } from '../lib/appCheck';
 import { loadPhoneAuthConfig, phoneAuthSendingAllowed } from '../phoneAuth/config';
+import { normalizeLinkNumber } from '../phoneLink/shared';
 
 const REGION = 'us-central1';
 
@@ -24,6 +28,8 @@ export const getSupportedPhoneCountries = onCall({ region: REGION, ...appCheckOp
     const cfg = await loadPhoneAuthConfig(getFirestore());
     if (!phoneAuthSendingAllowed(cfg)) return { available: false, countries: [] as string[] };
     const countries = supportedCountriesForDevices(await loadActiveRelayDevices(cfg.businessId!), Date.now());
+    const review = cfg.review ? normalizeLinkNumber(cfg.review.phoneE164)?.countryCode : undefined;
+    if (review && !countries.includes(review)) { countries.push(review); countries.sort(); }
     return { available: countries.length > 0, countries };
   } catch {
     return { available: false, countries: [] as string[] };
