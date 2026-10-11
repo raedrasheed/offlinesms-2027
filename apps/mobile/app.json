@@ -2,7 +2,7 @@
   "expo": {
     "name": "OfflineSMS",
     "slug": "offlinesms",
-    "version": "2.3.18",
+    "version": "2.4.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "offlinesms",
@@ -37,7 +37,7 @@
     },
     "android": {
       "package": "app.offlinesms.mobile",
-      "versionCode": 15,
+      "versionCode": 16,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",

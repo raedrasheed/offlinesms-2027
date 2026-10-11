@@ -23,10 +23,10 @@ beforeAll(() => {
 });
 afterAll(() => { rmSync(dir, { recursive: true, force: true }); });
 
-const googleServices = (project: string, number: string, androidKey: string) => JSON.stringify({
+const googleServices = (project: string, number: string, androidKey: string, pkg = 'app.offlinesms.mobile.test') => JSON.stringify({
   project_info: { project_id: project, project_number: number, storage_bucket: `${project}.firebasestorage.app` },
   client: [{
-    client_info: { mobilesdk_app_id: `1:${number}:android:abc123`, android_client_info: { package_name: 'app.offlinesms.mobile.test' } },
+    client_info: { mobilesdk_app_id: `1:${number}:android:abc123`, android_client_info: { package_name: pkg } },
     api_key: [{ current_key: androidKey }],
   }],
 });
@@ -41,8 +41,8 @@ const staging = {
   EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: '111',
 };
 
-function check(over: Partial<Record<keyof typeof staging, string>>) {
-  const r = spawnSync(process.execPath, ['--import', stub, SCRIPT, '--staging'], {
+function check(over: Partial<Record<keyof typeof staging, string>>, args = ['--staging']) {
+  const r = spawnSync(process.execPath, ['--import', stub, SCRIPT, ...args], {
     env: { PATH: process.env.PATH, NODE_ENV: 'test' as const, ...staging, ...over }, encoding: 'utf8',
   });
   return { code: r.status, out: `${r.stdout}${r.stderr}` };
@@ -100,5 +100,33 @@ describe('staging backend config check', () => {
     });
     expect(r.code).toBe(1);
     expect(r.out).toContain('production project');
+  });
+});
+
+describe('production release config check', () => {
+  const p = 'offlinesms-prod-2027';
+  const prod = (pkg: string) => ({
+    MOBILE_GOOGLE_SERVICES_JSON: googleServices(p, '999', `K-${p}`, pkg), EXPO_PUBLIC_FIREBASE_API_KEY: `K-${p}`,
+    EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN: `${p}.firebaseapp.com`, EXPO_PUBLIC_FIREBASE_PROJECT_ID: p,
+    EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET: `${p}.firebasestorage.app`, EXPO_PUBLIC_FIREBASE_APP_ID: '1:999:web:aa',
+    EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: '999',
+  });
+
+  it('accepts the production project for the named store package', () => {
+    expect(check(prod('app.offlinesms.mobile'), ['--production', '--package', 'app.offlinesms.mobile'])).toMatchObject({ code: 0 });
+    expect(check(prod('app.offlinesms.business'), ['--production', '--package', 'app.offlinesms.business'])).toMatchObject({ code: 0 });
+  });
+
+  it('refuses a config without the named package', () => {
+    const r = check(prod('app.offlinesms.mobile.test'), ['--production', '--package', 'app.offlinesms.mobile']);
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('no Android client for app.offlinesms.mobile');
+  });
+
+  it('refuses any project other than production', () => {
+    const r = check({ MOBILE_GOOGLE_SERVICES_JSON: googleServices('stg', '111', 'K-stg', 'app.offlinesms.mobile') },
+      ['--production', '--package', 'app.offlinesms.mobile']);
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('production settings must point at offlinesms-prod-2027');
   });
 });

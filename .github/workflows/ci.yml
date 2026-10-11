@@ -199,7 +199,7 @@ jobs:
         run: |
           mkdir -p dist-relay
           gradle -p apps/mobile-relay :app:assembleDebug --no-daemon
-          APK="dist-relay/offlinesms-relay-0.2.0-test-$PROJECT.apk"
+          APK="dist-relay/offlinesms-relay-0.2.1-test-$PROJECT.apk"
           cp apps/mobile-relay/app/build/outputs/apk/debug/app-debug.apk "$APK"
           # The values the APK actually carries must be exactly this project's relay app config.
           node scripts/ci/check-apk-backend.mjs --apk "$APK" --project "$PROJECT" \

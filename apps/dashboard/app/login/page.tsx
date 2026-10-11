@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { signInWithEmailAndPassword, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { safeNextPath } from '@/lib/safeNext';
 
 // The login page initialises the Firebase client SDK, which is unsafe to
 // prerender without a complete set of NEXT_PUBLIC_FIREBASE_* env vars.
@@ -27,7 +28,7 @@ async function exchangeForSession(idToken: string) {
 function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
-  const next = params.get('next') ?? '/admin';
+  const next = safeNextPath(params.get('next'));
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
