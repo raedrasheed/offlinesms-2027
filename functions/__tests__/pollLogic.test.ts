@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   buildPoll, normalizeSelection, applyVote, tally, PollError, POLL_OPTIONS_MAX,
+  nextDeviceSeqs, MAX_DEVICE_SEQS,
 } from '../src/chats/pollLogic';
 import { STICKER_PACKS, findSticker } from '../src/chats/stickerCatalog';
 import { messagePreview } from '../src/notifications/notifyLogic';
@@ -88,5 +89,21 @@ describe('previews', () => {
   it('sticker and poll previews', () => {
     expect(messagePreview({ type: 'sticker', text: '👋' })).toBe('👋 Sticker');
     expect(messagePreview({ type: 'poll', text: '📊 Lunch?' })).toBe('📊 Lunch?');
+  });
+});
+
+describe('nextDeviceSeqs', () => {
+  it('sets only the voting device and keeps the others', () => {
+    expect(nextDeviceSeqs({ a: 5, b: 1_700_000_000_000 }, 'a', 6)).toEqual({ a: 6, b: 1_700_000_000_000 });
+    expect(nextDeviceSeqs({}, 'c', 1)).toEqual({ c: 1 });
+  });
+
+  it('keeps at most MAX_DEVICE_SEQS, dropping the lowest of the other devices, never the voting one', () => {
+    const many = Object.fromEntries(Array.from({ length: MAX_DEVICE_SEQS }, (_, i) => [`d${i}`, i + 10]));
+    const next = nextDeviceSeqs(many, 'new', 1);
+    expect(Object.keys(next)).toHaveLength(MAX_DEVICE_SEQS);
+    expect(next.new).toBe(1);
+    expect(next.d0).toBeUndefined();
+    expect(next.d1).toBe(11);
   });
 });

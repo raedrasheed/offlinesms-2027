@@ -181,7 +181,7 @@ export async function pushOutboxItem(item: OutboxRow): Promise<PushResult> {
       }
     }
     case 'vote_poll':
-      await call('votePoll', { conversationId: payload.conversationId, messageId: payload.messageId, optionIds: payload.optionIds, seq: payload.seq });
+      await call('votePoll', { conversationId: payload.conversationId, messageId: payload.messageId, optionIds: payload.optionIds, seq: payload.seq, deviceId: payload.deviceId });
       return { ok: true };
     case 'close_poll':
       await call('closePoll', { conversationId: payload.conversationId, messageId: payload.messageId });

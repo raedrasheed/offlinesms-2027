@@ -1,14 +1,19 @@
 // Callables: votePoll / closePoll.
 //
-// votePoll({ conversationId, messageId, optionIds, seq })
+// votePoll({ conversationId, messageId, optionIds, seq, deviceId })
 //   • caller must be a participant (and an ACTIVE member of a group); a
 //     disabled conversation or a blocked direct chat refuses votes;
 //   • single-choice polls accept at most one option; [] retracts the vote;
 //   • one Firestore transaction reads the poll + the caller's server-only voter
 //     doc and rewrites the voter's entry; counts are recomputed from all votes,
 //     so a retried / duplicated request can never be counted twice;
-//   • `seq` (client time of the vote, strictly increasing per voter) makes a
-//     late retry of an OLDER vote a no-op instead of overwriting a newer one.
+//   • `seq` (a counter, strictly increasing per device) makes a late retry of
+//     an OLDER vote from the SAME device a no-op instead of overwriting a newer
+//     one. Watermarks are kept per `deviceId`: devices' clocks and counters are
+//     never compared, so between two devices of one account the vote that
+//     arrives last wins. Requests without `deviceId` (test builds before this
+//     change) share one watermark, which also takes over a voter doc's older
+//     single `seq`.
 //   Result: { ok, unchanged?, stale?, counts, voterCount, selection }.
 //
 // closePoll({ conversationId, messageId }) — the poll's creator ends voting.
@@ -19,7 +24,7 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore, FieldValue, type Transaction } from 'firebase-admin/firestore';
 import { assertDirectNotBlocked } from './blockGuard';
-import { applyVote, normalizeSelection, PollError, type PollDoc } from './pollLogic';
+import { applyVote, nextDeviceSeqs, normalizeSelection, PollError, type PollDoc } from './pollLogic';
 
 type Convo = { type?: string; participantUids?: string[]; memberIds?: string[]; status?: string };
 
@@ -47,6 +52,9 @@ function ids(data: Record<string, unknown>) {
 
 /** Transaction attempts for one vote (Firestore's default is 5). */
 const VOTE_TX_ATTEMPTS = 15;
+/** Watermark key for requests that carry no deviceId. */
+const NO_DEVICE = '_';
+const DEVICE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
 export const votePoll = onCall(async (request) => {
   const uid = request.auth?.uid;
@@ -54,6 +62,7 @@ export const votePoll = onCall(async (request) => {
   const data = (request.data ?? {}) as Record<string, unknown>;
   const { conversationId, messageId } = ids(data);
   const seq = typeof data.seq === 'number' && Number.isFinite(data.seq) ? data.seq : 0;
+  const device = typeof data.deviceId === 'string' && DEVICE_ID_RE.test(data.deviceId) ? data.deviceId : NO_DEVICE;
 
   const db = getFirestore();
   const convoRef = db.collection('conversations').doc(conversationId);
@@ -82,9 +91,13 @@ export const votePoll = onCall(async (request) => {
     try { selection = normalizeSelection(poll, data.optionIds); }
     catch (e) { throw new HttpsError('invalid-argument', e instanceof PollError ? e.code : 'poll-invalid-selection'); }
 
-    const lastSeq = (voterSnap.data()?.seq as number | undefined) ?? -Infinity;
+    const voter = voterSnap.data() ?? {};
+    const seqs: Record<string, number> = { ...((voter.seqs as Record<string, number> | undefined) ?? {}) };
+    if (typeof voter.seq === 'number' && seqs[NO_DEVICE] === undefined) seqs[NO_DEVICE] = voter.seq;
+    const lastSeq = seqs[device] ?? -Infinity;
     if (seq > 0 && seq <= lastSeq) {
-      // A retry of an older (or the same) vote that already landed: keep the newer one.
+      // A retry of an older (or the same) vote from this device that already
+      // landed: keep the newer one.
       const current = poll.votes?.[uid] ?? [];
       return { unchanged: true, stale: seq < lastSeq, poll, selection: current };
     }
@@ -93,9 +106,13 @@ export const votePoll = onCall(async (request) => {
     if (!unchanged) {
       tx.update(msgRef, { poll: next, updatedAt: FieldValue.serverTimestamp() });
     }
-    // A request without seq (older client) never moves the watermark, so it
+    // A request without seq (older client) never moves a watermark, so it
     // can't make a later sequenced vote look stale.
-    tx.set(voterRef, { optionIds: selection, seq: seq > 0 ? seq : Math.max(lastSeq, 0), updatedAt: FieldValue.serverTimestamp() });
+    tx.set(voterRef, {
+      optionIds: selection,
+      seqs: seq > 0 ? nextDeviceSeqs(seqs, device, seq) : seqs,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
     return { unchanged, stale: false, poll: next, selection };
   }, { maxAttempts: VOTE_TX_ATTEMPTS });
 

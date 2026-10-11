@@ -144,7 +144,7 @@ export async function wipeUserData(): Promise<void> {
     for (const table of USER_DATA_TABLES) {
       await db.run(`DELETE FROM ${table}`);
     }
-    await db.run(`DELETE FROM sync_state WHERE key NOT IN ('device_id')`);
+    await db.run(`DELETE FROM sync_state WHERE key NOT IN ('device_id', 'poll_vote_seq')`);
   });
 }
 

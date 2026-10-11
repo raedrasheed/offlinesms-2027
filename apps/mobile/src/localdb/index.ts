@@ -23,6 +23,7 @@ import { pullMessageById } from './sync/firebasePull';
 import { createNotificationTargets } from './sync/notificationTarget';
 import type { MessageRow } from './types';
 import { enqueuePollClose } from './pollClose';
+import { nextVoteSeq } from './pollVoteSeq';
 import { retryQueuedSend } from './retrySend';
 import { emitLocalMessagesChanged } from './messageChanges';
 
@@ -164,12 +165,11 @@ export async function queueSendMessage(input: QueueSendInput): Promise<MessageRo
   return row;
 }
 
-let lastVoteSeq = 0;
-
 /**
- * Vote in a poll: optimistic local tally + an outbox item. Each vote carries a
- * strictly increasing `seq`, so the server ignores a late retry of an older
- * vote; retries of the same vote are no-ops server-side (no double counting).
+ * Vote in a poll: optimistic local tally + an outbox item. Each vote carries
+ * this device's id and a strictly increasing `seq`, so the server ignores a
+ * late retry of an older vote from this device; retries of the same vote are
+ * no-ops server-side (no double counting).
  */
 export async function queueVotePoll(args: { conversationId: string; messageId: string; uid: string; optionIds: string[] }): Promise<ActionResult> {
   if (!getCurrentUid()) return { ok: false, reason: 'not-initialised' };
@@ -178,13 +178,13 @@ export async function queueVotePoll(args: { conversationId: string; messageId: s
   const poll = parsePoll(msg.payload_json);
   if (!poll || poll.closed) return { ok: false, reason: 'not-a-poll' };
   await messagesRepo.setPayload(args.messageId, JSON.stringify(applyLocalVote(poll, args.uid, args.optionIds)));
-  const seq = lastVoteSeq = Math.max(Date.now(), lastVoteSeq + 1);
   const deviceId = await getDeviceId();
+  const seq = await nextVoteSeq(deviceId);
   await outboxRepo.enqueue({
     type: 'vote_poll', entityType: 'message', entityId: args.messageId,
     conversationId: args.conversationId,
     idempotencyKey: idempotencyKey(['vote', deviceId, args.messageId, String(seq)]),
-    payload: { conversationId: args.conversationId, messageId: args.messageId, optionIds: args.optionIds, seq },
+    payload: { conversationId: args.conversationId, messageId: args.messageId, optionIds: args.optionIds, seq, deviceId },
   });
   emitLocalMessagesChanged(args.conversationId);
   kick('outbox');
