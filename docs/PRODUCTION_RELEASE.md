@@ -50,7 +50,8 @@ phone test. `functions/src` changed in one place only: `votePoll` retries its tr
 to 15 times instead of Firestore's default 5. Fifty simultaneous votes on one poll had
 failed with "Transaction lock timeout". The indexes gained one entry (§3). Check before
 stage 1: `git diff --stat 925b812 <final> -- functions/src firestore.rules firestore.indexes.json`
-must list only `functions/src/chats/votePoll.ts` and `firestore.indexes.json` (14 lines added).
+must list only `functions/src/chats/votePoll.ts` and `firestore.indexes.json` (the two index
+changes in §3).
 
 ---
 
@@ -143,8 +144,14 @@ npx firebase deploy --project offlinesms-prod-2027 --only firestore:rules,firest
   30 minutes. The live index orders `createdAt` descending, so the query fails with
   `FAILED_PRECONDITION: The query requires an index` and stuck batches are never settled.
   Staging logged this on Node 20 and on Node 22 (2026-10-11). The Dashboard's failed-batch
-  count uses the same query shape. If the CLI offers to **delete** an index that is not in
-  the file, answer **No**.
+  count uses the same query shape.
+- The `relayJobs` (`kind`, `status`) entry no longer lists `__name__`. Firestore ends every
+  index with `__name__`, and the CLI drops it from the live list before comparing. The
+  three-field entry therefore never matched the live index: each redeploy offered to delete
+  that index, then tried to create it again and failed with HTTP 409 "index already exists".
+  A failed index step also stops the rules release. Seen on staging on 2026-10-11. The live
+  index is unchanged.
+- If the CLI still offers to **delete** an index that is not in the file, answer **No**.
 - **Check:** `firebase firestore:indexes` matches `$B/indexes-before.json` plus that index,
   and `gcloud firestore indexes composite list --project offlinesms-prod-2027 --filter="collectionGroup=smsBatches"`
   shows it `READY` (it builds in the background; the rest of the release does not wait on
