@@ -222,6 +222,38 @@ In `relayJobs`, check the following:
 - no job is left `queued` or `sending`;
 - `relayDevices/<id>.usage` grows by one per SMS.
 
+## 5b. Completion tests (gate before production SMS)
+
+A first SMS arriving does not prove the safeguards. Run every row below on staging and
+record the observed result in §7 before production sending is enabled
+(`PRODUCTION_RELEASE.md` stage 7).
+
+**Ground rules**
+- Change one limit at a time, raise `policyVersion` by 1 with each edit, and restore the
+  value from §1 afterwards.
+- A limit of `0` closes that scope: every request is refused before any job exists
+  (`functions/src/phoneLink/limits.ts:140-160`).
+- Unless a row says otherwise, a refused request creates **no** `relayJobs` document and
+  sends no SMS. Check `relayJobs` after each row.
+
+| # | Setup | Action on phone B | Expected | SMS |
+|---|---|---|---|---|
+| T1 | — | Link number B to the email account (5.1) | number linked | 1 |
+| T2 | — | Sign out, sign in with number B (5.2) | same UID, same chats, real name | 1 |
+| T3 | `signin.limits.maxVerifyAttempts: 2` | Sign in with number B. Enter a wrong code twice, then the correct one | 1st: `code-invalid` with 1 attempt left. 2nd: `too-many-attempts`. The correct code is then refused too, because the code is burned | 1 |
+| T4 | `signin.limits.codeTtlSec: 60` (the minimum) | Sign in with number B. Wait 70 s, then enter the correct code | `code-expired`; no sign-in | 1 |
+| T5 | `link.limits.codeTtlSec: 60` | On an email account with no phone, request a link code for a second number you control, wait 70 s, enter it | `code-expired`; nothing linked. Skip this row if no second number | 1 |
+| T6 | `signin.limits.destinationPerDay: 0` | Request a sign-in code for number B | `rate-limited`, scope `destination` | 0 |
+| T7 | `signin.limits.globalPerHour: 0` | Request a sign-in code | `service-busy`, scope `global` | 0 |
+| T8 | `shared.perHour: 0` | Request a sign-in code | refused, scope `global` (the shared budget reports `global`) | 0 |
+| T9 | `link.limits.accountPerHour: 0` | Request a link code on an email account | refused, scope `account` | 0 |
+| T10 | — | Request a code for a number that does not start with 59 or 56 | `number-not-supported` | 0 |
+| T11 | relay `status: "paused"` | Reopen the phone screen; request a code | no countries offered, or `no-relay-for-country` | 0 |
+| T12 | relay active, phone A in **airplane mode** | Request a sign-in code (the job stays `queued`). Set `emergencyStop: true`. Turn airplane mode off | `onOtpPolicyWritten` marks the job `failed` and removes its body. No SMS arrives after phone A reconnects | 0 |
+| T13 | `emergencyStop: true` | Reopen the phone screen; request a code | no countries / `service-paused` (5.4) | 0 |
+
+At most six SMS in total, within the `globalPerDay: 10` budget from §1.
+
 ## 6. Leave staging stopped
 
 1. `smsConfig/otp`:
