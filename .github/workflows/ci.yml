@@ -29,10 +29,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Node 20
+      - name: Set up Node 22
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: 'npm'
 
       - name: Install dependencies
@@ -62,9 +62,344 @@ jobs:
       - name: Build (all workspaces)
         run: npm run build --workspaces --if-present
 
-# Firestore rules tests (tests/rules/) require the Firestore emulator
-# which depends on Java. They run locally via:
-#   firebase emulators:start --only firestore   (Terminal A)
-#   npm run test:rules                          (Terminal B)
-# A dedicated rules-test job that boots the emulator can be added in a
-# future phase.
+  # Security gate for SMS/OTP abuse protection: Firestore rules, emulator-backed
+  # handler tests (public phone sign-in, linking, relay enforcement, email OTP,
+  # remediation), wire-level callable tests through the Functions emulator, and
+  # the relay app's Android-free send pipeline on a plain JVM. No SMS/email is sent:
+  # every provider and relay is emulated or mocked.
+  security-emulators:
+    name: rules · integration · callable (emulators) · relay send pipeline (JVM)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      HUSKY: '0'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Set up Java 21 (Firestore emulator, Gradle)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Cache Firebase emulator binaries
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/firebase/emulators
+          key: firebase-emulators-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Firestore rules tests (emulator)
+        run: npx firebase emulators:exec --project demo-offlinesms --only firestore "npm run test:rules"
+
+      - name: Handler integration tests (Firestore + Auth emulators)
+        run: npm run test:integration
+
+      - name: Wire-level callable tests (Functions + Firestore + Auth emulators)
+        run: npm run test:callable
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.14.3'
+
+      - name: Relay send pipeline (plain JVM, no Android SDK)
+        run: gradle -p apps/mobile-relay/sendgate-jvm-test test --no-daemon
+
+  # Full relay Android application: compile + package the debug APK (AGP, Room
+  # kapt, resources, manifest) and run its unit/integration tests — the send
+  # pipeline with fakes, and Room + RelayApi + production pipeline wiring over a
+  # fake callable transport under Robolectric. Uses a NON-PRODUCTION placeholder
+  # google-services.json. Not covered here: SmsManager/carrier behaviour, the
+  # foreground service lifecycle and FCM on a real device.
+  relay-android:
+    name: relay app · assembleDebug · unit + Robolectric integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # The hosted runner image ships the Android SDK; make sure the exact
+      # platform/build-tools this app compiles against are present.
+      - name: Android SDK packages
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-34" "build-tools;34.0.0" > /dev/null
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.14.3'
+
+      - name: Placeholder google-services.json (non-production)
+        run: bash scripts/ci/relay-google-services.sh
+
+      # The relay test APK must be signed with the repo's stable test key, so an
+      # APK from one run installs over one from another. Gradle ignored a key
+      # copied to ~/.android and signed with a random debug key on every run
+      # (runs 38118008600, 38118706710), so every build here is given the key.
+      - name: Stable test signing key
+        run: |
+          mkdir -p "$GRADLE_USER_HOME"
+          {
+            echo "android.injected.signing.store.file=$GITHUB_WORKSPACE/apps/mobile/android/app/debug.keystore"
+            echo 'android.injected.signing.store.password=android'
+            echo 'android.injected.signing.key.alias=androiddebugkey'
+            echo 'android.injected.signing.key.password=android'
+          } >> "$GRADLE_USER_HOME/gradle.properties"
+
+      - name: Build relay APK and run its tests
+        run: gradle -p apps/mobile-relay :app:assembleDebug :app:testDebugUnitTest --no-daemon
+
+      # Diagnostics only: kept when the tests fail, for 3 days, and an upload
+      # failure (e.g. artifact storage full) never fails the job.
+      - name: Relay test reports
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: relay-test-reports
+          path: apps/mobile-relay/app/build/reports/tests/
+          if-no-files-found: ignore
+          retention-days: 3
+
+      # Run workflow with test_backend=staging: only the MOBILE_STAGING_* settings
+      # are passed, and anything missing or pointing elsewhere fails the job (no
+      # fallback to the default settings). Otherwise the MOBILE_TEST_* settings.
+      - name: Configure private relay test APK
+        id: relay-backend
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+        env:
+          TEST_BACKEND: ${{ inputs.test_backend == 'staging' && 'staging' || 'default' }}
+          MOBILE_GOOGLE_SERVICES_JSON: ${{ inputs.test_backend != 'staging' && secrets.MOBILE_GOOGLE_SERVICES_JSON || '' }}
+          MOBILE_TEST_FIREBASE_PROJECT_ID: ${{ inputs.test_backend != 'staging' && vars.MOBILE_TEST_FIREBASE_PROJECT_ID || '' }}
+          MOBILE_TEST_ALLOW_PRODUCTION_BACKEND: ${{ inputs.test_backend != 'staging' && vars.MOBILE_TEST_ALLOW_PRODUCTION_BACKEND || '' }}
+          MOBILE_STAGING_GOOGLE_SERVICES_JSON: ${{ inputs.test_backend == 'staging' && secrets.MOBILE_STAGING_GOOGLE_SERVICES_JSON || '' }}
+          MOBILE_STAGING_FIREBASE_PROJECT_ID: ${{ inputs.test_backend == 'staging' && vars.MOBILE_STAGING_FIREBASE_PROJECT_ID || '' }}
+        run: node scripts/ci/relay-test-backend.mjs
+
+      - name: Build private relay test APK with a stable test key
+        if: steps.relay-backend.outputs.ready == 'true'
+        env:
+          PROJECT: ${{ steps.relay-backend.outputs.project }}
+        run: |
+          mkdir -p dist-relay
+          gradle -p apps/mobile-relay :app:assembleDebug --no-daemon
+          APK="dist-relay/offlinesms-relay-0.2.1-test-$PROJECT.apk"
+          cp apps/mobile-relay/app/build/outputs/apk/debug/app-debug.apk "$APK"
+          # The values the APK actually carries must be exactly this project's relay app config.
+          node scripts/ci/check-apk-backend.mjs --apk "$APK" --project "$PROJECT" \
+            --google-services apps/mobile-relay/app/google-services.json --package app.offlinesms.business
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --print-certs "$APK" > dist-relay/signing-cert.txt
+          STABLE=$(keytool -exportcert -keystore apps/mobile/android/app/debug.keystore -storepass android -alias androiddebugkey | sha256sum | cut -d' ' -f1)
+          grep -q "SHA-256 digest: $STABLE" dist-relay/signing-cert.txt || {
+            echo "::error::The relay test APK is not signed with the stable test key ($STABLE)"; cat dist-relay/signing-cert.txt; exit 1; }
+          {
+            echo "Firebase project: $PROJECT (test_backend=${{ inputs.test_backend || 'default' }})"
+            echo "Commit: $GITHUB_SHA"
+            "$ANDROID_HOME/build-tools/34.0.0/aapt2" dump badging "$APK" | head -1
+            ( cd dist-relay && sha256sum "$(basename "$APK")" )
+            grep -E "SHA-256 digest" dist-relay/signing-cert.txt
+          } | tee dist-relay/BUILD-INFO.txt
+          # The activation notes describe the production relay; a staging build has BUILD-INFO only.
+          if [ "${{ inputs.test_backend }}" != staging ]; then cp docs/PHONE_TEST_ACTIVATION.md dist-relay/README.md; fi
+
+      # A Run workflow build is the deliverable: its upload must succeed. A pull
+      # request build is verified above either way, so a full artifact storage
+      # only leaves a warning there.
+      - name: Upload private relay test APK
+        if: steps.relay-backend.outputs.ready == 'true'
+        continue-on-error: ${{ github.event_name != 'workflow_dispatch' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: offlinesms-relay-test
+          path: dist-relay/
+          # Run workflow builds: 30 days, capped by the repository's artifact
+          # retention setting (7 days now). Pull request builds: 3 days.
+          retention-days: ${{ github.event_name == 'workflow_dispatch' && 30 || 3 }}
+
+  # Matched pair of installable TEST builds of the main mobile app
+  # (docs/TEST_BUILDS.md): "updated" (this commit) and "baseline" (2a61167 +
+  # scripts/test-builds/baseline-instrumentation.patch) — same package
+  # app.offlinesms.mobile.test (installs next to the store app), same signing,
+  # same timing instrumentation, versionCode baseline < updated. Download from
+  # the run's "Artifacts".
+  #
+  # Backend (one Firebase project for both builds):
+  #   secret   MOBILE_GOOGLE_SERVICES_JSON  google-services.json with an Android
+  #            app for app.offlinesms.mobile.test
+  #   vars     MOBILE_TEST_FIREBASE_{API_KEY,AUTH_DOMAIN,PROJECT_ID,
+  #            STORAGE_BUCKET,APP_ID,MESSAGING_SENDER_ID}  (that project's web config)
+  #   var      MOBILE_TEST_ALLOW_PRODUCTION_BACKEND=true  required if it is
+  #            offlinesms-prod-2027 (owner decision)
+  #   none     → placeholder backend (installs/opens; no sign-in or push)
+  # Run workflow with test_backend=staging to build against a NON-production
+  # project instead: secret MOBILE_STAGING_GOOGLE_SERVICES_JSON and vars
+  # MOBILE_STAGING_FIREBASE_* (same names); production is refused for it. The
+  # same run builds the private relay (relay-android) from those settings; the
+  # secret then also needs the Android app app.offlinesms.business. A staging
+  # run builds only "updated" (no baseline pair).
+  # Optional private signing key (else the repo debug key) — secrets
+  #   MOBILE_TEST_KEYSTORE_BASE64, MOBILE_TEST_KEYSTORE_PASSWORD,
+  #   MOBILE_TEST_KEY_ALIAS, MOBILE_TEST_KEY_PASSWORD.
+  mobile-android:
+    name: mobile test build · ${{ matrix.variant }}
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        # A staging run is for the phone test of this commit: no baseline pair.
+        variant: ${{ inputs.test_backend == 'staging' && fromJSON('["updated"]') || fromJSON('["updated", "baseline"]') }}
+    env:
+      BACKEND_VARS: ${{ inputs.test_backend == 'staging' && 'MOBILE_STAGING' || 'MOBILE_TEST' }}
+      MOBILE_GOOGLE_SERVICES_JSON: ${{ inputs.test_backend == 'staging' && secrets.MOBILE_STAGING_GOOGLE_SERVICES_JSON || inputs.test_backend != 'staging' && secrets.MOBILE_GOOGLE_SERVICES_JSON || '' }}
+      # Never for staging: if its settings point at production, the build refuses.
+      MOBILE_TEST_ALLOW_PRODUCTION_BACKEND: ${{ inputs.test_backend != 'staging' && vars.MOBILE_TEST_ALLOW_PRODUCTION_BACKEND || '' }}
+    steps:
+      - name: Staging settings present
+        if: inputs.test_backend == 'staging'
+        run: |
+          [ -n "$MOBILE_GOOGLE_SERVICES_JSON" ] || { echo "secret MOBILE_STAGING_GOOGLE_SERVICES_JSON missing" >&2; exit 1; }
+          for v in API_KEY AUTH_DOMAIN PROJECT_ID STORAGE_BUCKET APP_ID MESSAGING_SENDER_ID; do
+            n="STAGING_$v"; [ -n "${!n:-}" ] || { echo "variable MOBILE_STAGING_FIREBASE_$v missing" >&2; exit 1; }
+          done
+          [ "$STAGING_PROJECT_ID" != offlinesms-prod-2027 ] || { echo "staging must not be the production project" >&2; exit 1; }
+        env:
+          STAGING_API_KEY: ${{ vars.MOBILE_STAGING_FIREBASE_API_KEY }}
+          STAGING_AUTH_DOMAIN: ${{ vars.MOBILE_STAGING_FIREBASE_AUTH_DOMAIN }}
+          STAGING_PROJECT_ID: ${{ vars.MOBILE_STAGING_FIREBASE_PROJECT_ID }}
+          STAGING_STORAGE_BUCKET: ${{ vars.MOBILE_STAGING_FIREBASE_STORAGE_BUCKET }}
+          STAGING_APP_ID: ${{ vars.MOBILE_STAGING_FIREBASE_APP_ID }}
+          STAGING_MESSAGING_SENDER_ID: ${{ vars.MOBILE_STAGING_FIREBASE_MESSAGING_SENDER_ID }}
+
+      - name: Checkout (full history for the baseline commit)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Android SDK packages
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0" "ndk;27.1.12297006" "cmake;3.22.1" > /dev/null
+
+      - name: Install mobile dependencies (identical for both variants)
+        run: npm --prefix apps/mobile ci
+
+      - name: Backend web config
+        run: |
+          if [ -n "$MOBILE_GOOGLE_SERVICES_JSON" ]; then
+            {
+              echo "EXPO_PUBLIC_FIREBASE_API_KEY=${{ vars[format('{0}_FIREBASE_API_KEY', env.BACKEND_VARS)] }}"
+              echo "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN=${{ vars[format('{0}_FIREBASE_AUTH_DOMAIN', env.BACKEND_VARS)] }}"
+              echo "EXPO_PUBLIC_FIREBASE_PROJECT_ID=${{ vars[format('{0}_FIREBASE_PROJECT_ID', env.BACKEND_VARS)] }}"
+              echo "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET=${{ vars[format('{0}_FIREBASE_STORAGE_BUCKET', env.BACKEND_VARS)] }}"
+              echo "EXPO_PUBLIC_FIREBASE_APP_ID=${{ vars[format('{0}_FIREBASE_APP_ID', env.BACKEND_VARS)] }}"
+              echo "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=${{ vars[format('{0}_FIREBASE_MESSAGING_SENDER_ID', env.BACKEND_VARS)] }}"
+            } >> "$GITHUB_ENV"
+            [ -n "${{ vars[format('{0}_FIREBASE_PROJECT_ID', env.BACKEND_VARS)] }}" ] || { echo "${BACKEND_VARS}_FIREBASE_PROJECT_ID variable missing" >&2; exit 1; }
+          fi
+
+      # Every staging value must belong to ONE non-production project, and each
+      # API key must resolve to it (Auth requests go where the key belongs).
+      - name: Staging backend is one project (keys checked with Identity Toolkit)
+        if: inputs.test_backend == 'staging'
+        run: node scripts/ci/check-backend-config.mjs --staging
+
+      - name: Private test signing key (optional)
+        env:
+          KS: ${{ secrets.MOBILE_TEST_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KS" ]; then
+            echo "$KS" | base64 -d > apps/mobile/android/app/test-release.keystore
+            {
+              echo "RELEASE_STORE_FILE=test-release.keystore"
+              echo "RELEASE_STORE_PASSWORD=${{ secrets.MOBILE_TEST_KEYSTORE_PASSWORD }}"
+              echo "RELEASE_KEY_ALIAS=${{ secrets.MOBILE_TEST_KEY_ALIAS }}"
+              echo "RELEASE_KEY_PASSWORD=${{ secrets.MOBILE_TEST_KEY_PASSWORD }}"
+            } > apps/mobile/android/keystore.properties
+            if [ "${{ matrix.variant }}" = baseline ]; then echo "COPY_KEYSTORE=1" >> "$GITHUB_ENV"; fi
+          fi
+
+      - name: Build ${{ matrix.variant }} test APK
+        env:
+          BASELINE_DIR: ${{ github.workspace }}/../offlinesms-baseline
+          GRADLE_ARGS: --stacktrace
+        run: |
+          # Release packaging ran the Gradle daemon out of Metaspace with the
+          # project's 2 GiB heap / 512 MiB Metaspace (:app:packageRelease failed).
+          # The user-level gradle.properties overrides it for both variants.
+          mkdir -p ~/.gradle
+          echo 'org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g' >> ~/.gradle/gradle.properties
+          if [ "${COPY_KEYSTORE:-}" = 1 ]; then
+            # build.sh creates the baseline worktree; give it the same key.
+            git worktree add -f "$BASELINE_DIR" 2a61167
+            git -C "$BASELINE_DIR" apply scripts/test-builds/baseline-instrumentation.patch
+            cp apps/mobile/android/app/test-release.keystore "$BASELINE_DIR/apps/mobile/android/app/"
+          fi
+          # The updated variant also builds the AAB for the 16 KB page size check.
+          if [ "${{ matrix.variant }}" = updated ]; then export TEST_BUILD_AAB="$RUNNER_TEMP/app-release.aab"; fi
+          scripts/test-builds/build.sh ${{ matrix.variant }} dist-apk
+
+      # Same check as the production release (Codex R6-2): ELF LOAD segments,
+      # APK zip alignment, and the AAB's BundleConfig and generated splits.
+      - name: 16 KB page size (APK and AAB)
+        if: matrix.variant == 'updated'
+        env:
+          BT: 36.0.0
+        run: bash scripts/release/check-16kb.sh dist-apk/*.apk "$RUNNER_TEMP/app-release.aab"
+
+      - name: Signing certificate (must match between baseline and updated)
+        run: |
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs dist-apk/*.apk | grep -E "SHA-256 digest" | tee dist-apk/signing-cert.txt
+
+      # Read the Firebase config back from the APK itself (native resources and
+      # the Hermes JS bundle) and compare every value exactly with the settings.
+      - name: APK backend
+        if: env.MOBILE_GOOGLE_SERVICES_JSON != ''
+        run: |
+          APK=$(ls dist-apk/*.apk)
+          printf '%s' "$MOBILE_GOOGLE_SERVICES_JSON" > "$RUNNER_TEMP/google-services.json"
+          node scripts/ci/check-apk-backend.mjs --apk "$APK" --project "$EXPO_PUBLIC_FIREBASE_PROJECT_ID" \
+            --google-services "$RUNNER_TEMP/google-services.json" --package app.offlinesms.mobile.test --web-config-env
+          rm -f "$RUNNER_TEMP/google-services.json"
+          {
+            echo "Firebase project: $EXPO_PUBLIC_FIREBASE_PROJECT_ID (test_backend=${{ inputs.test_backend || 'default' }})"
+            echo "Commit: $GITHUB_SHA"
+            "$ANDROID_HOME/build-tools/36.0.0/aapt2" dump badging "$APK" | head -1
+            cat dist-apk/*.sha256
+            cat dist-apk/signing-cert.txt
+          } | tee dist-apk/BUILD-INFO.txt
+
+      - name: Upload APK
+        continue-on-error: ${{ github.event_name != 'workflow_dispatch' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: offlinesms-test-${{ matrix.variant }}
+          path: dist-apk/
+          retention-days: ${{ github.event_name == 'workflow_dispatch' && 30 || 3 }}
+

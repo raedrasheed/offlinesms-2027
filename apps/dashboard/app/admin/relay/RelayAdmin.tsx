@@ -6,8 +6,9 @@ import { ADMIN_LABELS as L } from '@/lib/i18n';
 import { COUNTRY_OPTIONS, flagEmoji } from '@/lib/phoneCountry';
 import {
   createRelayPairingCodeAction, setRelayDeviceStatusAction, revokeRelayDeviceAction,
-  setRelayModeAction, sendRelayTestAction, setRelayCountriesAction,
+  setRelayModeAction, sendRelayTestAction, setRelayCountriesAction, setRelayCapsAction,
 } from '@/lib/relayActions';
+import { RELAY_CAP_BOUNDS, type RelayCaps } from '@/lib/otpLimits';
 
 export type RelayDeviceView = {
   deviceId: string;
@@ -25,6 +26,8 @@ export type RelayDeviceView = {
   lastError: string | null;
   allowedCountryCodes: string[];
   countryRoutingEnabled: boolean;
+  /** Effective send caps (stored values over the functions' defaults). */
+  caps: RelayCaps;
 };
 export type RelayOrgStatus = { mode: 'http' | 'relay' | 'hybrid'; relayEnabled: boolean };
 export type CoverageRow = { country: string; active: number; offline: number; available: boolean };
@@ -80,12 +83,14 @@ function CountryPicker({ value, onChange }: { value: string[]; onChange: (v: str
 }
 
 export default function RelayAdmin({
-  devices, orgStatus, businessId, canManage, fetchError, queueHealth, healthyDevices, orgOptions, coverage,
+  devices, orgStatus, businessId, canManage, isPlatform, fetchError, queueHealth, healthyDevices, orgOptions, coverage,
 }: {
   devices: RelayDeviceView[];
   orgStatus: RelayOrgStatus;
   businessId: string | null;
   canManage: boolean;
+  /** Platform admins (no organization scope) may change send caps. */
+  isPlatform: boolean;
   fetchError: string | null;
   queueHealth: Record<string, number>;
   healthyDevices: number;
@@ -110,6 +115,8 @@ export default function RelayAdmin({
   const [fStatus, setFStatus] = useState<'all' | 'online' | 'offline' | 'revoked'>('all');
   const [fCountry, setFCountry] = useState('');
   const [fNoCountries, setFNoCountries] = useState(false);
+  const [capsId, setCapsId] = useState<string | null>(null);
+  const [capsDraft, setCapsDraft] = useState<Record<keyof RelayCaps, string>>({ maxPerMinute: '', maxPerHour: '', maxPerDay: '' });
 
   useEffect(() => {
     setNow(Date.now());
@@ -164,6 +171,20 @@ export default function RelayAdmin({
     startTransition(async () => {
       const res = await setRelayCountriesAction(d.deviceId, editCodes);
       if (res.error) setErr(res.error); else { setEditingId(null); router.refresh(); }
+    });
+  }
+  function startCaps(d: RelayDeviceView) {
+    setCapsId(d.deviceId); setErr(null);
+    setCapsDraft({ maxPerMinute: String(d.caps.maxPerMinute), maxPerHour: String(d.caps.maxPerHour), maxPerDay: String(d.caps.maxPerDay) });
+  }
+  function saveCaps(d: RelayDeviceView) {
+    const caps = {
+      maxPerMinute: Number(capsDraft.maxPerMinute), maxPerHour: Number(capsDraft.maxPerHour), maxPerDay: Number(capsDraft.maxPerDay),
+    };
+    setErr(null);
+    startTransition(async () => {
+      const res = await setRelayCapsAction(d.deviceId, caps);
+      if (res.error) setErr(res.error); else { setCapsId(null); router.refresh(); }
     });
   }
   function copy() {
@@ -436,6 +457,35 @@ export default function RelayAdmin({
                       {canManage && d.status !== 'revoked' && (
                         <button onClick={() => startEdit(d)} disabled={pending}
                           className="px-2 py-1 rounded-md text-xs" style={{ border: `1px solid ${BORDER}` }}>Edit countries</button>
+                      )}
+                    </>
+                  )}
+                </div>
+
+                {/* Send caps */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm" style={{ color: 'var(--c-text-muted)' }}>{L.relay.caps}:</span>
+                  {capsId === d.deviceId ? (
+                    <>
+                      {(Object.keys(RELAY_CAP_BOUNDS) as (keyof RelayCaps)[]).map(k => (
+                        <label key={k} className="text-xs inline-flex items-center gap-1">
+                          {k === 'maxPerMinute' ? L.relay.capsMinute : k === 'maxPerHour' ? L.relay.capsHour : L.relay.capsDay}
+                          <input type="number" min={RELAY_CAP_BOUNDS[k][0]} max={RELAY_CAP_BOUNDS[k][1]} step={1}
+                            value={capsDraft[k]} onChange={e => setCapsDraft({ ...capsDraft, [k]: e.target.value })}
+                            className="px-2 py-1 rounded-md text-sm w-20" style={{ border: `1px solid ${BORDER}`, background: 'transparent', color: 'inherit' }} />
+                        </label>
+                      ))}
+                      <button onClick={() => saveCaps(d)} disabled={pending}
+                        className="px-3 py-1.5 rounded-md text-sm font-medium" style={{ background: 'var(--c-accent, #1D6E92)', color: '#fff' }}>Save</button>
+                      <button onClick={() => setCapsId(null)} disabled={pending}
+                        className="px-3 py-1.5 rounded-md text-sm" style={{ border: `1px solid ${BORDER}` }}>Cancel</button>
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-sm">{d.caps.maxPerMinute} / {d.caps.maxPerHour} / {d.caps.maxPerDay}</span>
+                      {canManage && isPlatform && d.status !== 'revoked' && (
+                        <button onClick={() => startCaps(d)} disabled={pending}
+                          className="px-2 py-1 rounded-md text-xs" style={{ border: `1px solid ${BORDER}` }}>{L.relay.capsEdit}</button>
                       )}
                     </>
                   )}

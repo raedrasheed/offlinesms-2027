@@ -12,6 +12,9 @@ import { PermissionState } from '@/components/state';
 import DetailCard from '@/components/admin/DetailCard';
 import MetadataList from '@/components/admin/MetadataList';
 import StatusBadge from '@/components/admin/StatusBadge';
+import UserName from '@/components/admin/UserName';
+import { resolveUserNames } from '@/lib/userNames';
+import { userLabel, userInitial } from '@/lib/userLabel';
 import GroupLockAction from './GroupLockAction';
 
 export const dynamic = 'force-dynamic';
@@ -39,9 +42,10 @@ export default async function GroupDetailPage({
   const tab = (searchParams?.tab ?? 'overview') as Tab;
   const canManage = canDo(session.role, 'manage:groups');
 
-  const [members, smsSummary] = await Promise.all([
+  const [members, smsSummary, ownerNames] = await Promise.all([
     tab === 'members' ? listGroupMembers(params.conversationId) : Promise.resolve(null),
     tab === 'sms'     ? getGroupSmsSummary(params.conversationId) : Promise.resolve(null),
+    tab === 'overview' ? resolveUserNames([group.ownerUid]) : Promise.resolve({} as Awaited<ReturnType<typeof resolveUserNames>>),
   ]);
 
   const tabs: { key: Tab; label: string }[] = [
@@ -94,7 +98,7 @@ export default async function GroupDetailPage({
           <MetadataList columns={2} items={[
             { label: 'Name',       value: group.name ?? '—' },
             { label: 'Status',     value: <StatusBadge status={group.status} /> },
-            { label: 'Owner UID',  value: <span className="font-mono text-[11px]">{group.ownerUid ?? '—'}</span> },
+            { label: 'Owner',      value: <UserName uid={group.ownerUid} info={group.ownerUid ? ownerNames[group.ownerUid] : null} /> },
             { label: 'Org',        value: group.organizationId ? <span className="font-mono text-[11px]">{group.organizationId.slice(0, 14)}</span> : '—' },
             { label: 'Members',    value: String(group.memberCount) },
             { label: 'Locked',     value: group.locked ? 'Yes' : 'No' },
@@ -125,13 +129,14 @@ export default async function GroupDetailPage({
                       <td className="py-2.5 pr-4">
                         <Link href={`/admin/users/${m.uid}` as any} className="flex items-center gap-2 group">
                           <div className="w-7 h-7 rounded-full bg-primary/10 text-primary font-bold text-xs grid place-items-center shrink-0">
-                            {(m.displayName ?? m.uid).slice(0, 1).toUpperCase()}
+                            {userInitial(userLabel(m, { uid: m.uid }))}
                           </div>
                           <div className="min-w-0">
                             <div className="font-semibold text-ink-900 group-hover:text-primary text-xs truncate">
-                              {m.displayName ?? <span className="font-mono">{m.uid.slice(0, 10)}</span>}
+                              {userLabel(m, { uid: m.uid })}
                             </div>
-                            {m.username && <div className="text-[10px] text-ink-400">@{m.username}</div>}
+                            {m.username && m.displayName && <div className="text-[10px] text-ink-400">@{m.username}</div>}
+                            <div className="font-mono text-[10px] text-ink-400 truncate" title={m.uid}>{m.uid}</div>
                           </div>
                         </Link>
                       </td>

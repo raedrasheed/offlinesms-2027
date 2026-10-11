@@ -10,6 +10,8 @@ import { canDo } from '@/lib/adminPermissions';
 import { listTransactions } from '@/lib/adminData';
 import { PermissionState, EmptyState } from '@/components/state';
 import StatusBadge from '@/components/admin/StatusBadge';
+import UserName from '@/components/admin/UserName';
+import { resolveUserNames } from '@/lib/userNames';
 import FilterBar from '@/components/admin/FilterBar';
 
 export const dynamic = 'force-dynamic';
@@ -37,6 +39,7 @@ export default async function TransactionsPage({
   let fetchError: string | null = null;
   try { rows = await listTransactions(searchParams?.cursor, undefined, typeFilter || undefined); }
   catch (e: any) { fetchError = e?.message ?? 'Failed to load transactions.'; }
+  const names = await resolveUserNames(rows.map(r => r.uid));
 
   const nextCursor = rows.length === 50 ? rows[rows.length - 1].id : null;
 
@@ -116,9 +119,7 @@ export default async function TransactionsPage({
                 >
                   <td className="px-4 py-3 font-mono text-[11px]" style={{ color: 'var(--c-text-4)' }}>{t.id.slice(0, 12)}…</td>
                   <td className="px-4 py-3">
-                    <Link href={`/admin/users/${t.uid}` as any} className="font-mono text-[11px] hover:underline" style={{ color: '#5BB6DE' }}>
-                      {t.uid.slice(0, 12)}
-                    </Link>
+                    <UserName uid={t.uid} info={names[t.uid]} color="#5BB6DE" />
                   </td>
                   <td className="px-4 py-3 text-[11px]" style={{ color: 'var(--c-text-2)' }}>{t.type}</td>
                   <td className="px-4 py-3 text-right font-mono text-[11px] font-bold" style={{ color: t.direction === 'credit' ? '#22C55E' : '#EF4444' }}>

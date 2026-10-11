@@ -1,65 +1,51 @@
 // Phase 22C — Firestore → local message feeder for the open conversation.
 //
-// When local-first conversation mode is on, the screen does NOT subscribe to
-// Firestore directly. This feeder owns the messages listener: it upserts each
-// remote message (with reactions + receipt counts) into the local SQLite DB and
-// pings `onChange` so the hook re-reads. Reuses the existing subscribeMessages
-// mapping so reactions/counts/timestamps stay consistent with the legacy path.
+// Owns the messages listener while a conversation is open: applies remote
+// changes to the local SQLite DB and pings `onChange` so the screen re-reads.
+//
+// Performance: only the snapshot's CHANGED documents are applied (Firestore
+// re-delivers the whole 100-message window on every snapshot; re-upserting all
+// of it cost ~200 statements per incoming message), in one transaction, and
+// `onChange` fires only after that transaction committed — so the re-read can
+// never run ahead of the write and miss the new message.
 
-import { subscribeMessages } from '../../lib/conversations';
-import { upsertRemoteMessage } from '../repositories/messagesRepo';
+import { collection, query, orderBy, limit as qlimit, onSnapshot } from 'firebase/firestore';
+import { db } from '../../lib/firebase';
+import { applyRemoteMessages } from '../repositories/messagesRepo';
+import { remoteMessageInput } from './remoteMessage';
 
-function ms(ts: any): number | null {
-  return ts?.toMillis?.() ?? null;
-}
+export const FEEDER_WINDOW = 100;
+
+export interface FeederChange { ids: string[]; fromCache: boolean }
 
 /** Start feeding one conversation's messages into the local DB. Returns unsubscribe. */
-export function startConversationFeeder(conversationId: string, onChange: () => void): () => void {
-  return subscribeMessages(conversationId, async (msgs) => {
-    for (const m of msgs) {
-      try {
-        const media = (m as any).media;
-        await upsertRemoteMessage({
-          remoteId: m.id,
-          conversationId,
-          senderUid: m.senderUid ?? (m as any).senderId ?? '',
-          senderDisplayName: m.senderDisplayName ?? null,
-          type: (m as any).type ?? 'text',
-          caption: (m as any).caption ?? null,
-          text: m.text ?? null,
-          remoteCreatedAt: ms(m.createdAt),
-          editedAt: ms(m.editedAt),
-          deletedForEveryone: !!m.deletedForEveryone,
-          replyToMessageId: m.replyTo?.messageId ?? null,
-          replyToPreview: m.replyTo?.preview ?? null,
-          replyToSenderUid: m.replyTo?.senderUid ?? null,
-          replyToSenderName: m.replyTo?.senderDisplayName ?? null,
-          replyToType: (m.replyTo as any)?.type ?? null,
-          mentions: Array.isArray((m as any).mentions) ? (m as any).mentions : null,
-          forwarded: !!m.forwarded,
-          reactions: m.reactions ?? null,
-          counts: {
-            delivered: m.deliveredCount ?? 0,
-            read: m.readCount ?? 0,
-            viewed: m.viewedCount ?? 0,
-            played: m.playedCount ?? 0,
-          },
-          media: media ? {
-            mimeType: media.mimeType ?? null,
-            sizeBytes: media.sizeBytes ?? null,
-            width: media.width ?? null,
-            height: media.height ?? null,
-            durationMs: media.durationMs ?? null,
-            waveform: media.waveform ?? null,
-            storagePath: media.storagePath ?? null,
-            downloadURL: media.downloadURL ?? null,
-            thumbnailPath: media.thumbnailPath ?? null,
-            thumbnailURL: media.thumbnailURL ?? null,
-            uploadStatus: media.uploadStatus ?? null,
-          } : null,
-        });
-      } catch { /* best-effort per message */ }
-    }
-    onChange();
+export function startConversationFeeder(
+  conversationId: string,
+  onChange: (change: FeederChange) => void,
+  onError?: (code: string) => void,
+): () => void {
+  // Serialize applies so a burst of snapshots commits in order.
+  let chain: Promise<void> = Promise.resolve();
+  let stopped = false;
+  const q = query(
+    collection(db, 'conversations', conversationId, 'messages'),
+    orderBy('createdAt', 'desc'),
+    qlimit(FEEDER_WINDOW),
+  );
+  const unsub = onSnapshot(q, snap => {
+    // 'removed' only means "left the 100-message window" — never a deletion
+    // (deletes arrive as a modified doc with deletedForEveryone).
+    const changed = snap.docChanges().filter(c => c.type !== 'removed').map(c => c.doc);
+    const fromCache = snap.metadata.fromCache;
+    if (changed.length === 0) { onChange({ ids: [], fromCache }); return; }
+    const batch = changed.map(d => remoteMessageInput(d.id, conversationId, d.data()));
+    chain = chain
+      .then(() => applyRemoteMessages(batch))
+      .then(() => { if (!stopped) onChange({ ids: batch.map(b => b.remoteId), fromCache }); })
+      .catch(() => { /* best-effort per batch; the catch-up pull re-applies */ });
+  }, err => {
+    if (__DEV__) console.warn('[feeder] messages listener failed:', (err as any)?.code ?? err);
+    onError?.((err as any)?.code ?? 'unknown');
   });
+  return () => { stopped = true; unsub(); };
 }

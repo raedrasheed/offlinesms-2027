@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getAdminScope, canViewOrganization } from '../lib/adminScope';
+import { getAdminScope, canViewOrganization, isPlatformAdmin, organizationClaim } from '../lib/adminScope';
 import type { SessionResult } from '../lib/session';
 
 function makeSession(role: any, organizationId?: string): SessionResult & { state: 'authorized' } {
@@ -37,14 +37,39 @@ describe('getAdminScope', () => {
     expect(getAdminScope(makeSession('organization_admin', 'org-acme')).organizationId).toBe('org-acme');
   });
 
-  it('returns undefined orgId for organization_admin with missing claim', () => {
-    expect(getAdminScope(makeSession('organization_admin')).organizationId).toBeUndefined();
+  // Codex R6-1: an organization admin without an organization must never get
+  // the unrestricted (platform-wide) scope.
+  it('refuses organization_admin with a missing, blank or non-string claim', () => {
+    expect(() => getAdminScope(makeSession('organization_admin'))).toThrow(/without an organizationId/);
+    for (const bad of ['', '   ', 123, null, ['org-a']]) {
+      const session = makeSession('organization_admin') as any;
+      session.user.claims.organizationId = bad;
+      expect(() => getAdminScope(session), JSON.stringify(bad)).toThrow(/without an organizationId/);
+    }
+  });
+});
+
+describe('organizationClaim', () => {
+  it('accepts only a non-blank string', () => {
+    expect(organizationClaim({ organizationId: 'org-a' })).toBe('org-a');
+    expect(organizationClaim({})).toBeNull();
+    expect(organizationClaim({ organizationId: ' ' })).toBeNull();
+    expect(organizationClaim({ organizationId: 7 })).toBeNull();
+  });
+});
+
+describe('isPlatformAdmin', () => {
+  it('is true only for super_admin and legacy_admin', () => {
+    expect(isPlatformAdmin(makeSession('super_admin'))).toBe(true);
+    expect(isPlatformAdmin(makeSession('legacy_admin'))).toBe(true);
+    for (const role of ['bootstrap_admin', 'organization_admin', 'support_agent', 'finance_admin', 'auditor']) {
+      expect(isPlatformAdmin(makeSession(role)), role).toBe(false);
+    }
   });
 
-  it('returns undefined orgId for organization_admin with non-string claim', () => {
-    const session = makeSession('organization_admin') as any;
-    session.user.claims.organizationId = 123;
-    expect(getAdminScope(session).organizationId).toBeUndefined();
+  it('is false for an organization_admin whatever the organization claim says', () => {
+    expect(isPlatformAdmin(makeSession('organization_admin'))).toBe(false);
+    expect(isPlatformAdmin(makeSession('organization_admin', 'org-acme'))).toBe(false);
   });
 });
 

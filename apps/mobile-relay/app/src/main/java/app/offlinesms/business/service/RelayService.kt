@@ -12,11 +12,12 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import app.offlinesms.business.R
 import app.offlinesms.business.data.SecureStore
-import app.offlinesms.business.data.db.JobEntity
+import app.offlinesms.business.net.ClaimedJob
 import app.offlinesms.business.data.db.RelayDb
 import app.offlinesms.business.net.RelayApi
 import app.offlinesms.business.sms.SmsEngine
 import app.offlinesms.business.util.RelayLog
+import app.offlinesms.business.work.ReportStore
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
 import com.google.firebase.messaging.ktx.messaging
@@ -26,6 +27,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import android.os.SystemClock
 import app.offlinesms.business.net.awaitResult
 
 /**
@@ -37,7 +40,10 @@ import app.offlinesms.business.net.awaitResult
 class RelayService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private lateinit var store: SecureStore
-    @Volatile private var busy = false
+    /** One claim/send loop at a time: FCM wake, the poll tick and RESUME can
+     *  all call claimOnce concurrently; tryLock makes the extra callers no-ops
+     *  (the old @Volatile flag was check-then-set, not atomic). */
+    private val sendLock = Mutex()
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -76,32 +82,41 @@ class RelayService : Service() {
 
     private suspend fun claimOnce() {
         val deviceId = store.deviceId ?: return
-        if (busy || store.paused || Firebase.auth.currentUser == null) return
-        busy = true
+        if (store.paused || Firebase.auth.currentUser == null) return
+        if (!sendLock.tryLock()) return
         try {
-            val jobs = RelayApi.claim(deviceId, CLAIM_CAPACITY)
-            if (jobs.isEmpty()) return
-            RelayLog.info(this, "claim", "n=${jobs.size}")
-            val dao = RelayDb.get(this).jobs()
-            for (job in jobs) {
-                val now = System.currentTimeMillis()
-                dao.insert(JobEntity(job.jobId, RelayLog.maskPhone(job.phoneE164), job.body,
-                    job.simSubscriptionId, job.traceId, "sending", now, now))
-                try {
-                    SmsEngine.send(this, job)
-                    RelayLog.info(this, "send", "job=${job.jobId} to=${RelayLog.maskPhone(job.phoneE164)}")
-                } catch (e: Exception) {
-                    RelayLog.error(this, "failed", "job=${job.jobId} ${e.message?.take(60)}")
-                    app.offlinesms.business.work.Reporter.enqueue(this, job.jobId, "failed", e.message?.take(120), null)
-                }
-                delay(PACING_MS) // carrier-friendly spacing
+            val outcomes = pipeline(deviceId).runOnce(CLAIM_CAPACITY)
+            if (outcomes.isNotEmpty()) {
+                RelayLog.info(this, "claim", "n=${outcomes.size}")
+                updateNotification()
             }
-            updateNotification()
         } catch (e: Exception) {
             RelayLog.warn(this, "claim", "err: ${e.message?.take(80)}")
         } finally {
-            busy = false
+            sendLock.unlock()
         }
+    }
+
+    /** Production send loop (see relayPipeline): Room + RelayApi + SmsManager + Reporter. */
+    private fun pipeline(deviceId: String): SendPipeline {
+        val ctx = this
+        return relayPipeline(
+            deviceId = deviceId,
+            db = RelayDb.get(this),
+            transport = object : SendPipeline.Transport {
+                override fun send(job: ClaimedJob) {
+                    SmsEngine.send(ctx, job)
+                    RelayLog.info(ctx, "send", "job=${job.jobId} to=${RelayLog.maskPhone(job.phoneE164)}")
+                }
+            },
+            reports = StoreReports(ReportStore(RelayDb.get(this))) { jobId, reason ->
+                RelayLog.info(ctx, "not-sent", "job=$jobId $reason")
+                app.offlinesms.business.work.Reporter.kickFlush(ctx)
+            },
+            clock = object : SendPipeline.Clock { override fun elapsedMs() = SystemClock.elapsedRealtime() },
+            pause = object : SendPipeline.Pause { override val paused get() = store.paused },
+            pacer = { delay(PACING_MS) }, // carrier-friendly spacing; server enforces minute/hour/day caps
+        )
     }
 
     private suspend fun heartbeatOnce() {
@@ -109,7 +124,7 @@ class RelayService : Service() {
         try {
             val token = Firebase.messaging.token.awaitResult()
             val pending = RelayDb.get(this).jobs().pendingCount()
-            RelayApi.heartbeat(deviceId, token, appVersion(), emptyList(), pending, 0, 0,
+            RelayApi.heartbeat(deviceId, token, appVersion(), emptyList(), pending,
                 if (store.paused) "paused" else null)
         } catch (e: Exception) {
             RelayLog.warn(this, "heartbeat", e.message?.take(60))

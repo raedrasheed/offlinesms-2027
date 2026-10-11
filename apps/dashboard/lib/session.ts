@@ -17,6 +17,7 @@
 // change.
 
 import { adminAuth } from './firebase-admin';
+import { organizationClaim } from './adminScope';
 
 export const ADMIN_ROLES = [
   'super_admin',
@@ -77,6 +78,11 @@ export async function verifySession(sessionCookie?: string): Promise<SessionResu
   };
 
   const adminRole = isAdminClaims(user.claims);
+  // An organization admin without an organization would otherwise read as
+  // unrestricted wherever "no organizationId" means platform-wide. Refuse it.
+  if (adminRole === 'organization_admin' && !organizationClaim(user.claims)) {
+    return { state: 'forbidden', user };
+  }
   if (adminRole) return { state: 'authorized', user, role: adminRole };
 
   // Bootstrap allow-list: until a first real admin exists in the system, a

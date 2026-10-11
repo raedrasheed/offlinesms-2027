@@ -3,6 +3,7 @@ package app.offlinesms.business.sms
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.telephony.SmsManager
 import app.offlinesms.business.net.ClaimedJob
@@ -12,6 +13,7 @@ object SmsEngine {
     const val ACTION_DELIVERED = "app.offlinesms.business.SMS_DELIVERED"
     const val EXTRA_JOB_ID = "jobId"
     const val EXTRA_PART_COUNT = "partCount"
+    const val EXTRA_ATTEMPT = "attempt"
 
     @Suppress("DEPRECATION")
     private fun managerFor(context: Context, subId: Int?): SmsManager {
@@ -26,12 +28,16 @@ object SmsEngine {
         }
     }
 
-    private fun pending(context: Context, action: String, jobId: String, partCount: Int, part: Int): PendingIntent {
+    private fun pending(context: Context, action: String, jobId: String, attempt: Int, partCount: Int, part: Int): PendingIntent {
+        // Identity per (job, ATTEMPT, action, part): the data URI makes each
+        // PendingIntent distinct (extras are not part of intent identity), so a
+        // newer attempt never reuses — or overwrites — an older attempt's intent.
         val intent = Intent(context, SmsResultReceiver::class.java).setAction(action)
+            .setData(Uri.parse("relay-sms://${Uri.encode(jobId)}/$attempt/$part"))
             .putExtra(EXTRA_JOB_ID, jobId)
+            .putExtra(EXTRA_ATTEMPT, attempt)
             .putExtra(EXTRA_PART_COUNT, partCount)
-        // Unique requestCode per (job, action, part) so PendingIntents don't collapse.
-        val rc = (jobId + action + part).hashCode()
+        val rc = "$jobId#$attempt#$action#$part".hashCode()
         return PendingIntent.getBroadcast(
             context, rc, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
@@ -47,8 +53,8 @@ object SmsEngine {
         val sentIntents = ArrayList<PendingIntent>(n)
         val deliveredIntents = ArrayList<PendingIntent>(n)
         for (i in 0 until n) {
-            sentIntents.add(pending(context, ACTION_SENT, job.jobId, n, i))
-            deliveredIntents.add(pending(context, ACTION_DELIVERED, job.jobId, n, i))
+            sentIntents.add(pending(context, ACTION_SENT, job.jobId, job.attempt, n, i))
+            deliveredIntents.add(pending(context, ACTION_DELIVERED, job.jobId, job.attempt, n, i))
         }
         sms.sendMultipartTextMessage(job.phoneE164, null, parts, sentIntents, deliveredIntents)
     }

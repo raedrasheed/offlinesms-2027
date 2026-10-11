@@ -12,6 +12,10 @@ import {
   UserState,
 } from '../lib/conversations';
 import { subscribeToPresence, type ChatPresence } from '../services/presenceService';
+import { createKeyedSubscriptions } from '../lib/keyedSubscriptions';
+import { primeUserProfile } from '../lib/userProfiles';
+import { normalizeProfile, profileName } from '../lib/displayNames.pure';
+import { perfMark } from '../lib/perf';
 import { useTheme } from '../context/ThemeContext';
 import { useLocalChatList } from '../hooks/useLocalChatList';
 import { isRTL } from '../i18n';
@@ -60,10 +64,11 @@ export default function ChatsList({ navigation }: any) {
   // below runs unchanged (including as a fallback).
   const local = useLocalChatList(me);
   const useLocal = local.source === 'local';
+  const refreshChats = local.refresh;
 
   // Per-conversation state + peer profile, keyed by conversation id.
   const [states, setStates]   = useState<Record<string, UserState | undefined>>({});
-  const [peers, setPeers]     = useState<Record<string, { name?: string; photoURL?: string | null }>>({});
+  const [peers, setPeers]     = useState<Record<string, { name?: string | null; photoURL?: string | null }>>({});
   // Live presence (online + typing/recording) per conversation, both paths.
   const [presence, setPresence] = useState<Record<string, ChatPresence>>({});
 
@@ -73,30 +78,44 @@ export default function ChatsList({ navigation }: any) {
     return subscribeConversations(setRows);
   }, [useLocal]);
 
-  // Per-conversation subscriptions: userState + peer display name.
+  // Per-conversation subscriptions: userState + peer display name (Firestore
+  // path only). Diffed by key like presence below, so a conversation update no
+  // longer re-creates every listener.
   // (typing/recording/online come from the unified presence effect below.)
-  useEffect(() => {
-    if (useLocal || !me || !rows) return;
-    const unsubs: Array<() => void> = [];
+  const legacySubs = useMemo(() => {
+    if (useLocal || !me) return null;
+    return createKeyedSubscriptions(key => {
+      const [kind, cid, peerUid] = key.split('|');
+      if (kind === 'state') {
+        return onSnapshot(doc(db, 'conversations', cid, 'userState', me), snap => {
+          setStates(prev => ({ ...prev, [cid]: snap.exists() ? ({ uid: me, ...snap.data() } as UserState) : undefined }));
+        });
+      }
+      return onSnapshot(doc(db, 'users', peerUid), snap => {
+        // Live peer doc → shared resolver cache (so other screens agree) and
+        // the unified name rule (displayName → @username → translated fallback).
+        primeUserProfile(peerUid, snap.data() ?? {});
+        const prof = normalizeProfile(snap.data());
+        setPeers(prev => ({ ...prev, [cid]: { name: profileName(prof), photoURL: prof.photoURL } }));
+      });
+    });
+  }, [me, useLocal]);
+  const legacyKeys = useMemo(() => {
+    if (!rows || !me) return '';
+    const keys: string[] = [];
     for (const c of rows) {
-      // user state
-      unsubs.push(onSnapshot(doc(db, 'conversations', c.id, 'userState', me), snap => {
-        setStates(prev => ({ ...prev, [c.id]: snap.exists() ? ({ uid: me, ...snap.data() } as UserState) : undefined }));
-      }));
-      // peer profile (direct conversations only)
+      keys.push(`state|${c.id}`);
       if (c.type === 'direct' && c.participantUids?.length === 2) {
         const peerUid = c.participantUids.find(u => u !== me);
-        if (peerUid && !peers[peerUid]) {
-          unsubs.push(onSnapshot(doc(db, 'users', peerUid), snap => {
-            const data = snap.data() as { displayName?: string; username?: string; photoURL?: string | null } | undefined;
-            const name = data?.displayName || (data?.username ? `@${data.username}` : peerUid.slice(0, 6));
-            setPeers(prev => ({ ...prev, [c.id]: { name, photoURL: data?.photoURL ?? null } }));
-          }));
-        }
+        if (peerUid) keys.push(`peer|${c.id}|${peerUid}`);
       }
     }
-    return () => { for (const u of unsubs) try { u(); } catch {} };
-  }, [me, rows, useLocal]);
+    return keys.sort().join(',');
+  }, [rows, me]);
+  useEffect(() => {
+    legacySubs?.sync(legacyKeys ? legacyKeys.split(',') : []);
+  }, [legacySubs, legacyKeys]);
+  useEffect(() => () => legacySubs?.clear(), [legacySubs]);
 
   const enriched: Row[] = useMemo(() => {
     if (useLocal) return local.items as unknown as Row[];
@@ -104,8 +123,8 @@ export default function ChatsList({ navigation }: any) {
     return rows.map(c => {
       const isGroup = c.type === 'group';
       const displayName = isGroup
-        ? (c.name ?? 'Group')
-        : (peers[c.id]?.name ?? c.name ?? 'Conversation');
+        ? (c.name || t('names.group'))
+        : (peers[c.id]?.name || c.name || t('names.unknownUser'));
       return {
         ...c,
         state:         states[c.id],
@@ -114,7 +133,7 @@ export default function ChatsList({ navigation }: any) {
         someoneTyping: false,
       };
     });
-  }, [useLocal, local.items, rows, states, peers]);
+  }, [useLocal, local.items, rows, states, peers, t]);
 
   // Resolve the peer uid of a direct chat (Firestore: participantUids; local:
   // the sorted participant_key "<a>_<b>").
@@ -127,23 +146,30 @@ export default function ChatsList({ navigation }: any) {
     return null;
   };
 
-  // Unified presence: subscribe to online + typing/recording for visible chats
-  // (both local-first and Firestore paths). Keyed on a stable id+peer signature
-  // so it only re-subscribes when the set of chats changes.
-  const presenceKey = enriched.map(e => `${e.id}:${peerUidOf(e) ?? ''}`).join(',');
+  // Unified presence: online + typing/recording for the listed chats (both
+  // local-first and Firestore paths). Subscriptions are kept by `id|peer` and
+  // updated by diff, so re-ordering the list (every new message) or an unrelated
+  // row change starts/stops nothing; an update that changes nothing is dropped
+  // before it re-renders the list.
+  const presenceSubs = useMemo(() => {
+    if (!me) return null;
+    return createKeyedSubscriptions(key => {
+      const [chatId, peer] = key.split('|');
+      return subscribeToPresence(chatId, { peerUid: peer || null }, p =>
+        setPresence(prev => (samePresence(prev[chatId], p) ? prev : { ...prev, [chatId]: p })),
+      );
+    });
+  }, [me]);
+  const presenceKeys = enriched.map(e => `${e.id}|${peerUidOf(e) ?? ''}`).sort().join(',');
   useEffect(() => {
-    if (!me || enriched.length === 0) return;
-    const unsubs = enriched.map(item =>
-      subscribeToPresence(item.id, { peerUid: peerUidOf(item) }, p =>
-        setPresence(prev => ({ ...prev, [item.id]: p })),
-      ),
-    );
-    return () => { for (const u of unsubs) try { u(); } catch { /* noop */ } };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [me, presenceKey]);
+    presenceSubs?.sync(presenceKeys ? presenceKeys.split(',') : []);
+  }, [presenceSubs, presenceKeys]);
+  useEffect(() => () => presenceSubs?.clear(), [presenceSubs]);
 
   // Archived chats are always hidden from every filter now (no archive tab).
   const visible = useMemo(() => enriched.filter(c => c.state?.archived !== true), [enriched]);
+  // Timing (test builds, src/lib/perf.ts): first time the chat list has rows.
+  useEffect(() => { if (visible.length > 0) perfMark('chatList:shown', { rows: visible.length }, true); }, [visible]);
 
   const filtered = useMemo(() => {
     let out = visible;
@@ -170,16 +196,18 @@ export default function ChatsList({ navigation }: any) {
 
   useEffect(() => { setUnreadTotal(unreadCounts.all); }, [unreadCounts.all]);
 
+  // Depend on the stable refresh callback, not the result object (which
+  // changes with items/loading). Otherwise every ChatRow loses its memo hit.
   const confirmClearChat = useCallback((cid: string, name: string) => {
     Alert.alert(
       t('chats.clearChatTitle'),
       name ? `${t('chats.clearChatMessage')}\n\n${name}` : t('chats.clearChatMessage'),
       [
         { text: t('common.cancel'), style: 'cancel' },
-        { text: t('chats.clearChat'), style: 'destructive', onPress: () => { void clearChat(cid).then(() => local.refresh?.()); } },
+        { text: t('chats.clearChat'), style: 'destructive', onPress: () => { void clearChat(cid).then(() => refreshChats()); } },
       ],
     );
-  }, [t, local]);
+  }, [t, refreshChats]);
 
   // Stable handlers passed to every ChatRow so the row's memo comparator
   // sees identical references across parent renders.
@@ -364,4 +392,11 @@ function buildStyles(colors: any, rtl: boolean) {
     fab:         { position: 'absolute', right: 18, bottom: 108, width: 60, height: 60, borderRadius: 20, backgroundColor: colors.action.primary, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 6 },
     fabText:     { color: colors.action.primaryFg, fontSize: 28, fontWeight: '700', marginTop: -2 },
   });
+}
+
+function samePresence(a: ChatPresence | undefined, b: ChatPresence): boolean {
+  if (!a) return false;
+  const eq = (x: string[], y: string[]) => x.length === y.length && x.every((v, i) => v === y[i]);
+  return a.online === b.online && a.lastSeenAt === b.lastSeenAt
+    && eq(a.typingUids, b.typingUids) && eq(a.recordingUids, b.recordingUids);
 }

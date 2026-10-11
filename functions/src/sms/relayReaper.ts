@@ -11,6 +11,7 @@ import { writeAuditLog } from '../lib/auditLog';
 import {
   reapDecision, backoffMs, isHeartbeatStale, recipientStatusFor, type RelayJobStatus,
 } from './relayLogic';
+import { sweepStaleVerificationJobs } from '../verification/staleJobSweep';
 import { maybeFinalizeRelayBatch } from './relaySettlement';
 
 const SCAN_LIMIT = 200;
@@ -34,7 +35,7 @@ export const relayReaper = onSchedule(
       const attempts = (doc.get('attempts') as number) ?? 1;
       const maxAttempts = (doc.get('maxAttempts') as number) ?? 3;
       const status = (doc.get('status') ?? 'claimed') as RelayJobStatus;
-      const decision = reapDecision({ status, leaseExpiresAtMs: leaseMs, attempts, maxAttempts }, now);
+      const decision = reapDecision({ status, leaseExpiresAtMs: leaseMs, attempts, maxAttempts, kind: doc.get('kind'), noRetry: doc.get('noRetry') === true }, now);
       if (decision === 'none') continue;
 
       const businessId = doc.get('businessId') as string;
@@ -48,7 +49,7 @@ export const relayReaper = onSchedule(
         const lm = (fresh.get('leaseExpiresAt') as Timestamp | undefined)?.toMillis?.() ?? null;
         const at = (fresh.get('attempts') as number) ?? 1;
         const max = (fresh.get('maxAttempts') as number) ?? 3;
-        const d = reapDecision({ status: s, leaseExpiresAtMs: lm, attempts: at, maxAttempts: max }, now);
+        const d = reapDecision({ status: s, leaseExpiresAtMs: lm, attempts: at, maxAttempts: max, kind: fresh.get('kind'), noRetry: fresh.get('noRetry') === true }, now);
         if (d === 'requeue') {
           tx.update(doc.ref, {
             status: 'queued', leaseOwnerDeviceId: null, leaseExpiresAt: null, assignedDeviceId: null,
@@ -58,7 +59,7 @@ export const relayReaper = onSchedule(
         } else if (d === 'fail') {
           tx.update(doc.ref, {
             status: 'failed', failedAt: FieldValue.serverTimestamp(),
-            lastError: 'lease-expired-max-attempts', messageBody: FieldValue.delete(),
+            lastError: fresh.get('noRetry') === true ? 'lease-expired-no-retry' : 'lease-expired-max-attempts', messageBody: FieldValue.delete(),
             updatedAt: FieldValue.serverTimestamp(),
           });
         }
@@ -78,6 +79,13 @@ export const relayReaper = onSchedule(
       }
       if (batchId) touchedBatches.add(batchId);
     }
+
+    // 1a) Cancel QUEUED verification jobs that must never be delivered: every
+    //     legacy public sign-in OTP (the retired unprotected protocol) and any
+    //     sign-in / link code past its expiry. claimRelayJobs enforces the same
+    //     rule at claim time; this sweep also purges the code from the body of
+    //     jobs no device ever polls for.
+    const cancelled = await cancelQueuedVerificationJobs(db, now);
 
     // 1b) Finalize any batch whose relay jobs are now all terminal (safety net
     //     for batches whose last report didn't finalize, e.g. device went away).
@@ -103,6 +111,20 @@ export const relayReaper = onSchedule(
     await db.collection('relayMetrics').doc('summary').set({
       lastRunAt: FieldValue.serverTimestamp(),
       queuedDepth, claimedDepth, expiredLeases, requeued, failedPermanent, devicesOffline,
+      verificationCancelled: cancelled,
     }, { merge: true });
   },
 );
+
+/** Every minute: generation-conditional, paginated cleanup of queued verification
+ *  codes (legacy, expired, stopped, other sender/generation). Bounded per run. */
+async function cancelQueuedVerificationJobs(db: FirebaseFirestore.Firestore, _now: number): Promise<number> {
+  try {
+    return (await sweepStaleVerificationJobs(db, 10)).cancelled;
+  } catch (e) {
+    // A failure here must not stop the lease sweep; claim/authorization still
+    // block delivery of stale codes. Logged without any job content.
+    console.error('[relayReaper] verification sweep failed', (e as Error)?.message);
+    return 0;
+  }
+}

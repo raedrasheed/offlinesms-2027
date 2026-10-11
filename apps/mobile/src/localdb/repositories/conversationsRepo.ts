@@ -102,6 +102,14 @@ export async function upsertRemoteConversation(c: Partial<ConversationRow> & { i
   }
 }
 
+/** Apply a batch of remote conversation changes in ONE transaction. */
+export async function applyRemoteConversations(batch: Array<Partial<ConversationRow> & { id: string }>): Promise<void> {
+  if (batch.length === 0) return;
+  await getDb().transaction(async () => {
+    for (const c of batch) await upsertRemoteConversation(c);
+  });
+}
+
 /** Apply per-user state (unread/pinned/muted/favorite/archived) for a conversation. */
 export async function applyUserState(
   id: string,

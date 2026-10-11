@@ -11,6 +11,8 @@ import { PermissionState } from '@/components/state';
 import DetailCard from '@/components/admin/DetailCard';
 import MetadataList from '@/components/admin/MetadataList';
 import StatusBadge from '@/components/admin/StatusBadge';
+import UserName from '@/components/admin/UserName';
+import { resolveUserNames } from '@/lib/userNames';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -36,9 +38,10 @@ export default async function OrgDetailPage({
 
   const tab = (searchParams?.tab ?? 'overview') as Tab;
 
-  const [members, groups] = await Promise.all([
+  const [members, groups, ownerNames] = await Promise.all([
     tab === 'users' ? listOrgMembers(params.orgId) : Promise.resolve(null),
     tab === 'groups' ? listOrgGroups(params.orgId) : Promise.resolve(null),
+    tab === 'overview' ? resolveUserNames([org.ownerUid]) : Promise.resolve({}),
   ]);
 
   const tabs: { key: Tab; label: string }[] = [
@@ -98,7 +101,7 @@ export default async function OrgDetailPage({
               { label: 'Name',       value: org.name },
               { label: 'Slug',       value: <span className="font-mono">{org.slug}</span> },
               { label: 'Status',     value: <StatusBadge status={org.status} /> },
-              { label: 'Owner UID',  value: <span className="font-mono text-[11px]">{org.ownerUid}</span> },
+              { label: 'Owner',      value: <UserName uid={org.ownerUid} info={(ownerNames as Record<string, any>)[org.ownerUid]} /> },
               { label: 'Created',    value: org.createdAt },
               { label: 'Updated',    value: org.updatedAt },
             ]} />
@@ -114,7 +117,7 @@ export default async function OrgDetailPage({
             <table className="w-full text-sm border-collapse">
               <thead>
                 <tr className="text-[10px] font-bold text-ink-500 uppercase tracking-wide text-left">
-                  <th className="pb-2 pr-4">UID</th>
+                  <th className="pb-2 pr-4">User</th>
                   <th className="pb-2 pr-4">Role</th>
                   <th className="pb-2">Joined</th>
                 </tr>
@@ -123,9 +126,7 @@ export default async function OrgDetailPage({
                 {members.map((m, i) => (
                   <tr key={m.uid} className={`border-t border-ink-100 ${i % 2 === 0 ? '' : 'bg-surface3/40'}`}>
                     <td className="py-2 pr-4">
-                      <Link href={`/admin/users/${m.uid}` as any} className="font-mono text-xs text-primary hover:underline">
-                        {m.uid.slice(0, 14)}…
-                      </Link>
+                      <UserName uid={m.uid} info={m} />
                     </td>
                     <td className="py-2 pr-4"><StatusBadge status={m.role} /></td>
                     <td className="py-2 text-xs text-ink-500">{m.joinedAt}</td>

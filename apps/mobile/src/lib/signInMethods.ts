@@ -1,0 +1,148 @@
+// Sign-in methods of the signed-in account (Settings → Email / Phone number).
+// Thin client over the authenticated callables — every rule (eligibility,
+// re-authentication, limits, uniqueness, code checks) is enforced on the
+// server. Adding or changing a method never switches accounts: every token this
+// module signs in with is checked to belong to the CURRENT uid first.
+
+import { getFunctions, httpsCallable } from 'firebase/functions';
+import { signInWithCustomToken } from 'firebase/auth';
+import { app, auth } from './firebase';
+import { newPhoneAuthFlow } from './phoneAuth';
+import type { PhoneAuthFlow } from './phoneAuth.flow';
+
+const fns = () => getFunctions(app, 'us-central1');
+
+export interface SignInMethods {
+  email: string | null;
+  emailVerified: boolean;
+  phone: string | null;
+  emailChange: { available: boolean; pendingRecovery: boolean; pendingChallengeId: string | null; reauthRequired: boolean; codeTtlSec: number };
+}
+
+export async function getSignInMethods(): Promise<SignInMethods> {
+  return (await httpsCallable<Record<string, never>, SignInMethods>(fns(), 'getSignInMethods')({})).data;
+}
+
+export interface EmailChallenge { challengeId: string; expiresAtMs: number; resendAfterSec: number; maskedEmail: string }
+
+export async function requestEmailChangeCode(email: string): Promise<EmailChallenge> {
+  return (await httpsCallable<{ email: string }, EmailChallenge & { ok: boolean }>(fns(), 'requestEmailChangeCode')({ email: email.trim() })).data;
+}
+
+interface ChangeResult { changed: true; email: string; maskedEmail: string; customToken: string }
+
+/** Firebase ends existing sessions when the email changes; continue on this
+ *  device with the server's token — only if it is for the same account. */
+async function continueSession(r: ChangeResult): Promise<ChangeResult> {
+  const me = auth.currentUser?.uid;
+  if (r.customToken && me) {
+    await signInWithCustomToken(auth, r.customToken);
+    if (auth.currentUser?.uid !== me) throw new Error('account-mismatch');
+    await auth.currentUser?.reload().catch(() => {});
+  }
+  return r;
+}
+
+// Test builds only (EXPO_PUBLIC_TEST_FAULTS=1, set by scripts/test-builds/build.sh
+// and never by store builds), each armed for the next verify only — for the
+// device checks in docs/EMAIL_CHANGE_VERIFICATION.md:
+//   - lose the reply AFTER the server has answered it, as a dropped connection
+//     would (whatever the answer was);
+//   - ask the server to stop right after its Auth write, as a request that dies
+//     there would. Honored only by a staging backend with
+//     EMAIL_CHANGE_TEST_FAULTS=on; production ignores it.
+let dropNextReply = false;
+let stopNextBeforeFinish = false;
+export const testFaults = process.env.EXPO_PUBLIC_TEST_FAULTS === '1'
+  ? {
+      setDropNextEmailChangeReply(on: boolean) { dropNextReply = on; },
+      setStopNextEmailChangeBeforeFinish(on: boolean) { stopNextBeforeFinish = on; },
+    }
+  : null;
+
+export async function verifyEmailChangeCode(challengeId: string, code: string): Promise<ChangeResult> {
+  const drop = testFaults !== null && dropNextReply;
+  const stop = testFaults !== null && stopNextBeforeFinish;
+  dropNextReply = false;
+  stopNextBeforeFinish = false;
+  const lost = () => Object.assign(new Error('reply lost (test build)'), { code: 'functions/unavailable' });
+  let res;
+  try {
+    res = await httpsCallable<{ challengeId: string; code: string; testStopBeforeFinalize?: true }, ChangeResult>(fns(), 'verifyEmailChangeCode')(
+      { challengeId, code, ...(stop ? { testStopBeforeFinalize: true as const } : {}) },
+    );
+  } catch (e) {
+    throw drop ? lost() : e;
+  }
+  if (drop) throw lost();
+  return continueSession(res.data);
+}
+
+/** Finish a change that was interrupted. The email change signs out every
+ *  session, this one included: if the reply that carried the replacement token
+ *  was lost, the server answers `reauth-required` and this device signs in
+ *  again to the same account (see reauthenticateWith*) before resuming. */
+export async function resumeEmailChange(challengeId: string): Promise<ChangeResult> {
+  const res = await httpsCallable<{ challengeId: string }, ChangeResult>(fns(), 'resumeEmailChange')({ challengeId });
+  return continueSession(res.data);
+}
+
+// ── Re-authentication with a method the account ALREADY has ─────────────────
+
+export type ReauthMethod = 'email' | 'phone';
+
+/** Methods this account can confirm itself with right now. `email` is the
+ *  address the server reports on the account (it may be newer than this
+ *  device's cached one, e.g. right after an email change landed). */
+export function reauthMethods(email?: string | null): ReauthMethod[] {
+  const u = auth.currentUser;
+  const out: ReauthMethod[] = [];
+  if (email || u?.email) out.push('email');
+  if (u?.phoneNumber) out.push('phone');
+  return out;
+}
+
+/** Send a code to the account's own email. */
+export async function sendReauthEmailCode(accountEmail?: string | null): Promise<void> {
+  const email = accountEmail || auth.currentUser?.email;
+  if (!email) throw new Error('reauth-required');
+  await httpsCallable<{ email: string }, { ok: boolean }>(fns(), 'requestEmailOtp')({ email });
+}
+
+/** Confirm with the emailed code; refuses (without signing in) if the code
+ *  belongs to any account other than the current one. */
+export async function reauthenticateWithEmailCode(code: string, accountEmail?: string | null): Promise<void> {
+  const me = auth.currentUser;
+  const email = accountEmail || me?.email;
+  if (!me || !email) throw new Error('reauth-required');
+  const res = await httpsCallable<{ email: string; code: string }, { customToken: string; uid: string }>(
+    fns(), 'verifyEmailOtp',
+  )({ email, code });
+  if (res.data?.uid !== me.uid) throw new Error('reauth-required');
+  await signInWithCustomToken(auth, res.data.customToken);
+  await auth.currentUser?.getIdToken(true);
+}
+
+let phoneReauth: { flow: PhoneAuthFlow; challengeId: string } | null = null;
+
+/** Send a sign-in code by SMS to the account's own number. */
+export async function sendReauthPhoneCode(): Promise<{ maskedPhone: string; resendAfterSec: number }> {
+  const phone = auth.currentUser?.phoneNumber;
+  if (!phone) throw new Error('reauth-required');
+  const flow = await newPhoneAuthFlow();
+  const r = await flow.sendCode(phone);
+  phoneReauth = { flow, challengeId: r.challengeId };
+  return { maskedPhone: r.maskedPhone, resendAfterSec: r.resendAfterSec };
+}
+
+/** Confirm with the SMS code; refuses (without signing in) unless it resolves
+ *  to the current account. */
+export async function reauthenticateWithPhoneCode(code: string): Promise<void> {
+  const me = auth.currentUser;
+  if (!me || !phoneReauth) throw new Error('reauth-required');
+  const res = await phoneReauth.flow.verify(phoneReauth.challengeId, code);
+  if (res.uid !== me.uid) throw new Error('reauth-required');
+  await signInWithCustomToken(auth, res.customToken);
+  await auth.currentUser?.getIdToken(true);
+  phoneReauth = null;
+}

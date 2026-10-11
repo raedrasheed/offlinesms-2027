@@ -7,6 +7,7 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore, FieldValue, type WriteBatch } from 'firebase-admin/firestore';
 import { writeAuditLog } from '../lib/auditLog';
+import { publicNameFrom } from '../lib/displayName';
 
 export const MAX_GROUP_MEMBERS = 256;
 const NAME_MAX = 80;
@@ -93,13 +94,14 @@ export const createGroup = onCall(async (request) => {
   for (let i = 0; i < participantUids.length; i++) {
     const u = participantUids[i];
     const snap = memberSnaps[i];
-    const profile = (snap.data() ?? {}) as { displayName?: string; photoURL?: string };
+    const profile = (snap.data() ?? {}) as { displayName?: string; username?: string; photoURL?: string };
     batch.set(convoRef.collection('members').doc(u), {
       uid: u,
       role: u === uid ? 'owner' : 'member',
       status: 'active',
       addedBy: uid,
-      displayNameSnapshot: profile.displayName ?? u,
+      // Name snapshot (fallback only — clients resolve live). Null, never the uid.
+      displayNameSnapshot: publicNameFrom(profile, u),
       photoURLSnapshot: profile.photoURL ?? null,
       joinedAt: now,
       updatedAt: now,

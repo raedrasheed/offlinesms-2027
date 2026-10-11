@@ -18,6 +18,7 @@ import DetailCard from '@/components/admin/DetailCard';
 import MetadataList from '@/components/admin/MetadataList';
 import StatusBadge from '@/components/admin/StatusBadge';
 import UserStatusAction from './UserStatusAction';
+import { userLabel, userInitial } from '@/lib/userLabel';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -46,7 +47,7 @@ export default async function UserDetailPage({ params }: { params: { uid: string
       <div className="flex items-center gap-2 text-[12px]">
         <Link href="/admin/users" className="hover:underline" style={{ color: '#5BB6DE' }}>← Users</Link>
         <span style={{ color: 'var(--c-text-4)' }}>/</span>
-        <span className="font-semibold truncate" style={{ color: 'var(--c-text-3)' }}>{user.displayName ?? user.uid}</span>
+        <span className="font-semibold truncate" style={{ color: 'var(--c-text-3)' }}>{userLabel(user, { uid: user.uid })}</span>
       </div>
 
       <div className="grid gap-5">
@@ -61,10 +62,10 @@ export default async function UserDetailPage({ params }: { params: { uid: string
               className="w-14 h-14 rounded-full font-extrabold text-xl grid place-items-center shrink-0"
               style={{ background: '#1F7BA822', color: '#5BB6DE' }}
             >
-              {(user.displayName ?? user.uid).slice(0, 1).toUpperCase()}
+              {userInitial(userLabel(user, { uid: user.uid }))}
             </div>
             <div>
-              <p className="text-lg font-extrabold" style={{ color: 'var(--c-text)' }}>{user.displayName ?? '—'}</p>
+              <p className="text-lg font-extrabold" style={{ color: 'var(--c-text)' }}>{userLabel(user, { uid: user.uid })}</p>
               <p className="text-sm" style={{ color: 'var(--c-text-3)' }}>{user.username ? `@${user.username}` : 'No username'}</p>
               <div className="mt-1"><StatusBadge status={user.status} /></div>
             </div>

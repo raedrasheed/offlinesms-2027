@@ -15,6 +15,8 @@ import StatusBadge from '@/components/admin/StatusBadge';
 import TicketStatusAction from './TicketStatusAction';
 import TicketAssignAction from './TicketAssignAction';
 import { updateTicketStatus, assignSupportTicket } from '@/lib/supportActions';
+import UserName from '@/components/admin/UserName';
+import { resolveUserNames } from '@/lib/userNames';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -32,6 +34,7 @@ export default async function TicketDetailPage({ params }: { params: { ticketId:
 
   const ticket = await getSupportTicket(params.ticketId);
   if (!ticket) notFound();
+  const names = await resolveUserNames([ticket.createdBy, ticket.assignedTo]);
 
   const canManage = canDo(session.role, 'manage:support');
   const boundAction = updateTicketStatus.bind(null, params.ticketId);
@@ -59,12 +62,10 @@ export default async function TicketDetailPage({ params }: { params: { ticketId:
             { label: 'Category',    value: <span className="capitalize">{ticket.category}</span> },
             { label: 'Status',      value: <StatusBadge status={ticket.status} /> },
             { label: 'Submitted by', value: (
-              <Link href={`/admin/users/${ticket.createdBy}` as any} className="font-mono text-[11px] hover:underline" style={{ color: '#5BB6DE' }}>
-                {ticket.createdBy}
-              </Link>
+              <UserName uid={ticket.createdBy} info={names[ticket.createdBy]} color="#5BB6DE" />
             )},
             { label: 'Assigned to', value: ticket.assignedTo ? (
-              <span className="font-mono text-[11px]">{ticket.assignedTo}</span>
+              <UserName uid={ticket.assignedTo} info={names[ticket.assignedTo]} />
             ) : '—' },
             { label: 'Created',     value: ticket.createdAt },
             { label: 'Updated',     value: ticket.updatedAt },

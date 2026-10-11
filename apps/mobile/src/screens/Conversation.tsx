@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList, View, Text, TextInput, Pressable, StyleSheet, Alert,
-  Platform, PanResponder, Image, ScrollView,
+  Platform, PanResponder, Image, ScrollView, Keyboard,
 } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -12,6 +12,7 @@ import {
   subscribeMessages,
   subscribeUserState,
   sendTextMessage,
+  sendRichMessage,
   markRead,
   markReceipt,
   editMessage,
@@ -26,7 +27,7 @@ import {
   getOrCreateDirectConversation,
 } from '../lib/conversations';
 import type { ReactorInfo } from '../components/ReactionsSheet';
-import { useUserProfiles } from '../lib/userProfiles';
+import { useUserProfiles, useDisplayNames, primeUserProfile, displayNameFromCache } from '../lib/userProfiles';
 import { blockUser, unblockUser, subscribeIsBlocked } from '../lib/blocks';
 import { useChatPresence, formatPresenceSubtitle } from '../hooks/useChatPresence';
 import { useTypingPresence } from '../hooks/useTypingPresence';
@@ -43,15 +44,20 @@ import { LoadingState, EmptyState, ErrorState } from '../components/state';
 import { avatarColor, initials } from '../lib/avatar';
 import { useOffline } from '../context/OfflineContext';
 import { OfflineNotice, SyncSuccessChip } from '../components/OfflineBanners';
+import { SyncStatusBanner } from '../components/chat/SyncStatusBanner';
+import { perfBegin, perfObserve, perfNow } from '../lib/perf';
 import { getDraft, setDraft as persistDraft, clearDraft } from '../lib/drafts';
 import { useLocalConversation } from '../hooks/useLocalConversation';
 import { useMessagePersistence } from '../hooks/useLocalPersistence';
-import { queueSendMessage, queueEditMessage, queueMarkReceipt, retryMediaMessage, queueSendVoiceMessage, openLocalDb, kickSync } from '../localdb';
+import { queueSendMessage, queueEditMessage, queueMarkReceipt, retryMediaMessage, queueSendVoiceMessage, openLocalDb, kickSync, retryQueuedMessage } from '../localdb';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import { prefetchMedia } from '../media/mediaCache';
 import { AttachmentSheet } from '../components/chat/AttachmentSheet';
-import { EmojiPicker3D } from '../components/chat/EmojiPicker3D';
+import { ComposerPanel } from '../components/chat/ComposerPanel';
+import type { PickedSticker } from '../components/chat/StickerPanel';
+import { CreatePollSheet, type PollDraft } from '../components/chat/CreatePollSheet';
+import { insertAtSelection } from '../lib/emojiCatalog';
 import { SwipeToReply } from '../components/chat/SwipeToReply';
 import { detectMentionQuery, filterMembers, insertMention, resolveMentions, renderMentionSegments, type MentionCandidate } from '../lib/mentions';
 import { LockedVoiceRecorderBar } from '../components/chat/LockedVoiceRecorderBar';
@@ -120,7 +126,7 @@ export default function Conversation({ route, navigation }: any) {
   const { t } = useTranslation();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
-  const { id, sharedText } = route.params as { id: string; sharedText?: string };
+  const { id, sharedText, messageId: focusMessageId } = route.params as { id: string; sharedText?: string; messageId?: string };
   const me = auth.currentUser?.uid ?? '';
   const { isOffline, enqueue, queuedFor, deliveredFor, deliveredNonce } = useOffline();
   const wallpaper = useWallpaper(id);
@@ -129,7 +135,7 @@ export default function Conversation({ route, navigation }: any) {
   // Phase 22C — local-first conversation (flag-gated). `useLocal` is true only
   // when the flag is on AND the local DB initialised; otherwise the Firestore +
   // OfflineContext path below runs unchanged (including as a fallback).
-  const local = useLocalConversation(id, me);
+  const local = useLocalConversation(id, me, focusMessageId);
   const useLocal = local.source === 'local';
 
   // Mirror this conversation's messages into the local SQLite DB while it's open.
@@ -152,7 +158,7 @@ export default function Conversation({ route, navigation }: any) {
   const [err, setErr] = useState<string | null>(null);
 
   const [convo, setConvo] = useState<ConversationDoc | null | undefined>(undefined);
-  const [peerName, setPeerName] = useState<string>('Chat');
+  const [peerName, setPeerName] = useState<string>(() => t('names.chat'));
   const [peerUsername, setPeerUsername] = useState<string | null>(null);
   const [peerUid, setPeerUid] = useState<string | null>(null);
   const [iBlockedPeer, setIBlockedPeer] = useState(false);
@@ -165,6 +171,11 @@ export default function Conversation({ route, navigation }: any) {
   // @mention composer state: caret position + the members the user has picked
   // (resolved to concrete spans against the final text on send).
   const [selection, setSelection] = useState<{ start: number; end: number }>({ start: 0, end: 0 });
+  // Latest draft/selection for inserting emoji at the caret (rapid taps compound).
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const selectionRef = useRef(selection);
+  selectionRef.current = selection;
   const [selectedMentions, setSelectedMentions] = useState<Array<{ userId: string; displayName: string }>>([]);
 
   const listRef = useRef<FlatList<Message>>(null);
@@ -244,16 +255,20 @@ export default function Conversation({ route, navigation }: any) {
   // Peer name (direct chats) / group header.
   useEffect(() => {
     if (!convo || !me) return;
-    if (convo.type === 'group') { setPeerName(convo.name ?? 'Group'); return; }
+    if (convo.type === 'group') { setPeerName(convo.name || t('names.group')); return; }
     const peers = (convo.participantUids ?? convo.memberIds ?? []).filter(u => u !== me);
     if (!peers[0]) return;
-    setPeerUid(peers[0]);
-    return onSnapshot(doc(db, 'users', peers[0]), userSnap => {
+    const peer = peers[0];
+    setPeerUid(peer);
+    return onSnapshot(doc(db, 'users', peer), userSnap => {
       const u = userSnap.data() as { displayName?: string; username?: string } | undefined;
-      setPeerName(u?.displayName ?? (u?.username ? `@${u.username}` : 'Chat'));
+      // Feed the live peer doc into the shared resolver so every label in
+      // this chat (bubbles, replies, reactions, typing) agrees with the header.
+      primeUserProfile(peer, u ?? {});
+      setPeerName(displayNameFromCache(peer));
       setPeerUsername(u?.username ?? null);
     });
-  }, [convo, me]);
+  }, [convo, me, t]);
 
   // Whether I've blocked this direct-chat peer (drives the composer gate +
   // header menu). Private to me (users/{me}/blockedUsers/{peer}).
@@ -291,12 +306,19 @@ export default function Conversation({ route, navigation }: any) {
   const peerPhoto = isDirect && peerUid ? (peerProfiles[peerUid]?.photoURL ?? null) : null;
   // Header avatar: direct peer photo, or the group's avatar for groups.
   const headerPhoto = isDirect ? peerPhoto : (convo?.avatarUrl ?? null);
+  // One resolver for every person label in this chat: group members, the
+  // direct peer and me (reactions / typing / mentions / reply previews).
+  const nameFor = useDisplayNames(isDirect ? [peerUid, me] : [...memberUids, me]);
   const reactorNames = useMemo<Record<string, ReactorInfo>>(() => {
     const map: Record<string, ReactorInfo> = {};
+    if (isDirect && peerUid) {
+      map[peerUid] = { name: nameFor(peerUid), photoURL: peerPhoto };
+    }
     for (const m of members) {
       const prof = memberProfiles[m.uid];
       map[m.uid] = {
-        name: m.displayNameSnapshot || prof?.displayName || m.uid.slice(0, 6),
+        // Live profile name first; the add-time snapshot only while loading.
+        name: nameFor(m.uid, { snapshot: m.displayNameSnapshot }),
         // Prefer the member's LIVE profile photo over the add-time snapshot.
         // The snapshot is captured when the member joins and goes stale once
         // they change their picture (a broken URL → invisible avatar), whereas
@@ -307,7 +329,7 @@ export default function Conversation({ route, navigation }: any) {
       };
     }
     return map;
-  }, [members, memberProfiles]);
+  }, [members, memberProfiles, nameFor, isDirect, peerUid, peerPhoto]);
 
   // @mention suggestions (groups only). Candidates are the current group members
   // (excluding me) — so a user can never be mentioned outside the group. The
@@ -318,11 +340,12 @@ export default function Conversation({ route, navigation }: any) {
       .filter(m => m.uid !== me && (m.status ?? 'active') === 'active')
       .map(m => ({
         uid: m.uid,
-        displayName: reactorNames[m.uid]?.name ?? m.displayNameSnapshot ?? m.uid.slice(0, 6),
-        username: (memberProfiles[m.uid] as any)?.username ?? null,
+        // Strip the handle's '@' so a username-only member mentions as @name, not @@name.
+        displayName: (reactorNames[m.uid]?.name ?? nameFor(m.uid, { snapshot: m.displayNameSnapshot })).replace(/^@/, ''),
+        username: memberProfiles[m.uid]?.username ?? null,
         phone: null,
       }));
-  }, [convo?.type, members, me, reactorNames, memberProfiles]);
+  }, [convo?.type, members, me, reactorNames, memberProfiles, nameFor]);
 
   const activeMention = useMemo(
     () => (convo?.type === 'group' && !editing ? detectMentionQuery(draft, selection.end) : null),
@@ -441,9 +464,11 @@ export default function Conversation({ route, navigation }: any) {
     listRef.current?.scrollToIndex?.({ index: total - 1 - idx, animated: true, viewPosition: 0.5 });
   }, [visibleMsgs]);
 
-  // Re-attempt a stuck/failed local send: poke the sync engine to flush the
-  // outbox (it re-claims due items).
-  const retrySend = useCallback(() => { kickSync('manual'); }, []);
+  // Reset the failed job before waking sync, retaining its original local id.
+  const retrySend = useCallback((message: Message) => {
+    if (useLocal) void retryQueuedMessage(message.id);
+    else kickSync('manual');
+  }, [useLocal]);
 
   const startReply = useCallback((m: Message) => {
     if (m.deletedForEveryone) return;
@@ -451,7 +476,9 @@ export default function Conversation({ route, navigation }: any) {
     setReplyTo({
       messageId:         m.id,
       senderUid:         m.senderUid,
-      senderDisplayName: m.senderDisplayName ?? m.senderUid.slice(0, 6),
+      // Store the RESOLVED name (never a uid fragment); readers re-resolve
+      // from senderUid anyway, this is only the offline/legacy fallback.
+      senderDisplayName: displayNameFromCache(m.senderUid, { snapshot: m.senderDisplayName, fallback: '' }),
       preview:           buildPreview(m.text ?? ''),
       type:              'text',
       createdAt:         m.createdAt,
@@ -495,7 +522,33 @@ export default function Conversation({ route, navigation }: any) {
 
   // Phase 23 — attachment sheet + image picking.
   const [attachOpen, setAttachOpen] = useState(false);
-  const [emojiOpen, setEmojiOpen] = useState(false);
+  // Emoji / sticker panel shown in place of the keyboard; sized like the last
+  // keyboard so toggling between them doesn't make the conversation jump.
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [pollOpen, setPollOpen] = useState(false);
+  const [panelHeight, setPanelHeight] = useState(290);
+  const inputRef = useRef<TextInput>(null);
+  useEffect(() => {
+    const sub = Keyboard.addListener('keyboardDidShow', e => {
+      const h = Math.round(e.endCoordinates.height - insets.bottom);
+      if (h > 180) setPanelHeight(h);
+    });
+    return () => sub.remove();
+  }, [insets.bottom]);
+  const togglePanel = useCallback(() => {
+    setPanelOpen(open => {
+      if (open) { requestAnimationFrame(() => inputRef.current?.focus()); return false; }
+      Keyboard.dismiss();
+      return true;
+    });
+  }, []);
+  const insertEmoji = useCallback((emoji: string) => {
+    const r = insertAtSelection(draftRef.current, selectionRef.current, emoji);
+    draftRef.current = r.draft;
+    selectionRef.current = { start: r.caret, end: r.caret };
+    setDraft(r.draft);
+    setSelection(selectionRef.current);
+  }, []);
 
   async function handleAsset(res: ImagePicker.ImagePickerResult) {
     if (res.canceled || !res.assets?.[0]) return;
@@ -522,6 +575,8 @@ export default function Conversation({ route, navigation }: any) {
       if (!perm.granted) { Alert.alert(t('media.photosPermissionTitle'), t('media.photosPermissionMessage')); return; }
       const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.8 });
       await handleAsset(res);
+    } else if (key === 'poll') {
+      setPollOpen(true);
     } else if (key === 'camera') {
       const perm = await ImagePicker.requestCameraPermissionsAsync();
       if (!perm.granted) { Alert.alert(t('media.cameraPermissionTitle'), t('media.cameraPermissionMessage')); return; }
@@ -705,6 +760,39 @@ export default function Conversation({ route, navigation }: any) {
     }),
   ).current;
 
+  // Stickers and polls: same local-first outbox (and the same server send
+  // gates) as text; the legacy path calls the callable directly.
+  async function sendRich(rich: { kind: 'sticker'; sticker: PickedSticker } | { kind: 'poll'; poll: PollDraft }) {
+    if (gate.kind !== 'allowed') return;
+    setErr(null);
+    try {
+      if (useLocal) {
+        await queueSendMessage({
+          conversationId: id, senderUid: me, text: '',
+          ...(rich.kind === 'sticker' ? { kind: 'sticker', sticker: rich.sticker } : { kind: 'poll', poll: rich.poll }),
+          replyTo: rich.kind === 'sticker' && replyTo ? {
+            messageId: replyTo.messageId, senderUid: replyTo.senderUid, senderDisplayName: replyTo.senderDisplayName,
+            preview: replyTo.preview, type: replyTo.type,
+          } : null,
+        });
+        local.refresh();
+      } else {
+        await sendRichMessage(id, rich.kind === 'sticker'
+          ? { kind: 'sticker', sticker: { packId: rich.sticker.packId, stickerId: rich.sticker.stickerId } }
+          : { kind: 'poll', poll: rich.poll });
+      }
+      if (rich.kind === 'sticker') setReplyTo(null);
+    } catch (e: any) {
+      const code = e?.message ?? 'send-failed';
+      if (code === 'blocked-by-recipient') setErr(t('block.cannotSendBlockedBy'));
+      else if (code === 'recipient-blocked') setErr(t('block.cannotSendBlocked'));
+      else setErr(code);
+    }
+  }
+  const sendSticker = useCallback((st: PickedSticker) => { void sendRich({ kind: 'sticker', sticker: st }); },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [useLocal, id, me, replyTo, gate.kind]);
+
   async function send() {
     const text = draft.trim();
     if (!text || busy) return;
@@ -724,7 +812,8 @@ export default function Conversation({ route, navigation }: any) {
         // Local-first: write an optimistic local message + idempotent outbox
         // item; the sync engine delivers it (online or on reconnect) and
         // reconciles to the server id without duplicating on retry.
-        await queueSendMessage({
+        const sendStartedAt = perfNow();
+        const queued = await queueSendMessage({
           conversationId: id,
           senderUid: me,
           text,
@@ -737,6 +826,8 @@ export default function Conversation({ route, navigation }: any) {
           } : null,
           mentions: mentions.length ? mentions : null,
         });
+        // Timing (test builds): send tap → own message rendered.
+        perfBegin('send_to_visible', { id: queued.local_id }, sendStartedAt);
         local.refresh();
         clearComposer();
       } else if (isOffline) {
@@ -766,10 +857,10 @@ export default function Conversation({ route, navigation }: any) {
     return formatPresenceSubtitle(presence, {
       isGroup,
       t,
-      nameFor: (uid) => reactorNames[uid]?.name ?? memberProfiles[uid]?.displayName ?? uid.slice(0, 6),
+      nameFor: (uid) => reactorNames[uid]?.name ?? nameFor(uid),
       groupFallback,
     }) || null;
-  }, [presence, isGroup, convo?.memberCount, convo?.status, reactorNames, memberProfiles, t]);
+  }, [presence, isGroup, convo?.memberCount, convo?.status, reactorNames, nameFor, t]);
 
   const queued = queuedFor(id);
 
@@ -801,6 +892,17 @@ export default function Conversation({ route, navigation }: any) {
   // Inverted list: newest is at the top of the data array (index 0) and the
   // bottom of the screen (scroll offset 0).
   const invData = useMemo(() => data.slice().reverse(), [data]);
+
+  // Timing (test builds, src/lib/perf.ts): the same screen-level points as the
+  // baseline build — open → first rows, and every render reports its ids so
+  // tap/send/older spans end when their message is in the rendered list.
+  const renderedRef = useRef<string[]>([]);
+  useEffect(() => { perfBegin('conversation_open'); }, [id]);
+  useEffect(() => {
+    const ids = invData.map((m: any) => m.id as string);
+    renderedRef.current = ids;
+    perfObserve(ids);
+  }, [invData]);
   useEffect(() => { dataLenRef.current = data.length; }, [data]);
 
   const onListScroll = useCallback((e: any) => {
@@ -811,9 +913,35 @@ export default function Conversation({ route, navigation }: any) {
   }, []);
 
   // Pagination: onEndReached fires near the visual TOP in an inverted list.
+  // Depends on the STABLE loadOlder (not the whole `local` object), so the
+  // memoised list body isn't rebuilt on every render.
+  const loadOlder = local.loadOlder;
   const onReachOlder = useCallback(() => {
-    if (useLocal) void local.loadOlder();
-  }, [useLocal, local]);
+    if (!useLocal) return;
+    // Timing (test builds): request → older messages rendered.
+    const rendered = renderedRef.current;
+    perfBegin('older_to_visible', { minCount: rendered.length + 1, lastNot: rendered[rendered.length - 1] });
+    loadOlder();
+  }, [useLocal, loadOlder]);
+
+  // Notification deep link: once the target message is on screen, scroll to it
+  // and briefly highlight it. Runs once per target.
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const focusedRef = useRef<string | null>(null);
+  useEffect(() => {
+    const f = local.focus;
+    if (!f || f.state !== 'ready' || focusedRef.current === f.messageId) return;
+    const idx = invData.findIndex((m: any) => m.id === f.messageId);
+    if (idx < 0) return;
+    focusedRef.current = f.messageId;
+    setHighlightId(f.messageId);
+    requestAnimationFrame(() => {
+      if (idx === 0) listRef.current?.scrollToOffset?.({ offset: 0, animated: true });
+      else listRef.current?.scrollToIndex?.({ index: idx, animated: true, viewPosition: 0.5 });
+    });
+    const h = setTimeout(() => setHighlightId(null), 2500);
+    return () => clearTimeout(h);
+  }, [local.focus, invData]);
 
   const scrollToBottom = useCallback(() => {
     // One reliable jump — offset 0 is the latest message in an inverted list.
@@ -918,12 +1046,12 @@ export default function Conversation({ route, navigation }: any) {
             );
           }
           const mine = item.senderUid === me || (item as any).senderId === me;
-          // Surface real send state for my own not-yet-synced TEXT messages so
+          // Surface real send state for my own not-yet-synced text/sticker/poll messages so
           // they show "Sending/Queued/Failed" instead of a misleading "Seen by
           // 0" — and so the un-pushed message has no server-info menu (which
           // would 404 with message-not-found). Media keeps its own upload UI.
           const sendState: 'queued' | 'syncing' | 'failed' | undefined =
-            mine && !item.deletedForEveryone && (item.type ?? 'text') === 'text'
+            mine && !item.deletedForEveryone && ['text', 'sticker', 'poll'].includes(item.type ?? 'text')
               ? (item.status === 'failed' ? 'failed'
                 : item.status === 'sending' ? (isOffline ? 'queued' : 'syncing')
                 : undefined)
@@ -972,19 +1100,20 @@ export default function Conversation({ route, navigation }: any) {
             />
             </SwipeToReply>
           );
-          if (!showDate) return bubble;
+          const cell = item.id === highlightId ? <View style={s.focusHighlight}>{bubble}</View> : bubble;
+          if (!showDate) return cell;
           return (
             <>
               <View style={s.dateSep}>
                 <View style={s.datePill}><Text style={s.datePillText}>{daySeparatorLabel(ts, t as any)}</Text></View>
               </View>
-              {bubble}
+              {cell}
             </>
           );
         }}
       />
     );
-  }, [invData, visibleMsgs, queuedItems, me, isGroup, id, myRoleIsAdmin, starred, convo?.pinnedMessage, convo?.memberCount, reactorNames, useLocal, startReply, startEdit, startForward, jumpTo, openInfo, openImage, retryMedia, onPlayedVoice, onSendViaSms, onAvatarPress, onListScroll, onReachOlder, t, isOffline, retrySend]);
+  }, [invData, visibleMsgs, queuedItems, me, isGroup, id, myRoleIsAdmin, starred, convo?.pinnedMessage, convo?.memberCount, reactorNames, useLocal, startReply, startEdit, startForward, jumpTo, openInfo, openImage, retryMedia, onPlayedVoice, onSendViaSms, onAvatarPress, onListScroll, onReachOlder, t, isOffline, retrySend, highlightId]);
 
   return (
     <KeyboardAvoidingView behavior="padding" style={s.root}>
@@ -1087,7 +1216,9 @@ export default function Conversation({ route, navigation }: any) {
       ) : null}
 
       {deliveredChip > 0 ? <SyncSuccessChip count={deliveredChip} /> : null}
-      {isOffline ? <OfflineNotice /> : null}
+      {useLocal
+        ? <SyncStatusBanner focus={local.focus} live={isOffline ? 'offline' : local.live} onRetry={local.retryFocus} />
+        : (isOffline ? <OfflineNotice /> : null)}
 
       {err ? <ErrorState compact title="Couldn't send" description={err} /> : null}
 
@@ -1162,7 +1293,7 @@ export default function Conversation({ route, navigation }: any) {
           ) : replyTo ? (
             <View style={s.composerPreview}>
               <View style={{ flex: 1 }}>
-                <Text style={s.composerPreviewTitle}>{t('messageActions.replyingTo', { name: replyTo.senderDisplayName })}</Text>
+                <Text style={s.composerPreviewTitle}>{t('messageActions.replyingTo', { name: nameFor(replyTo.senderUid, { snapshot: replyTo.senderDisplayName, selfAsYou: true }) })}</Text>
                 <Text style={s.composerPreviewBody} numberOfLines={1}>{replyTo.preview}</Text>
               </View>
               <Pressable
@@ -1174,7 +1305,7 @@ export default function Conversation({ route, navigation }: any) {
               </Pressable>
             </View>
           ) : null}
-          <View style={[s.composer, { marginBottom: insets.bottom + 10 }]}>
+          <View style={[s.composer, { marginBottom: panelOpen ? 8 : insets.bottom + 10 }]}>
             {recorder.mode === 'locked' ? (
               <LockedVoiceRecorderBar
                 elapsedMs={recorder.elapsedMs}
@@ -1205,14 +1336,16 @@ export default function Conversation({ route, navigation }: any) {
                         {!editing ? (
                           <Pressable
                             style={s.inlineIconLead}
-                            onPress={() => setEmojiOpen(true)}
+                            onPress={togglePanel}
                             accessibilityRole="button"
-                            accessibilityLabel={t('convo.emojiTitle')}
+                            accessibilityLabel={panelOpen ? t('composer.keyboard') : t('composer.emojiAndStickers')}
                           >
-                            <Ionicons name="happy-outline" size={24} color={colors.text.muted} />
+                            <Ionicons name={panelOpen ? 'keypad-outline' : 'happy-outline'} size={24} color={colors.text.muted} />
                           </Pressable>
                         ) : null}
                         <TextInput
+                          ref={inputRef}
+                          onFocus={() => setPanelOpen(false)}
                           onChangeText={setDraft}
                           onSelectionChange={e => setSelection(e.nativeEvent.selection)}
                           placeholder={editing ? t('messageActions.editingMessage') : isOffline ? 'Type · saved as draft' : t('convo.composerPlaceholder')}
@@ -1286,6 +1419,15 @@ export default function Conversation({ route, navigation }: any) {
               </>
             )}
           </View>
+          {panelOpen && me ? (
+            <ComposerPanel
+              uid={me}
+              height={panelHeight}
+              bottomInset={insets.bottom}
+              onEmoji={insertEmoji}
+              onSticker={sendSticker}
+            />
+          ) : null}
         </View>
       )}
 
@@ -1295,10 +1437,10 @@ export default function Conversation({ route, navigation }: any) {
         onSelect={onAttachSelect}
       />
 
-      <EmojiPicker3D
-        visible={emojiOpen}
-        onClose={() => setEmojiOpen(false)}
-        onSelect={e => setDraft(d => d + e.char)}
+      <CreatePollSheet
+        visible={pollOpen}
+        onClose={() => setPollOpen(false)}
+        onCreate={poll => { setPollOpen(false); void sendRich({ kind: 'poll', poll }); }}
       />
 
       <MemberInfoSheet
@@ -1344,6 +1486,8 @@ function buildStyles(colors: any, rtl: boolean) {
     subtitle: { fontSize: 12, color: colors.action.primary, marginTop: 1, textAlign: rtl ? 'right' : 'left' },
     listHeader: { alignItems: 'center', gap: 10, paddingTop: 6, paddingBottom: 8 },
     dateSep:    { alignItems: 'center', marginVertical: 6 },
+    // Notification deep-link target, highlighted briefly after the jump.
+    focusHighlight: { backgroundColor: 'rgba(31,123,168,0.16)', borderRadius: 12 },
     datePill:   { backgroundColor: colors.background.surface, paddingHorizontal: 14, paddingVertical: 5, borderRadius: 999, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 3, shadowOffset: { width: 0, height: 1 }, elevation: 1 },
     datePillText: { fontSize: 12, fontWeight: '700', color: colors.text.muted },
     e2eBanner:  { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FBEFD0', paddingHorizontal: 14, paddingVertical: 9, borderRadius: 14, maxWidth: '88%' },

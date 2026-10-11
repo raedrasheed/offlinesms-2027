@@ -6,23 +6,12 @@
 
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
-import { decideReactionForRecipient, buildReactionNotification, type ChatType, type NotifSettings } from '../notifications/notifyLogic';
+import { decideReactionForRecipient, buildReactionNotification, notifLang, type ChatType, type NotifSettings } from '../notifications/notifyLogic';
+import { publicNameFrom } from '../lib/displayName';
 import { sendPushToUser } from '../notifications/send';
 
-// Accept any genuine emoji (the client offers a full picker) while still
-// rejecting arbitrary text/abuse: the value must contain a pictographic glyph,
-// carry no letters/digits, and stay short enough to be a single emoji —
-// including skin-tone modifiers, variation selectors, and ZWJ sequences
-// (e.g. 🏳️‍🌈).
-const PICTOGRAPHIC = /\p{Extended_Pictographic}/u;
-const HAS_ALNUM = /[\p{L}\p{N}]/u;
-export function isAllowedReactionEmoji(value: unknown): value is string {
-  if (typeof value !== 'string') return false;
-  const v = value.trim();
-  if (v.length === 0 || v.length > 16) return false; // 16 UTF-16 units covers ZWJ sequences
-  if (HAS_ALNUM.test(v)) return false;
-  return PICTOGRAPHIC.test(v);
-}
+import { isAllowedReactionEmoji } from './reactionEmoji';
+export { isAllowedReactionEmoji } from './reactionEmoji';
 
 export const reactToMessage = onCall(async (request) => {
   const uid = request.auth?.uid;
@@ -82,10 +71,11 @@ export const reactToMessage = onCall(async (request) => {
   if (!toggledOff && authorUid && authorUid !== uid) {
     void (async () => {
       try {
-        const [authorStateSnap, settingsSnap, actorSnap] = await Promise.all([
+        const [authorStateSnap, settingsSnap, actorSnap, authorSnap] = await Promise.all([
           convoRef.collection('userState').doc(authorUid).get(),
           db.collection('users').doc(authorUid).collection('notificationSettings').doc('current').get(),
           db.collection('users').doc(uid).get(),
+          db.collection('users').doc(authorUid).get(),
         ]);
         const decision = decideReactionForRecipient(
           { uid: authorUid, muted: authorStateSnap.get('muted') === true, settings: (settingsSnap.data() ?? {}) as NotifSettings },
@@ -94,7 +84,9 @@ export const reactToMessage = onCall(async (request) => {
         if (!decision.notify) return;
         const chatType: ChatType = convo.type === 'group' ? 'group' : 'direct';
         const { title, body } = buildReactionNotification({
-          chatType, groupName: convo.name, actorName: (actorSnap.data()?.displayName as string) ?? 'Someone', emoji,
+          // displayName → @username → recipient-language "Someone" (never the uid).
+          chatType, groupName: convo.name, actorName: publicNameFrom(actorSnap.data(), uid), emoji,
+          lang: notifLang(authorSnap.get('preferredLanguage')),
         });
         await sendPushToUser(authorUid, {
           title, body, silent: decision.silent, conversationId,
@@ -109,3 +101,4 @@ export const reactToMessage = onCall(async (request) => {
 
   return { ok: true, emoji, toggledOff };
 });
+

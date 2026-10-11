@@ -12,6 +12,7 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore, FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { writeAuditLog } from '../lib/auditLog';
+import { publicNameFrom } from '../lib/displayName';
 import {
   validateTextStatusInput, validateMediaStatusInput, STATUS_TTL_MS,
 } from './statusLogic';
@@ -36,7 +37,7 @@ export const createStatus = onCall(async (request) => {
   const db = getFirestore();
   const userSnap = await db.collection('users').doc(uid).get();
   if (!userSnap.exists) throw new HttpsError('not-found', 'user-not-found');
-  const profile = (userSnap.data() ?? {}) as { displayName?: string; photoURL?: string | null };
+  const profile = (userSnap.data() ?? {}) as { displayName?: string; username?: string; photoURL?: string | null };
 
   const statusRef = db.collection('statuses').doc();
   const expiresAt = Timestamp.fromMillis(Date.now() + STATUS_TTL_MS);
@@ -47,7 +48,7 @@ export const createStatus = onCall(async (request) => {
 
   await statusRef.set({
     authorId:            uid,
-    authorName:          profile.displayName ?? uid,
+    authorName:          publicNameFrom(profile, uid), // null, never the uid
     authorPhotoURL:      profile.photoURL ?? null,
     type,
     body:                input.body,

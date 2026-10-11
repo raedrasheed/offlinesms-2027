@@ -13,6 +13,10 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { signOut, deleteMyAccount } from '../lib/auth';
+import { getPhoneLinkStatus, type PhoneLinkStatus } from '../lib/phoneLink';
+import { phoneLinkRow } from '../lib/phoneLink.helpers';
+import { getSignInMethods, type SignInMethods } from '../lib/signInMethods';
+import { signInMethodRows, formatOwnPhone } from '../lib/signInMethods.helpers';
 import { auth } from '../lib/firebase';
 import {
   subscribeMe,
@@ -52,6 +56,8 @@ const TIME_FORMATS: { value: TimeFormat; labelKey: string }[] = [
 const CHIP = {
   findFriends:  '#2196F3',
   securityPin:  '#4CAF50',
+  phone:        '#009688',
+  email:        '#5C6BC0',
   permissions:  '#FF9800',
   points:       '#FFB300',
   smsReminders: '#E91E63',
@@ -95,6 +101,23 @@ export default function Settings({ navigation }: any) {
   const [busy, setBusy]                 = useState(false);
   const [profile, setProfile]           = useState<{ displayName?: string; username?: string; phoneNumber?: string | null; photoURL?: string | null }>({});
   const [localStats, setLocalStats]     = useState<{ chats: number; messages: number } | null>(null);
+  // "Phone number" row (see phoneLinkRow): offered to every email account
+  // without a number; reads "Not available yet" while the server has linking
+  // switched off. Refreshed whenever Settings regains focus.
+  const [phoneLink, setPhoneLink]       = useState<PhoneLinkStatus | null>(null);
+  // Sign-in methods (Email + Phone number), as the server's Auth record has them.
+  const [methods, setMethods]           = useState<SignInMethods | null>(null);
+  useEffect(() => {
+    if (!me) return;
+    let active = true;
+    const refresh = () => {
+      getPhoneLinkStatus().then(st => { if (active) setPhoneLink(st); }).catch(() => { if (active) setPhoneLink(null); });
+      getSignInMethods().then(m => { if (active) setMethods(m); }).catch(() => { if (active) setMethods(null); });
+    };
+    refresh();
+    const unsub = navigation.addListener('focus', refresh);
+    return () => { active = false; unsub(); };
+  }, [me, navigation]);
   useEffect(() => {
     if (!me) return;
     return subscribeWallet(me, setWallet);
@@ -166,7 +189,9 @@ export default function Settings({ navigation }: any) {
 
   const s = buildStyles(colors, isRTL);
 
-  const phone = profile.phoneNumber || auth.currentUser?.phoneNumber || '';
+  const phone = methods?.phone || profile.phoneNumber || auth.currentUser?.phoneNumber || '';
+  const phoneRow = phoneLinkRow(phoneLink, { hasEmail: !!auth.currentUser?.email, phone: phoneLink?.available ? null : phone });
+  const [emailRow, phoneMethodRow] = signInMethodRows(methods, auth.currentUser ?? {});
   const handle = profile.username ? `@${profile.username}` : '';
   const headerSub = [phone, handle].filter(Boolean).join(' • ') || t('settings.editProfileHint');
 
@@ -256,6 +281,23 @@ export default function Settings({ navigation }: any) {
       {/* Account & security */}
       <View style={s.card}>
         {navRow({ icon: 'person-add', color: CHIP.findFriends, label: t('settings.findFriends'), onPress: () => navigation.navigate('FindFriends'), first: true })}
+        {/* Sign-in methods: both always shown — "Add" when missing, "Edit" when present. */}
+        {navRow({
+          icon: 'mail', color: CHIP.email, label: t('signInMethods.email'),
+          sub: methods?.emailChange.pendingRecovery ? t('emailChange.settingsRowRecover')
+            : emailRow.value ? `${emailRow.value}  ·  ${t('signInMethods.edit')}` : `${t('signInMethods.notAdded')}  ·  ${t('signInMethods.add')}`,
+          onPress: () => navigation.navigate('ChangeEmail'),
+          hint: t(emailRow.action === 'add' ? 'signInMethods.addEmailHint' : 'signInMethods.editEmailHint'),
+        })}
+        {navRow({
+          icon: 'call', color: CHIP.phone, label: t('phoneLink.settingsRow'),
+          sub: phoneRow === 'recover' ? t('phoneLink.settingsRowRecover')
+            : phoneMethodRow.value ? `${formatOwnPhone(phoneMethodRow.value)}  ·  ${t('signInMethods.edit')}`
+              : phoneRow === 'unavailable' ? `${t('signInMethods.notAdded')}  ·  ${t('phoneLink.settingsRowUnavailable')}`
+                : `${t('signInMethods.notAdded')}  ·  ${t('signInMethods.add')}`,
+          onPress: () => navigation.navigate('LinkPhone', { mode: phoneMethodRow.action === 'edit' ? 'change' : 'add' }),
+          hint: t(phoneMethodRow.action === 'add' ? 'signInMethods.addPhoneHint' : 'signInMethods.editPhoneHint'),
+        })}
         {navRow({ icon: 'key', color: CHIP.securityPin, label: t('settings.securityPin'), onPress: () => navigation.navigate('CreatePin') })}
         {navRow({ icon: 'shield-checkmark', color: CHIP.permissions, label: t('settings.permissions'), onPress: () => navigation.navigate('Permissions') })}
       </View>

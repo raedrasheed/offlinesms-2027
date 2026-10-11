@@ -10,6 +10,7 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { writeAuditLog } from '../lib/auditLog';
+import { cleanNameSnapshot, publicNameFrom } from '../lib/displayName';
 import { assertDirectNotBlocked } from './blockGuard';
 
 const MAX_MEDIA_BYTES = 10 * 1024 * 1024;
@@ -112,12 +113,12 @@ export const createMediaMessage = onCall(async (request) => {
     const isPrivileged = member.role === 'owner' || member.role === 'admin';
     if (convo.status === 'locked' && !isPrivileged) throw new HttpsError('failed-precondition', 'group-locked');
     if (convo.settings?.onlyAdminsCanSend === true && !isPrivileged) throw new HttpsError('permission-denied', 'admins-only');
-    senderDisplayName = member.displayNameSnapshot ?? null;
+    senderDisplayName = cleanNameSnapshot(member.displayNameSnapshot, uid);
     senderPhotoURL = member.photoURLSnapshot ?? null;
     if (!senderDisplayName) {
       const userSnap = await db.collection('users').doc(uid).get();
-      const u = (userSnap.data() ?? {}) as { displayName?: string; photoURL?: string };
-      senderDisplayName = u.displayName ?? uid;
+      const u = (userSnap.data() ?? {}) as { displayName?: string; username?: string; photoURL?: string };
+      senderDisplayName = publicNameFrom(u, uid); // never the uid
       senderPhotoURL = senderPhotoURL ?? u.photoURL ?? null;
     }
   }

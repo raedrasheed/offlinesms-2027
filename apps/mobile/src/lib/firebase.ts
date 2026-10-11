@@ -1,9 +1,6 @@
 // Firebase client (mobile · web + native)
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import {
-  initializeAuth, getAuth,
-  signInWithPhoneNumber, RecaptchaVerifier,
-} from 'firebase/auth';
+import { initializeAuth, getAuth } from 'firebase/auth';
 // In Firebase JS SDK 11+, `getReactNativePersistence` is exposed from the
 // main `firebase/auth` entry via the package's `react-native` conditional
 // export. Metro resolves to the RN bundle automatically. The subpath

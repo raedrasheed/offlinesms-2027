@@ -11,7 +11,7 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { verifySession } from '@/lib/session';
 import { canDo } from '@/lib/adminPermissions';
-import { getAdminScope } from '@/lib/adminScope';
+import { getAdminScope, isPlatformAdmin as isPlatformRole } from '@/lib/adminScope';
 import { listOrganizations } from '@/lib/adminData';
 import {
   getOrgMessagingOverview, getOrgApiKeyStatus, listOrgMessageBatches,
@@ -45,7 +45,7 @@ export default async function OrgMessagingPage({
   }
 
   const scope = getAdminScope(session);
-  const isPlatformAdmin = scope.organizationId === undefined;
+  const isPlatformAdmin = isPlatformRole(session);
   // org_admin: always their own org. Platform admin: ?org= selection.
   const orgId = scope.organizationId ?? searchParams?.org ?? null;
 

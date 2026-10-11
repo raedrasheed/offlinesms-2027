@@ -6,13 +6,17 @@ import {
   sendPasswordResetEmail,
 } from 'firebase/auth';
 import { auth } from '../lib/firebase';
+import { emailOtpErrorCopy } from '../lib/auth';
 import { colors, radius } from '../theme';
 import KeyboardAwareScreen from '../components/KeyboardAwareScreen';
 
 type Mode = 'signIn' | 'signUp';
 
-function copyForFirebaseError(code: string): string {
-  switch (code) {
+function copyForFirebaseError(e: { code?: string; message?: string } | null): string {
+  // A blocking-function refusal arrives as auth/internal-error carrying the
+  // server's reason (guardEmailSignIn / guardEmailSent).
+  if (String(e?.message ?? '').includes('address-replaced')) return emailOtpErrorCopy('address-replaced');
+  switch (e?.code ?? '') {
     case 'auth/invalid-email':            return 'That email address doesn’t look right.';
     case 'auth/user-disabled':            return 'This account has been disabled.';
     case 'auth/user-not-found':           return 'No account with that email. Try creating one.';
@@ -46,7 +50,7 @@ export default function EmailLogin() {
     } catch (e: any) {
       Alert.alert(
         mode === 'signIn' ? 'Could not sign in' : 'Could not create account',
-        copyForFirebaseError(e?.code ?? ''),
+        copyForFirebaseError(e),
       );
     } finally {
       setBusy(false);
@@ -63,7 +67,7 @@ export default function EmailLogin() {
       await sendPasswordResetEmail(auth, email.trim());
       Alert.alert('Check your email', 'We sent a password reset link to ' + email.trim());
     } catch (e: any) {
-      Alert.alert('Could not send reset email', copyForFirebaseError(e?.code ?? ''));
+      Alert.alert('Could not send reset email', copyForFirebaseError(e));
     } finally {
       setBusy(false);
     }

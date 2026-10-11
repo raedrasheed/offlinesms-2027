@@ -3,16 +3,12 @@ package app.offlinesms.business.net
 import com.google.firebase.functions.ktx.functions
 import com.google.firebase.ktx.Firebase
 
-/** A relay job handed to this device to send. */
-data class ClaimedJob(
-    val jobId: String,
-    val phoneE164: String,
-    val body: String,
-    val simSubscriptionId: Int?,
-    val traceId: String,
-)
-
 data class EnrollResult(val deviceId: String, val businessId: String, val customToken: String)
+
+/** The callable transport. Production: Firebase Functions; tests: an in-memory fake server. */
+fun interface Callables {
+    suspend fun call(name: String, data: Map<String, Any?>): Any?
+}
 
 /**
  * Thin wrapper over the relay Cloud Function callables (region us-central1),
@@ -20,7 +16,10 @@ data class EnrollResult(val deviceId: String, val businessId: String, val custom
  * has no identity yet); the rest run with the custom-token session.
  */
 object RelayApi {
-    private val functions get() = Firebase.functions("us-central1")
+    /** Swappable for integration tests only (fake transport, no network). */
+    @Volatile var callables: Callables = Callables { name, data ->
+        Firebase.functions("us-central1").getHttpsCallable(name).call(data).awaitResult().data
+    }
 
     suspend fun enroll(
         pairingCode: String,
@@ -39,7 +38,7 @@ object RelayApi {
             "simInfo" to simInfo,
         )
         @Suppress("UNCHECKED_CAST")
-        val res = functions.getHttpsCallable("enrollRelayDevice").call(data).awaitResult().data as Map<String, Any?>
+        val res = callables.call("enrollRelayDevice", data) as Map<String, Any?>
         return EnrollResult(
             deviceId = res["deviceId"] as String,
             businessId = res["businessId"] as String,
@@ -48,45 +47,48 @@ object RelayApi {
     }
 
     suspend fun claim(deviceId: String, capacity: Int): List<ClaimedJob> {
-        val data = mapOf("deviceId" to deviceId, "capacity" to capacity)
-        @Suppress("UNCHECKED_CAST")
-        val res = functions.getHttpsCallable("claimRelayJobs").call(data).awaitResult().data as Map<String, Any?>
-        val jobs = (res["jobs"] as? List<*>).orEmpty()
-        return jobs.mapNotNull { raw ->
-            val m = raw as? Map<*, *> ?: return@mapNotNull null
-            ClaimedJob(
-                jobId = m["jobId"] as? String ?: return@mapNotNull null,
-                phoneE164 = m["phoneE164"] as? String ?: return@mapNotNull null,
-                body = m["messageBody"] as? String ?: "",
-                simSubscriptionId = (m["assignedSimSubscriptionId"] as? Number)?.toInt(),
-                traceId = m["traceId"] as? String ?: "",
-            )
-        }
+        val data = mapOf(
+            "deviceId" to deviceId, "capacity" to capacity,
+            "clientCaps" to listOf(SEND_AUTH_CAPABILITY, ATTEMPT_CAPABILITY),
+        )
+        return parseClaimedJobs(callables.call("claimRelayJobs", data))
     }
 
+    /** Final server check immediately before the SmsManager hand-off. Throws on
+     *  network/server failure — callers must treat that as "do not send". */
+    suspend fun authorizeSend(deviceId: String, jobId: String): SendAuthorization {
+        val data = mapOf("deviceId" to deviceId, "jobId" to jobId)
+        return parseSendAuthorization(callables.call("authorizeRelaySend", data))
+    }
+
+    /** [attempt] binds the report to one server attempt; null (pre-upgrade
+     *  pending reports) is sent unbound and the server only applies it to a job
+     *  that was never re-leased. */
     suspend fun report(
-        deviceId: String, jobId: String, status: String,
+        deviceId: String, jobId: String, attempt: Int?, status: String,
         reason: String?, androidResultCode: Int?, simSubscriptionId: Int?,
     ) {
         val data = mapOf(
             "deviceId" to deviceId, "jobId" to jobId, "status" to status,
+            "attempt" to attempt,
             "reason" to reason, "androidResultCode" to androidResultCode,
             "simSubscriptionId" to simSubscriptionId,
             "timestamp" to java.time.Instant.now().toString(),
         )
-        functions.getHttpsCallable("reportRelayDelivery").call(data).awaitResult()
+        callables.call("reportRelayDelivery", data)
     }
 
+    /** Liveness + informational telemetry. Never carries send counters: the
+     *  server owns capacity accounting (older builds sent 0/0 here, which reset
+     *  the server's daily counter). */
     suspend fun heartbeat(
         deviceId: String, fcmToken: String, appVersion: String,
-        simInfo: List<Map<String, Any?>>, queueDepth: Int,
-        sentToday: Int, failedToday: Int, lastError: String?,
+        simInfo: List<Map<String, Any?>>, queueDepth: Int, lastError: String?,
     ) {
         val data = mapOf(
             "deviceId" to deviceId, "fcmToken" to fcmToken, "appVersion" to appVersion,
-            "simInfo" to simInfo, "queueDepth" to queueDepth,
-            "sentToday" to sentToday, "failedToday" to failedToday, "lastError" to lastError,
+            "simInfo" to simInfo, "queueDepth" to queueDepth, "lastError" to lastError,
         )
-        functions.getHttpsCallable("relayHeartbeat").call(data).awaitResult()
+        callables.call("relayHeartbeat", data)
     }
 }

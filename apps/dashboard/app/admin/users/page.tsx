@@ -14,6 +14,7 @@ import { phoneCountry } from '@/lib/phoneCountry';
 import { PermissionState } from '@/components/state';
 import StatusBadge from '@/components/admin/StatusBadge';
 import FilterBar from '@/components/admin/FilterBar';
+import { userLabel, userInitial } from '@/lib/userLabel';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -120,12 +121,12 @@ export default async function UsersAdminPage({
                         className="w-8 h-8 rounded-full font-bold text-xs grid place-items-center shrink-0"
                         style={{ background: '#1F7BA822', color: '#5BB6DE' }}
                       >
-                        {(u.displayName ?? u.uid).slice(0, 1).toUpperCase()}
+                        {userInitial(userLabel(u, { uid: u.uid }))}
                       </div>
                       <div className="min-w-0">
-                        <div className="font-semibold truncate" style={{ color: 'var(--c-text)' }}>{u.displayName ?? '—'}</div>
-                        <div className="text-[10px] font-mono truncate" style={{ color: 'var(--c-text-4)' }}>
-                          {u.username ? `@${u.username}` : u.uid.slice(0, 10)}
+                        <div className="font-semibold truncate" style={{ color: 'var(--c-text)' }}>{userLabel(u, { uid: u.uid })}</div>
+                        <div className="text-[10px] font-mono truncate" style={{ color: 'var(--c-text-4)' }} title={u.uid}>
+                          {u.username && u.displayName ? `@${u.username} · ` : ''}{u.uid}
                         </div>
                       </div>
                     </Link>

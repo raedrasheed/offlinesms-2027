@@ -1,0 +1,73 @@
+{
+  "label": "after",
+  "dataset": {
+    "conversations": 200,
+    "messagesPerConversation": 200,
+    "heavyConversationId": "c_heavy",
+    "heavyMessages": 20000
+  },
+  "results": [
+    {
+      "name": "chatList.read+map (200 chats)",
+      "medianMs": 2.16,
+      "p95Ms": 3.5,
+      "statements": 1,
+      "runs": 30
+    },
+    {
+      "name": "conversation.open (100 of 20k)",
+      "medianMs": 2.4,
+      "p95Ms": 3.64,
+      "statements": 1,
+      "runs": 30
+    },
+    {
+      "name": "conversation.open (100 of 200)",
+      "medianMs": 2.2,
+      "p95Ms": 3.96,
+      "statements": 1,
+      "runs": 30
+    },
+    {
+      "name": "newMessage.feederApply+refresh",
+      "medianMs": 2.72,
+      "p95Ms": 3.4,
+      "statements": 4,
+      "runs": 15,
+      "note": "server write → feeder committed → re-read"
+    },
+    {
+      "name": "loadOlder.page10 (window 1000)",
+      "medianMs": 24.5,
+      "p95Ms": 30.51,
+      "statements": 1,
+      "runs": 15
+    },
+    {
+      "name": "send.queueSendMessage",
+      "medianMs": 0.97,
+      "p95Ms": 1.79,
+      "statements": 7,
+      "runs": 30
+    },
+    {
+      "name": "chatList.newMessage feederApply+read",
+      "medianMs": 2.5,
+      "p95Ms": 6.46,
+      "statements": 5,
+      "runs": 15,
+      "note": "server write → feeder committed → list re-read"
+    }
+  ],
+  "plans": {
+    "listMessages": [
+      "SEARCH messages USING INDEX idx_messages_conv_visible_order (conversation_id=? AND deleted_for_me=?)"
+    ],
+    "listConversations": [
+      "SEARCH conversations USING INDEX idx_conversations_archived_last (archived=?)"
+    ]
+  },
+  "extra": {
+    "changedObjectsAfterOneNewMessage": 1
+  }
+}

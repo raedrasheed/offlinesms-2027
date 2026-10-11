@@ -102,9 +102,9 @@ describe('mediaPreviewLabel & attachment options', () => {
     expect(mediaPreviewLabel('image')).toBe('Photo');
     expect(mediaPreviewLabel('voice')).toBe('Voice message');
   });
-  it('enables only Photos and Camera', () => {
+  it('enables Photos, Camera and Poll', () => {
     const enabled = ATTACHMENT_OPTIONS.filter(o => o.enabled).map(o => o.key);
-    expect(enabled).toEqual(['photos', 'camera']);
+    expect(enabled).toEqual(['photos', 'camera', 'poll']);
     expect(ATTACHMENT_OPTIONS).toHaveLength(8);
   });
 });

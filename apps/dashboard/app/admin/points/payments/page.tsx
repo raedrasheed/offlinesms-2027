@@ -10,6 +10,8 @@ import { canDo } from '@/lib/adminPermissions';
 import { listPayments } from '@/lib/adminData';
 import { PermissionState, EmptyState } from '@/components/state';
 import StatusBadge from '@/components/admin/StatusBadge';
+import UserName from '@/components/admin/UserName';
+import { resolveUserNames } from '@/lib/userNames';
 import FilterBar from '@/components/admin/FilterBar';
 import PaymentActions from './PaymentActions';
 
@@ -39,6 +41,7 @@ export default async function PaymentsPage({
   let fetchError: string | null = null;
   try { rows = await listPayments(searchParams?.cursor, statusFilter || undefined); }
   catch (e: any) { fetchError = e?.message ?? 'Failed to load payments.'; }
+  const names = await resolveUserNames(rows.map(r => r.userId));
 
   const nextCursor = rows.length === 50 ? rows[rows.length - 1].id : null;
 
@@ -117,9 +120,7 @@ export default async function PaymentsPage({
                 >
                   <td className="px-4 py-3 font-mono text-[11px]" style={{ color: 'var(--c-text-4)' }}>{p.id.slice(0, 12)}…</td>
                   <td className="px-4 py-3">
-                    <Link href={`/admin/users/${p.userId}` as any} className="font-mono text-[11px] hover:underline" style={{ color: '#5BB6DE' }}>
-                      {p.userId.slice(0, 12)}
-                    </Link>
+                    <UserName uid={p.userId} info={names[p.userId]} color="#5BB6DE" />
                   </td>
                   <td className="px-4 py-3 text-right font-mono text-[11px] font-bold" style={{ color: '#22C55E' }}>{p.totalPoints}</td>
                   <td className="px-4 py-3 text-right font-mono text-[11px]" style={{ color: 'var(--c-text-2)' }}>{(p.amount / 100).toFixed(2)}</td>

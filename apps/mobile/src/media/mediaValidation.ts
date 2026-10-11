@@ -115,7 +115,7 @@ export const ATTACHMENT_OPTIONS: readonly AttachmentOption[] = [
   { key: 'file',     labelKey: 'media.file',    icon: 'document',         enabled: false },
   { key: 'location', labelKey: 'media.location', icon: 'location',        enabled: false },
   { key: 'contact',  labelKey: 'media.contact', icon: 'person',           enabled: false },
-  { key: 'poll',     labelKey: 'media.poll',    icon: 'stats-chart',      enabled: false },
+  { key: 'poll',     labelKey: 'media.poll',    icon: 'stats-chart',      enabled: true },
   { key: 'audio',    labelKey: 'media.audio',   icon: 'musical-notes',    enabled: false },
   { key: 'gif',      labelKey: 'media.gif',     icon: 'film',             enabled: false },
 ];

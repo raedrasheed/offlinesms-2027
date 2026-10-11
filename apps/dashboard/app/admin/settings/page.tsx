@@ -6,12 +6,13 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { verifySession } from '@/lib/session';
 import { canDo } from '@/lib/adminPermissions';
-import { getAdminScope } from '@/lib/adminScope';
+import { isPlatformAdmin as isPlatformRole } from '@/lib/adminScope';
 import { getSystemSettings, listOrganizations } from '@/lib/adminData';
 import { adminDb } from '@/lib/firebase-admin';
 import { PermissionState } from '@/components/state';
 import SettingsForm from './SettingsForm';
-import OtpSenderSetting from './OtpSenderSetting';
+import OtpSenderSetting, { type OtpPolicyState } from './OtpSenderSetting';
+import { readOtpLimits } from '@/lib/otpLimits';
 import { updateSystemSettings } from '@/lib/settingsActions';
 
 export const dynamic = 'force-dynamic';
@@ -31,13 +32,25 @@ export default async function SettingsPage() {
   const canManage = canDo(session.role, 'manage:settings');
   // The default OTP sender is a platform-global setting — only unrestricted
   // (super/legacy/bootstrap) admins may view or change it.
-  const isPlatformAdmin = canManage && getAdminScope(session).organizationId === undefined;
+  const isPlatformAdmin = canManage && isPlatformRole(session);
 
   let otpOrgOptions: { id: string; name: string }[] = [];
   let otpOrgId: string | null = null;
+  let otpPolicy: OtpPolicyState | null = null;
   if (isPlatformAdmin) {
     try { otpOrgOptions = (await listOrganizations()).map(o => ({ id: o.id ?? '', name: o.name })); } catch { /* soft-fail */ }
-    try { otpOrgId = (await adminDb.collection('smsConfig').doc('otp').get()).data()?.businessId ?? null; } catch { /* soft-fail */ }
+    try {
+      const d = (await adminDb.collection('smsConfig').doc('otp').get()).data() ?? null;
+      otpOrgId = d?.businessId ?? null;
+      otpPolicy = {
+        enabled: d?.enabled === true,
+        emergencyStop: !d || d.emergencyStop !== false,
+        signinEnabled: d?.signin?.enabled === true,
+        linkEnabled: d?.link?.enabled === true,
+        policyVersion: typeof d?.policyVersion === 'number' ? d.policyVersion : 0,
+        limits: readOtpLimits(d),
+      };
+    } catch { /* soft-fail: the component shows "unknown" */ }
   }
 
   let settings = await getSystemSettings().catch(() => null);
@@ -69,7 +82,7 @@ export default async function SettingsPage() {
       {canManage ? (
         <>
           <SettingsForm action={updateSystemSettings} initial={settings} />
-          {isPlatformAdmin && <OtpSenderSetting orgOptions={otpOrgOptions} otpOrgId={otpOrgId} />}
+          {isPlatformAdmin && <OtpSenderSetting orgOptions={otpOrgOptions} otpOrgId={otpOrgId} policy={otpPolicy} />}
         </>
       ) : (
         <div className="rounded-2xl p-6 space-y-4" style={{ background: CARD, border: `1px solid ${BORDER}` }}>

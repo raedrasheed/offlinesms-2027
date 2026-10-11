@@ -156,9 +156,13 @@ service cloud.firestore {
       return changedKeys().hasOnly(allowedProfileFields())
           && !changedKeys().hasAny(bannedProfileFields());
     }
+    // phoneNumber / email / phoneVerified are never client-writable, on create
+    // either: they come only from the server's verified OTP/link flows (and
+    // the PII lives in userPrivate). The profile is normally created by the
+    // backend (onUserCreate / verifyEmailOtp) before the client could.
     function safeUserProfileCreate() {
       return changedKeysOnCreate().hasOnly([
-        'displayName', 'phoneNumber', 'email', 'createdAt', 'status'
+        'displayName', 'createdAt', 'status'
       ]);
     }
 
@@ -451,26 +455,100 @@ service cloud.firestore {
       allow read:  if isAdmin() || isOrgAdminOf(resource.data.businessId);
       allow write: if isAdmin();
     }
+    // Relay jobs carry SMS bodies (incl. verification codes) and are created,
+    // leased and settled ONLY by the backend (Admin SDK). No client — not even
+    // an admin-claim client — may create or alter one: that would be an SMS
+    // sent around every budget, policy check and audit trail.
     match /relayJobs/{jobId} {
       allow read:  if isAdmin();
-      allow write: if isAdmin();
+      allow write: if false;
     }
     match /relayPairingCodes/{code} {
       allow read, write: if isAdmin();
     }
+    // SMS/OTP policy (sender org, master/emergency switches, limits, review
+    // access). Changed only through audited dashboard server actions (Admin
+    // SDK) or deploy-time tooling — never directly from a client.
     match /smsConfig/{docId} {
       allow read:  if isAdmin();
-      allow write: if isAdmin();
+      allow write: if false;
     }
     // OTP challenges — written/read only by the OTP callables (Admin SDK).
     match /otpChallenges/{phoneKey} {
-      allow read, write: if isAdmin();
+      allow read:  if isAdmin();
+      allow write: if false;
     }
 
     // Email sign-in OTP challenges — backend-only (hashed codes). Clients can
     // never read or write these; only trusted Cloud Functions (admin) touch them.
+    // A client that could write a challenge could choose the code and sign in
+    // as that address — backend only, for admins too.
     match /emailOtpChallenges/{emailKey} {
-      allow read, write: if isAdmin();
+      allow read:  if isAdmin();
+      allow write: if false;
+    }
+    match /emailOtpLimits/{emailKey} {
+      allow read:  if isAdmin();
+      allow write: if false;
+    }
+
+    // Protected public phone sign-in / sign-up — backend only.
+    //   phoneAuthSessions/{HMAC(token)}  — pre-auth sessions: unreadable by anyone
+    //   phoneAuthChallenges/{id}         — code verifiers: unreadable by anyone
+    //   phoneAuthOps/{id}                — completion state: admin read-only
+    match /phoneAuthSessions/{key} {
+      allow read, write: if false;
+    }
+    match /phoneAuthChallenges/{id} {
+      allow read, write: if false;
+    }
+    match /phoneAuthOps/{id} {
+      allow read:  if isAdmin();
+      allow write: if false;
+    }
+
+    // Phone linking (existing email accounts) — ALL state is server-owned and
+    // written only by the phone-link callables (Admin SDK, bypasses rules).
+    // No client — owner or admin — may create, change or delete it, so
+    // verified-phone state can't be forged from a client.
+    //   phoneLinkChallenges/{uid}  — code verifiers: unreadable by anyone.
+    //   phoneClaims/{phoneHmac}    — number ownership: admin read-only.
+    //   phoneLinkOps/{uid}         — link progress / recovery: admin read-only.
+    //   smsRateLimits/{key}        — abuse counters: admin read-only.
+    // Email add/change for existing accounts — backend only, like phone linking.
+    //   emailChangeChallenges/{uid} — hashed codes: unreadable by anyone.
+    //   emailChangeOps/{uid}        — change progress / recovery: admin read-only.
+    //   emailChangeLimits/{key}     — abuse counters: admin read-only.
+    //   emailChangeAuthWrites/{uid} — ledger of Auth email writes: admin read-only.
+    match /emailChangeChallenges/{uid} {
+      allow read, write: if false;
+    }
+    match /emailChangeOps/{uid} {
+      allow read:  if isAdmin();
+      allow write: if false;
+    }
+    match /emailChangeAuthWrites/{uid} {
+      allow read:  if isAdmin();
+      allow write: if false;
+    }
+    match /emailChangeLimits/{key} {
+      allow read:  if isAdmin();
+      allow write: if false;
+    }
+    match /phoneLinkChallenges/{uid} {
+      allow read, write: if false;
+    }
+    match /phoneClaims/{phoneKey} {
+      allow read:  if isAdmin();
+      allow write: if false;
+    }
+    match /phoneLinkOps/{uid} {
+      allow read:  if isAdmin();
+      allow write: if false;
+    }
+    match /smsRateLimits/{key} {
+      allow read:  if isAdmin();
+      allow write: if false;
     }
 
     // ════════════════════════════════════════════════════════════

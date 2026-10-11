@@ -6,11 +6,12 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { verifySession } from '@/lib/session';
 import { canDo } from '@/lib/adminPermissions';
-import { getAdminScope } from '@/lib/adminScope';
+import { getAdminScope, isPlatformAdmin } from '@/lib/adminScope';
 import { adminDb } from '@/lib/firebase-admin';
 import { listOrganizations } from '@/lib/adminData';
 import { ADMIN_LABELS } from '@/lib/i18n';
 import { PermissionState } from '@/components/state';
+import { effectiveRelayCaps } from '@/lib/otpLimits';
 import RelayAdmin, { type RelayDeviceView, type RelayOrgStatus } from './RelayAdmin';
 
 export const dynamic = 'force-dynamic';
@@ -79,6 +80,7 @@ export default async function RelayAdminPage({ searchParams }: { searchParams?: 
           lastError: (x.lastError as string) ?? null,
           allowedCountryCodes: Array.isArray(x.allowedCountryCodes) ? (x.allowedCountryCodes as string[]) : [],
           countryRoutingEnabled: x.countryRoutingEnabled === true,
+          caps: effectiveRelayCaps(x.caps),
         };
       })
       .sort((a, b) => (b.lastHeartbeatAt ?? 0) - (a.lastHeartbeatAt ?? 0));
@@ -133,6 +135,7 @@ export default async function RelayAdminPage({ searchParams }: { searchParams?: 
         orgStatus={orgStatus}
         businessId={businessId}
         canManage={canManage}
+        isPlatform={isPlatformAdmin(session)}
         fetchError={fetchError}
         queueHealth={queueHealth}
         healthyDevices={healthyDevices}

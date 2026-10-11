@@ -3,6 +3,7 @@ import { View, Text, Pressable, StyleSheet, FlatList, ActivityIndicator, Alert }
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius } from '../theme';
+import { useProfileLabel } from '../lib/userProfiles';
 import { request as requestPermission } from '../lib/permissions';
 import {
   loadDeviceContactsAsE164, matchContactsOnServer, type ContactMatch, type SyncProgress,
@@ -17,6 +18,7 @@ function initials(name: string): string {
 
 export default function FindFriends({ navigation }: any) {
   const insets = useSafeAreaInsets();
+  const label = useProfileLabel();
   const [phase, setPhase]       = useState<'idle' | 'syncing' | 'done'>('idle');
   const [progress, setProgress] = useState<SyncProgress>({ scanned: 0, total: 0, matched: 0 });
   const [matches, setMatches]   = useState<ContactMatch[]>([]);
@@ -92,9 +94,9 @@ export default function FindFriends({ navigation }: any) {
               }
               renderItem={({ item }) => (
                 <View style={s.friendRow}>
-                  <View style={s.av}><Text style={s.avText}>{initials(item.displayName)}</Text></View>
+                  <View style={s.av}><Text style={s.avText}>{initials(label(item))}</Text></View>
                   <View style={{ flex: 1 }}>
-                    <Text style={s.friendName}>{item.displayName || (item.username ? `@${item.username}` : 'OfflineSMS user')}</Text>
+                    <Text style={s.friendName}>{label(item)}</Text>
                   </View>
                   <View style={s.badge}>
                     <View style={s.badgeDot} />

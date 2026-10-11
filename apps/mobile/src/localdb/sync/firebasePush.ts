@@ -10,6 +10,7 @@ import * as FileSystem from 'expo-file-system';
 import { app, auth } from '../../lib/firebase';
 import * as messagesRepo from '../repositories/messagesRepo';
 import { setTransferProgress, clearTransfer } from '../../media/transferProgress';
+import { emitLocalMessagesChanged } from '../messageChanges';
 import type { OutboxRow } from '../types';
 
 export interface PushResult {
@@ -87,12 +88,15 @@ export async function pushOutboxItem(item: OutboxRow): Promise<PushResult> {
     case 'send_message': {
       const res = await call<{ messageId: string; idempotent?: boolean }>('sendTextMessage', {
         conversationId: payload.conversationId,
-        text: payload.text,
+        // Only the new backend may create the text fallback for rich messages.
+        // Omitting it makes an older backend refuse instead of losing the options.
+        ...(payload.kind === 'poll' || payload.kind === 'sticker' ? {} : { text: payload.text }),
         replyTo: payload.replyTo ?? null,
         mentions: payload.mentions ?? null,
         localId: payload.localId,
         idempotencyKey: item.idempotency_key,
         clientCreatedAt: payload.clientCreatedAt ?? null,
+        ...(payload.kind ? { kind: payload.kind, sticker: payload.sticker ?? null, poll: payload.poll ?? null } : {}),
       });
       return { ok: true, remoteId: res?.messageId, idempotent: res?.idempotent };
     }
@@ -176,6 +180,14 @@ export async function pushOutboxItem(item: OutboxRow): Promise<PushResult> {
         throw err;
       }
     }
+    case 'vote_poll':
+      await call('votePoll', { conversationId: payload.conversationId, messageId: payload.messageId, optionIds: payload.optionIds, seq: payload.seq });
+      return { ok: true };
+    case 'close_poll':
+      await call('closePoll', { conversationId: payload.conversationId, messageId: payload.messageId });
+      await messagesRepo.confirmPollClosed(payload.messageId);
+      emitLocalMessagesChanged(payload.conversationId);
+      return { ok: true };
     case 'edit_message':
       await call('editMessage', { conversationId: payload.conversationId, messageId: payload.messageId, text: payload.text });
       return { ok: true };
@@ -219,3 +231,4 @@ export async function pushOutboxItem(item: OutboxRow): Promise<PushResult> {
       throw Object.assign(new Error(`unknown outbox type: ${item.type}`), { code: 'functions/invalid-argument' });
   }
 }
+

@@ -8,6 +8,7 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { writeAuditLog } from '../lib/auditLog';
+import { cleanNameSnapshot, publicNameFrom } from '../lib/displayName';
 import { assertDirectNotBlocked } from './blockGuard';
 
 const MAX_SOURCE = 10;
@@ -127,7 +128,7 @@ export const forwardMessages = onCall(async (request) => {
         throw new HttpsError('permission-denied', `target-admins-only:${tid}`);
       }
       const memberData = m.data() as { displayNameSnapshot?: string; photoURLSnapshot?: string | null };
-      senderDisplayName = memberData.displayNameSnapshot ?? null;
+      senderDisplayName = cleanNameSnapshot(memberData.displayNameSnapshot, uid);
       senderPhotoURL    = memberData.photoURLSnapshot    ?? null;
     }
     targets.push({
@@ -143,13 +144,13 @@ export const forwardMessages = onCall(async (request) => {
   }
 
   // Resolve caller display name / photo once for direct-conversation forwards
-  // that don't have a per-member snapshot.
+  // and group targets whose member snapshot has no usable name. Never the uid.
   let callerDisplayName: string | null = null;
   let callerPhotoURL:    string | null = null;
-  if (targets.some(t => !t.isGroup)) {
+  if (targets.some(t => !t.isGroup || !t.senderDisplayName)) {
     const userSnap = await db.collection('users').doc(uid).get();
-    const u = (userSnap.data() ?? {}) as { displayName?: string; photoURL?: string };
-    callerDisplayName = u.displayName ?? uid;
+    const u = (userSnap.data() ?? {}) as { displayName?: string; username?: string; photoURL?: string };
+    callerDisplayName = publicNameFrom(u, uid);
     callerPhotoURL    = u.photoURL ?? null;
   }
 
@@ -160,7 +161,7 @@ export const forwardMessages = onCall(async (request) => {
   for (const t of targets) {
     for (const src of forwardables) {
       const newRef = t.ref.collection('messages').doc();
-      const senderDisplayName = t.isGroup ? t.senderDisplayName : callerDisplayName;
+      const senderDisplayName = t.isGroup ? (t.senderDisplayName ?? callerDisplayName) : callerDisplayName;
       const senderPhotoURL    = t.isGroup ? t.senderPhotoURL    : callerPhotoURL;
 
       batch.set(newRef, {

@@ -4,8 +4,55 @@
 
 export type ChatType = 'direct' | 'group';
 
+/** Recipient UI language (users/{uid}.preferredLanguage). */
+export type NotifLang = 'en' | 'ar';
+
+/** Normalise a stored preferredLanguage to a supported push language. */
+export function notifLang(value: unknown): NotifLang {
+  return value === 'ar' ? 'ar' : 'en';
+}
+
+const STRINGS: Record<NotifLang, {
+  someone: string; group: string; photo: string; voice: string; sticker: string; message: string;
+  newMessage: string; newGroupMessage: string; openToRead: string;
+  reactedDirect: (emoji: string) => string;
+  reactedGroup: (actor: string, emoji: string) => string;
+}> = {
+  en: {
+    someone: 'Someone',
+    group: 'Group',
+    photo: '📷 Photo',
+    voice: '🎤 Voice message',
+    sticker: 'Sticker',
+    message: 'Message',
+    newMessage: 'New message',
+    newGroupMessage: 'New group message',
+    openToRead: 'Open OfflineSMS to read it',
+    reactedDirect: (e) => `Reacted ${e} to your message`,
+    reactedGroup: (a, e) => `${a} reacted ${e} to your message`,
+  },
+  ar: {
+    someone: 'شخص ما',
+    group: 'مجموعة',
+    photo: '📷 صورة',
+    voice: '🎤 رسالة صوتية',
+    sticker: 'ملصق',
+    message: 'رسالة',
+    newMessage: 'رسالة جديدة',
+    newGroupMessage: 'رسالة جديدة في مجموعة',
+    openToRead: 'افتح OfflineSMS لقراءتها',
+    reactedDirect: (e) => `تفاعل بـ ${e} مع رسالتك`,
+    reactedGroup: (a, e) => `${a} تفاعل بـ ${e} مع رسالتك`,
+  },
+};
+
+/** Translated generic sender label used when a person has no public name. */
+export function someoneLabel(lang: NotifLang = 'en'): string {
+  return STRINGS[lang].someone;
+}
+
 export interface MsgLike {
-  type?: string;          // text | image | voice | ...
+  type?: string;          // text | image | voice | sticker | poll | ...
   text?: string;
 }
 
@@ -22,15 +69,17 @@ export interface NotifSettings {
 const PREVIEW_MAX = 120;
 
 /** Human-readable, content-light preview of a message. */
-export function messagePreview(msg: MsgLike): string {
-  if (msg.type === 'image') return '📷 Photo';
-  if (msg.type === 'voice') return '🎤 Voice message';
-  if ((msg.type ?? 'text') === 'text' && typeof msg.text === 'string') {
+export function messagePreview(msg: MsgLike, lang: NotifLang = 'en'): string {
+  const L = STRINGS[lang];
+  if (msg.type === 'image') return L.photo;
+  if (msg.type === 'voice') return L.voice;
+  if (msg.type === 'sticker') return `${typeof msg.text === 'string' && msg.text ? msg.text + ' ' : ''}${L.sticker}`;
+  if (((msg.type ?? 'text') === 'text' || msg.type === 'poll') && typeof msg.text === 'string') {
     const t = msg.text.replace(/\s+/g, ' ').trim();
-    if (!t) return 'Message';
+    if (!t) return L.message;
     return t.length > PREVIEW_MAX ? t.slice(0, PREVIEW_MAX - 1) + '…' : t;
   }
-  return 'Message';
+  return L.message;
 }
 
 export interface BuiltNotification { title: string; body: string }
@@ -47,18 +96,21 @@ export function buildNotification(args: {
   senderName?: string | null;
   msg: MsgLike;
   showPreview: boolean;
+  /** Recipient language; defaults to English. */
+  lang?: NotifLang;
 }): BuiltNotification {
-  const sender = (args.senderName ?? 'Someone').trim() || 'Someone';
+  const L = STRINGS[args.lang ?? 'en'];
+  const sender = (args.senderName ?? '').trim() || L.someone;
 
   if (!args.showPreview) {
     return args.chatType === 'group'
-      ? { title: 'New group message', body: 'Open OfflineSMS to read it' }
-      : { title: 'New message',       body: 'Open OfflineSMS to read it' };
+      ? { title: L.newGroupMessage, body: L.openToRead }
+      : { title: L.newMessage,      body: L.openToRead };
   }
 
-  const preview = messagePreview(args.msg);
+  const preview = messagePreview(args.msg, args.lang ?? 'en');
   if (args.chatType === 'group') {
-    return { title: (args.groupName ?? 'Group').trim() || 'Group', body: `${sender}: ${preview}` };
+    return { title: (args.groupName ?? '').trim() || L.group, body: `${sender}: ${preview}` };
   }
   return { title: sender, body: preview };
 }
@@ -119,12 +171,15 @@ export function buildReactionNotification(args: {
   groupName?: string | null;
   actorName?: string | null;
   emoji: string;
+  /** Recipient language; defaults to English. */
+  lang?: NotifLang;
 }): BuiltNotification {
-  const actor = (args.actorName ?? 'Someone').trim() || 'Someone';
+  const L = STRINGS[args.lang ?? 'en'];
+  const actor = (args.actorName ?? '').trim() || L.someone;
   if (args.chatType === 'group') {
-    return { title: (args.groupName ?? 'Group').trim() || 'Group', body: `${actor} reacted ${args.emoji} to your message` };
+    return { title: (args.groupName ?? '').trim() || L.group, body: L.reactedGroup(actor, args.emoji) };
   }
-  return { title: actor, body: `Reacted ${args.emoji} to your message` };
+  return { title: actor, body: L.reactedDirect(args.emoji) };
 }
 
 /** FCM messaging error codes that mean a token is dead and should be removed. */

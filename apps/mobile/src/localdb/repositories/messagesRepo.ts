@@ -21,13 +21,38 @@ export async function listMessages(conversationId: string, limit = PAGE, beforeC
   // Sort by canonical time when known, else local time. Newest first; the UI
   // reverses for display. deleted_for_me rows are hidden.
   const rows = await getDb().all<MessageRow>(
-    `SELECT * FROM messages
+    `SELECT messages.*, CASE WHEN messages.type = 'poll' THEN (
+        SELECT status FROM outbox WHERE entity_type = 'message' AND entity_id = messages.remote_id
+          AND conversation_id = messages.conversation_id AND type = 'close_poll'
+        LIMIT 1
+      ) ELSE NULL END AS poll_close_status FROM messages
       WHERE conversation_id = ? AND deleted_for_me = 0 ${cursor}
       ORDER BY COALESCE(remote_created_at, created_at) DESC
       LIMIT ?`,
     params,
   );
   return rows;
+}
+
+/**
+ * How many visible messages are at least as new as the given message — the
+ * window size the conversation screen needs to include it (notification deep
+ * link to a message that is no longer among the newest). Uses the v6 order
+ * index. Returns null when the message isn't stored locally.
+ */
+export async function positionFromNewest(conversationId: string, remoteOrLocalId: string): Promise<number | null> {
+  const row = await getDb().first<{ t: number | null }>(
+    `SELECT COALESCE(remote_created_at, created_at) AS t FROM messages
+      WHERE conversation_id = ? AND (remote_id = ? OR local_id = ?) AND deleted_for_me = 0`,
+    [conversationId, remoteOrLocalId, remoteOrLocalId],
+  );
+  if (!row || row.t == null) return null;
+  const n = await getDb().first<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM messages
+      WHERE conversation_id = ? AND deleted_for_me = 0 AND COALESCE(remote_created_at, created_at) >= ?`,
+    [conversationId, row.t],
+  );
+  return n?.n ?? null;
 }
 
 /** Count stored messages, optionally scoped to a single conversation. Excludes
@@ -143,6 +168,9 @@ export interface NewLocalMessage {
   mentionsJson?: string | null;
   deviceId: string;
   clientSequence: number;
+  /** Sticker / poll messages (text holds the fallback). */
+  type?: 'text' | 'sticker' | 'poll';
+  payloadJson?: string | null;
 }
 
 /** Insert an optimistic outgoing message (status `pending`). Returns the row. */
@@ -156,13 +184,13 @@ export async function insertLocalMessage(m: NewLocalMessage): Promise<MessageRow
        created_at, remote_created_at, updated_at, edited_at, deleted_for_everyone, deleted_for_me, deleted_at,
        reply_to_message_id, reply_to_preview, reply_to_sender_uid, reply_to_sender_name, reply_to_type,
        mentions_json, forwarded, forwarded_from_message_id,
-       status, error_code, error_message, sync_status, client_sequence, server_version)
-     VALUES (?,?,NULL,?,?,?, 'text', ?, ?, ?, NULL, ?, NULL, 0, 0, NULL, ?, ?, ?, ?, ?, ?, 0, NULL, 'pending', NULL, NULL, 'pending', ?, 0)`,
+       status, error_code, error_message, sync_status, client_sequence, server_version, payload_json)
+     VALUES (?,?,NULL,?,?,?, ?, ?, ?, ?, NULL, ?, NULL, 0, 0, NULL, ?, ?, ?, ?, ?, ?, 0, NULL, 'pending', NULL, NULL, 'pending', ?, 0, ?)`,
     [
-      id, id, m.conversationId, m.senderUid, m.senderDisplayName ?? null, m.text, preview,
+      id, id, m.conversationId, m.senderUid, m.senderDisplayName ?? null, m.type ?? 'text', m.text, preview,
       now, now, m.replyToMessageId ?? null, m.replyToPreview ?? null,
       m.replyToSenderUid ?? null, m.replyToSenderName ?? null, m.replyToType ?? null,
-      m.mentionsJson ?? null, m.clientSequence,
+      m.mentionsJson ?? null, m.clientSequence, m.payloadJson ?? null,
     ],
   );
   return (await getByLocalId(id))!;
@@ -305,9 +333,11 @@ export interface RemoteMediaInput {
   uploadStatus?: 'pending' | 'uploading' | 'uploaded' | 'failed' | null;
 }
 
-export async function upsertRemoteMessage(r: {
+export interface RemoteMessageInput {
   remoteId: string; conversationId: string; senderUid: string; senderDisplayName?: string | null;
-  type?: 'text' | 'image' | 'voice'; caption?: string | null;
+  type?: 'text' | 'image' | 'voice' | 'sticker' | 'poll'; caption?: string | null;
+  /** Sticker / poll payload JSON; undefined = leave as is. */
+  payload?: string | null;
   text: string | null; remoteCreatedAt: number | null; editedAt?: number | null;
   deletedForEveryone?: boolean; replyToMessageId?: string | null; replyToPreview?: string | null;
   replyToSenderUid?: string | null; replyToSenderName?: string | null; replyToType?: string | null;
@@ -315,8 +345,41 @@ export async function upsertRemoteMessage(r: {
   forwarded?: boolean; serverVersion?: number; status?: MessageStatus;
   reactions?: Record<string, string[]> | null; counts?: RemoteReceiptCounts;
   media?: RemoteMediaInput | null;
-}): Promise<void> {
-  const existing = await getByRemoteId(r.remoteId);
+  /** The sender's optimistic local id (server field `clientLocalId`). */
+  clientLocalId?: string | null;
+}
+
+/**
+ * Apply a batch of remote messages in ONE transaction (realtime snapshot
+ * changes, catch-up pages, a notification's target message). On a device each
+ * statement is a native round-trip and each autocommit a WAL commit, so batching
+ * is what keeps applying a snapshot off the user's critical path. Deleted-for-
+ * everyone messages are tombstoned in the same transaction.
+ */
+export async function applyRemoteMessages(batch: RemoteMessageInput[]): Promise<void> {
+  if (batch.length === 0) return;
+  await getDb().transaction(async () => {
+    for (const r of batch) {
+      // A deleted-for-everyone message keeps its row (it renders as "deleted"
+      // in place, preserving order) but never keeps its content.
+      if (r.deletedForEveryone) await upsertRemoteMessage({ ...r, text: null, caption: null, media: null, payload: null });
+      else await upsertRemoteMessage(r);
+    }
+  });
+}
+
+export async function upsertRemoteMessage(r: RemoteMessageInput): Promise<void> {
+  let existing = await getByRemoteId(r.remoteId);
+  if (!existing && r.clientLocalId) {
+    // Our own message, delivered by the realtime feed before the send call
+    // returned: adopt the optimistic row instead of inserting a second copy
+    // (it used to show twice until the outbox reconciled it).
+    await getDb().run(
+      `UPDATE messages SET remote_id = ? WHERE local_id = ? AND conversation_id = ? AND remote_id IS NULL`,
+      [r.remoteId, r.clientLocalId, r.conversationId],
+    );
+    existing = await getByRemoteId(r.remoteId);
+  }
   const now = Date.now();
   const reactionsJson = r.reactions != null ? JSON.stringify(r.reactions) : null;
   const mentionsJson = r.mentions != null ? JSON.stringify(r.mentions) : null;
@@ -345,16 +408,21 @@ export async function upsertRemoteMessage(r: {
     ];
     if (r.reactions !== undefined) { sets.push('reactions_json = ?'); params.push(reactionsJson); }
     if (r.mentions !== undefined) { sets.push('mentions_json = ?'); params.push(mentionsJson); }
+    if (r.payload !== undefined) { sets.push('payload_json = ?'); params.push(r.payload); }
     if (r.counts !== undefined) {
       sets.push('delivered_count = ?', 'read_count = ?', 'viewed_count = ?', 'played_count = ?');
       params.push(c.delivered ?? 0, c.read ?? 0, c.viewed ?? 0, c.played ?? 0);
     }
     if (r.media !== undefined) {
+      // Keep a known URL across snapshots that omit it — except when the
+      // message was deleted for everyone: then nothing of the media may stay.
+      const keep = r.deletedForEveryone ? '' : 'COALESCE(?, media_download_url)';
+      const keepThumb = r.deletedForEveryone ? '' : 'COALESCE(?, media_thumb_url)';
       sets.push(
         'media_mime = ?', 'media_size = ?', 'media_width = ?', 'media_height = ?',
         'media_duration_ms = ?', 'media_waveform = ?', 'media_storage_path = ?',
-        'media_download_url = COALESCE(?, media_download_url)', 'media_thumb_path = ?',
-        'media_thumb_url = COALESCE(?, media_thumb_url)', 'media_upload_status = ?',
+        `media_download_url = ${keep || '?'}`, 'media_thumb_path = ?',
+        `media_thumb_url = ${keepThumb || '?'}`, 'media_upload_status = ?',
       );
       params.push(
         md?.mimeType ?? null, md?.sizeBytes ?? null, md?.width ?? null, md?.height ?? null,
@@ -375,9 +443,9 @@ export async function upsertRemoteMessage(r: {
          status, error_code, error_message, sync_status, client_sequence, server_version,
          reactions_json, delivered_count, read_count, viewed_count, played_count,
          media_mime, media_size, media_width, media_height, media_duration_ms, media_waveform,
-         media_storage_path, media_download_url, media_thumb_path, media_thumb_url, media_upload_status)
+         media_storage_path, media_download_url, media_thumb_path, media_thumb_url, media_upload_status, payload_json)
        VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, NULL, 'synced', 0, ?, ?, ?, ?, ?, ?,
-         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         r.remoteId, r.remoteId, r.conversationId, r.senderUid, r.senderDisplayName ?? null,
         type, r.text, (r.text ?? '').slice(0, 200), r.caption ?? null,
@@ -390,6 +458,7 @@ export async function upsertRemoteMessage(r: {
         md?.mimeType ?? null, md?.sizeBytes ?? null, md?.width ?? null, md?.height ?? null,
         md?.durationMs ?? null, waveformJson, md?.storagePath ?? null, md?.downloadURL ?? null,
         md?.thumbnailPath ?? null, md?.thumbnailURL ?? null, md?.uploadStatus ?? null,
+        r.payload ?? null,
       ],
     );
   }
@@ -426,4 +495,27 @@ export async function nextClientSequence(conversationId: string): Promise<number
   const row = await getDb().first<{ m: number }>(
     `SELECT MAX(client_sequence) AS m FROM messages WHERE conversation_id = ?`, [conversationId]);
   return (row?.m ?? 0) + 1;
+}
+
+/** Optimistic local poll vote: rewrite this message's payload (the next
+ *  snapshot from the server replaces it with the authoritative tally). */
+export async function setPayload(remoteOrLocalId: string, payloadJson: string | null): Promise<void> {
+  await getDb().run(
+    `UPDATE messages SET payload_json = ?, updated_at = ? WHERE remote_id = ? OR local_id = ?`,
+    [payloadJson, Date.now(), remoteOrLocalId, remoteOrLocalId],
+  );
+}
+
+export async function getPayload(remoteOrLocalId: string): Promise<string | null> {
+  const r = await getDb().first<{ payload_json: string | null }>(
+    `SELECT payload_json FROM messages WHERE remote_id = ? OR local_id = ?`, [remoteOrLocalId, remoteOrLocalId],
+  );
+  return r?.payload_json ?? null;
+}
+
+
+/** Server-confirmed close; preserve votes that may have arrived during the call. */
+export async function confirmPollClosed(messageId: string): Promise<void> {
+  await getDb().run(`UPDATE messages SET payload_json = json_set(payload_json, '$.closed', json('true')), updated_at = ?
+    WHERE remote_id = ? AND type = 'poll' AND json_valid(payload_json)`, [Date.now(), messageId]);
 }

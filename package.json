@@ -19,6 +19,8 @@
     "test": "vitest run --config vitest.config.ts",
     "test:watch": "vitest --config vitest.config.ts",
     "test:rules": "vitest run --config vitest.rules.config.ts",
+    "test:integration": "firebase emulators:exec --project demo-offlinesms --only firestore,auth \"vitest run --config vitest.integration.config.ts\"",
+    "test:callable": "bash scripts/ci/runCallableTests.sh",
     "validate": "npm run typecheck && npm run lint && npm run i18n:check && npm run test && npm run build",
     "seed": "tsx scripts/seed.ts",
     "seed:review": "tsx scripts/seedReviewDemo.ts",
@@ -31,7 +33,9 @@
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^5.0.1",
+    "@types/sql.js": "^1.4.9",
     "firebase-tools": "^13.21.0",
+    "sql.js": "^1.12.0",
     "tsx": "^4.19.0",
     "typescript": "^5.5.4",
     "vitest": "^1.6.1"

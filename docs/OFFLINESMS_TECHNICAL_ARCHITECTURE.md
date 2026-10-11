@@ -210,7 +210,7 @@ offlinesms-2027/
 │   └── dashboard     Next.js 14 (App Router, static export → Firebase Hosting)
 ├── packages/
 │   └── design-tokens Tokens + Tailwind preset (consumed by both apps)
-├── functions/        Firebase Functions Gen 2 (Node 20, TS)
+├── functions/        Firebase Functions Gen 2 (Node 22, TS)
 ├── scripts/          Seed + admin promotion (admin SDK)
 ├── docs/             Architecture, data model, roadmap, audit
 └── (root)            firebase.json, firestore.rules/indexes, storage.rules, tsconfig.base
@@ -259,7 +259,7 @@ offlinesms-2027/
 ## D. Firebase architecture
 
 - **Project:** `offlinesms-prod` (production). Staging project to be added before Phase 20.
-- **Services in use:** Auth (Phone OTP, Email/Password, Google), Firestore (Native mode), Storage, Functions (Gen 2 on Node 20), Hosting, FCM.
+- **Services in use:** Auth (Phone OTP, Email/Password, Google), Firestore (Native mode), Storage, Functions (Gen 2 on Node 22), Hosting, FCM.
 - **Emulators:** Auth (9099), Firestore (8080), Functions (5001), Storage (9199), Hosting (5000), UI (4000).
 - **Configuration:** `firebase.json` + `.firebaserc` (single project + hosting target).
 - **Secrets:** service-account JSON for admin tasks; payment-provider keys (Phase 10) stored via `firebase functions:secrets`.

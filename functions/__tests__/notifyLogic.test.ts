@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   messagePreview, buildNotification, decideForRecipient, isDeadTokenError, collapseKey,
-  decideReactionForRecipient, buildReactionNotification,
+  decideReactionForRecipient, buildReactionNotification, notifLang, someoneLabel,
 } from '../src/notifications/notifyLogic';
 
 describe('messagePreview', () => {
@@ -98,5 +98,37 @@ describe('buildReactionNotification', () => {
   it('group: group title + "Actor reacted <emoji>"', () => {
     expect(buildReactionNotification({ chatType: 'group', groupName: 'Team', actorName: 'Ahmed', emoji: '❤️' }))
       .toEqual({ title: 'Team', body: 'Ahmed reacted ❤️ to your message' });
+  });
+});
+
+describe('localised notifications (recipient preferredLanguage)', () => {
+  it('notifLang accepts only supported languages', () => {
+    expect(notifLang('ar')).toBe('ar');
+    expect(notifLang('en')).toBe('en');
+    expect(notifLang('fr')).toBe('en');
+    expect(notifLang(undefined)).toBe('en');
+  });
+
+  it('falls back to a translated "Someone" when the sender has no public name', () => {
+    expect(buildNotification({ chatType: 'direct', senderName: null, msg: { type: 'text', text: 'hi' }, showPreview: true }))
+      .toEqual({ title: 'Someone', body: 'hi' });
+    expect(buildNotification({ chatType: 'direct', senderName: '  ', msg: { type: 'text', text: 'hi' }, showPreview: true, lang: 'ar' }))
+      .toEqual({ title: 'شخص ما', body: 'hi' });
+    expect(someoneLabel('ar')).toBe('شخص ما');
+  });
+
+  it('builds Arabic group/media/hidden-preview copy', () => {
+    expect(buildNotification({ chatType: 'group', groupName: null, senderName: 'سارة', msg: { type: 'image' }, showPreview: true, lang: 'ar' }))
+      .toEqual({ title: 'مجموعة', body: 'سارة: 📷 صورة' });
+    expect(buildNotification({ chatType: 'direct', senderName: 'سارة', msg: { type: 'text', text: 'x' }, showPreview: false, lang: 'ar' }))
+      .toEqual({ title: 'رسالة جديدة', body: 'افتح OfflineSMS لقراءتها' });
+    expect(messagePreview({ type: 'voice' }, 'ar')).toBe('🎤 رسالة صوتية');
+  });
+
+  it('builds Arabic reaction copy and a translated actor fallback', () => {
+    expect(buildReactionNotification({ chatType: 'direct', actorName: null, emoji: '👍', lang: 'ar' }))
+      .toEqual({ title: 'شخص ما', body: 'تفاعل بـ 👍 مع رسالتك' });
+    expect(buildReactionNotification({ chatType: 'group', groupName: 'الفريق', actorName: 'سارة', emoji: '❤️', lang: 'ar' }))
+      .toEqual({ title: 'الفريق', body: 'سارة تفاعل بـ ❤️ مع رسالتك' });
   });
 });

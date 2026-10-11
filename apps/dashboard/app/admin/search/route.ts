@@ -10,6 +10,7 @@ import { verifySession } from '@/lib/session';
 import { canDo } from '@/lib/adminPermissions';
 import { maskEmail, maskPhone, safeDate } from '@/lib/redaction';
 import { checkRateLimit, rateLimitResponse, LIMITS } from '@/lib/rateLimit';
+import { nameInfoFrom, userLabel } from '@/lib/userLabel';
 
 export const runtime = 'nodejs';
 
@@ -48,7 +49,7 @@ async function searchUsers(q: string, role: string): Promise<SearchResult[]> {
       const priv = (await snap.ref.collection('userPrivate').doc('profile').get()).data() ?? {};
       results.push({
         type:     'user',
-        title:    (d.displayName as string | null) ?? d.uid,
+        title:    userLabel(nameInfoFrom(d, snap.id), { uid: snap.id }),
         subtitle: maskEmail((priv.email as string | null) ?? null, role as any),
         href:     `/admin/users/${snap.id}`,
         status:   (d.status as string | null) ?? 'active',
@@ -84,8 +85,8 @@ async function searchUsers(q: string, role: string): Promise<SearchResult[]> {
       const priv = (await d.ref.collection('userPrivate').doc('profile').get()).data() ?? {};
       results.push({
         type:     'user',
-        title:    (data.displayName as string | null) ?? `@${data.usernameLower}`,
-        subtitle: `@${data.usernameLower ?? d.id.slice(0, 8)} · ${maskEmail((priv.email as string | null) ?? null, role as any)}`,
+        title:    userLabel(nameInfoFrom(data, d.id), { uid: d.id }),
+        subtitle: `${data.usernameLower ? `@${data.usernameLower}` : d.id} · ${maskEmail((priv.email as string | null) ?? null, role as any)}`,
         href:     `/admin/users/${d.id}`,
         status:   (data.status as string | null) ?? 'active',
       });

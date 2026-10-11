@@ -98,8 +98,8 @@ Expected deployed functions include: `createRelayPairingCode`,
 `enrollRelayDevice`, `claimRelayJobs`, `reportRelayDelivery`, `relayHeartbeat`,
 `revokeRelayDevice`, and `relayReaper`.
 
-> The "Node.js 20 deprecated" and "outdated firebase-functions" lines are
-> warnings, not errors.
+> The "outdated firebase-functions" line is a warning, not an error. The functions
+> run on Node.js 22 (`functions/package.json` engines; `firebase.json` sets no runtime).
 
 ---
 

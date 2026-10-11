@@ -13,6 +13,8 @@ import DetailCard from '@/components/admin/DetailCard';
 import MetadataList from '@/components/admin/MetadataList';
 import StatusBadge from '@/components/admin/StatusBadge';
 import SmsRetryAction from './SmsRetryAction';
+import UserName from '@/components/admin/UserName';
+import { resolveUserNames } from '@/lib/userNames';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -43,6 +45,7 @@ export default async function SmsBatchDetailPage({
   ]);
 
   if (!batch) notFound();
+  const names = await resolveUserNames([batch.senderId, ...recipients.map(r => r.uid)]);
 
   const nextCursor = recipients.length === 100 ? recipients[recipients.length - 1].uid : null;
 
@@ -90,9 +93,7 @@ export default async function SmsBatchDetailPage({
               </Link>
             ) : '—' },
             { label: 'Sender',        value: batch.senderId ? (
-              <Link href={`/admin/users/${batch.senderId}` as any} className="font-mono text-[11px] hover:underline" style={{ color: '#5BB6DE' }}>
-                {batch.senderId.slice(0, 16)}
-              </Link>
+              <UserName uid={batch.senderId} info={names[batch.senderId]} color="#5BB6DE" />
             ) : '—' },
             { label: 'Audience',      value: batch.audience ?? '—' },
             { label: 'Points cost',   value: String(batch.pointsCost) },
@@ -148,9 +149,7 @@ export default async function SmsBatchDetailPage({
                       style={{ borderTop: `1px solid ${BORDER}` }}
                     >
                       <td className="py-2.5 pr-4">
-                        <Link href={`/admin/users/${r.uid}` as any} className="font-mono text-[11px] hover:underline" style={{ color: '#5BB6DE' }}>
-                          {(r.displayName ?? r.uid).slice(0, 12)}
-                        </Link>
+                        <UserName uid={r.uid} info={names[r.uid]} snapshot={r.displayName} color="#5BB6DE" />
                       </td>
                       <td className="py-2.5 pr-4 font-mono text-[11px]" style={{ color: 'var(--c-text-2)' }}>{maskPhone(r.phone)}</td>
                       <td className="py-2.5 pr-4">

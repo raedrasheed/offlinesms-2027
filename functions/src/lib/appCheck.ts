@@ -25,6 +25,17 @@ export function appCheckEnforced(): boolean {
  * today changes no behavior — it only makes the env flag able to enable
  * enforcement later without a code change.
  */
-export function appCheckOptions(): { enforceAppCheck: boolean; consumeAppCheckToken: boolean } {
-  return { enforceAppCheck: appCheckEnforced(), consumeAppCheckToken: false };
+export function appCheckOptions(
+  opts: { replayProtected?: boolean } = {},
+): { enforceAppCheck: boolean; consumeAppCheckToken: boolean } {
+  return {
+    enforceAppCheck: appCheckEnforced(),
+    // Replay protection (limited-use tokens, consumed on verification) only for
+    // callables that opt in AND when APPCHECK_CONSUME=on. Clients must then
+    // send limited-use tokens; enabling it before they do rejects nothing (the
+    // token is just absent) unless enforcement or policy `attestation:
+    // 'required'` is also on.
+    consumeAppCheckToken: !!opts.replayProtected
+      && (process.env.APPCHECK_CONSUME ?? 'off').trim().toLowerCase() === 'on',
+  };
 }

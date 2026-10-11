@@ -17,8 +17,10 @@ import {
   View, Text, Pressable, Alert, StyleSheet, Clipboard, Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useTranslation } from 'react-i18next';
 import { colors } from '../theme';
 import { avatarColor, initials } from '../lib/avatar';
+import { useDisplayNames } from '../lib/userProfiles';
 import { LinkText } from './LinkText';
 import { MentionText } from './MentionText';
 import { ChatActionSheet, SheetAction } from './ChatActionSheet';
@@ -27,6 +29,8 @@ import { EmojiReactionPicker } from './chat/EmojiReactionPicker';
 import { ImageMessageBubble } from './chat/ImageMessageBubble';
 import { VoiceMessageBubble } from './chat/VoiceMessageBubble';
 import { AnimatedEmoji3D } from './chat/AnimatedEmoji3D';
+import { StickerBubble } from './chat/StickerBubble';
+import { PollBubble } from './chat/PollBubble';
 import { matchAnimatedEmoji } from '../lib/emoji3d';
 import {
   Message,
@@ -35,12 +39,16 @@ import {
   starMessage,
   pinMessage,
   deleteMessage,
+  votePoll,
+  closePoll,
 } from '../lib/conversations';
 import {
   queueReactMessage,
   queueDeleteMessage,
   queueStarMessage,
   queuePinMessage,
+  queueVotePoll,
+  queueClosePoll,
 } from '../localdb';
 
 const EDIT_WINDOW_MS = 15 * 60 * 1000;
@@ -84,7 +92,7 @@ export type MessageBubbleProps = {
   onMentionPress?: (uid: string) => void;
   // Offline-first: locally queued outgoing message not yet on the server.
   pending?:   'queued' | 'syncing' | 'failed';
-  onRetry?:   () => void;
+  onRetry?:   (message: Message) => void;
 };
 
 function createdAtMillis(value: any): number {
@@ -103,6 +111,7 @@ function MessageBubbleImpl({
   message: m, context, showSender, onReply, onEditStart, onForward, onJumpTo, onInfo, onSendViaSms,
   onOpenImage, onRetryMedia, onPlayedVoice, onAvatarPress, onMentionPress, pending, onRetry,
 }: MessageBubbleProps) {
+  const { t } = useTranslation();
   const mine    = context.isMyMessage;
   const deleted = m.deletedForEveryone === true;
   // For images without a caption, overlay time + ticks on the photo (WhatsApp
@@ -115,7 +124,16 @@ function MessageBubbleImpl({
   // fallback for when the profile hasn't resolved (e.g. a left member).
   const senderProfile = context.reactorNames?.[m.senderUid];
   const senderPhoto = senderProfile?.photoURL ?? m.senderPhotoURL ?? null;
-  const senderName = m.senderDisplayName ?? senderProfile?.name ?? m.senderUid.slice(0, 2);
+  // Names come from the shared resolver (live profile → snapshot while
+  // loading → "Unknown user"), never from the uid. The reply author is
+  // resolved from replyTo.senderUid so OLD replies that persisted a uid
+  // fragment as senderDisplayName still show the real name.
+  const replyUid = m.replyTo?.senderUid || null;
+  const nameFor = useDisplayNames([m.senderUid, replyUid]);
+  const senderName = nameFor(m.senderUid, { snapshot: [m.senderDisplayName, senderProfile?.name] });
+  const replyAuthor = m.replyTo
+    ? nameFor(replyUid, { snapshot: m.replyTo.senderDisplayName, selfAsYou: true })
+    : '';
   const [sheetOpen, setSheetOpen] = useState(false);
   // Track a photo URL that failed to load so we can fall back to the initials
   // placeholder instead of leaving a blank gap. Keyed by URL so a new/updated
@@ -141,7 +159,10 @@ function MessageBubbleImpl({
   // card frame is keyed off the image type. Reads as "image & video" since a
   // video message would share the same `media` shape if/when it lands.
   const mediaMessage      = !deleted && m.type === 'image';
-  const transparentBubble = !deleted && !!emoji3d;
+  // Stickers float on the wallpaper like the big 3D emoji (no bubble chrome).
+  const stickerMessage    = !deleted && m.type === 'sticker';
+  const transparentBubble = !deleted && (!!emoji3d || stickerMessage);
+  const richKind          = m.type === 'sticker' || m.type === 'poll';
   // Footer tone: white inside the emoji pill (sits on the wallpaper), ink on
   // the gray media card, Telegram green on the sent bubble, default gray on
   // received bubbles. Both bubble colors are light, so text is always dark.
@@ -160,13 +181,18 @@ function MessageBubbleImpl({
         <View style={[s.col, s.colMine]}>
           <Pressable
             style={{ marginBottom: 2 }}
-            onPress={pending === 'failed' ? onRetry : undefined}
+            onPress={pending === 'failed' ? () => onRetry?.(m) : undefined}
             disabled={pending !== 'failed'}
           >
             <View style={[s.bubble, s.sent, pending !== 'failed' && { opacity: 0.92 }]}>
-              <View style={s.bubbleRow}>
-                <Text style={s.bubbleText}>{m.text ?? ''}</Text>
-              </View>
+              {m.type === 'poll' && m.poll ? (
+                <PollBubble poll={m.poll} me={context.myUid} isCreator={false} mine={mine}
+                  interactive={false} onVote={() => {}} onClose={() => {}} />
+              ) : m.type === 'sticker' ? <StickerBubble sticker={m.sticker} fallbackText={m.text} /> : (
+                <View style={s.bubbleRow}>
+                  <Text style={s.bubbleText}>{m.text ?? ''}</Text>
+                </View>
+              )}
               <View style={s.bubbleFooter}>
                 {pending === 'failed' ? (
                   <>
@@ -193,7 +219,7 @@ function MessageBubbleImpl({
     );
   }
 
-  const canEdit = mine && !deleted && (() => {
+  const canEdit = mine && !deleted && (m.type ?? 'text') === 'text' && (() => {
     const ms = createdAtMillis(m.createdAt);
     return ms === 0 || Date.now() - ms <= EDIT_WINDOW_MS;
   })();
@@ -256,6 +282,32 @@ function MessageBubbleImpl({
     Alert.alert('Delete message', undefined, buttons);
   }
 
+  function vote(selection: string[]) {
+    if (context.localFirst) {
+      void queueVotePoll({ conversationId: context.conversationId, messageId: m.id, uid: context.myUid, optionIds: selection })
+        .then(r => {
+          if (!r.ok && r.reason === 'not-initialised') {
+            votePoll(context.conversationId, m.id, selection).catch(e => Alert.alert('Poll', e?.message ?? 'try-again'));
+          }
+        });
+    } else {
+      votePoll(context.conversationId, m.id, selection).catch(e => Alert.alert('Poll', e?.message ?? 'try-again'));
+    }
+  }
+  function confirmClosePoll() {
+    Alert.alert(t('poll.endTitle'), t('poll.endBody'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      { text: t('poll.end'), style: 'destructive', onPress: () => {
+        const action = context.localFirst
+          ? queueClosePoll({ conversationId: context.conversationId, messageId: m.id }).then(result => {
+            if (!result.ok) throw new Error(result.reason);
+          })
+          : closePoll(context.conversationId, m.id);
+        action.catch(e => Alert.alert(t('poll.endTitle'), e?.message ?? 'try-again'));
+      } },
+    ]);
+  }
+
   const close = () => setSheetOpen(false);
   const sheetActions: SheetAction[] = deleted
     ? [
@@ -264,12 +316,14 @@ function MessageBubbleImpl({
       ]
     : [
         { key: 'reply',   label: 'Reply',   icon: 'arrow-undo-outline', onPress: () => { close(); onReply(m); } },
-        { key: 'forward', label: 'Forward', icon: 'arrow-redo-outline', onPress: () => { close(); onForward(m); } },
-        { key: 'copy',    label: 'Copy',    icon: 'copy-outline', onPress: () => { close(); copyText(); } },
+        ...(!richKind ? [
+          { key: 'forward', label: 'Forward', icon: 'arrow-redo-outline', onPress: () => { close(); onForward(m); } } as SheetAction,
+          { key: 'copy',    label: 'Copy',    icon: 'copy-outline', onPress: () => { close(); copyText(); } } as SheetAction,
+        ] : []),
         { key: 'star',    label: context.isStarred ? 'Unstar' : 'Star', icon: context.isStarred ? 'star' : 'star-outline', onPress: () => { close(); toggleStar(); } },
         ...(canPin ? [{ key: 'pin', label: context.isPinned ? 'Unpin' : 'Pin', icon: 'pin-outline', onPress: () => { close(); togglePin(); } } as SheetAction] : []),
         ...(canEdit ? [{ key: 'edit', label: 'Edit', icon: 'create-outline', onPress: () => { close(); onEditStart(m); } } as SheetAction] : []),
-        ...(mine && onSendViaSms ? [{ key: 'sms', label: 'Send via OfflineSMS', icon: 'paper-plane-outline', onPress: () => { close(); onSendViaSms(m); } } as SheetAction] : []),
+        ...(mine && onSendViaSms && !richKind ? [{ key: 'sms', label: 'Send via OfflineSMS', icon: 'paper-plane-outline', onPress: () => { close(); onSendViaSms(m); } } as SheetAction] : []),
         { key: 'info',   label: 'Message info', icon: 'information-circle-outline', highlighted: true, onPress: () => { close(); onInfo(m); } },
         { key: 'delete', label: 'Delete', icon: 'trash-outline', destructive: true, onPress: () => { close(); confirmDelete(); } },
       ];
@@ -324,7 +378,7 @@ function MessageBubbleImpl({
             style={[s.replyPreview, mine && !mediaMessage && s.replyPreviewMine]}
           >
             <Text style={[s.replyName, mine && !mediaMessage && s.replyNameMine]} numberOfLines={1}>
-              {m.replyTo.senderDisplayName || m.replyTo.senderUid.slice(0, 6)}
+              {replyAuthor}
             </Text>
             <Text style={s.replyText} numberOfLines={2}>
               {m.replyTo.preview}
@@ -351,6 +405,23 @@ function MessageBubbleImpl({
             mine={mine}
             onPlayed={() => onPlayedVoice?.(m)}
             onRetry={() => onRetryMedia?.(m)}
+          />
+        ) : stickerMessage ? (
+          <Pressable
+            onLongPress={() => setSheetOpen(true)}
+            delayLongPress={300}
+            accessibilityRole="image"
+          >
+            <StickerBubble sticker={m.sticker} fallbackText={m.text} />
+          </Pressable>
+        ) : !deleted && m.type === 'poll' && m.poll ? (
+          <PollBubble
+            poll={m.poll}
+            me={context.myUid}
+            isCreator={mine}
+            mine={mine}
+            onVote={vote}
+            onClose={confirmClosePoll}
           />
         ) : !deleted && emoji3d ? (
           // Single-emoji message → large animated 3D emoji (WhatsApp style).
@@ -419,6 +490,7 @@ function MessageBubbleImpl({
       />
 
       <EmojiReactionPicker
+        uid={context.myUid}
         visible={emojiPickerOpen}
         onClose={() => setEmojiPickerOpen(false)}
         onSelect={(e) => { setEmojiPickerOpen(false); react(e); }}
@@ -429,10 +501,7 @@ function MessageBubbleImpl({
         onClose={() => setReactionsOpen(false)}
         reactions={m.reactions}
         myUid={context.myUid}
-        resolveName={(uid) =>
-          context.reactorNames?.[uid] ??
-          (uid === context.myUid ? { name: 'You' } : { name: uid.slice(0, 6) })
-        }
+        resolveName={(uid) => context.reactorNames?.[uid] ?? null}
         onRemoveMine={(emoji) => { void react(emoji); }}
       />
     </View>
@@ -569,6 +638,8 @@ function areBubblePropsEqual(prev: MessageBubbleProps, next: MessageBubbleProps)
     if ((a as any).replyTo   !== (b as any).replyTo)   return false;
     if ((a as any).mentions  !== (b as any).mentions)  return false;
     if ((a as any).forwardedFrom !== (b as any).forwardedFrom) return false;
+    if (a.poll    !== b.poll)    return false; // ref compare (live votes)
+    if (a.sticker !== b.sticker) return false;
     if (a.senderPhotoURL    !== b.senderPhotoURL)    return false;
     if (a.senderDisplayName !== b.senderDisplayName) return false;
   }
@@ -591,3 +662,4 @@ function areBubblePropsEqual(prev: MessageBubbleProps, next: MessageBubbleProps)
 }
 
 export const MessageBubble = memo(MessageBubbleImpl, areBubblePropsEqual);
+

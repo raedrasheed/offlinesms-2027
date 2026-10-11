@@ -5,8 +5,9 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   View, Text, TextInput, FlatList, Pressable, StyleSheet, Alert,
 } from 'react-native';
-import { doc, onSnapshot } from 'firebase/firestore';
-import { db, auth } from '../lib/firebase';
+import { useTranslation } from 'react-i18next';
+import { auth } from '../lib/firebase';
+import { useDisplayNames } from '../lib/userProfiles';
 import {
   subscribeConversations,
   forwardMessages,
@@ -26,7 +27,7 @@ export default function ForwardPicker({ route, navigation }: any) {
   };
 
   const [rows, setRows]         = useState<Conversation[] | null>(null);
-  const [peers, setPeers]       = useState<Record<string, string>>({});
+  const { t } = useTranslation();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [search, setSearch]     = useState('');
   const [busy, setBusy]         = useState(false);
@@ -34,22 +35,18 @@ export default function ForwardPicker({ route, navigation }: any) {
 
   useEffect(() => subscribeConversations(setRows), []);
 
-  // Resolve peer names for direct conversations (lightweight).
-  useEffect(() => {
-    if (!me || !rows) return;
-    const unsubs: Array<() => void> = [];
-    for (const c of rows) {
+  // Direct-chat peer names via the shared resolver (one batched read for all
+  // peers, cached across screens) — never a uid.
+  const peerUidOf = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const c of rows ?? []) {
       if (c.type !== 'direct' || !c.participantUids?.length) continue;
       const peerUid = c.participantUids.find(u => u !== me);
-      if (!peerUid || peers[c.id]) continue;
-      unsubs.push(onSnapshot(doc(db, 'users', peerUid), snap => {
-        const u = snap.data() as { displayName?: string; username?: string } | undefined;
-        const name = u?.displayName ?? (u?.username ? `@${u.username}` : peerUid.slice(0, 6));
-        setPeers(prev => ({ ...prev, [c.id]: name }));
-      }));
+      if (peerUid) out[c.id] = peerUid;
     }
-    return () => { for (const u of unsubs) try { u(); } catch {} };
+    return out;
   }, [me, rows]);
+  const nameFor = useDisplayNames(Object.values(peerUidOf));
 
   const enriched: Row[] = useMemo(() => {
     if (!rows) return [];
@@ -58,14 +55,14 @@ export default function ForwardPicker({ route, navigation }: any) {
       .filter(c => c.status !== 'disabled')
       .map(c => ({
         ...c,
-        peerName: c.type === 'group' ? (c.name ?? 'Group') : (peers[c.id] ?? 'Conversation'),
+        peerName: c.type === 'group' ? (c.name || t('names.group')) : nameFor(peerUidOf[c.id]),
       }));
-  }, [rows, peers, sourceConversationId]);
+  }, [rows, peerUidOf, nameFor, t, sourceConversationId]);
 
   const filtered = useMemo(() => {
-    const t = search.trim().toLowerCase();
-    if (!t) return enriched;
-    return enriched.filter(c => c.peerName.toLowerCase().includes(t));
+    const q = search.trim().toLowerCase();
+    if (!q) return enriched;
+    return enriched.filter(c => c.peerName.toLowerCase().includes(q));
   }, [enriched, search]);
 
   function toggle(id: string) {

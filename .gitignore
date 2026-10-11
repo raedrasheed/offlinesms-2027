@@ -5,6 +5,7 @@ node_modules/
 
 # Builds
 dist/
+dist-gallery/
 build/
 .next/
 out/
@@ -17,7 +18,8 @@ functions/lib/
 .env
 .env.local
 .env*.local
-eas.env
+# Per-project Cloud Functions env (functions/.env.<project-id>) can hold API keys.
+functions/.env.*
 
 # Firebase
 .firebase/
@@ -52,4 +54,17 @@ keystore.properties
 # Firebase app config (FCM) — contains keys, keep out of git
 google-services.json
 GoogleService-Info.plist
+apps/mobile-relay/sendgate-jvm-test/build/
+apps/mobile-relay/sendgate-jvm-test/.gradle/
+apps/mobile-relay/sendgate-jvm-test/.kotlin/
+functions/.secret.local
+# Relay Android build outputs / machine-local SDK path
+apps/mobile-relay/.gradle/
+apps/mobile-relay/.kotlin/
+apps/mobile-relay/build/
+apps/mobile-relay/app/build/
+apps/mobile-relay/local.properties
+
+# Local release configuration and service credentials
+eas.env
 service-account.json
