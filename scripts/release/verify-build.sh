@@ -62,7 +62,11 @@ cp "$APK" "dist/$BASE.apk"
   echo "Version: $VNAME (versionCode $VCODE)"
   echo "Firebase project: $PROD ($([ "$WEB" = --web-config-env ] && echo 'native and JS config' || echo 'native config') checked inside the APK)"
   echo "Commit: $GITHUB_SHA"
-  echo "Run: ${GITHUB_SERVER_URL:-}/${GITHUB_REPOSITORY:-}/actions/runs/${GITHUB_RUN_ID:-} (attempt ${GITHUB_RUN_ATTEMPT:-1})"
+  if [ -n "${GITHUB_RUN_ID:-}" ]; then
+    echo "Run: ${GITHUB_SERVER_URL:-}/${GITHUB_REPOSITORY:-}/actions/runs/$GITHUB_RUN_ID (attempt ${GITHUB_RUN_ATTEMPT:-1})"
+  else
+    echo "Built outside GitHub Actions; checked by scripts/release/verify-local-artifacts.sh against this commit's source"
+  fi
   echo "Signing certificate SHA-256 (APK): $APK_CERT"
   [ -n "$AAB_CERT" ] && echo "Signing certificate SHA-256 (AAB): $AAB_CERT"
   echo "Expected certificate SHA-256: $EXPECTED_CERT_HEX"

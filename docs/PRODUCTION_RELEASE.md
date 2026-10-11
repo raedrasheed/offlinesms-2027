@@ -4,6 +4,11 @@ Owner approval: Raed, 2026-10-11 09:04 UTC, to move to production with every cha
 (user app, Relay, Dashboard). **Order:** Codex reviews this package first; only stages that
 pass review are executed. Verification SMS stays suspended in production until stage 7.
 
+Raed, 2026-10-11 12:16 UTC: the functions move to **Node.js 22 before** the release
+continues (`NODE22_UPGRADE.md`: its own commit, reviewed by Codex, deployed and checked on
+staging first). Raed builds the Android apps on his own computer with his signing files;
+no signing key goes to GitHub (§6, §8).
+
 Project `offlinesms-prod-2027`. Every Firebase command names it with `--project`, because
 `.firebaserc` defaults to it and a typo must not land anywhere else. **Never run a bare
 `firebase deploy` or `--only functions`.** Every function deploy names its functions through
@@ -31,7 +36,7 @@ Project `offlinesms-prod-2027`. Every Firebase command names it with `--project`
 
 | Part | Today in production | After this release |
 |---|---|---|
-| Functions | 20 phone/relay functions at `d3cafc76` (2026-10-08), 65 at older source; 85 in total. Node.js 20 | All 94 at the release commit; 9 are new. Still Node.js 20 (see §11.4) |
+| Functions | 20 phone/relay functions at `d3cafc76` (2026-10-08), 65 at older source; 85 in total. Node.js 20 | All 94 at the release commit; 9 are new. Node.js 22 (§4, §11.4) |
 | Rules | ruleset `0b9413c8…` from `d3cafc76` | `+20` lines: admin-read rules for the email-change records. Nothing else changes |
 | Indexes | 50 composite indexes | Unchanged (`firestore.indexes.json` equals `d3cafc76`) |
 | Dashboard | `dash.offlinesms.com` (DigitalOcean, Next.js server) | Display names, SMS policy switches and limits, Relay caps. The login no longer follows `?next=` to other sites |
@@ -54,7 +59,8 @@ must list only `functions/src/chats/votePoll.ts`.
 PR #30 is stacked on PR #29, which is stacked on PR #28. Main was merged into the PR #30
 branch (`e4b3b72`) with no conflicts, so the release tree is the PR #30 head.
 
-1. **Codex reviews** this document, the PR #30 head, and §12.
+1. **Codex reviews** this document, the PR #30 head, and §12. The Node.js 22 staging checks
+   (`NODE22_UPGRADE.md` §6) are recorded before stage 2.
 2. **DigitalOcean autodeploy.** Before merging, open the Dashboard app on DigitalOcean →
    Settings → the component's Source. If **Autodeploy** is on, turn it off. Otherwise a
    merge to `main` would publish the new Dashboard before stage 3. Turn it back on after
@@ -81,7 +87,7 @@ In Cloud Shell, signed in as the project owner:
 ```sh
 git clone https://github.com/raedrasheed/offlinesms-2027.git release && cd release
 git checkout <final>            # the exact final commit
-npm ci && npm --prefix functions ci
+npm ci                          # installs every workspace, functions included
 mkdir -p ~/release-backup && B=~/release-backup
 ```
 
@@ -98,7 +104,7 @@ mkdir -p ~/release-backup && B=~/release-backup
 2. **Function inventory, names only:**
    `bash scripts/release/function-env-names.sh offlinesms-prod-2027 > $B/functions-before.tsv`.
    It lists each function's runtime and the *names* of its variables and secrets, never
-   their values. Expect 85 rows.
+   their values. Expect 85 rows, all `nodejs20`.
 3. **Settings snapshot:**
    `npx tsx scripts/release/snapshotConfig.ts --project offlinesms-prod-2027 --out $B/config-before.json`.
    It saves `smsConfig/*`, `systemSettings/*`, the relay devices' routing settings, open
@@ -145,6 +151,13 @@ npx firebase deploy --project offlinesms-prod-2027 --only firestore:rules,firest
 next. A deploy that stops on a quota error is re-run with the same command; deploys are
 idempotent.
 
+**Runtime:** every function deploys on Node.js 22 (`functions/package.json` engines;
+`firebase.json` sets no runtime). In production the runtime changes together with the
+code: the source of 65 of today's functions was never recorded, so today's code cannot be
+redeployed alone on Node.js 22. Staging ran this exact commit on Node.js 22 first
+(`NODE22_UPGRADE.md`). Until 2e is done, production runs a mix of Node.js 20 and 22; each
+group works on either.
+
 ```sh
 D() { npx firebase deploy --project offlinesms-prod-2027 --only "$(node scripts/release/deploy-only.mjs "$1")"; }
 ```
@@ -158,10 +171,14 @@ D() { npx firebase deploy --project offlinesms-prod-2027 --only "$(node scripts/
 | 2e | `D email-change` | **Check B** of `EMAIL_CHANGE_VERIFICATION.md` §5: switch off, zero changes |
 
 After 2e:
-`bash scripts/release/function-env-names.sh offlinesms-prod-2027 > $B/functions-after.tsv`
-and `diff $B/functions-before.tsv $B/functions-after.tsv`. Expect 9 new rows and no
-variable or secret name removed from an existing function. The six pepper-bound functions
-must still show `PHONE_HASH_PEPPER:1`.
+```sh
+bash scripts/release/check-runtime.sh offlinesms-prod-2027      # all 94 on nodejs22
+bash scripts/release/function-env-names.sh offlinesms-prod-2027 > $B/functions-after.tsv
+diff <(cut -f1,3,4 $B/functions-before.tsv) <(cut -f1,3,4 $B/functions-after.tsv)
+```
+The `diff` leaves out the runtime column, which changes on every row. Expect 9 new rows
+and no variable or secret name removed from an existing function. The six pepper-bound
+functions must still show `PHONE_HASH_PEPPER:1`.
 
 **Rollback:** see §11.2.
 
@@ -221,18 +238,41 @@ Redeploy). The Dashboard writes only through Firestore, so an older Dashboard ke
 
 ## 6. Stage 4: user app 2.4.0
 
-**Build:** Actions → *Production Android release* → Run workflow on `main`, with
-`commit = <final>` and `target = user-app`. Settings: §13.2.
+**Build (Raed, on his own computer, with his upload key; no key leaves it):**
+1. A clean checkout of `<final>` (`git status` shows nothing), Node.js 22, JDK 21 and the
+   Android SDK with NDK 27.1.12297006.
+2. Production config only:
+   - the production `google-services.json` (it lists `app.offlinesms.mobile`) in both
+     `apps/mobile/` and `apps/mobile/android/app/`;
+   - the production web config exported as the six `EXPO_PUBLIC_FIREBASE_*` variables;
+   - no `apps/mobile/.env*` file other than `.env.example`, and `EXPO_PUBLIC_TEST_FAULTS` and
+     `EXPO_PUBLIC_PERF_LOG` unset. Test builds set these; a store build never does.
+3. Signing: `apps/mobile/android/keystore.properties` pointing at the upload keystore
+   (`RELEASE_STORE_FILE`, `RELEASE_STORE_PASSWORD`, `RELEASE_KEY_ALIAS`,
+   `RELEASE_KEY_PASSWORD`). Without it Gradle falls back to the public debug key, and the
+   check below refuses the build.
+4. From the repository root:
+   ```sh
+   npm --prefix apps/mobile ci
+   cd apps/mobile/android && NODE_ENV=production ./gradlew bundleRelease assembleRelease
+   ```
+   The files are `app/build/outputs/bundle/release/app-release.aab` and
+   `app/build/outputs/apk/release/app-release.apk`.
 
-**What the workflow refuses:**
-- any commit other than the input;
-- any branch other than `main`;
-- a missing setting;
-- a project other than `offlinesms-prod-2027`;
-- an upload key whose certificate is not `MOBILE_UPLOAD_CERT_SHA256`, or that is the
-  repository's test key;
-- an APK or AAB signed by anything else;
-- Firebase values inside the APK that differ from production;
+**Check before anything is uploaded:** Raed puts in the project the AAB, the APK, the
+production `google-services.json` and the upload certificate's SHA-256 (Play Console → App
+integrity → Upload key certificate). None of these is a secret. Claude runs, from a clean
+checkout of `<final>`:
+
+```sh
+scripts/release/verify-local-artifacts.sh user-app app-release.apk app-release.aab google-services.json <upload cert SHA-256>
+```
+
+It runs the same checks as the release workflow (`verify-build.sh`) and refuses:
+- a checkout with local changes;
+- an expected certificate that is the repository's test key;
+- an APK or AAB not signed by exactly the expected certificate;
+- Firebase values inside the APK (native and JS) that differ from production;
 - a package other than `app.offlinesms.mobile`;
 - versions that differ from the source;
 - a debuggable build;
@@ -245,10 +285,13 @@ Redeploy). The Dashboard writes only through Firestore, so an older Dashboard ke
   - the arm64-v8a or x86_64 APKs that bundletool 1.17.2 (pinned SHA-256) builds from the
     AAB failing either check.
 
-**Artifact `offlinesms-production-user-app`:** the AAB, an APK of the same build, and
-`BUILD-INFO.txt`. BUILD-INFO records the package, version, project, commit, run, both
-signatures, the expected fingerprint, the signature schemes, each 16 KB check and the
-SHA-256 of each file. **Codex reviews BUILD-INFO before anything is uploaded.**
+`dist/BUILD-INFO.txt` records the package, version, project, the commit checked against,
+both signatures, the expected fingerprint, the signature schemes, each 16 KB check and the
+SHA-256 of each file. **Codex reviews BUILD-INFO before anything is uploaded**, and the
+file uploaded to Play must have the AAB's SHA-256 from BUILD-INFO.
+
+The GitHub workflow *Production Android release* stays in the repository, unused: it would
+need the signing keys in GitHub.
 
 **Release:**
 1. Play Console → Internal testing → upload the AAB.
@@ -297,17 +340,14 @@ email once, then run the stage-A route check again.
   adb pull <that path> installed-relay.apk
   apksigner verify --print-certs installed-relay.apk | grep 'certificate SHA-256'
   ```
-- Put that fingerprint in `RELAY_RELEASE_CERT_SHA256`.
+- That fingerprint is the expected certificate for the check below. It is not a secret.
 - **The fingerprint and the installed APK cannot sign anything.** Signing needs the
   matching keystore file (`.jks` or `.keystore`), its store password, the key alias and the
-  key password. Only Raed can find them, on the computer the old Relay was built on.
-  - Never upload the keystore to the project, a chat or the repository, and never send its
-    passwords in a message.
-  - From that computer (or Cloud Shell, with the file uploaded there and deleted after),
-    put it straight into GitHub → Settings → Environments → `production` as the
-    `RELAY_RELEASE_*` secrets (§13.2).
-  - The workflow checks the keystore's certificate against `RELAY_RELEASE_CERT_SHA256`
-    before building, so a wrong file stops the build.
+  key password. Raed has them and signs on his own computer; they never leave it (no
+  project upload, no chat, no GitHub).
+- Before building, Raed can confirm the keystore is the right one:
+  `keytool -list -v -keystore <relay keystore> -alias <alias>` must show the same SHA-256
+  as the installed relay.
 - **If that keystore no longer exists**, an update in place is impossible. Re-enrollment is
   a separate decision:
   1. drain;
@@ -317,10 +357,20 @@ email once, then run the stage-A route check again.
   5. pair with a new code;
   6. revoke the old device.
 
-  The repository test key is never used in production; the workflow refuses it.
+  The repository test key is never used in production; the check refuses it.
 
-**Build:** Run workflow with `target = relay`. Artifact `offlinesms-production-relay`
-(APK + BUILD-INFO). Codex reviews it before installation.
+**Build (Raed, on his own computer):** a clean checkout of `<final>`, the production
+`google-services.json` in `apps/mobile-relay/app/`, and `apps/mobile-relay/keystore.properties`
+pointing at the relay keystore (`keystore.properties.example` lists the four entries). Then
+`gradle -p apps/mobile-relay :app:assembleRelease` (Gradle 8.14.3, as CI uses) →
+`apps/mobile-relay/app/build/outputs/apk/release/app-release.apk`. Without
+`keystore.properties`, Gradle signs with the debug key and the check refuses it.
+
+**Check:** Raed puts the APK and the installed relay's SHA-256 in the project. Claude runs
+`scripts/release/verify-local-artifacts.sh relay app-release.apk google-services.json <installed relay SHA-256>`
+from a clean checkout of `<final>`: package `app.offlinesms.business`, version 0.2.1 (3),
+one signer equal to the installed relay's certificate, production Firebase values, not
+debuggable. Codex reviews BUILD-INFO before installation.
 
 **Install, one phone at a time:**
 1. Dashboard → Relay → **Pause** the device. A pause stops new claims; heartbeats don't
@@ -472,12 +522,18 @@ Data stays: no stage migrates or deletes documents.
 
 ### 11.2 Functions
 
-Prefer a forward fix. If a group must go back, redeploy it from a scratch checkout of the
-previous source, with the same `.env` file:
+Prefer a forward fix on Node.js 22. If a group must go back, redeploy it from a scratch
+checkout of the previous source, with the same `.env` file, **on Node.js 22**:
 - `d3cafc76` for the `relay` and `phone` groups (flags unset);
 - the other 65 functions: their exact source was never recorded (Firebase source hash
   `2656c210…` is not a Git commit). The closest known state is `main` before the release
   merges, `366128a`.
+
+Both commits say `"node": "20"` in `functions/package.json`. In the scratch checkout, set it
+to `"22"` before deploying, and check with `check-runtime.sh` afterwards. Node.js 20 can't
+be deployed from 2026-10-30; before then, going back to it would only bring the deadline
+back. That older source has not run on Node.js 22: deploy it to staging first when there
+is time.
 
 - **Do not remove** the nine new functions while email changes can still land. Stop them
   first with §11.3.
@@ -496,17 +552,17 @@ Only then may any of them be removed or rolled back. Rolling back the `email-gua
 while a change is mid-way would reopen the replaced address. The snapshot's
 `emailChangesMidway` and the drain status tell when it is safe.
 
-### 11.4 Node.js 20 deadline
+### 11.4 Node.js runtime
 
 From **2026-10-30**, Cloud Functions no longer lets anyone create or redeploy a function
 on Node.js 20. Functions already deployed are not guaranteed to be switched off on that
-date, but none of them can be updated on Node.js 20 any more: neither this release, nor a
-fix, nor a rollback to older source. This release stays on Node.js 20 so the runtime does
-not change together with the code.
+date, but none of them could be fixed or rolled back on Node.js 20 after it.
 
-The move to Node.js 22 is the next change. It is its own PR: `functions/package.json`
-engines, CI on 22, a staging deploy, then production. It must be in production before
-2026-10-30. After it, rollbacks need a Node.js 22 build of the older source.
+So the release deploys on **Node.js 22** (`NODE22_UPGRADE.md`): its own commit, CI on 22,
+the staging deploy and checks, then stage 2 here. Stage 2 must be done before 2026-10-30.
+
+The runtime table in firebase-tools 13.35.1 lists Node.js 22 as deprecated from
+2027-04-30 and decommissioned on 2027-10-31. Plan the next runtime move well before then.
 
 ---
 
@@ -518,13 +574,15 @@ engines, CI on 22, a staging deploy, then production. It must be in production b
      (`.test`) or run on staging only.
    - The staging Relay shares the production package `app.offlinesms.business`. A phone
      with the test-signed Relay must never hold a production enrollment.
-   - The production workflow refuses this key.
+   - The production checks (`verify-build.sh`, `verify-local-artifacts.sh`) refuse this key.
 2. **Production certificates are not yet confirmed.**
    - The user app's upload key fingerprint comes from Play Console.
-   - The production Relay's fingerprint comes from an installed phone (§8). That proves
-     which key to match, not that the key still exists: signing needs the matching
-     keystore file, its passwords and alias, and nothing yet shows they are kept. If they
-     are lost, re-enrollment is needed.
+   - The production Relay's fingerprint comes from an installed phone (§8). Raed keeps
+     the signing files and signs on his computer; the check compares the signed APK with
+     that fingerprint. If the keystore turns out not to match, re-enrollment is needed.
+   - **Local builds are not attested.** The checks prove what the signed files contain
+     (package, versions, signer, backend, 16 KB), not which commit they were built from.
+     That rests on Raed building from a clean checkout of `<final>`.
 3. **Dashboard rate limiting is in memory** (`apps/dashboard/lib/rateLimit.ts`): per
    process, reset on restart, not shared between instances. It is acceptable only while the
    Dashboard runs as one instance.
@@ -549,58 +607,23 @@ engines, CI on 22, a staging deploy, then production. It must be in production b
 ### 13.1 Claude (from this repository)
 
 - Merges #28 → #29 → #30 after Codex approves §1, and confirms CI on the final commit.
-- Runs the production build workflow once §13.2 is in place, and checks both BUILD-INFO
-  files.
-- Keeps this document and the handoff for Codex current.
+- Runs `verify-local-artifacts.sh` on the files Raed builds (§6, §8) and hands both
+  BUILD-INFO files to Codex.
+- Keeps this document, `NODE22_UPGRADE.md` and the handoff for Codex current.
 - Has no Firebase, DigitalOcean or Play access.
 
-### 13.2 Raed: GitHub settings
+### 13.2 Raed: Android builds on his computer
 
-Settings → Environments → **New environment** `production`. Optionally add yourself as a
-required reviewer and limit it to the `main` branch. Then add these to that environment.
-
-**User app upload key.** Download it from wherever production builds are signed today.
-
-| Kind | Name |
-|---|---|
-| Secret | `MOBILE_UPLOAD_KEYSTORE_BASE64`: `base64 -w0 upload.keystore` |
-| Secret | `MOBILE_UPLOAD_KEYSTORE_PASSWORD` |
-| Secret | `MOBILE_UPLOAD_KEY_ALIAS` |
-| Secret | `MOBILE_UPLOAD_KEY_PASSWORD` |
-| Variable | `MOBILE_UPLOAD_CERT_SHA256`: Play Console → App integrity → Upload key certificate |
-
-If the builds were made with EAS, the keystore comes from
-`npx eas-cli credentials -p android` → production → Keystore → Download.
-
-**Relay key.** The keystore file of the Relay installed on the production phones (`.jks`
-or `.keystore`), from the computer it was built on, with its passwords and alias (§8).
-Set these from that computer; don't upload the file or send its passwords anywhere else.
-
-| Kind | Name |
-|---|---|
-| Secret | `RELAY_RELEASE_KEYSTORE_BASE64` |
-| Secret | `RELAY_RELEASE_KEYSTORE_PASSWORD` |
-| Secret | `RELAY_RELEASE_KEY_ALIAS` |
-| Secret | `RELAY_RELEASE_KEY_PASSWORD` |
-| Variable | `RELAY_RELEASE_CERT_SHA256`: from §8 |
-
-**Firebase**
-
-| Kind | Name |
-|---|---|
-| Secret | `PROD_GOOGLE_SERVICES_JSON`: Firebase console → Project settings → the Android app `app.offlinesms.mobile` → google-services.json. The file must also contain `app.offlinesms.business` |
-| Variables | `PROD_FIREBASE_API_KEY`, `PROD_FIREBASE_AUTH_DOMAIN`, `PROD_FIREBASE_PROJECT_ID`, `PROD_FIREBASE_STORAGE_BUCKET`, `PROD_FIREBASE_APP_ID`, `PROD_FIREBASE_MESSAGING_SENDER_ID`: the production web config. These are the same values as today's `MOBILE_TEST_FIREBASE_*` |
-
-Set secrets from files in Cloud Shell, so nothing is pasted into a chat:
-
-```sh
-gh secret set MOBILE_UPLOAD_KEYSTORE_BASE64 --env production < <(base64 -w0 upload.keystore)
-gh secret set RELAY_RELEASE_KEYSTORE_BASE64 --env production < <(base64 -w0 relay.keystore)
-gh secret set RELAY_RELEASE_KEYSTORE_PASSWORD --env production   # prompts; nothing in history
-```
+- §6: the user app AAB and APK, signed with the upload key; then the files, the
+  production `google-services.json` and the upload certificate's SHA-256 into the project.
+- §8: the Relay APK, signed with the installed relay's key; then the APK and the installed
+  relay's SHA-256 into the project.
+- Keystores and passwords stay on his computer. Nothing needs to be set in GitHub for the
+  release.
 
 ### 13.3 Raed: Cloud Shell
 
+- `NODE22_UPGRADE.md` §1–§3 (staging on Node.js 22), before stage 2;
 - §2 (backups and inventory);
 - §3 (rules and indexes);
 - §4 (functions in groups, with checks A and B);
