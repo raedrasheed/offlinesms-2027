@@ -146,6 +146,17 @@ No variable or secret name may disappear.
 Logs throughout: `npx firebase functions:log --project offlinesms-staging-2027` must show no
 error other than the refusals the checks expect.
 
+**`reapStuckBatches` needs an index.** On staging every run (Node 20 before the deploy, Node 22
+after) failed with `FAILED_PRECONDITION: The query requires an index`: its query
+(`status ==`, `createdAt <=`) needs `smsBatches` (`status`, `createdAt` ascending), and only
+the descending index existed. `firestore.indexes.json` now has it. Deploy it, wait for
+`READY`, then run the job again:
+```sh
+npx firebase deploy --project offlinesms-staging-2027 --only firestore:indexes   # answer No if it offers to delete an index
+gcloud firestore indexes composite list --project offlinesms-staging-2027 --filter="collectionGroup=smsBatches"
+gcloud scheduler jobs run firebase-schedule-reapStuckBatches-us-central1 --project offlinesms-staging-2027 --location us-central1
+```
+
 **3.8 runs only jobs that already run on their schedule.** Running one by hand brings its
 next run forward; it enables nothing. `sweepExpiredMessages` is not deployed, scheduled or
 run by this upgrade.

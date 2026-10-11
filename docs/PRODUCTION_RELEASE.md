@@ -38,19 +38,19 @@ Project `offlinesms-prod-2027`. Every Firebase command names it with `--project`
 |---|---|---|
 | Functions | 20 phone/relay functions at `d3cafc76` (2026-10-08), 65 at older source; 85 in total. Node.js 20 | All 94 at the release commit; 9 are new. Node.js 22 (§4, §11.4) |
 | Rules | ruleset `0b9413c8…` from `d3cafc76` | `+20` lines: admin-read rules for the email-change records. Nothing else changes |
-| Indexes | 50 composite indexes | Unchanged (`firestore.indexes.json` equals `d3cafc76`) |
+| Indexes | 50 composite indexes | 51: one added, `smsBatches` (`status`, `createdAt` ascending), which `reapStuckBatches` needs (§3) |
 | Dashboard | `dash.offlinesms.com` (DigitalOcean, Next.js server) | Display names, SMS policy switches and limits, Relay caps. The login no longer follows `?next=` to other sites |
 | User app | 2.3.18 (versionCode 15) | 2.4.0 (16): phone/email sign-in on one account, add and edit both methods, real names, emoji, stickers, polls, responsiveness and notification fixes |
 | Relay | Older build on the production phones | 0.2.1 (3), same signing key as the installed relay |
 | Verification SMS | Suspended (`enabled:false`, `emergencyStop:true`) | Suspended until stage 7 opens it with small limits |
 | Email change | Not deployed | Deployed switched off; turned on in stage 5 |
 
-The rules and the indexes are unchanged since `925b812`, the commit whose functions ran on
-staging for the phone test. `functions/src` changed in one place only: `votePoll` retries
-its transaction up to 15 times instead of Firestore's default 5. Fifty simultaneous votes
-on one poll had failed with "Transaction lock timeout". Check before stage 1:
-`git diff --stat 925b812 <final> -- functions/src firestore.rules firestore.indexes.json`
-must list only `functions/src/chats/votePoll.ts`.
+The rules are unchanged since `925b812`, the commit whose functions ran on staging for the
+phone test. `functions/src` changed in one place only: `votePoll` retries its transaction up
+to 15 times instead of Firestore's default 5. Fifty simultaneous votes on one poll had
+failed with "Transaction lock timeout". The indexes gained one entry (§3). Check before
+stage 1: `git diff --stat 925b812 <final> -- functions/src firestore.rules firestore.indexes.json`
+must list only `functions/src/chats/votePoll.ts` and `firestore.indexes.json` (14 lines added).
 
 ---
 
@@ -138,10 +138,17 @@ npx firebase deploy --project offlinesms-prod-2027 --only firestore:rules,firest
 
 - Rules: four additive `match` blocks (`emailChangeChallenges` closed;
   `emailChangeOps`, `emailChangeAuthWrites`, `emailChangeLimits` admin read-only).
-- Indexes: the file equals the live set. If the CLI offers to **delete** an index that is
-  not in the file, answer **No**.
-- **Check:** `firebase firestore:indexes` matches `$B/indexes-before.json`; the app still
-  opens chats.
+- Indexes: the file is the live set plus one index, `smsBatches` (`status` ascending,
+  `createdAt` ascending). `reapStuckBatches` queries `status ==` with `createdAt <=` every
+  30 minutes. The live index orders `createdAt` descending, so the query fails with
+  `FAILED_PRECONDITION: The query requires an index` and stuck batches are never settled.
+  Staging logged this on Node 20 and on Node 22 (2026-10-11). The Dashboard's failed-batch
+  count uses the same query shape. If the CLI offers to **delete** an index that is not in
+  the file, answer **No**.
+- **Check:** `firebase firestore:indexes` matches `$B/indexes-before.json` plus that index,
+  and `gcloud firestore indexes composite list --project offlinesms-prod-2027 --filter="collectionGroup=smsBatches"`
+  shows it `READY` (it builds in the background; the rest of the release does not wait on
+  it). The app still opens chats.
 - **Rollback:** `cp $B/firestore.rules.before firestore.rules` in a scratch checkout and
   deploy `--only firestore:rules`.
 

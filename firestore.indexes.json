@@ -277,6 +277,20 @@
       ]
     },
     {
+      "collectionGroup": "smsBatches",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
       "collectionGroup": "wallets",
       "queryScope": "COLLECTION",
       "fields": [
