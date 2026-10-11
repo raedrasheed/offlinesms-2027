@@ -82,10 +82,12 @@ what stage 4 uploads.
 
 ## 2. Before any change: backups and inventory (stage 0)
 
-In Cloud Shell, signed in as the project owner:
+In Cloud Shell, signed in as the project owner. Cloud Shell's default Node is 24; use 22,
+the version CI tests (`nvm use 22` again after a reconnect):
 
 ```sh
-git clone https://github.com/raedrasheed/offlinesms-2027.git release && cd release
+nvm install 22 && nvm use 22 && node --version     # v22.x
+cd ~ && git clone https://github.com/raedrasheed/offlinesms-2027.git release && cd release
 git checkout <final>            # the exact final commit
 npm ci                          # installs every workspace, functions included
 mkdir -p ~/release-backup && B=~/release-backup

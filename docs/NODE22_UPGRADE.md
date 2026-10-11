@@ -25,35 +25,39 @@ suspension stays as it is.
 
 ## 1. Before deploying (Cloud Shell)
 
-Work in the staging checkout that already exists, `~/offlinesms-staging-847ddf0`. Its
-`functions/.env.offlinesms-staging-2027` is the one staging runs with.
+Deploy from a fresh Git clone on Node 22. The existing folder `~/offlinesms-staging-847ddf0`
+is not a Git checkout (no `.git`), so it can't move to the reviewed commit. It is left
+untouched; only its `functions/.env.offlinesms-staging-2027`, the file staging runs with, is
+copied into the new clone.
 
-**1a. Check the folder first, changing nothing:**
+Cloud Shell's default Node is 24. Use Node 22, the version CI tests and the functions run
+on, through Cloud Shell's `nvm`.
+
+**1a. Check, changing nothing:**
 
 ```sh
-cd ~/offlinesms-staging-847ddf0
-git remote get-url origin          # github.com/raedrasheed/offlinesms-2027
-git log -1 --format='%h %s'        # the commit staging was last deployed from
-git status --short                 # expect no output
-ls -l functions/.env.offlinesms-staging-2027   # present; Git ignores it
+ls -l ~/offlinesms-staging-847ddf0/functions/.env.offlinesms-staging-2027   # must exist
+df -h ~ | tail -1                                                          # free space for npm ci
 ```
 
-If `git status` prints anything, or the `.env` file is missing, stop and send the output.
-Nothing is deleted or reset.
+If the `.env` file is missing, stop and send the output.
 
-**1b. Move to the reviewed commit:**
+**1b. Node 22 and a fresh clone of the reviewed commit:**
 
 ```sh
-git fetch origin claude/phone-email-login-display-names-pu9nez
-git checkout --detach <reviewed commit>
-git status --short                 # still no output
+nvm install 22 && nvm use 22 && node --version          # v22.x
+cd ~ && git clone https://github.com/raedrasheed/offlinesms-2027.git offlinesms-node22
+cd ~/offlinesms-node22 && git checkout --detach <reviewed commit>
+cp ~/offlinesms-staging-847ddf0/functions/.env.offlinesms-staging-2027 functions/
+git log -1 --format='%h %s' && git status --short       # the reviewed commit; no other output
 npm ci
 mkdir -p ~/node22 && N=~/node22
 ```
 
-After a Cloud Shell reconnect, `cd` back to the folder and define `N` (and `S` in §2) again.
+`git status` shows nothing: Git ignores the copied `.env` file. After a Cloud Shell
+reconnect, run `nvm use 22`, `cd ~/offlinesms-node22`, and define `N` (and `S` in §2) again.
 
-1. **Environment file.** Keep `functions/.env.offlinesms-staging-2027` exactly as it is
+1. **Environment file.** Keep the copied `functions/.env.offlinesms-staging-2027` exactly as it is
    (`EMAIL_CHANGE_VERIFICATION.md` §2 and `STAGING_PHONE_SMS_TEST.md` §2). The deploy reads
    it; nothing is added or removed.
 2. **Staging stays stopped.** In the staging Firestore, `smsConfig/otp` shows
@@ -146,7 +150,7 @@ before then and plan the next move early.
 
 | Check | Result | Notes |
 |---|---|---|
-| 1a folder state | | commit, `git status` |
+| 1 clone, Node 22, `.env` copied | | commit, `node --version` |
 | 2 runtime: exactly the 94, all on nodejs22 | | |
 | 2 names diff empty | | |
 | 3.1 Auth guards | GO / NO-GO | cold and warm round trips |
