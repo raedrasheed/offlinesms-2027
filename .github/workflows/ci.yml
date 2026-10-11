@@ -361,7 +361,17 @@ jobs:
             git -C "$BASELINE_DIR" apply scripts/test-builds/baseline-instrumentation.patch
             cp apps/mobile/android/app/test-release.keystore "$BASELINE_DIR/apps/mobile/android/app/"
           fi
+          # The updated variant also builds the AAB for the 16 KB page size check.
+          if [ "${{ matrix.variant }}" = updated ]; then export TEST_BUILD_AAB="$RUNNER_TEMP/app-release.aab"; fi
           scripts/test-builds/build.sh ${{ matrix.variant }} dist-apk
+
+      # Same check as the production release (Codex R6-2): ELF LOAD segments,
+      # APK zip alignment, and the AAB's BundleConfig and generated splits.
+      - name: 16 KB page size (APK and AAB)
+        if: matrix.variant == 'updated'
+        env:
+          BT: 36.0.0
+        run: bash scripts/release/check-16kb.sh dist-apk/*.apk "$RUNNER_TEMP/app-release.aab"
 
       - name: Signing certificate (must match between baseline and updated)
         run: |

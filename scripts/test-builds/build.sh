@@ -17,6 +17,8 @@
 # MOBILE_GOOGLE_SERVICES_JSON for the same Firebase project, or nothing for a
 # placeholder (non-functional) build. Signing: android/keystore.properties in
 # the checkout if present (CI writes it from secrets), else the debug key.
+# TEST_BUILD_AAB=<path>: also build the AAB in the same Gradle run and copy it
+# there (CI checks it for 16 KB pages; it is not uploaded).
 set -euo pipefail
 VARIANT=${1:?baseline|updated}; OUT=${2:?out-dir}
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -82,11 +84,12 @@ bash "$REPO/scripts/ci/mobile-google-services.sh" "$SRC"
 cd "$SRC/apps/mobile/android"
 # Gradle does not track env vars: drop the JS bundle so EXPO_PUBLIC_* are re-inlined.
 rm -rf app/build/generated/assets/createBundleReleaseJsAndAssets app/build/generated/res/createBundleReleaseJsAndAssets
-NODE_ENV=production EXPO_PUBLIC_PERF_LOG=1 EXPO_PUBLIC_TEST_FAULTS=1 ./gradlew assembleRelease \
+NODE_ENV=production EXPO_PUBLIC_PERF_LOG=1 EXPO_PUBLIC_TEST_FAULTS=1 ./gradlew assembleRelease ${TEST_BUILD_AAB:+bundleRelease} \
   -Pofflinesms.testApp=true -Pofflinesms.versionCode="$VCODE" -Pofflinesms.versionName="$VNAME" \
   -PreactNativeArchitectures=arm64-v8a,x86_64 --no-daemon --console=plain ${GRADLE_ARGS:-}
 
 NAME="offlinesms-test-$VARIANT-$SHA-$BACKEND.apk"
 cp app/build/outputs/apk/release/app-release.apk "$OUT/$NAME"
 ( cd "$OUT" && sha256sum "$NAME" > "$NAME.sha256" && cat "$NAME.sha256" )
+[ -z "${TEST_BUILD_AAB:-}" ] || cp app/build/outputs/bundle/release/app-release.aab "$TEST_BUILD_AAB"
 echo "$OUT/$NAME"

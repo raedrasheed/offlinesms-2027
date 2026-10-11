@@ -5,7 +5,8 @@
 #   - APK (and AAB) signed by exactly the expected certificate, never the test key;
 #   - the Firebase values inside the APK are exactly offlinesms-prod-2027's
 #     (scripts/ci/check-apk-backend.mjs; with --web-config-env also the JS config);
-#   - 64-bit native libraries aligned for 16 KB pages (Google Play requirement).
+#   - 16 KB page size: ELF segments of the 64-bit libraries, APK zip alignment,
+#     and the AAB's BundleConfig and generated splits (scripts/release/check-16kb.sh).
 #   scripts/release/verify-build.sh <apk> <aab or ""> <google-services.json> [--web-config-env]
 set -euo pipefail
 APK=${1:?apk}; AAB=${2-}; GS=${3:?google-services.json}; WEB=${4:-}
@@ -50,11 +51,7 @@ ARGS=(--apk "$APK" --project "$PROD" --google-services "$GS" --package "$PKG")
 [ "$WEB" = --web-config-env ] && ARGS+=(--web-config-env)
 node scripts/ci/check-apk-backend.mjs "${ARGS[@]}"
 
-ALIGN="no native libraries"
-if unzip -l "$APK" | grep -qE ' lib/(arm64-v8a|x86_64)/[^/]+\.so$'; then
-  "$TOOLS/zipalign" -c -P 16 -v 4 "$APK" > "$RUNNER_TEMP/zipalign.txt" || { tail -20 "$RUNNER_TEMP/zipalign.txt"; fail "not 16 KB aligned"; }
-  ALIGN="16 KB page alignment verified (zipalign -c -P 16)"
-fi
+bash scripts/release/check-16kb.sh "$APK" ${AAB:+"$AAB"} | tee "$RUNNER_TEMP/16kb.txt" || fail "16 KB page size check failed"
 
 BASE="offlinesms-${PKG##*.}-$VNAME-$VCODE-prod-${GITHUB_SHA:0:7}"
 [ "$PKG" = app.offlinesms.mobile ] && BASE="offlinesms-$VNAME-$VCODE-prod-${GITHUB_SHA:0:7}"
@@ -70,7 +67,8 @@ cp "$APK" "dist/$BASE.apk"
   [ -n "$AAB_CERT" ] && echo "Signing certificate SHA-256 (AAB): $AAB_CERT"
   echo "Expected certificate SHA-256: $EXPECTED_CERT_HEX"
   echo "Signature schemes: $SCHEMES"
-  echo "$ALIGN"
+  echo "16 KB page size (scripts/release/check-16kb.sh):"
+  sed 's/^/  /' "$RUNNER_TEMP/16kb.txt"
   echo "$LINE"
   ( cd dist && sha256sum "$BASE".* )
 } | tee "dist/$BASE-BUILD-INFO.txt"
