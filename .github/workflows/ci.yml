@@ -149,11 +149,18 @@ jobs:
         run: bash scripts/ci/relay-google-services.sh
 
       # The relay test APK must be signed with the repo's stable test key, so an
-      # APK from one run installs over one from another. The key has to be in
-      # place before the first build: otherwise that build generates a random
-      # debug key, and the later test APK build signed with it (run 38118008600).
+      # APK from one run installs over one from another. Gradle ignored a key
+      # copied to ~/.android and signed with a random debug key on every run
+      # (runs 38118008600, 38118706710), so every build here is given the key.
       - name: Stable test signing key
-        run: mkdir -p "$HOME/.android" && cp apps/mobile/android/app/debug.keystore "$HOME/.android/debug.keystore"
+        run: |
+          mkdir -p "$GRADLE_USER_HOME"
+          {
+            echo "android.injected.signing.store.file=$GITHUB_WORKSPACE/apps/mobile/android/app/debug.keystore"
+            echo 'android.injected.signing.store.password=android'
+            echo 'android.injected.signing.key.alias=androiddebugkey'
+            echo 'android.injected.signing.key.password=android'
+          } >> "$GRADLE_USER_HOME/gradle.properties"
 
       - name: Build relay APK and run its tests
         run: gradle -p apps/mobile-relay :app:assembleDebug :app:testDebugUnitTest --no-daemon
