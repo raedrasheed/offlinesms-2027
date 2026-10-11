@@ -168,6 +168,11 @@ D() { npx firebase deploy --project offlinesms-prod-2027 --only "$(node scripts/
 Each step must end with `Deploy complete!`. If 2a reports "Failed to register blocking
 trigger function", `GOOGLE_CLOUD_QUOTA_PROJECT` (§2) is not set in this shell. Set it and
 run `D email-guards` again before Check A; the guards are not registered until then.
+If a step stops with `Error: An unexpected error has occurred.` and `firebase-debug.log`
+shows `TypeError: Cannot read properties of undefined (reading 'access_token')`, the access
+token expired during the deploy (`NODE22_UPGRADE.md` §2). The functions before the failure
+are updated and the rest of that group is not. Run the same `D` again at once, then do the
+step's check.
 
 | Step | Command | Check before the next step |
 |---|---|---|

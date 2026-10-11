@@ -98,6 +98,17 @@ S email-change
 
 - Each function is rebuilt on `nodejs22`. A deploy that stops on a quota error is re-run
   with the same command.
+- `Error: An unexpected error has occurred.`, with
+  `TypeError: Cannot read properties of undefined (reading 'access_token')` in
+  `firebase-debug.log`, means the Cloud Shell access token expired during the deploy (an
+  HTTP 401). firebase-tools 13.35.1 cannot renew an Application Default Credentials token
+  inside a running deploy. The functions updated before the 401 stay updated; the rest of the
+  group is not. Run the same group again: a new command starts with a new token. `R` re-runs
+  a group once by itself:
+  ```sh
+  R() { S "$1" && return; echo "=== retry $1"; S "$1"; }
+  ```
+  Seen on staging on 2026-10-11 at `business-sms-points`, after 8 of its 15 functions.
 - After `S email-guards`, run check 3.1 before the next group: the blocking functions
   decide every password sign-in and reset email.
 
