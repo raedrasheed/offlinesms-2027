@@ -56,8 +56,10 @@ mkdir -p ~/node22 && N=~/node22
 ```
 
 `git status` shows nothing: Git ignores the copied `.env` file. After a Cloud Shell
-reconnect, run `nvm use 22`, the `export` line, `cd ~/offlinesms-node22`, and define `N`
-(and `S` in §2) again.
+reconnect, run `nvm install 22 && nvm use 22`, the `export` line, `cd ~/offlinesms-node22`,
+and define `N` (and `S` in §2) again. Cloud Shell keeps only the home directory between
+sessions, and nvm's Node versions are outside it, so `nvm use 22` alone fails in a new
+session (seen twice on 2026-10-11). `nvm install 22` is harmless when 22 is already there.
 
 **Why `GOOGLE_CLOUD_QUOTA_PROJECT`:** without `firebase login`, the Firebase CLI in Cloud Shell
 uses Application Default Credentials. The Identity Platform admin API refuses those without a
