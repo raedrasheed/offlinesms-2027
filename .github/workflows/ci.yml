@@ -148,6 +148,13 @@ jobs:
       - name: Placeholder google-services.json (non-production)
         run: bash scripts/ci/relay-google-services.sh
 
+      # The relay test APK must be signed with the repo's stable test key, so an
+      # APK from one run installs over one from another. The key has to be in
+      # place before the first build: otherwise that build generates a random
+      # debug key, and the later test APK build signed with it (run 38118008600).
+      - name: Stable test signing key
+        run: mkdir -p "$HOME/.android" && cp apps/mobile/android/app/debug.keystore "$HOME/.android/debug.keystore"
+
       - name: Build relay APK and run its tests
         run: gradle -p apps/mobile-relay :app:assembleDebug :app:testDebugUnitTest --no-daemon
 
@@ -183,8 +190,7 @@ jobs:
         env:
           PROJECT: ${{ steps.relay-backend.outputs.project }}
         run: |
-          mkdir -p "$HOME/.android" dist-relay
-          cp apps/mobile/android/app/debug.keystore "$HOME/.android/debug.keystore"
+          mkdir -p dist-relay
           gradle -p apps/mobile-relay :app:assembleDebug --no-daemon
           APK="dist-relay/offlinesms-relay-0.2.0-test-$PROJECT.apk"
           cp apps/mobile-relay/app/build/outputs/apk/debug/app-debug.apk "$APK"
@@ -192,6 +198,9 @@ jobs:
           node scripts/ci/check-apk-backend.mjs --apk "$APK" --project "$PROJECT" \
             --google-services apps/mobile-relay/app/google-services.json --package app.offlinesms.business
           "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --print-certs "$APK" > dist-relay/signing-cert.txt
+          STABLE=$(keytool -exportcert -keystore apps/mobile/android/app/debug.keystore -storepass android -alias androiddebugkey | sha256sum | cut -d' ' -f1)
+          grep -q "SHA-256 digest: $STABLE" dist-relay/signing-cert.txt || {
+            echo "::error::The relay test APK is not signed with the stable test key ($STABLE)"; cat dist-relay/signing-cert.txt; exit 1; }
           {
             echo "Firebase project: $PROJECT (test_backend=${{ inputs.test_backend || 'default' }})"
             echo "Commit: $GITHUB_SHA"
