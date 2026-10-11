@@ -118,6 +118,14 @@ describe('voting', () => {
     expect((await pollOf(id)).votes).toEqual({});
   });
 
+  // 50 simultaneous transactions on one message document. The emulator settles
+  // the lock conflicts by lock timeouts, and votePoll retries each aborted vote
+  // with the SDK's growing backoff (up to 15 attempts, about 350 s of base delay
+  // in all). Measured on Node 22: the last vote lands after 8 to 61 s, none
+  // rejected. The clock must not decide this test: a vote that runs out of
+  // attempts is rejected, and that fails the first assertion.
+  const CONTENDED_VOTES_TIMEOUT_MS = 600_000;
+
   it('concurrent votes from 25 members (with duplicate retries) are all counted exactly once', async () => {
     const id = await createPoll(true);
     const calls = members.flatMap((uid, i) => {
@@ -134,7 +142,7 @@ describe('voting', () => {
     expect(p.voterCount).toBe(members.length);
     expect(p.counts).toEqual({ o1: n1 + n3, o2: n2, o3: n2 + n3 });
     expect(Object.keys(p.votes)).toHaveLength(members.length);
-  });
+  }, CONTENDED_VOTES_TIMEOUT_MS);
 
   it('respects membership: outsiders and removed members cannot vote', async () => {
     const id = await createPoll();
