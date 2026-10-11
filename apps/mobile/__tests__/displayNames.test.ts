@@ -141,6 +141,46 @@ describe('createProfileStore', () => {
     expect(listener).toHaveBeenCalledTimes(2);
   });
 
+  it('re-requests listened uids on a timer, so a rename shows with no other activity', async () => {
+    let clock = 0;
+    let active = true;
+    const queue: Array<() => void> = [];
+    const timers: Array<{ fn: () => void; ms: number; stopped: boolean }> = [];
+    let name = 'Ann';
+    const calls: string[][] = [];
+    const store = createProfileStore({
+      ttlMs: 1000,
+      now: () => clock,
+      schedule: (fn) => { queue.push(fn); },
+      interval: { start: (fn, ms) => { const t = { fn, ms, stopped: false }; timers.push(t); return t; }, stop: (t) => { (t as { stopped: boolean }).stopped = true; } },
+      isActive: () => active,
+      fetchBatch: async (uids) => { calls.push([...uids]); return { a: prof({ displayName: name }) }; },
+    });
+    const flush = async () => { while (queue.length) queue.shift()!(); await new Promise((r) => setTimeout(r, 0)); };
+    expect(timers).toHaveLength(0);
+    const listener = vi.fn();
+    const stop = store.subscribe(['a'], listener);
+    const other = store.subscribe(['a'], vi.fn());
+    expect(timers).toEqual([expect.objectContaining({ ms: 1000, stopped: false })]); // one timer: ttl/4, at least 1 s
+    store.request(['a']);
+    await flush();
+    name = 'Anna';
+
+    clock = 500; timers[0].fn(); await flush();
+    expect(calls).toHaveLength(1); // still fresh: no read
+    clock = 1001; active = false; timers[0].fn(); await flush();
+    expect(calls).toHaveLength(1); // app in the background: no read
+    active = true; timers[0].fn(); await flush();
+    expect(calls).toEqual([['a'], ['a']]);
+    expect(store.peek('a')?.displayName).toBe('Anna');
+    expect(listener).toHaveBeenCalledTimes(2);
+
+    stop();
+    expect(timers[0].stopped).toBe(false); // someone still listens
+    other();
+    expect(timers[0].stopped).toBe(true);
+  });
+
   it('does not notify when a refresh returns the same profile', async () => {
     const h = harness(10);
     const listener = vi.fn();
