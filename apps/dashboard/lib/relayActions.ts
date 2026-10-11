@@ -13,7 +13,7 @@ import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { adminDb, adminAuth } from './firebase-admin';
 import { verifySession, type SessionResult } from './session';
 import { canDo } from './adminPermissions';
-import { getAdminScope, canViewOrganization } from './adminScope';
+import { getAdminScope, canViewOrganization, isPlatformAdmin } from './adminScope';
 import { isSupportedCountry } from 'libphonenumber-js';
 import { randomInt } from 'node:crypto';
 import { normalizePhoneAndCountry } from './phoneCountry';
@@ -119,8 +119,7 @@ async function applyOtpPolicyChange(patch: Record<string, unknown>): Promise<num
 }
 
 function platformOnly(session: AuthorizedSession): string | null {
-  return getAdminScope(session).organizationId !== undefined
-    ? 'Only a platform admin can change the OTP sender settings.' : null;
+  return isPlatformAdmin(session) ? null : 'Only a platform admin can change the OTP sender settings.';
 }
 
 /** Platform setting: which org's relay sends verification SMS (smsConfig/otp).
@@ -208,7 +207,7 @@ export async function setOtpLimitsAction(values: OtpLimitValues): Promise<RelayA
 export async function setRelayCapsAction(deviceId: string, caps: RelayCaps): Promise<RelayActionState> {
   const session = await authorize();
   if ('error' in session) return session;
-  if (getAdminScope(session).organizationId !== undefined) return { error: 'Only a platform admin can change relay caps.' };
+  if (!isPlatformAdmin(session)) return { error: 'Only a platform admin can change relay caps.' };
   const parsed = parseRelayCaps(caps);
   if ('error' in parsed) return { error: parsed.error };
   const loaded = await loadDeviceScoped(session, deviceId);

@@ -6,7 +6,7 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { verifySession } from '@/lib/session';
 import { canDo } from '@/lib/adminPermissions';
-import { getAdminScope } from '@/lib/adminScope';
+import { isPlatformAdmin as isPlatformRole } from '@/lib/adminScope';
 import { getSystemSettings, listOrganizations } from '@/lib/adminData';
 import { adminDb } from '@/lib/firebase-admin';
 import { PermissionState } from '@/components/state';
@@ -32,7 +32,7 @@ export default async function SettingsPage() {
   const canManage = canDo(session.role, 'manage:settings');
   // The default OTP sender is a platform-global setting — only unrestricted
   // (super/legacy/bootstrap) admins may view or change it.
-  const isPlatformAdmin = canManage && getAdminScope(session).organizationId === undefined;
+  const isPlatformAdmin = canManage && isPlatformRole(session);
 
   let otpOrgOptions: { id: string; name: string }[] = [];
   let otpOrgId: string | null = null;

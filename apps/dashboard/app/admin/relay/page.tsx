@@ -6,7 +6,7 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { verifySession } from '@/lib/session';
 import { canDo } from '@/lib/adminPermissions';
-import { getAdminScope } from '@/lib/adminScope';
+import { getAdminScope, isPlatformAdmin } from '@/lib/adminScope';
 import { adminDb } from '@/lib/firebase-admin';
 import { listOrganizations } from '@/lib/adminData';
 import { ADMIN_LABELS } from '@/lib/i18n';
@@ -135,7 +135,7 @@ export default async function RelayAdminPage({ searchParams }: { searchParams?: 
         orgStatus={orgStatus}
         businessId={businessId}
         canManage={canManage}
-        isPlatform={isUnrestricted}
+        isPlatform={isPlatformAdmin(session)}
         fetchError={fetchError}
         queueHealth={queueHealth}
         healthyDevices={healthyDevices}
