@@ -29,7 +29,7 @@ Firestore wrapper `partitionRecipientsByCoverage`).
 | Org SMS escalation | `escalateOrgBatches` filters eligibles by coverage before sending — gates the HTTP path too (relay path already dispatcher-gated) |
 | Relay claim (device) | `claimRelayJobs` refuses jobs for unserved countries via `canDeviceClaimJobCountry` (candidate filter + in-txn re-check) |
 | Sign-in OTP request | `requestPhoneOtp` requires `hasRelayCoverageForCountry` for the OTP org or throws `no-relay-for-country` |
-| Sign-in country picker | `getSupportedPhoneCountries` returns only countries with a live relay; the mobile picker offers only those |
+| Sign-in country picker | `getSupportedPhoneCountries` returns only countries with a live relay, plus the store-review number's country while review access is on (that number never needs a relay); the mobile picker offers only those |
 | Admin test send | `sendRelayTestAction` country-checks via `loadOrgRelayCoverage` before queueing |
 
 **No silent fallback:** uncovered countries are skipped (`no_relay_for_country`), never routed to another country's relay and never HTTP-fallen-back, and (for org messaging) never delivered in-app either. Capacity overflow for a *covered* country is queued (relay-only) or HTTP-fallback (hybrid) — unchanged.

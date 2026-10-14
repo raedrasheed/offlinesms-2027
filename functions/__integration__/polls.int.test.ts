@@ -31,8 +31,8 @@ async function seedGroup(extra: Record<string, unknown> = {}) {
 
 const send = (uid: string, data: Record<string, unknown>, cid = G) =>
   sendTextMessage.run(req(uid, { conversationId: cid, ...data })) as Promise<{ messageId: string; idempotent: boolean }>;
-const vote = (uid: string, messageId: string, optionIds: unknown, seq?: number, cid = G) =>
-  votePoll.run(req(uid, { conversationId: cid, messageId, optionIds, ...(seq != null ? { seq } : {}) })) as
+const vote = (uid: string, messageId: string, optionIds: unknown, seq?: number, cid = G, deviceId?: string) =>
+  votePoll.run(req(uid, { conversationId: cid, messageId, optionIds, ...(seq != null ? { seq } : {}), ...(deviceId ? { deviceId } : {}) })) as
     Promise<{ ok: true; unchanged: boolean; stale: boolean; counts: Record<string, number>; voterCount: number; selection: string[] }>;
 const pollOf = async (messageId: string, cid = G) => (await db().doc(`conversations/${cid}/messages/${messageId}`).get()).data()!.poll;
 
@@ -108,6 +108,35 @@ describe('voting', () => {
     const late = await vote(members[0], id, ['o1'], 100);
     expect(late).toMatchObject({ unchanged: true, stale: true, selection: ['o2'] });
     expect((await pollOf(id)).counts).toEqual({ o1: 0, o2: 1, o3: 0 });
+  });
+
+  it('two devices of one account: the vote that arrives last wins, whatever their counters', async () => {
+    const id = await createPoll(false);
+    await vote(members[0], id, ['o1'], 1_760_000_000_000, G, 'dev_a'); // e.g. a clock-based counter
+    const b = await vote(members[0], id, ['o2'], 3, G, 'dev_b');
+    expect(b).toMatchObject({ unchanged: false, stale: false, selection: ['o2'] });
+    expect((await pollOf(id)).counts).toEqual({ o1: 0, o2: 1, o3: 0 });
+  });
+
+  it('a late retry of an older vote from the SAME device is still ignored', async () => {
+    const id = await createPoll(false);
+    await vote(members[0], id, ['o1'], 4, G, 'dev_a');
+    await vote(members[0], id, ['o2'], 5, G, 'dev_a');
+    await vote(members[0], id, ['o3'], 1, G, 'dev_b');
+    const late = await vote(members[0], id, ['o1'], 4, G, 'dev_a');
+    expect(late).toMatchObject({ unchanged: true, stale: true, selection: ['o3'] });
+    expect((await pollOf(id)).counts).toEqual({ o1: 0, o2: 0, o3: 1 });
+  });
+
+  it('a voter doc from before per-device order keeps its watermark for requests without deviceId only', async () => {
+    const id = await createPoll(false);
+    await vote(members[0], id, ['o1'], 200);
+    await db().doc(`conversations/${G}/messages/${id}/pollVoters/${members[0]}`).set({ optionIds: ['o1'], seq: 200 });
+    expect(await vote(members[0], id, ['o2'], 100)).toMatchObject({ unchanged: true, stale: true, selection: ['o1'] });
+    expect(await vote(members[0], id, ['o2'], 1, G, 'dev_a')).toMatchObject({ unchanged: false, selection: ['o2'] });
+    const voter = (await db().doc(`conversations/${G}/messages/${id}/pollVoters/${members[0]}`).get()).data()!;
+    expect(voter.seqs).toEqual({ _: 200, dev_a: 1 });
+    expect(voter.seq).toBeUndefined();
   });
 
   it('retracting removes the voter', async () => {

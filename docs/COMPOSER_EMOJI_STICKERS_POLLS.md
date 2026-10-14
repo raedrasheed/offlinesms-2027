@@ -45,12 +45,12 @@ Screenshots (English and Arabic/RTL) are in [`docs/screenshots/composer/`](scree
   - Creating a poll goes through `sendTextMessage` with `kind: 'poll'`. It gets the same membership, locked-group, admins-only, block and `localId` idempotency gates as text.
   - `votePoll` runs in **one transaction**. It re-checks that the caller is a participant and an **active member**, refuses disabled conversations, blocked direct chats, closed polls, non-polls and unknown options, and allows at most one option in single choice. An empty selection retracts the vote.
   - **No double counting:** counts are **recomputed from the per-voter map** on every vote and never incremented. A duplicated or retried request therefore changes nothing.
-  - **No stale overwrite:** each vote carries a strictly increasing `seq`. The last `seq` per voter is kept in a server-only doc (`…/messages/{m}/pollVoters/{uid}`), and the rules give clients no access to message subcollections. A late retry of an older vote is acknowledged as `stale` and ignored.
+  - **No stale overwrite:** each vote carries the device's id and a `seq` from a counter stored on that device (not its clock), so it keeps increasing across restarts. The last `seq` per device is kept in the voter's server-only doc (`…/messages/{m}/pollVoters/{uid}`, field `seqs`), and the rules give clients no access to message subcollections. A late retry of an older vote from the same device is acknowledged as `stale` and ignored. Two devices of one account are never compared: the vote that arrives last wins.
   - `closePoll` is limited to the creator. Results stay visible after closing.
   - Delete-for-everyone removes the poll, including its votes, and stickers.
 - **Client:**
   - Queued/failed polls retain their complete question and options; voting and closing stay disabled until delivery. A failed send can retry its original outbox job without duplicating the poll.
-  - Votes are optimistic. They are written to the local `payload_json` immediately and queued in the outbox, which is ordered and idempotent per `seq`.
+  - Votes are optimistic. They are written to the local `payload_json` immediately and queued in the outbox, which is ordered and idempotent per device and `seq`.
   - Live results arrive from the conversation's realtime feed. Only the poll's bubble re-renders, because of structural sharing.
   - Ending a delivered poll is durably queued while offline, survives app restart and displays “waiting for confirmation”. A permanent refusal displays failure and permits an explicit retry. Closing is confirmed only after the server acknowledges it; concurrent vote updates are preserved.
   - Local DB v7 adds `messages.payload_json`; queued-close status uses the existing outbox and requires no schema upgrade.
@@ -61,7 +61,7 @@ Screenshots (English and Arabic/RTL) are in [`docs/screenshots/composer/`](scree
 | Layer | What | Where |
 |---|---|---|
 | Unit | Poll rules: build, selection modes, idempotent apply, tally; sticker catalog parity; previews | `functions/__tests__/pollLogic.test.ts` |
-| Emulator (real callables) | Creation rules, admins-only, idempotent create; single/multiple choice; same-`seq` retry not counted; stale retry ignored; retract; **25 members voting concurrently with racing duplicate retries counted exactly once**; outsiders, removed members, blocks, disabled conversations; creator-only close; delete-for-everyone; sticker catalog gate | `functions/__integration__/polls.int.test.ts` |
+| Emulator (real callables) | Creation rules, admins-only, idempotent create; single/multiple choice; same-`seq` retry not counted; stale retry from the same device ignored; a second device with a lower counter still wins; retract; **25 members voting concurrently with racing duplicate retries counted exactly once**; outsiders, removed members, blocks, disabled conversations; creator-only close; delete-for-everyone; sticker catalog gate | `functions/__integration__/polls.int.test.ts` |
 | Unit (app) | Emoji catalog, version filter, rows, English and Arabic search, caret insertion; recents; sticker assets and names; poll model; Arabic plural forms | `apps/mobile/__tests__/composerExtras.test.ts` |
 | Real SQLite (app) | Live vote updates through the feeder (only the poll object changes); sticker round-trip; delete clears the payload; optimistic vote replaced by the server tally | `apps/mobile/__tests__/localdb/localSync.sqlite.test.ts` |
 

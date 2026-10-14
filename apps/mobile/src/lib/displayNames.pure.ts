@@ -10,7 +10,9 @@
 // `createProfileStore` is the cache behind it: batched + de-duplicated fetches
 // (one Firestore query per ≤30 uids instead of one read per message), with a
 // TTL so name changes are picked up (stale-while-revalidate), and per-uid
-// listeners so hooks re-render only when a uid they use changes.
+// listeners so hooks re-render only when a uid they use changes. While anyone
+// listens, a timer re-requests the listened uids, so an open screen picks up a
+// rename after the TTL even when nothing else on it changes.
 
 export interface NameProfile {
   displayName: string | null;
@@ -112,6 +114,12 @@ export interface ProfileStoreOptions {
   now?: () => number;
   /** Schedules the batch flush (defaults to setTimeout 0). */
   schedule?: (fn: () => void) => void;
+  /** How often listened uids are re-requested; only stale ones are fetched (default ttl/4). */
+  refreshEveryMs?: number;
+  /** Starts and stops that timer (defaults to setInterval/clearInterval). */
+  interval?: { start: (fn: () => void, ms: number) => unknown; stop: (handle: unknown) => void };
+  /** False skips a refresh (e.g. while the app is in the background). */
+  isActive?: () => boolean;
 }
 
 export interface ProfileStore {
@@ -136,6 +144,13 @@ export function createProfileStore(opts: ProfileStoreOptions): ProfileStore {
   const maxBatch = Math.max(1, opts.maxBatch ?? 30);
   const now = opts.now ?? (() => Date.now());
   const schedule = opts.schedule ?? ((fn: () => void) => { setTimeout(fn, 0); });
+  const refreshEvery = opts.refreshEveryMs ?? Math.max(1000, Math.floor(ttl / 4));
+  const interval = opts.interval ?? {
+    start: (fn: () => void, ms: number) => setInterval(fn, ms),
+    stop: (h: unknown) => clearInterval(h as ReturnType<typeof setInterval>),
+  };
+  const isActive = opts.isActive ?? (() => true);
+  let refreshTimer: unknown = null;
 
   const cache = new Map<string, { profile: NameProfile; at: number }>();
   const listeners = new Map<string, Set<() => void>>();
@@ -221,6 +236,17 @@ export function createProfileStore(opts: ProfileStoreOptions): ProfileStore {
     }
   };
 
+  // Runs only while someone listens; each tick fetches the listened uids whose
+  // entry passed the TTL (request() skips fresh and in-flight ones).
+  const syncRefreshTimer = () => {
+    if (listeners.size > 0 && refreshTimer === null) {
+      refreshTimer = interval.start(() => { if (isActive()) request(listeners.keys()); }, refreshEvery);
+    } else if (listeners.size === 0 && refreshTimer !== null) {
+      interval.stop(refreshTimer);
+      refreshTimer = null;
+    }
+  };
+
   return {
     peek: (uid) => cache.get(uid)?.profile,
     request,
@@ -260,6 +286,7 @@ export function createProfileStore(opts: ProfileStoreOptions): ProfileStore {
         if (!set) { set = new Set(); listeners.set(u, set); }
         set.add(listener);
       }
+      syncRefreshTimer();
       return () => {
         for (const u of list) {
           const set = listeners.get(u);
@@ -267,6 +294,7 @@ export function createProfileStore(opts: ProfileStoreOptions): ProfileStore {
           set.delete(listener);
           if (set.size === 0) listeners.delete(u);
         }
+        syncRefreshTimer();
       };
     },
   };

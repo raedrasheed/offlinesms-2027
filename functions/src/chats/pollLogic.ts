@@ -9,8 +9,8 @@
 //     voterCount: number
 //   }
 // Counts are derived, never incremented, so a retried or duplicated vote can't
-// be counted twice; the per-voter sequence (server-only doc) rejects a stale
-// retry that arrives after a newer vote.
+// be counted twice; the voter's per-device sequence (server-only doc) rejects a
+// stale retry that arrives after a newer vote from the same device.
 
 export const POLL_QUESTION_MAX = 300;
 export const POLL_OPTION_MAX = 100;
@@ -100,4 +100,15 @@ export function applyVote(poll: PollDoc, uid: string, selection: string[]): Poll
 /** Short, content-light preview text (chat list / push / older clients). */
 export function pollFallbackText(question: string): string {
   return `📊 ${question}`;
+}
+
+/** Per-device vote watermarks kept on one voter doc; the lowest go first. */
+export const MAX_DEVICE_SEQS = 20;
+
+/** The voter's watermarks with `device` set to `seq`, at most MAX_DEVICE_SEQS kept. */
+export function nextDeviceSeqs(seqs: Record<string, number>, device: string, seq: number): Record<string, number> {
+  const next = { ...seqs, [device]: seq };
+  const others = Object.keys(next).filter(k => k !== device).sort((a, b) => next[a] - next[b]);
+  while (others.length >= MAX_DEVICE_SEQS) delete next[others.shift()!];
+  return next;
 }

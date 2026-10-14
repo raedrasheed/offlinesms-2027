@@ -213,6 +213,8 @@ export type SyncStateKey =
   | 'local_schema_version'
   | 'current_user_uid'
   | 'device_id'
+  // Last poll vote seq on this device (kept with device_id on sign-out).
+  | 'poll_vote_seq'
   | 'legacy_queue_migrated'
   | 'last_prune_at'
   | 'notification_targets'

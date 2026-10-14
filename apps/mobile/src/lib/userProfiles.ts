@@ -10,11 +10,14 @@
 //     `documentId() in [...]` query per 30 uids — never one read per message.
 //   • Freshness: entries older than the TTL are served immediately and
 //     re-fetched in the background; subscribers re-render when a name changes.
+//     While a screen listens, its uids are re-checked on a timer (not while
+//     the app is in the background), so a rename shows without other activity.
 //   • Naming rule: displayNameFor() — displayName → @username → stored
 //     snapshot (only while unknown, never a uid fragment) → translated
 //     "Unknown user" (or "You" for the signed-in user).
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { AppState } from 'react-native';
 import { collection, documentId, getDocs, query, where } from 'firebase/firestore';
 import i18n from 'i18next';
 import { useTranslation } from 'react-i18next';
@@ -32,6 +35,7 @@ export type UserProfile = NameProfile;
 
 const store = createProfileStore({
   maxBatch: 30, // Firestore `in` limit
+  isActive: () => AppState.currentState === 'active',
   async fetchBatch(uids) {
     const snap = await getDocs(query(collection(db, 'users'), where(documentId(), 'in', uids)));
     const out: Record<string, NameProfile> = {};
