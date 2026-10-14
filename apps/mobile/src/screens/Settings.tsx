@@ -11,6 +11,7 @@ import {
   View, Text, Pressable, Switch, StyleSheet, Alert, ScrollView, Image, Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as Application from 'expo-application';
 import { useTranslation } from 'react-i18next';
 import { signOut, deleteMyAccount } from '../lib/auth';
 import { getPhoneLinkStatus, type PhoneLinkStatus } from '../lib/phoneLink';
@@ -77,10 +78,13 @@ const CHIP = {
 const PRIVACY_POLICY_URL = 'https://offlinesms.com/offlinesms-privacy-policy.html';
 const TERMS_OF_SERVICE_URL = 'https://offlinesms.com/offlinesms-terms-of-service.html';
 
-// App version shown in Settings. Sourced from the .env file
-// (EXPO_PUBLIC_APP_VERSION); falls back to the bundled app.json version.
+// Report the installed binary, including its build number. Environment values
+// can outlive a release; use app.json only where native metadata is unavailable.
 const BUNDLED_VERSION: string = require('../../app.json').expo?.version ?? '0.0.0';
-const APP_VERSION: string = (process.env.EXPO_PUBLIC_APP_VERSION ?? '').trim() || BUNDLED_VERSION;
+const APP_VERSION: string = Application.nativeApplicationVersion ?? BUNDLED_VERSION;
+const APP_VERSION_LABEL = Application.nativeBuildVersion
+  ? `${APP_VERSION} (${Application.nativeBuildVersion})`
+  : APP_VERSION;
 
 function profileInitials(name?: string): string {
   const parts = (name ?? '').trim().split(/\s+/).filter(Boolean);
@@ -492,13 +496,13 @@ export default function Settings({ navigation }: any) {
         <View
           style={s.cardRow}
           accessible={true}
-          accessibilityLabel={`${t('settings.appVersion')} ${APP_VERSION}`}
+          accessibilityLabel={`${t('settings.appVersion')} ${APP_VERSION_LABEL}`}
         >
           {iconChip(CHIP.version, 'information-circle')}
           <View style={{ flex: 1 }}>
             <Text style={s.title}>{t('settings.appVersion')}</Text>
           </View>
-          <Text style={s.sub}>{APP_VERSION}</Text>
+          <Text style={s.sub}>{APP_VERSION_LABEL}</Text>
         </View>
         {navRow({ icon: 'log-out', color: CHIP.signOut, label: t('settings.signOut'), onPress: () => signOut(), danger: true })}
       </View>
