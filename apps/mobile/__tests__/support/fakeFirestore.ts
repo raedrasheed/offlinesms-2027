@@ -110,7 +110,8 @@ const baseMock = {
   orderBy: (field: string, dir?: 'asc' | 'desc') => ({ field, order: dir ?? 'asc' }),
   limit: (n: number) => ({ limit: n }),
   Timestamp: FakeTimestamp,
-  onSnapshot: (target: Ref, next: (s: any) => void) => {
+  onSnapshot: (target: Ref, optionsOrNext: { includeMetadataChanges: boolean } | ((s: any) => void), callback?: (s: any) => void) => {
+    const next = typeof optionsOrNext === 'function' ? optionsOrNext : callback!;
     const l: Listener = { target, next, prev: new Map() };
     listeners.push(l);
     queueMicrotask(() => next(snapshotFor(l)));

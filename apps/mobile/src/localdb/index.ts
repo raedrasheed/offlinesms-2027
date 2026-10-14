@@ -25,7 +25,7 @@ import { createNotificationTargets } from './sync/notificationTarget';
 import type { MessageRow } from './types';
 import { enqueuePollClose } from './pollClose';
 import { retryQueuedSend } from './retrySend';
-import { emitLocalMessagesChanged } from './messageChanges';
+import { emitLocalMessagesChanged, onLocalMessagesChanged } from './messageChanges';
 
 export * from './types';
 export { getDb, getCurrentUid } from './connection';
@@ -57,6 +57,9 @@ export const notificationTargets = createNotificationTargets({
   onConnectivity: onConnectivityChange,
   loadPending: async () => JSON.parse((await getState('notification_targets')) ?? '[]'),
   savePending: targets => setState('notification_targets', JSON.stringify(targets)),
+});
+onLocalMessagesChanged(conversationId => {
+  void notificationTargets.onLocalMessagesChanged(conversationId);
 });
 export { setActiveConversation, kick as kickSync } from './sync/syncScheduler';
 

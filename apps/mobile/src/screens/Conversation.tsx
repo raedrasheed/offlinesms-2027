@@ -1226,7 +1226,7 @@ export default function Conversation({ route, navigation }: any) {
 
       {deliveredChip > 0 ? <SyncSuccessChip count={deliveredChip} /> : null}
       {useLocal
-        ? <SyncStatusBanner focus={local.focus} live={isOffline ? 'offline' : local.live} onRetry={local.retryFocus} />
+        ? <SyncStatusBanner focus={local.focus} live={isOffline ? 'offline' : local.live} onRetry={local.retrySync} />
         : (isOffline ? <OfflineNotice /> : null)}
 
       {err ? <ErrorState compact title="Couldn't send" description={err} /> : null}

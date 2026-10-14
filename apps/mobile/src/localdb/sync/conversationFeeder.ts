@@ -13,6 +13,7 @@ import { collection, query, orderBy, limit as qlimit, onSnapshot } from 'firebas
 import { db } from '../../lib/firebase';
 import { applyRemoteMessages } from '../repositories/messagesRepo';
 import { remoteMessageInput } from './remoteMessage';
+import { getCurrentUid } from '../connection';
 
 export const FEEDER_WINDOW = 100;
 
@@ -27,25 +28,45 @@ export function startConversationFeeder(
   // Serialize applies so a burst of snapshots commits in order.
   let chain: Promise<void> = Promise.resolve();
   let stopped = false;
+  let needsResync = false;
+  const uid = getCurrentUid();
+  const active = () => !stopped && getCurrentUid() === uid;
   const q = query(
     collection(db, 'conversations', conversationId, 'messages'),
     orderBy('createdAt', 'desc'),
     qlimit(FEEDER_WINDOW),
   );
-  const unsub = onSnapshot(q, snap => {
+  const unsub = onSnapshot(q, { includeMetadataChanges: true }, snap => {
     // 'removed' only means "left the 100-message window" — never a deletion
     // (deletes arrive as a modified doc with deletedForEveryone).
     const changed = snap.docChanges().filter(c => c.type !== 'removed').map(c => c.doc);
     const fromCache = snap.metadata.fromCache;
-    if (changed.length === 0) { onChange({ ids: [], fromCache }); return; }
-    const batch = changed.map(d => remoteMessageInput(d.id, conversationId, d.data()));
     chain = chain
-      .then(() => applyRemoteMessages(batch))
-      .then(() => { if (!stopped) onChange({ ids: batch.map(b => b.remoteId), fromCache }); })
-      .catch(() => { if (!stopped) onError?.('local-write-failed'); });
+      .then(async () => {
+        if (!active()) return;
+        const batch = (needsResync ? snap.docs : changed)
+          .map(d => remoteMessageInput(d.id, conversationId, d.data()));
+        // A snapshot has already been acknowledged to Firestore. Losing its
+        // local write and waiting for another docChanges event can lose the
+        // message indefinitely, so retry the write without another network read.
+        for (let attempt = 0; ; attempt++) {
+          if (!active()) return;
+          try { await applyRemoteMessages(batch); break; }
+          catch (error) {
+            if (attempt >= 2) throw error;
+            await new Promise<void>(resolve => setTimeout(resolve, 150 * (attempt + 1)));
+          }
+        }
+        needsResync = false;
+        if (active()) onChange({ ids: batch.map(b => b.remoteId), fromCache });
+      })
+      .catch(() => {
+        needsResync = true;
+        if (active()) onError?.('local-write-failed');
+      });
   }, err => {
     if (__DEV__) console.warn('[feeder] messages listener failed:', (err as any)?.code ?? err);
-    onError?.((err as any)?.code ?? 'unknown');
+    if (active()) onError?.((err as any)?.code ?? 'unknown');
   });
   return () => { stopped = true; unsub(); };
 }

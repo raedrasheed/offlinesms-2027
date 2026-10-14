@@ -17,12 +17,12 @@ export function SyncStatusBanner({ focus, live, onRetry }: { focus: FocusState |
 
   const spinner = kind === 'loading-message';
   const icon = kind === 'offline' || kind === 'waiting-network' ? 'cloud-offline-outline'
-    : kind === 'missing' ? 'alert-circle-outline' : kind === 'error' ? 'refresh' : null;
+    : kind === 'missing' ? 'alert-circle-outline' : kind === 'error' || kind === 'sync-error' ? 'refresh' : null;
   return (
     <View style={s.wrap} accessibilityRole="alert" accessibilityLiveRegion="polite">
       {spinner ? <ActivityIndicator size="small" color="#1F7BA8" /> : icon ? <Ionicons name={icon as any} size={16} color="#1F4E79" /> : null}
       <Text style={s.text}>{t(`sync.${kind}`)}</Text>
-      {kind === 'error' ? (
+      {kind === 'error' || kind === 'sync-error' ? (
         <Pressable onPress={onRetry} accessibilityRole="button" hitSlop={8}>
           <Text style={s.retry}>{t('common.retry', 'Retry')}</Text>
         </Pressable>

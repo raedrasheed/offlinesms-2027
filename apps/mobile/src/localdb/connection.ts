@@ -16,29 +16,59 @@ export interface LocalDatabase {
   all<T = any>(sql: string, params?: any[]): Promise<T[]>;
   first<T = any>(sql: string, params?: any[]): Promise<T | null>;
   exec(sql: string): Promise<void>;
-  transaction(fn: () => Promise<void>): Promise<void>;
+  /** All work inside a transaction must use its scoped database argument. */
+  transaction(fn: (tx: LocalDatabase) => Promise<void>): Promise<void>;
 }
 
 class ExpoSqliteDatabase implements LocalDatabase {
-  constructor(private readonly db: SQLite.SQLiteDatabase) {}
+  private tail: Promise<void> = Promise.resolve();
+  private closed = false;
+  constructor(private readonly db: SQLite.SQLiteDatabase, private readonly inTransaction = false) {}
+
+  // expo-sqlite's async transactions share a connection: overlapping BEGINs
+  // throw, and an unrelated write can be rolled back with someone else's batch.
+  // Queue complete transactions AND standalone operations. Only the explicit
+  // transaction handle bypasses this queue, so no async-context guess is needed.
+  private schedule<T>(work: () => Promise<T>): Promise<T> {
+    if (this.closed) return Promise.reject(new Error('localdb: connection closed'));
+    if (this.inTransaction) return work();
+    const result = this.tail.then(work);
+    this.tail = result.then(() => {}, () => {});
+    return result;
+  }
   async run(sql: string, params: any[] = []): Promise<void> {
-    await this.db.runAsync(sql, params);
+    await this.schedule(() => this.db.runAsync(sql, params));
   }
   async all<T = any>(sql: string, params: any[] = []): Promise<T[]> {
-    return (await this.db.getAllAsync(sql, params)) as T[];
+    return this.schedule(() => this.db.getAllAsync<T>(sql, params));
   }
   async first<T = any>(sql: string, params: any[] = []): Promise<T | null> {
-    return ((await this.db.getFirstAsync(sql, params)) as T) ?? null;
+    return this.schedule(() => this.db.getFirstAsync<T>(sql, params));
   }
   async exec(sql: string): Promise<void> {
-    await this.db.execAsync(sql);
+    await this.schedule(() => this.db.execAsync(sql));
   }
-  async transaction(fn: () => Promise<void>): Promise<void> {
-    await this.db.withTransactionAsync(fn);
+  async transaction(fn: (tx: LocalDatabase) => Promise<void>): Promise<void> {
+    if (this.inTransaction) throw new Error('localdb: nested transaction');
+    await this.schedule(() => this.db.withTransactionAsync(async () => {
+      const tx = new ExpoSqliteDatabase(this.db, true);
+      try { await fn(tx); } finally { tx.closed = true; }
+    }));
+  }
+  async close(): Promise<void> {
+    this.closed = true;
+    await this.tail;
+    await this.db.closeAsync();
   }
 }
 
-let current: { uid: string; raw: SQLite.SQLiteDatabase; db: LocalDatabase } | null = null;
+let current: { uid: string; db: ExpoSqliteDatabase } | null = null;
+let lifecycle: Promise<void> = Promise.resolve();
+function sequenceLifecycle<T>(work: () => Promise<T>): Promise<T> {
+  const result = lifecycle.then(work);
+  lifecycle = result.then(() => {}, () => {});
+  return result;
+}
 
 function fileName(uid: string): string {
   // Sanitise uid for a filename; Firebase uids are alnum but be defensive.
@@ -80,42 +110,51 @@ async function migrationExec(db: LocalDatabase, sql: string): Promise<void> {
  * Open (or reuse) the local DB for a user, running migrations. If a different
  * user's DB is open it is closed first so we never read another account's data.
  */
-export async function openForUser(uid: string): Promise<LocalDatabase> {
+export function openForUser(uid: string): Promise<LocalDatabase> {
+  return sequenceLifecycle(() => openUser(uid));
+}
+
+async function openUser(uid: string): Promise<LocalDatabase> {
   if (current && current.uid === uid) return current.db;
-  if (current) await closeDb();
+  if (current) await closeCurrent();
 
   const raw = await SQLite.openDatabaseAsync(fileName(uid));
-  await raw.execAsync('PRAGMA journal_mode = WAL;');
-  await raw.execAsync('PRAGMA foreign_keys = ON;');
-  const db = new ExpoSqliteDatabase(raw);
+  try {
+    await raw.execAsync('PRAGMA journal_mode = WAL;');
+    await raw.execAsync('PRAGMA foreign_keys = ON;');
+    const db = new ExpoSqliteDatabase(raw);
 
-  const versionRow = (await raw.getFirstAsync('PRAGMA user_version')) as { user_version: number } | null;
-  const currentVersion = versionRow?.user_version ?? 0;
-  if (currentVersion < LATEST_VERSION) {
-    // The version bump commits atomically WITH the schema changes. It used to
-    // be written after the commit: an app killed in between re-ran the
-    // migrations on next launch, and the non-idempotent `ALTER TABLE … ADD
-    // COLUMN` failed ("duplicate column name"), leaving the DB unopenable.
-    // (user_version lives in the DB header and is transactional.)
-    await db.transaction(async () => {
-      await applyMigrations(currentVersion, (sql) => migrationExec(db, sql));
-      // PRAGMA user_version does not accept bound params.
-      await db.exec(`PRAGMA user_version = ${LATEST_VERSION};`);
-    });
+    const versionRow = (await raw.getFirstAsync('PRAGMA user_version')) as { user_version: number } | null;
+    const currentVersion = versionRow?.user_version ?? 0;
+    if (currentVersion < LATEST_VERSION) {
+      // The version bump commits atomically WITH the schema changes. It used to
+      // be written after the commit: an app killed in between re-ran the
+      // migrations on next launch, and the non-idempotent `ALTER TABLE … ADD
+      // COLUMN` failed ("duplicate column name"), leaving the DB unopenable.
+      // (user_version lives in the DB header and is transactional.)
+      await db.transaction(async tx => {
+        await applyMigrations(currentVersion, (sql) => migrationExec(tx, sql));
+        // PRAGMA user_version does not accept bound params.
+        await tx.exec(`PRAGMA user_version = ${LATEST_VERSION};`);
+      });
+    }
+
+    await db.run(
+      `INSERT OR REPLACE INTO sync_state (key, value, updated_at) VALUES ('current_user_uid', ?, ?)`,
+      [uid, Date.now()],
+    );
+    await db.run(
+      `INSERT OR REPLACE INTO sync_state (key, value, updated_at) VALUES ('local_schema_version', ?, ?)`,
+      [String(LATEST_VERSION), Date.now()],
+    );
+    await ensureDeviceId(db);
+
+    current = { uid, db };
+    return db;
+  } catch (error) {
+    try { await raw.closeAsync(); } catch { /* preserve the original error */ }
+    throw error;
   }
-
-  await db.run(
-    `INSERT OR REPLACE INTO sync_state (key, value, updated_at) VALUES ('current_user_uid', ?, ?)`,
-    [uid, Date.now()],
-  );
-  await db.run(
-    `INSERT OR REPLACE INTO sync_state (key, value, updated_at) VALUES ('local_schema_version', ?, ?)`,
-    [String(LATEST_VERSION), Date.now()],
-  );
-  await ensureDeviceId(db);
-
-  current = { uid, raw, db };
-  return db;
 }
 
 export function getDb(): LocalDatabase {
@@ -127,10 +166,15 @@ export function getCurrentUid(): string | null {
   return current?.uid ?? null;
 }
 
-export async function closeDb(): Promise<void> {
+async function closeCurrent(): Promise<void> {
   if (!current) return;
-  try { await current.raw.closeAsync(); } catch { /* ignore */ }
+  const { db } = current;
   current = null;
+  try { await db.close(); } catch { /* ignore */ }
+}
+
+export function closeDb(): Promise<void> {
+  return sequenceLifecycle(closeCurrent);
 }
 
 /**
@@ -140,11 +184,11 @@ export async function closeDb(): Promise<void> {
 export async function wipeUserData(): Promise<void> {
   if (!current) return;
   const { db } = current;
-  await db.transaction(async () => {
+  await db.transaction(async tx => {
     for (const table of USER_DATA_TABLES) {
-      await db.run(`DELETE FROM ${table}`);
+      await tx.run(`DELETE FROM ${table}`);
     }
-    await db.run(`DELETE FROM sync_state WHERE key NOT IN ('device_id')`);
+    await tx.run(`DELETE FROM sync_state WHERE key NOT IN ('device_id')`);
   });
 }
 

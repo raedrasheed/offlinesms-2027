@@ -160,6 +160,11 @@ describe('syncBannerKind', () => {
     expect(syncBannerKind(null, 'connecting')).toBeNull();
     expect(syncBannerKind(f('ready'), 'connecting')).toBeNull();
   });
+  it('distinguishes a failed conversation feed from a failed notification target', () => {
+    expect(syncBannerKind(null, 'error')).toBe('sync-error');
+    expect(syncBannerKind(f('ready'), 'error')).toBe('sync-error');
+    expect(syncBannerKind(f('error'), 'live')).toBe('error');
+  });
 });
 
 describe('push routing keeps the message id', () => {
@@ -248,6 +253,48 @@ describe('remoteMessageInput', () => {
 
 
 describe('notification recovery regression', () => {
+  it('unblocks the target as soon as another sync path commits it, despite a stalled direct read', async () => {
+    let local = false;
+    let reject!: (error: unknown) => void;
+    const fetchOne = vi.fn(() => new Promise<boolean>((_resolve, r) => { reject = r; }));
+    const t = createNotificationTargets(deps({ hasLocal: async () => local, fetchOne }));
+    const request = t.request('c', 'm');
+    await tick();
+    expect(t.state('c', 'm')).toBe('fetching');
+    local = true;
+    await t.onLocalMessagesChanged('c');
+    expect(await request).toBe('ready');
+    reject({ code: 'unavailable' });
+    await tick();
+    expect(t.state('c', 'm')).toBe('ready');
+    expect(fetchOne).toHaveBeenCalledTimes(1);
+    t.reset();
+  });
+
+  it('a late missing response cannot replace a committed local target', async () => {
+    let local = false;
+    let resolve!: (value: boolean) => void;
+    const t = createNotificationTargets(deps({ hasLocal: async () => local,
+      fetchOne: () => new Promise<boolean>(r => { resolve = r; }) }));
+    const request = t.request('c', 'm'); await tick();
+    local = true; await t.onLocalMessagesChanged('c');
+    expect(await request).toBe('ready');
+    resolve(false); await tick();
+    expect(t.state('c', 'm')).toBe('ready'); t.reset();
+  });
+
+  it('logout releases a waiting screen and ignores a late local check', async () => {
+    let local = false;
+    const t = createNotificationTargets(deps({ hasLocal: async () => local,
+      fetchOne: () => new Promise<boolean>(() => {}) }));
+    const request = t.request('c', 'm'); await tick();
+    local = true;
+    const check = t.onLocalMessagesChanged('c');
+    t.reset();
+    expect(await request).toBe('pending'); await check;
+    expect(t.state('c', 'm')).toBeUndefined();
+  });
+
   it('retries a transient online error without needing a new push or screen open', async () => {
     vi.useFakeTimers();
     const fetchOne = vi.fn().mockRejectedValueOnce({ code: 'unavailable' }).mockResolvedValue(true);

@@ -56,11 +56,11 @@ export async function createSqlJsDb(opts: { migrate?: boolean; data?: Uint8Array
     async transaction(fn) {
       // expo-sqlite's withTransactionAsync is not re-entrant either; nested calls
       // simply join the outer transaction here.
-      if (depth > 0) { depth++; try { await fn(); } finally { depth--; } return; }
+      if (depth > 0) { depth++; try { await fn(self); } finally { depth--; } return; }
       depth++;
       self.statements++;
       raw.exec('BEGIN');
-      try { await fn(); raw.exec('COMMIT'); }
+      try { await fn(self); raw.exec('COMMIT'); }
       catch (e) { raw.exec('ROLLBACK'); throw e; }
       finally { depth--; }
     },

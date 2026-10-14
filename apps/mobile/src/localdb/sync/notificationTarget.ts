@@ -33,6 +33,8 @@ export function createNotificationTargets(deps: TargetDeps) {
   const listeners = new Set<Listener>();
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   const attempts = new Map<string, number>();
+  const localReady = new Map<string, (state: TargetState) => void>();
+  const localChecks = new Map<string, Promise<void>>();
   let generation = 0;
   let persistence = Promise.resolve();
   const persist = () => {
@@ -55,6 +57,15 @@ export function createNotificationTargets(deps: TargetDeps) {
     persist();
     for (const l of listeners) { try { l(c, m, s); } catch { /* noop */ } }
   }
+  function ready(c: string, m: string) {
+    const k = key(c, m);
+    const complete = localReady.get(k);
+    inflight.delete(k);
+    localReady.delete(k);
+    queued.delete(k);
+    set(c, m, 'ready');
+    complete?.('ready');
+  }
   function watchConnectivity() {
     if (stopConn) return;
     stopConn = deps.onConnectivity(online => {
@@ -64,16 +75,17 @@ export function createNotificationTargets(deps: TargetDeps) {
     });
   }
 
-  async function attempt(c: string, m: string): Promise<TargetState> {
+  async function attempt(c: string, m: string, ownsFlight: () => boolean): Promise<TargetState> {
     const epoch = generation;
+    const current = () => epoch === generation && ownsFlight();
     queued.set(key(c, m), { conversationId: c, messageId: m });
     if (!deps.isDbOpen()) { queued.set(key(c, m), { conversationId: c, messageId: m }); set(c, m, 'pending'); return 'pending'; }
     try {
       const local = await deps.hasLocal(m);
-      if (epoch !== generation) return 'pending';
-      if (local) { queued.delete(key(c, m)); set(c, m, 'ready'); return 'ready'; }
+      if (!current()) return 'pending';
+      if (local) { ready(c, m); return 'ready'; }
     } catch { /* fall through to fetch */ }
-    if (epoch !== generation) return 'pending';
+    if (!current()) return 'pending';
     if (!deps.isOnline()) {
       queued.set(key(c, m), { conversationId: c, messageId: m });
       watchConnectivity();
@@ -83,13 +95,24 @@ export function createNotificationTargets(deps: TargetDeps) {
     set(c, m, 'fetching');
     try {
       const ok = await deps.fetchOne(c, m);
-      if (epoch !== generation) return 'pending';
+      if (!current()) return 'pending';
+      // The live feed or catch-up may have committed this message while the
+      // direct read was in flight. A late result must not undo that success.
+      if (states.get(key(c, m)) === 'ready') return 'ready';
       queued.delete(key(c, m));
       const s: TargetState = ok ? 'ready' : 'missing';
       set(c, m, s);
       return s;
     } catch (err: any) {
-      if (epoch !== generation) return 'pending';
+      if (!current()) return 'pending';
+      if (states.get(key(c, m)) === 'ready') return 'ready';
+      try {
+        if (await deps.hasLocal(m)) {
+          if (!current()) return 'pending';
+          ready(c, m); return 'ready';
+        }
+      } catch { /* preserve the original fetch error */ }
+      if (!current()) return 'pending';
       const code = String(err?.code ?? '').replace(/^(firestore|functions)\//, '');
       if (['permission-denied', 'invalid-argument', 'not-found'].includes(code)) {
         queued.delete(key(c, m)); set(c, m, 'error'); return 'error';
@@ -115,7 +138,12 @@ export function createNotificationTargets(deps: TargetDeps) {
     const existing = inflight.get(k);
     if (existing) return existing;
     clearTimeout(timers.get(k)); timers.delete(k);
-    const p = attempt(c, m).finally(() => { if (inflight.get(k) === p) inflight.delete(k); });
+    const available = new Promise<TargetState>(resolve => {
+      localReady.set(k, resolve);
+    });
+    const p: Promise<TargetState> = Promise.race([attempt(c, m, () => inflight.get(k) === p), available]).finally(() => {
+      if (inflight.get(k) === p) { inflight.delete(k); localReady.delete(k); }
+    });
     inflight.set(k, p);
     return p;
   }
@@ -144,12 +172,30 @@ export function createNotificationTargets(deps: TargetDeps) {
     state(conversationId: string, messageId: string): TargetState | undefined {
       return states.get(key(conversationId, messageId));
     },
+    /** A committed local write wins immediately over a slow direct network read. */
+    onLocalMessagesChanged(conversationId: string): Promise<void> {
+      const epoch = generation;
+      const checks = [...queued.values()].filter(t => t.conversationId === conversationId).map(t => {
+        const k = key(t.conversationId, t.messageId);
+        const existing = localChecks.get(k);
+        if (existing) return existing;
+        const check = (async () => {
+          const local = await deps.hasLocal(t.messageId);
+          if (local && epoch === generation) ready(t.conversationId, t.messageId);
+        })().catch(() => {}).finally(() => { if (localChecks.get(k) === check) localChecks.delete(k); });
+        localChecks.set(k, check);
+        return check;
+      });
+      return Promise.all(checks).then(() => {});
+    },
     subscribe(l: Listener): () => void { listeners.add(l); return () => { listeners.delete(l); }; },
     /** Test/teardown helper. */
     reset(): void {
       generation++;
+      for (const resolve of localReady.values()) resolve('pending');
       for (const timer of timers.values()) clearTimeout(timer);
       timers.clear(); attempts.clear(); states.clear(); inflight.clear(); queued.clear();
+      localReady.clear(); localChecks.clear();
       stopConn?.(); stopConn = null;
     },
   };

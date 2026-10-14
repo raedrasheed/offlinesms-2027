@@ -36,6 +36,30 @@ beforeEach(async () => { db = await createSqlJsDb(); resetFake(); });
 afterEach(() => db.close());
 
 describe('conversation feeder', () => {
+  it('retries a rejected local write without waiting for another server snapshot', async () => {
+    vi.useFakeTimers();
+    fakeSeed(`conversations/${C}/messages/retry`, msg(1));
+    const write = vi.spyOn(db, 'transaction').mockRejectedValueOnce(new Error('database busy'));
+    const onChange = vi.fn(); const onError = vi.fn();
+    const stop = startConversationFeeder(C, onChange, onError);
+    try {
+      await vi.advanceTimersByTimeAsync(600);
+      expect(await visibleIds()).toEqual(['retry']);
+      expect(write).toHaveBeenCalledTimes(2);
+      expect(onChange).toHaveBeenCalledTimes(1);
+      expect(onError).not.toHaveBeenCalled();
+    } finally { stop(); write.mockRestore(); vi.useRealTimers(); }
+  });
+
+  it('does not apply a snapshot queued before the screen was closed', async () => {
+    fakeSeed(`conversations/${C}/messages/late`, msg(1));
+    const onChange = vi.fn();
+    const stop = startConversationFeeder(C, onChange);
+    stop(); await flush();
+    expect(await visibleIds()).toEqual([]);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it('stores the first window, then applies only the changed doc and notifies after commit', async () => {
     for (let k = 0; k < 5; k++) fakeSeed(`conversations/${C}/messages/m${k}`, msg(k));
     const changes: FeederChange[] = [];

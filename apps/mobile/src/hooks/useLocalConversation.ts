@@ -55,7 +55,7 @@ export interface LocalConversation {
   refresh: () => void;
   loadOlder: () => void;
   clear: () => Promise<void>;
-  retryFocus: () => void;
+  retrySync: () => void;
 }
 
 export function useLocalConversation(
@@ -75,6 +75,7 @@ export function useLocalConversation(
   const loadingOlderRef = useRef(false);
   const reachedStartRef = useRef(false);
   const focusRef = useRef<string | undefined>(focusMessageId);
+  const restartLiveRef = useRef<(() => void) | null>(null);
   focusRef.current = focusMessageId;
 
   // A separate lifecycle for each user/chat prevents a late SQLite result from
@@ -148,13 +149,21 @@ export function useLocalConversation(
       startLive: () => {
         // Catch-up starts only after the saved messages have been read.
         setActiveConversation(conversationId);
-        const stopFeeder = startConversationFeeder(conversationId, (change) => {
+        let stopFeeder: () => void = () => {};
+        const restart = () => {
           if (cancelled) return;
-          if (!change.fromCache) setLive('live');
-          // applyRemoteMessages emits the shared refresh after commit.
-          const f = focusRef.current;
-          if (f && change.ids.includes(f)) void revealFocus(f);
-        }, () => { if (!cancelled) setLive(isOnline() ? 'error' : 'offline'); });
+          stopFeeder();
+          setLive(isOnline() ? 'connecting' : 'offline');
+          stopFeeder = startConversationFeeder(conversationId, (change) => {
+            if (cancelled) return;
+            if (!change.fromCache) setLive('live');
+            // applyRemoteMessages emits the shared refresh after commit.
+            const f = focusRef.current;
+            if (f && change.ids.includes(f)) void revealFocus(f);
+          }, () => { if (!cancelled) setLive(isOnline() ? 'error' : 'offline'); });
+        };
+        restartLiveRef.current = restart;
+        restart();
         const stopTargets = notificationTargets.subscribe((c, m, state) => {
           if (cancelled || c !== conversationId || m !== focusRef.current) return;
           if (state === 'ready') void revealFocus(m);
@@ -173,7 +182,10 @@ export function useLocalConversation(
         })().catch(() => {
           if (!cancelled && focusRef.current === target) setFocus({ messageId: target, state: 'error' });
         });
-        return () => { stopFeeder(); stopTargets(); };
+        return () => {
+          if (restartLiveRef.current === restart) restartLiveRef.current = null;
+          stopFeeder(); stopTargets();
+        };
       },
       maintain: async () => {
         await initLocalDb(uid);
@@ -227,15 +239,22 @@ export function useLocalConversation(
     return () => { cancelled = true; };
   }, [focusMessageId, runner, conversationId, revealFocus, lifecycle]);
 
-  const retryFocus = useCallback(() => {
+  const retrySync = useCallback(() => {
+    // Retry also works for a failed conversation feed with no notification
+    // target. Restart only the listener; never blank already visible messages.
+    restartLiveRef.current?.();
+    void runner?.();
     const f = focusRef.current;
     if (!f || !conversationId) return;
     setFocus({ messageId: f, state: 'fetching' });
     void notificationTargets.retry(conversationId, f).then(s => {
+      if (!lifecycle.active || focusRef.current !== f) return;
       if (s === 'ready') void revealFocus(f);
       else if (focusRef.current === f) setFocus({ messageId: f, state: s });
+    }).catch(() => {
+      if (lifecycle.active && focusRef.current === f) setFocus({ messageId: f, state: 'error' });
     });
-  }, [conversationId, revealFocus]);
+  }, [conversationId, revealFocus, runner, lifecycle]);
 
   const loadOlder = useCallback(async () => {
     if (!enabled || !conversationId || !runner) return;
@@ -274,6 +293,6 @@ export function useLocalConversation(
   const loadOlderVoid = useCallback(() => { void loadOlder(); }, [loadOlder]);
 
   return useMemo(() => ({
-    messages, loading, source, live, focus, refresh, loadOlder: loadOlderVoid, clear, retryFocus,
-  }), [messages, loading, source, live, focus, refresh, loadOlderVoid, clear, retryFocus]);
+    messages, loading, source, live, focus, refresh, loadOlder: loadOlderVoid, clear, retrySync,
+  }), [messages, loading, source, live, focus, refresh, loadOlderVoid, clear, retrySync]);
 }
