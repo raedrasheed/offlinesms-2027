@@ -39,6 +39,7 @@
     "@react-navigation/native": "^6.1.18",
     "@react-navigation/native-stack": "^6.11.0",
     "expo": "^53.0.27",
+    "expo-application": "~6.1.5",
     "expo-asset": "~11.1.7",
     "expo-av": "~15.1.7",
     "expo-camera": "~16.1.11",
