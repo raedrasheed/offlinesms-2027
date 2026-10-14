@@ -187,8 +187,8 @@ describe.each(HISTORY)('upgrade from shipped schema v%i', (v) => {
       failOn = (sql) => sql.trim().startsWith(target.trim().slice(0, 60));
       await expect(openForUser(UID)).rejects.toThrow(/injected/);
       failOn = null;
-      // App killed: nothing of the half-done upgrade was persisted.
-      await lastOpened!.closeAsync();
+      // openForUser now closes a rejected migration's handle itself. Read
+      // those persisted bytes; do not close the same native handle twice.
       const check = new SQL.Database(files.get(FILE));
       expect(check.exec('PRAGMA user_version')[0].values[0][0]).toBe(v);
       expect(check.exec(`SELECT COUNT(*) FROM messages`)[0].values[0][0]).toBe(51);

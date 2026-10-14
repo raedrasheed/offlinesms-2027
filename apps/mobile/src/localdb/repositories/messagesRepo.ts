@@ -360,12 +360,12 @@ export interface RemoteMessageInput {
 export async function applyRemoteMessages(batch: RemoteMessageInput[]): Promise<void> {
   if (batch.length === 0) return;
   const database = getDb();
-  await database.transaction(async () => {
+  await database.transaction(async tx => {
     for (const r of batch) {
       // A deleted-for-everyone message keeps its row (it renders as "deleted"
       // in place, preserving order) but never keeps its content.
-      if (r.deletedForEveryone) await upsertRemoteMessage({ ...r, text: null, caption: null, media: null, payload: null }, database);
-      else await upsertRemoteMessage(r, database);
+      if (r.deletedForEveryone) await upsertRemoteMessage({ ...r, text: null, caption: null, media: null, payload: null }, tx);
+      else await upsertRemoteMessage(r, tx);
     }
   });
   for (const id of new Set(batch.map(r => r.conversationId))) emitLocalMessagesChanged(id);

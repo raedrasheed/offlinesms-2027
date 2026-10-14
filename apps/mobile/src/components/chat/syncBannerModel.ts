@@ -2,7 +2,7 @@
 // can be unit-tested in node).
 import type { FocusState, LiveState } from '../../hooks/useLocalConversation';
 
-export type SyncBannerKind = 'loading-message' | 'waiting-network' | 'missing' | 'error' | 'offline' | null;
+export type SyncBannerKind = 'loading-message' | 'waiting-network' | 'missing' | 'error' | 'sync-error' | 'offline' | null;
 
 /** Pure: which banner to show (unit-tested). */
 export function syncBannerKind(focus: FocusState | null, live: LiveState): SyncBannerKind {
@@ -15,7 +15,7 @@ export function syncBannerKind(focus: FocusState | null, live: LiveState): SyncB
       case 'ready': break;
     }
   }
-  if (live === 'error') return 'error';
+  if (live === 'error') return 'sync-error';
   if (live === 'offline') return 'offline';
   return null;
 }

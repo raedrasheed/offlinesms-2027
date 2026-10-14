@@ -3,7 +3,7 @@
 // The chat list reads from here. List query is a single indexed scan ordered by
 // last_message_at; no per-row JSON parsing.
 
-import { getDb } from '../connection';
+import { getDb, type LocalDatabase } from '../connection';
 import type { ConversationRow, SyncStatus } from '../types';
 
 export interface ConversationListFilter {
@@ -32,8 +32,8 @@ export async function listConversations(filter: ConversationListFilter = {}): Pr
   );
 }
 
-export async function getConversation(id: string): Promise<ConversationRow | null> {
-  return getDb().first<ConversationRow>(`SELECT * FROM conversations WHERE id = ? OR remote_id = ?`, [id, id]);
+export async function getConversation(id: string, database: LocalDatabase = getDb()): Promise<ConversationRow | null> {
+  return database.first<ConversationRow>(`SELECT * FROM conversations WHERE id = ? OR remote_id = ?`, [id, id]);
 }
 
 export async function countConversations(includeArchived = true): Promise<number> {
@@ -56,11 +56,11 @@ export async function countUnreadConversations(): Promise<number> {
  * (muted/pinned/favorite/archived/unread_count) are preserved unless the caller
  * explicitly provides them, since those live in per-user state.
  */
-export async function upsertRemoteConversation(c: Partial<ConversationRow> & { id: string }): Promise<void> {
-  const existing = await getConversation(c.id);
+export async function upsertRemoteConversation(c: Partial<ConversationRow> & { id: string }, database: LocalDatabase = getDb()): Promise<void> {
+  const existing = await getConversation(c.id, database);
   const now = Date.now();
   if (existing) {
-    await getDb().run(
+    await database.run(
       `UPDATE conversations SET
         remote_id = COALESCE(?, remote_id),
         type = COALESCE(?, type),
@@ -85,7 +85,7 @@ export async function upsertRemoteConversation(c: Partial<ConversationRow> & { i
       ],
     );
   } else {
-    await getDb().run(
+    await database.run(
       `INSERT INTO conversations
         (id, remote_id, type, title, avatar_url, owner_uid, status, member_count,
          pinned_message_id, last_message_id, last_message_preview, last_message_at,
@@ -105,8 +105,8 @@ export async function upsertRemoteConversation(c: Partial<ConversationRow> & { i
 /** Apply a batch of remote conversation changes in ONE transaction. */
 export async function applyRemoteConversations(batch: Array<Partial<ConversationRow> & { id: string }>): Promise<void> {
   if (batch.length === 0) return;
-  await getDb().transaction(async () => {
-    for (const c of batch) await upsertRemoteConversation(c);
+  await getDb().transaction(async tx => {
+    for (const c of batch) await upsertRemoteConversation(c, tx);
   });
 }
 

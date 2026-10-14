@@ -14,11 +14,11 @@ export async function retryQueuedSend(localId: string): Promise<boolean> {
     WHERE entity_type = 'message' AND entity_id = ? AND type = 'send_message'
       AND status IN ('pending', 'failed', 'dead') LIMIT 1`, [localId]);
   if (!job) return false;
-  await db.transaction(async () => {
+  await db.transaction(async tx => {
     const now = Date.now();
-    await db.run(`UPDATE outbox SET status = 'pending', attempt_count = 0, next_attempt_at = ?,
+    await tx.run(`UPDATE outbox SET status = 'pending', attempt_count = 0, next_attempt_at = ?,
       last_error_code = NULL, last_error_message = NULL, updated_at = ? WHERE id = ?`, [now, now, job.id]);
-    await db.run(`UPDATE messages SET status = 'pending', sync_status = 'pending',
+    await tx.run(`UPDATE messages SET status = 'pending', sync_status = 'pending',
       error_code = NULL, error_message = NULL, updated_at = ? WHERE local_id = ?`, [now, localId]);
   });
   emitLocalMessagesChanged(row.conversation_id);
