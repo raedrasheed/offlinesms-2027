@@ -1,9 +1,9 @@
 // Resolve the best URI for a message's media: the persistent cached file when
-// available (instant, offline), otherwise the remote download URL while it
-// caches in the background, or the sender's own still-local file before upload.
+// available (instant, offline), otherwise an image thumbnail or the voice URL.
+// Only viewport prefetch starts caching; mounting an offscreen cell does not.
 
 import { useEffect, useState } from 'react';
-import { ensureCached } from '../media/mediaCache';
+import { cachedMediaUri, onMediaCached } from '../media/mediaCache';
 import type { Message } from '../lib/conversations';
 
 export function useCachedMediaUri(message: Message): string | null {
@@ -14,12 +14,13 @@ export function useCachedMediaUri(message: Message): string | null {
   useEffect(() => {
     let active = true;
     setCached(null);
-    ensureCached(message)
+    const stop = onMediaCached(message, uri => { if (active) setCached(uri); });
+    cachedMediaUri(message)
       .then((p) => { if (active && p) setCached(p); })
       .catch(() => {});
-    return () => { active = false; };
+    return () => { active = false; stop(); };
     // Re-run when the message or its remote URL changes (e.g. after finalize).
-  }, [message.id, remote]);
+  }, [message.id, remote, localUri]);
 
-  return cached || localUri || remote;
+  return cached || localUri || (message.type === 'image' ? message.media?.thumbnailURL || null : remote);
 }

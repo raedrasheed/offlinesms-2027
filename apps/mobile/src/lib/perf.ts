@@ -1,6 +1,5 @@
-// On-device timing for test builds. THE SAME FILE ships in the baseline and the
-// updated test build (scripts/test-builds/), and both call it at the same
-// screen-level points, so before/after numbers are comparable:
+// On-device timing for test builds. Existing data-ready spans retain their
+// old meaning. New viewability spans measure native list visibility separately:
 //
 //   mark  auth:resolved            first auth state known          (App)
 //   mark  chatList:shown           chat list first has rows        (ChatsList)
@@ -9,7 +8,10 @@
 //   span  send_to_visible          send tap → own message in the rendered list
 //   span  older_to_visible         "load older" → more messages in the rendered list
 //
-// "Rendered" = present in the array handed to the conversation's FlatList.
+//   span  conversation_first_viewable   open → native viewability callback
+//   span  push_to_viewable              tap → target actually viewable
+//
+// Legacy "rendered" = present in the array handed to the conversation's FlatList.
 // Output (EXPO_PUBLIC_PERF_LOG=1 builds, or development): logcat lines
 //   [perf] mark <name> +<ms since JS start>
 //   [perf] span <name> <ms>
@@ -40,7 +42,7 @@ export function perfMark(name: string, data?: Record<string, unknown>, onlyFirst
   record({ kind: 'mark', name, ms: Math.round(clock() - t0), data });
 }
 
-interface Pending { start: number; id?: string; minCount?: number; lastNot?: string }
+interface Pending { phase: 'data' | 'viewable'; start: number; id?: string; minCount?: number; lastNot?: string }
 const pending = new Map<string, Pending>();
 
 /** Current clock, to start a span before its target id is known. */
@@ -55,16 +57,17 @@ export function perfNow(): number {
  */
 export function perfBegin(
   span: string,
-  target: { id?: string | null; minCount?: number; lastNot?: string } = {},
+  target: { id?: string | null; minCount?: number; lastNot?: string; phase?: 'data' | 'viewable' } = {},
   startedAt: number = clock(),
 ): void {
-  pending.set(span, { start: startedAt, id: target.id ?? undefined, minCount: target.minCount, lastNot: target.lastNot });
+  pending.set(span, { phase: target.phase ?? 'data', start: startedAt, id: target.id ?? undefined, minCount: target.minCount, lastNot: target.lastNot });
 }
 
 /** Report what the conversation list renders (newest first); ends matching spans. */
-export function perfObserve(ids: readonly string[]): void {
+export function perfObserve(ids: readonly string[], phase: 'data' | 'viewable' = 'data'): void {
   if (pending.size === 0) return;
   for (const [span, p] of pending) {
+    if (p.phase !== phase) continue;
     const done = p.id ? ids.includes(p.id)
       : p.minCount != null ? ids.length >= p.minCount && ids[ids.length - 1] !== p.lastNot
         : ids.length > 0;

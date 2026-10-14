@@ -402,9 +402,13 @@ service cloud.firestore {
                            || (get(/databases/$(database)/documents/conversations/$(convoId)/messages/$(messageId)).data.senderUid == request.auth.uid)
                            || (get(/databases/$(database)/documents/conversations/$(convoId)/messages/$(messageId)).data.senderId == request.auth.uid);
           allow create: if (isSelf(uid) || isAdmin())
+                          && exists(/databases/$(database)/documents/conversations/$(convoId)/messages/$(messageId))
+                          && get(/databases/$(database)/documents/conversations/$(convoId)/messages/$(messageId)).data.get('retentionDeleting', false) != true
                           && (!('status' in request.resource.data)
                               || isValidReceiptStatus(request.resource.data.status));
           allow update: if (isSelf(uid) || isAdmin())
+                          && exists(/databases/$(database)/documents/conversations/$(convoId)/messages/$(messageId))
+                          && get(/databases/$(database)/documents/conversations/$(convoId)/messages/$(messageId)).data.get('retentionDeleting', false) != true
                           && (!('status' in request.resource.data)
                               || isValidReceiptStatus(request.resource.data.status));
           allow delete: if isAdmin();

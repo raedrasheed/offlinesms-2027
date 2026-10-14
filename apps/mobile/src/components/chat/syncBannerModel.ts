@@ -15,6 +15,7 @@ export function syncBannerKind(focus: FocusState | null, live: LiveState): SyncB
       case 'ready': break;
     }
   }
+  if (live === 'error') return 'error';
   if (live === 'offline') return 'offline';
   return null;
 }

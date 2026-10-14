@@ -6,5 +6,5 @@ export function onLocalMessagesChanged(listener: Listener): () => void {
   return () => { listeners.delete(listener); };
 }
 export function emitLocalMessagesChanged(conversationId: string): void {
-  for (const listener of listeners) listener(conversationId);
+  for (const listener of listeners) { try { listener(conversationId); } catch { /* a UI listener must not fail a committed write */ } }
 }

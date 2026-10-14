@@ -42,7 +42,7 @@ export function startConversationFeeder(
     chain = chain
       .then(() => applyRemoteMessages(batch))
       .then(() => { if (!stopped) onChange({ ids: batch.map(b => b.remoteId), fromCache }); })
-      .catch(() => { /* best-effort per batch; the catch-up pull re-applies */ });
+      .catch(() => { if (!stopped) onError?.('local-write-failed'); });
   }, err => {
     if (__DEV__) console.warn('[feeder] messages listener failed:', (err as any)?.code ?? err);
     onError?.((err as any)?.code ?? 'unknown');

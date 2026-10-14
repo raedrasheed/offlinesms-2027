@@ -14,7 +14,7 @@
 // app drops the local banner when viewing that chat); the OS still delivers to
 // background/killed apps, which is the expected WhatsApp behaviour.
 
-import { onDocumentCreated } from 'firebase-functions/v2/firestore';
+import { onDocumentCreated, onDocumentUpdated } from 'firebase-functions/v2/firestore';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import {
   buildNotification, decideForRecipient, notifLang,
@@ -23,14 +23,27 @@ import {
 import { cleanNameSnapshot, publicNameFrom } from '../lib/displayName';
 import { sendPushToUser } from './send';
 
-export const onMessageCreateNotify = onDocumentCreated(
-  'conversations/{convoId}/messages/{msgId}',
-  async (event) => {
-    const db = getFirestore();
-    const msg = event.data?.data();
-    if (!msg) return;
-    const { convoId, msgId } = event.params as { convoId: string; msgId: string };
+/** Media is announced only when opening the notification can fetch its file. */
+export function notificationReady(msg: Record<string, any> | undefined): boolean {
+  if (!msg || msg.deletedForEveryone || msg.retentionDeleting) return false;
+  return msg.type !== 'image' && msg.type !== 'voice'
+    || msg.media?.uploadStatus === 'uploaded' && !!msg.media?.downloadURL;
+}
 
+const messagePath = 'conversations/{convoId}/messages/{msgId}';
+export const onMessageCreateNotify = onDocumentCreated({ document: messagePath, retry: true }, async event => {
+  const msg = event.data?.data();
+  if (notificationReady(msg)) await notifyMessage(event.params.convoId, event.params.msgId, msg!);
+});
+export const onMessageMediaReadyNotify = onDocumentUpdated({ document: messagePath, retry: true }, async event => {
+  const before = event.data?.before.data(), after = event.data?.after.data();
+  if (['image', 'voice'].includes(after?.type) && !notificationReady(before) && notificationReady(after)) {
+    await notifyMessage(event.params.convoId, event.params.msgId, after!);
+  }
+});
+
+async function notifyMessage(convoId: string, msgId: string, msg: Record<string, any>): Promise<void> {
+    const db = getFirestore();
     const senderUid: string = msg.senderUid ?? msg.senderId;
     if (!senderUid) return;
     if (msg.deletedForEveryone) return;
@@ -77,13 +90,32 @@ export const onMessageCreateNotify = onDocumentCreated(
         lang: notifLang(langOf.get(uid)),
       });
 
-      return sendPushToUser(uid, {
+      // Per-recipient completion survives duplicate trigger deliveries. A lease
+      // recovers a worker crash; transport acknowledgement is not exactly-once.
+      const messageRef = convoRef.collection('messages').doc(msgId);
+      const dispatchRef = messageRef.collection('notificationDeliveries').doc(uid);
+      const claimed = await db.runTransaction(async tx => {
+        const [live, prior] = await Promise.all([tx.get(messageRef), tx.get(dispatchRef)]);
+        if (!live.exists || !notificationReady(live.data()) || prior.get('complete') === true) return false;
+        if ((prior.get('leaseUntil') ?? 0) > Date.now()) throw new Error('notification-dispatch-in-progress');
+        tx.set(dispatchRef, { leaseUntil: Date.now() + 120_000 }, { merge: true });
+        return true;
+      });
+      if (!claimed) return 0;
+      const sent = await sendPushToUser(uid, {
         title, body, silent: decision.silent, conversationId: convoId,
         data: {
           type: 'chat_message', conversationId: convoId, messageId: msgId,
           senderUid, chatType, route: 'Conversation',
+          createdAtMs: String(msg.createdAt?.toMillis?.() ?? ''),
         },
       });
+      await db.runTransaction(async tx => {
+        const live = await tx.get(messageRef);
+        if (!live.exists || live.get('retentionDeleting') === true) return;
+        tx.set(dispatchRef, { complete: true, leaseUntil: 0, completedAt: FieldValue.serverTimestamp() }, { merge: true });
+      });
+      return sent;
     }));
 
     const sent = counts.reduce((a, b) => a + b, 0);
@@ -96,5 +128,4 @@ export const onMessageCreateNotify = onDocumentCreated(
         });
       } catch { /* noop */ }
     }
-  },
-);
+}

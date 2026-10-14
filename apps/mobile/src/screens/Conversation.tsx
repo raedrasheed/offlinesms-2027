@@ -212,39 +212,8 @@ export default function Conversation({ route, navigation }: any) {
     if (useLocal || !id) return;
     return subscribeMessages(id, rows => {
       setMsgs(rows);
-      markRead(id).catch(() => {});
-      // Phase 7: emit receipts for every visible message not authored
-      // by the caller. The lib dedupes (messageId, status) so this
-      // safely re-runs on every snapshot.
-      for (const m of rows) {
-        if (m.senderUid === me || (m as any).senderId === me) continue;
-        if (m.deletedForEveryone) continue;
-        if (receiptedRef.current.has(m.id)) continue;
-        receiptedRef.current.add(m.id);
-        markReceipt(id, m.id, 'delivered');
-        markReceipt(id, m.id, 'read');
-      }
     });
   }, [id, me, useLocal]);
-
-  // Local-first mode: messages come from the feeder/local DB; still emit
-  // read/delivered receipts for incoming messages (callables dedupe server-side).
-  useEffect(() => {
-    if (!useLocal || !id) return;
-    markRead(id).catch(() => {});
-    // Only emit per-message receipts for incoming messages we haven't already
-    // receipted this session (deduped above) — never re-mark the whole history.
-    for (const m of local.messages) {
-      if (m.senderUid === me) continue;
-      if (m.deletedForEveryone) continue;
-      if (receiptedRef.current.has(m.id)) continue;
-      receiptedRef.current.add(m.id);
-      void queueMarkReceipt({ conversationId: id, messageId: m.id, status: 'delivered' });
-      void queueMarkReceipt({ conversationId: id, messageId: m.id, status: 'read' });
-    }
-    // No manual scroll here — the list is inverted (opens at the bottom) and the
-    // new-message effect handles following new messages.
-  }, [useLocal, id, me, local.messages]);
 
   // userState (drives starred + deletedForMe filtering).
   useEffect(() => {
@@ -449,20 +418,27 @@ export default function Conversation({ route, navigation }: any) {
     return effectiveMsgs.filter(m => !deletedForMe.has(m.id));
   }, [effectiveMsgs, deletedForMe]);
 
-  // Cache media to the device so images/voice load instantly on revisit.
-  useEffect(() => { if (visibleMsgs) prefetchMedia(visibleMsgs); }, [visibleMsgs]);
+  const visibleMediaIdsRef = useRef(new Set<string>());
+  const visibleMsgsRef = useRef(visibleMsgs);
+  visibleMsgsRef.current = visibleMsgs;
+  useEffect(() => {
+    if (visibleMsgs) prefetchMedia(visibleMsgs.filter(m => visibleMediaIdsRef.current.has(m.id)));
+  }, [visibleMsgs]);
+
+
 
   // Bubble handlers — useCallback so MessageBubble's memo comparator sees
   // stable references and only re-renders when its own data changes.
   const jumpTo = useCallback((messageId: string) => {
-    if (!visibleMsgs) return;
-    const idx = visibleMsgs.findIndex(m => m.id === messageId);
+    const rows = visibleMsgsRef.current;
+    if (!rows) return;
+    const idx = rows.findIndex(m => m.id === messageId);
     if (idx < 0) return;
     // The list is inverted: index 0 is the newest. Map the chronological index
     // to the inverted one across the full data length (messages + queued).
-    const total = dataLenRef.current || visibleMsgs.length;
+    const total = dataLenRef.current || rows.length;
     listRef.current?.scrollToIndex?.({ index: total - 1 - idx, animated: true, viewPosition: 0.5 });
-  }, [visibleMsgs]);
+  }, []);
 
   // Reset the failed job before waking sync, retaining its original local id.
   const retrySend = useCallback((message: Message) => {
@@ -893,11 +869,42 @@ export default function Conversation({ route, navigation }: any) {
   // bottom of the screen (scroll offset 0).
   const invData = useMemo(() => data.slice().reverse(), [data]);
 
+  // Native viewability controls receipts and prefetch, not the entire history.
+  const viewContext = useRef({ id, me, useLocal, newestId: invData[0]?.id });
+  viewContext.current = { id, me, useLocal, newestId: invData[0]?.id };
+  const readNewestRef = useRef('');
+  useEffect(() => { receiptedRef.current.clear(); readNewestRef.current = ''; }, [id, me]);
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 60, minimumViewTime: 150 }).current;
+  const onViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: Array<{ item: any; isViewable: boolean }> }) => {
+    const ctx = viewContext.current;
+    const visible = viewableItems.filter(v => v.isViewable).map(v => v.item);
+    visibleMediaIdsRef.current = new Set(visible.map(m => m.id));
+    perfObserve(visible.map(m => m.id), 'viewable');
+    prefetchMedia(visible);
+    if (!ctx.id || !ctx.me) return;
+    const readKey = `${ctx.id}/${ctx.newestId}`;
+    if (visible.some(m => m.id === ctx.newestId) && readNewestRef.current !== readKey) {
+      readNewestRef.current = readKey;
+      void markRead(ctx.id).catch(() => { if (readNewestRef.current === readKey) readNewestRef.current = ''; });
+    }
+    for (const m of visible) {
+      if (m.senderUid === ctx.me || m.deletedForEveryone || (m as any).__pending) continue;
+      const key = `${ctx.id}/${m.id}`;
+      if (receiptedRef.current.has(key)) continue;
+      receiptedRef.current.add(key);
+      if (ctx.useLocal) {
+        void queueMarkReceipt({ conversationId: ctx.id, messageId: m.id, status: 'read' })
+          .then(result => { if (!result.ok) receiptedRef.current.delete(key); })
+          .catch(() => { receiptedRef.current.delete(key); });
+      } else markReceipt(ctx.id, m.id, 'read');
+    }
+  }, []);
+
   // Timing (test builds, src/lib/perf.ts): the same screen-level points as the
   // baseline build — open → first rows, and every render reports its ids so
   // tap/send/older spans end when their message is in the rendered list.
   const renderedRef = useRef<string[]>([]);
-  useEffect(() => { perfBegin('conversation_open'); }, [id]);
+  useEffect(() => { perfBegin('conversation_open'); perfBegin('conversation_first_viewable', { phase: 'viewable' }); }, [id]);
   useEffect(() => {
     const ids = invData.map((m: any) => m.id as string);
     renderedRef.current = ids;
@@ -1012,6 +1019,8 @@ export default function Conversation({ route, navigation }: any) {
             </View>
           </View>
         }
+        onViewableItemsChanged={onViewableItemsChanged}
+        viewabilityConfig={viewabilityConfig}
         onScroll={onListScroll}
         scrollEventThrottle={64}
         // Page in older history when the user nears the top of the inverted list.

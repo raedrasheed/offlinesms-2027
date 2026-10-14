@@ -25,7 +25,7 @@ import {
   notificationTargets, type TargetState,
 } from '../localdb';
 import { startConversationFeeder } from '../localdb/sync/conversationFeeder';
-import { pullMessagesBefore } from '../localdb/sync/firebasePull';
+import { pullMessageHistoryPage } from '../localdb/sync/firebasePull';
 import { isOnline, onConnectivityChange } from '../localdb/sync/networkState';
 import { importLegacyQueueOnce } from '../localdb/sync/legacyImport';
 import { createMessageMapper } from './messageModel';
@@ -36,7 +36,7 @@ import type { Message } from '../lib/conversations';
 
 export type ConversationSource = 'disabled' | 'local' | 'firestoreFallback';
 /** 'connecting' until the realtime listener delivered server data at least once. */
-export type LiveState = 'connecting' | 'live' | 'offline';
+export type LiveState = 'connecting' | 'live' | 'offline' | 'error';
 
 export interface FocusState { messageId: string; state: TargetState | 'locating' }
 
@@ -71,7 +71,6 @@ export function useLocalConversation(
   const [focus, setFocus] = useState<FocusState | null>(focusMessageId ? { messageId: focusMessageId, state: 'locating' } : null);
   const limitRef = useRef(PAGE);
   const localCountRef = useRef(0);
-  const oldestMsRef = useRef<number | null>(null);
   const clearedAtRef = useRef(0);
   const loadingOlderRef = useRef(false);
   const reachedStartRef = useRef(false);
@@ -100,8 +99,6 @@ export function useLocalConversation(
           ? all.filter(r => r.remote_created_at == null || r.remote_created_at > clearedAtRef.current)
           : all;
         localCountRef.current = rows.length;
-        const oldest = rows[rows.length - 1]; // rows are newest-first
-        oldestMsRef.current = oldest ? (oldest.remote_created_at ?? oldest.created_at ?? null) : null;
         setMessages(mapRows(rows));
         setSource('local');
       } catch {
@@ -154,11 +151,10 @@ export function useLocalConversation(
         const stopFeeder = startConversationFeeder(conversationId, (change) => {
           if (cancelled) return;
           if (!change.fromCache) setLive('live');
-          void runner().then(() => {
-            const f = focusRef.current;
-            if (!cancelled && f && change.ids.includes(f)) void revealFocus(f);
-          });
-        });
+          // applyRemoteMessages emits the shared refresh after commit.
+          const f = focusRef.current;
+          if (f && change.ids.includes(f)) void revealFocus(f);
+        }, () => { if (!cancelled) setLive(isOnline() ? 'error' : 'offline'); });
         const stopTargets = notificationTargets.subscribe((c, m, state) => {
           if (cancelled || c !== conversationId || m !== focusRef.current) return;
           if (state === 'ready') void revealFocus(m);
@@ -253,10 +249,13 @@ export function useLocalConversation(
       if (localCountRef.current >= limitRef.current) return;
       // Local history exhausted: back-fill older messages from Firestore,
       // bounded below by any "clear chat" watermark. fetched === 0 ⇒ the start.
-      if (oldestMsRef.current == null) { reachedStartRef.current = true; return; }
-      const fetched = await pullMessagesBefore(conversationId, oldestMsRef.current, clearedAtRef.current);
-      if (fetched > 0) await runner();
-      else reachedStartRef.current = true;
+      // The first server page may overlap the cached live window. Keep moving
+      // until this requested local window fills, rather than stalling on duplicates.
+      for (let page = 0; page < 4 && localCountRef.current < limitRef.current; page++) {
+        const fetched = await pullMessageHistoryPage(conversationId, PAGE);
+        if (fetched === 0) { reachedStartRef.current = true; break; }
+        await runner();
+      }
     } catch {
       /* best-effort: keep showing what we have; a later scroll can retry */
     } finally {

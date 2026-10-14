@@ -13,13 +13,14 @@ import { startScheduler, stopScheduler, kick } from './sync/syncScheduler';
 import * as messagesRepo from './repositories/messagesRepo';
 import * as outboxRepo from './repositories/outboxRepo';
 import * as externalMembersRepo from './repositories/externalMembersRepo';
-import { getDeviceId, getCursor, setCursor } from './repositories/syncStateRepo';
+import { getDeviceId, getCursor, setCursor, getState, setState } from './repositories/syncStateRepo';
 import { idempotencyKey, localId } from './sync/ids';
 import { sanitizePoll, parsePoll, applyLocalVote } from '../lib/pollModel';
 import { toggleReaction } from './sync/reactionLogic';
 import { phoneDigits } from '../lib/phone';
 import { isOnline, onConnectivityChange } from './sync/networkState';
 import { pullMessageById } from './sync/firebasePull';
+import { auth } from '../lib/firebase';
 import { createNotificationTargets } from './sync/notificationTarget';
 import type { MessageRow } from './types';
 import { enqueuePollClose } from './pollClose';
@@ -44,24 +45,39 @@ export type { TargetState } from './sync/notificationTarget';
  * queued until the local DB opens on a cold start or the network returns.
  */
 export const notificationTargets = createNotificationTargets({
-  isDbOpen: () => getCurrentUid() != null,
+  isDbOpen: () => getCurrentUid() != null && auth.currentUser?.uid === getCurrentUid(),
   isOnline,
-  hasLocal: async (messageId) => (await messagesRepo.getByRemoteId(messageId)) != null,
+  hasLocal: async messageId => {
+    const row = await messagesRepo.getByRemoteId(messageId);
+    if (!row) return false;
+    return row.deleted_for_everyone === 1 || !['image', 'voice'].includes(row.type)
+      || row.media_upload_status === 'uploaded' && !!row.media_download_url;
+  },
   fetchOne: (conversationId, messageId) => pullMessageById(conversationId, messageId),
   onConnectivity: onConnectivityChange,
+  loadPending: async () => JSON.parse((await getState('notification_targets')) ?? '[]'),
+  savePending: targets => setState('notification_targets', JSON.stringify(targets)),
 });
 export { setActiveConversation, kick as kickSync } from './sync/syncScheduler';
 
 let started = false;
+function prepareUser(uid: string): void {
+  if (getCurrentUid() && getCurrentUid() !== uid) {
+    notificationTargets.reset();
+    if (started) { stopScheduler(); started = false; }
+  }
+}
 
 /** Open the per-user DB only (no message-sync scheduler). Used by Phase 22B
  *  where the chat-list feeder drives writes. */
 export async function openLocalDb(uid: string): Promise<void> {
+  prepareUser(uid);
   await openForUser(uid);
   notificationTargets.onDbOpened();
 }
 
 export async function initLocalDb(uid: string): Promise<void> {
+  prepareUser(uid);
   await openForUser(uid);
   // Clear any inherited backlog of read-receipts that are stuck failing (e.g. a
   // bulk enqueue hard-failing with `internal`). Best-effort, so dropping them is
@@ -72,11 +88,13 @@ export async function initLocalDb(uid: string): Promise<void> {
 }
 
 export async function teardownLocalDb(): Promise<void> {
+  notificationTargets.reset();
   if (started) { stopScheduler(); started = false; }
   await closeDb();
 }
 
 export async function wipeAndClose(): Promise<void> {
+  notificationTargets.reset();
   if (started) { stopScheduler(); started = false; }
   await wipeUserData();
   await closeDb();

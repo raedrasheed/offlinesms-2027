@@ -4,8 +4,8 @@
 import * as outboxRepo from '../repositories/outboxRepo';
 import * as messagesRepo from '../repositories/messagesRepo';
 import * as conversationsRepo from '../repositories/conversationsRepo';
-import { getCursor, setCursor } from '../repositories/syncStateRepo';
-import { pullConversations, pullMessages, pullMembers, pullMessagesBefore } from './firebasePull';
+import { getCursor, setCursor, getState, setState } from '../repositories/syncStateRepo';
+import { pullConversations, pullMessages, pullMembers, pullMessageHistoryPage } from './firebasePull';
 import { pushOutboxItem } from './firebasePush';
 import { isOnline } from './networkState';
 import { isPermanent, errorCode, nextAttemptAt } from './retryPolicy';
@@ -18,8 +18,8 @@ let pushing = false;   // guards the outbox push (independent → sends never wa
 // Realtime feeders own steady-state reads, so the engine only pulls on these
 // lifecycle transitions (cold start, reconnect, return to foreground) to close
 // any gap when feeders weren't attached. The frequent timer/outbox kicks just
-// drain the outbox.
-const PULL_REASONS: ReadonlySet<SyncReason> = new Set(['boot', 'auth-change', 'online', 'foreground', 'active-change']);
+// drain the outbox; foreground timer ticks also resume bounded catch-up.
+const PULL_REASONS: ReadonlySet<SyncReason> = new Set(['boot', 'auth-change', 'online', 'foreground', 'active-change', 'timer', 'manual']);
 
 // Retention sweep cadence — at most once per this interval, on a pull run.
 const PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -41,57 +41,35 @@ async function maybePrune(): Promise<void> {
 // single sync never runs away on a huge/old account.
 const BACKFILL_PAGE = 100;                 // messages fetched per page
 const MAX_BACKFILL_PAGES_PER_RUN = 8;      // ≈ 800 messages per run; resumes next sync
-const BACKFILL_REASONS: ReadonlySet<SyncReason> = new Set(['boot', 'online', 'foreground']);
+const BACKFILL_REASONS: ReadonlySet<SyncReason> = new Set(['boot', 'online', 'foreground', 'timer', 'manual']);
 
-/** Backfill one conversation's older history, consuming from the shared page
- *  budget. Marks the conversation done when the server has nothing older. */
-async function backfillConversation(id: string, budget: { pages: number }): Promise<void> {
-  if (await getCursor(`backfill_done:${id}`) > 0) return;
-  // Never page across a "clear chat" watermark (don't resurrect cleared history).
-  const floor = await getCursor(`chat_cleared:${id}`);
-
-  while (budget.pages > 0 && isOnline()) {
-    let frontier = await getCursor(`backfill_before:${id}`);
-    if (frontier <= 0) {
-      const min = await messagesRepo.getMinMessageTime(id);
-      frontier = min > 0 ? min : Date.now();   // empty chat → start from "now"
-    }
-    if (floor > 0 && frontier <= floor) { await markBackfillDone(id); return; }
-
-    budget.pages--;
-    const fetched = await pullMessagesBefore(id, frontier, floor, BACKFILL_PAGE);
-    if (fetched === 0) { await markBackfillDone(id); return; }   // no older history
-
-    const newMin = await messagesRepo.getMinMessageTime(id);
-    if (newMin <= 0 || newMin >= frontier) { await markBackfillDone(id); return; } // no progress
-    await setCursor(`backfill_before:${id}`, newMin);
-  }
-}
-
-async function markBackfillDone(id: string): Promise<void> {
-  await setCursor(`backfill_done:${id}`, Date.now());
-  // Seed the forward cursor (if unset) so the next incremental pull for this
-  // conversation starts from the newest message instead of re-reading from 0.
-  if ((await getCursor(`msg_cursor:${id}`)) <= 0) {
-    const max = await messagesRepo.getMaxMessageTime(id);
-    if (max > 0) await setCursor(`msg_cursor:${id}`, max);
-  }
-}
-
-/** Pull every message not yet on the device, across all conversations (active
- *  one first). Bounded per run; resumes on the next sync until complete. */
+/** Round-robin background pages prevent a large/finished chat starving others.
+ * The active chat gets one priority page; the persisted rotation survives restarts.
+ */
 export async function backfillMissingMessages(activeConversationId?: string): Promise<void> {
   if (!isOnline()) return;
   const convos = await conversationsRepo.listConversations();
-  const ids = convos.map(c => c.id);
-  if (activeConversationId) {
-    const i = ids.indexOf(activeConversationId);
-    if (i > 0) { ids.splice(i, 1); ids.unshift(activeConversationId); }
-  }
-  const budget = { pages: MAX_BACKFILL_PAGES_PER_RUN };
-  for (const id of ids) {
-    if (budget.pages <= 0 || !isOnline()) break;
-    try { await backfillConversation(id, budget); } catch { /* best-effort; retry next run */ }
+  const byId = new Map(convos.map(c => [c.id, c]));
+  const ids = convos.map(c => c.id).filter(id => id !== activeConversationId);
+  const previous = await getState('history_rotation');
+  const start = previous ? (ids.indexOf(previous) + 1) % Math.max(ids.length, 1) : 0;
+  const rotated = [...ids.slice(start), ...ids.slice(0, start)];
+  const work = [...(activeConversationId ? [activeConversationId] : []), ...rotated];
+  if (!work.length) return;
+  for (let n = 0; n < MAX_BACKFILL_PAGES_PER_RUN && isOnline(); n++) {
+    const id = work[n % work.length];
+    try {
+      const saved = await getState(`history_v2:${id}`);
+      if (saved && JSON.parse(saved).done) {
+        const raw = await getState(`msg_cursor_v2:${id}`);
+        const cursor = raw ? JSON.parse(raw) : null;
+        const caughtUpAt = cursor ? cursor.seconds * 1000 + cursor.nanoseconds / 1e6 : 0;
+        if (!cursor || caughtUpAt < (byId.get(id)?.last_message_at ?? 0)) await pullMessages(id, BACKFILL_PAGE, 1);
+      } else await pullMessageHistoryPage(id, BACKFILL_PAGE);
+    } catch { /* Resume the same durable cursor next time. */ }
+    if (id !== activeConversationId) await setState('history_rotation', id);
+    if (n >= work.length - 1) break;
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
   }
 }
 
@@ -210,13 +188,15 @@ export async function syncNow(reason: SyncReason, activeConversationId?: string)
     await pullConversationNow(activeConversationId);
     return;
   }
-  // Always flush the outbox first, regardless of any in-flight pull/backfill.
-  await flushOutbox();
+  // Sends and reads run independently; a receipt backlog cannot block catch-up.
+  void flushOutbox();
   if (!PULL_REASONS.has(reason)) return;
   if (running) return;
   running = true;
   try {
-    await pullRemoteChanges(activeConversationId);
+    if (reason === 'timer') {
+      if (activeConversationId) await pullMessages(activeConversationId, 100, 2);
+    } else await pullRemoteChanges(activeConversationId);
     // Pull any older history still missing from the device (resumable, bounded
     // per run) so going online eventually mirrors the full history locally.
     if (BACKFILL_REASONS.has(reason)) await backfillMissingMessages(activeConversationId);

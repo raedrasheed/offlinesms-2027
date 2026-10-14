@@ -53,7 +53,7 @@ export function ImageMessageBubble({
   return (
     <View>
       <Pressable
-        onPress={() => uri && !busy && onOpen(uri)}
+        onPress={() => uri && !busy && onOpen(uri === media?.thumbnailURL ? media?.downloadURL || uri : uri)}
         accessibilityRole="imagebutton"
         accessibilityLabel={t('media.openImage')}
         style={[s.frame, { width: MAX_W, height: h }]}

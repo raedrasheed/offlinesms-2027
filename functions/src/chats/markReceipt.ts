@@ -70,7 +70,10 @@ export const markReceipt = onCall(async (request) => {
   }
 
   const result = await db.runTransaction(async (tx) => {
-    const snap = await tx.get(receiptRef);
+    const [liveMessage, snap] = await Promise.all([tx.get(msgRef), tx.get(receiptRef)]);
+    if (!liveMessage.exists || liveMessage.get('retentionDeleting') === true) {
+      throw new HttpsError('not-found', 'message-expired');
+    }
     const current = snap.exists ? (snap.data() as Record<string, unknown>) : null;
     const currentStatus = ((current?.status as Status | undefined) ?? 'pending') as Status;
 
