@@ -4,7 +4,7 @@ import { initializeApp } from 'firebase-admin/app';
 initializeApp();
 
 export { onMessageCreate } from './chats/onMessageCreate';
-export { onMessageCreateNotify } from './notifications/onMessageCreateNotify';
+export { onMessageCreateNotify, onMessageMediaReadyNotify } from './notifications/onMessageCreateNotify';
 export {
   estimateBroadcastAudience, createNotificationBroadcast, sendNotificationBroadcast,
 } from './notifications/broadcasts';
@@ -145,3 +145,6 @@ export { verifyEmailChangeCode, resumeEmailChange } from './emailChange/verifyEm
 export { getSignInMethods } from './emailChange/getSignInMethods';
 export { reconcileEmailChangeWrites } from './emailChange/reconcileEmailChangeWrites';
 export { guardEmailSignIn, guardEmailSent } from './emailChange/emailSignInBlocking';
+
+// Cloud-only retention (default 14 days; activated in the platform dashboard).
+export { purgeRetainedMessages } from './chats/messageRetention';

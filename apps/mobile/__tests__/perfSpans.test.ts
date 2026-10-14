@@ -34,3 +34,13 @@ describe('perf spans', () => {
     expect(e.ms).toBeGreaterThanOrEqual(50);
   });
 });
+
+it('does not confuse data readiness with actual list viewability', () => {
+  perfBegin('push_to_viewable', { id: 'focused', phase: 'viewable' });
+  perfObserve(['focused']);
+  expect(spans()).not.toContain('push_to_viewable');
+  perfObserve(['other'], 'viewable');
+  expect(spans()).not.toContain('push_to_viewable');
+  perfObserve(['focused'], 'viewable');
+  expect(spans()).toContain('push_to_viewable');
+});

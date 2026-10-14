@@ -215,6 +215,11 @@ export type SyncStateKey =
   | 'device_id'
   | 'legacy_queue_migrated'
   | 'last_prune_at'
+  | 'notification_targets'
+  | 'history_rotation'
+  | `msg_cursor_v2:${string}`
+  | `history_v2:${string}`
+  | 'conversations_cursor_v2'
   // Per-conversation message high-water mark (max remote createdAt pulled).
   | `msg_cursor:${string}`
   // Per-conversation "cleared chat" watermark (hide messages at/older than ms).

@@ -29,7 +29,7 @@ export const finalizeMediaMessage = onCall(async (request) => {
   const msgRef = db.collection('conversations').doc(data.conversationId)
     .collection('messages').doc(data.messageId);
   const snap = await msgRef.get();
-  if (!snap.exists) throw new HttpsError('not-found', 'message-not-found');
+  if (!snap.exists || snap.get('retentionDeleting') === true) throw new HttpsError('not-found', 'message-not-found');
   const msg = snap.data() as {
     senderUid?: string; senderId?: string; type?: string;
     media?: { uploadStatus?: string };

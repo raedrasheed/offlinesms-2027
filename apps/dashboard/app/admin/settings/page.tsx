@@ -11,6 +11,8 @@ import { getSystemSettings, listOrganizations } from '@/lib/adminData';
 import { adminDb } from '@/lib/firebase-admin';
 import { PermissionState } from '@/components/state';
 import SettingsForm from './SettingsForm';
+import MessageRetentionSettings from './MessageRetentionSettings';
+import { retentionPolicy } from '../../../../../functions/src/chats/messageRetentionPolicy';
 import OtpSenderSetting, { type OtpPolicyState } from './OtpSenderSetting';
 import { readOtpLimits } from '@/lib/otpLimits';
 import { updateSystemSettings } from '@/lib/settingsActions';
@@ -33,6 +35,17 @@ export default async function SettingsPage() {
   // The default OTP sender is a platform-global setting — only unrestricted
   // (super/legacy/bootstrap) admins may view or change it.
   const isPlatformAdmin = canManage && isPlatformRole(session);
+
+  let retention: ReturnType<typeof retentionPolicy> | null = null;
+  let retentionRun: { at: string; deleted: number; failed: number } | null = null;
+  if (isPlatformAdmin) {
+    try {
+      const [policy, run] = await Promise.all([adminDb.doc('systemSettings/general').get(), adminDb.doc('systemJobs/messageRetention').get()]);
+      retention = retentionPolicy(policy.data());
+      const at = run.get('lastRunAt')?.toDate?.();
+      if (at) retentionRun = { at: at.toISOString(), deleted: run.get('deleted') ?? 0, failed: run.get('failed') ?? 0 };
+    } catch { /* Do not show editable defaults when the policy could not be read. */ }
+  }
 
   let otpOrgOptions: { id: string; name: string }[] = [];
   let otpOrgId: string | null = null;
@@ -82,6 +95,9 @@ export default async function SettingsPage() {
       {canManage ? (
         <>
           <SettingsForm action={updateSystemSettings} initial={settings} />
+          {isPlatformAdmin && (retention
+            ? <MessageRetentionSettings days={retention.days} enabled={retention.enabled} lastRun={retentionRun} />
+            : <p role="alert">Could not load the message retention policy.</p>)}
           {isPlatformAdmin && <OtpSenderSetting orgOptions={otpOrgOptions} otpOrgId={otpOrgId} policy={otpPolicy} />}
         </>
       ) : (

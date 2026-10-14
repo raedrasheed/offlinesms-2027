@@ -7,14 +7,15 @@
 // (including edits/deletes), so this catch-up path can key on createdAt safely.
 
 import {
-  collection, query, where, orderBy, limit as qlimit, getDocs, doc, getDoc, Timestamp,
+  collection, query, where, orderBy, limit as qlimit, getDocsFromServer as getDocs, doc, getDocFromServer as getDoc, Timestamp, startAfter, documentId,
 } from 'firebase/firestore';
 import { db, auth } from '../../lib/firebase';
 import { upsertRemoteConversation, applyUserState } from '../repositories/conversationsRepo';
 import { applyRemoteMessages } from '../repositories/messagesRepo';
 import { remoteMessageInput } from './remoteMessage';
 import { upsertMember } from '../repositories/membersRepo';
-import { getCursor, setCursor } from '../repositories/syncStateRepo';
+import { getCurrentUid } from '../connection';
+import { getCursor, getState, setState } from '../repositories/syncStateRepo';
 
 const CONV_PAGE = 50;
 const MSG_PAGE = 50;
@@ -33,79 +34,135 @@ export async function pullConversations(): Promise<void> {
   const uid = auth.currentUser?.uid;
   if (!uid) return;
   const since = await getCursor('last_conversations_pull_at');
-  // `>=` (not `>`) so docs sharing the boundary millisecond aren't skipped when
-  // a page truncates at the limit; re-processing the boundary doc is idempotent.
-  const snap = await getDocs(query(
-    collection(db, 'conversations'),
-    where('participantUids', 'array-contains', uid),
-    where('updatedAt', '>=', Timestamp.fromMillis(since)),
-    orderBy('updatedAt', 'asc'),
-    qlimit(CONV_PAGE),
-  ));
-  let maxTs = since;
-  // Per-conversation userState lives in a sibling doc; fetch them in parallel
-  // rather than serially (a cold-start page can be up to CONV_PAGE round-trips).
-  await Promise.all(snap.docs.map(async (d) => {
-    const c = d.data() as any;
-    const updatedMs = ms(c.updatedAt);
-    if (updatedMs != null && updatedMs > maxTs) maxTs = updatedMs;
-    await upsertRemoteConversation({
-      id: d.id,
-      remote_id: d.id,
-      type: c.type === 'group' ? 'group' : 'direct',
-      title: c.name ?? null,
-      owner_uid: c.ownerUid ?? null,
-      status: c.status ?? 'active',
-      member_count: c.memberCount ?? 0,
-      pinned_message_id: c.pinnedMessage?.messageId ?? null,
-      last_message_preview: c.lastMessageText ?? null,
-      last_message_at: updatedMs,
-      remote_updated_at: updatedMs,
-    });
-    try {
-      const us = await getDoc(doc(db, 'conversations', d.id, 'userState', uid));
-      if (us.exists()) {
-        const s = us.data() as any;
-        await applyUserState(d.id, {
-          unread_count: s.unreadCount ?? 0,
-          muted: s.muted ? 1 : 0,
-          pinned: s.pinned ? 1 : 0,
-          favorite: s.favorite ? 1 : 0,
-          archived: s.archived ? 1 : 0,
-        });
-      }
-    } catch { /* best-effort */ }
-  }));
-  if (maxTs > since) await setCursor('last_conversations_pull_at', maxTs);
+  const saved = await getState('conversations_cursor_v2');
+  let cursor: PageCursor | null = saved ? JSON.parse(saved) : null;
+  for (let page = 0; page < 8; page++) {
+    const snap = await getDocs(query(
+      collection(db, 'conversations'), where('participantUids', 'array-contains', uid),
+      where('updatedAt', '>=', Timestamp.fromMillis(since)),
+      orderBy('updatedAt', 'asc'), orderBy(documentId(), 'asc'),
+      ...(cursor ? [after(cursor)] : []), qlimit(CONV_PAGE),
+    ));
+    assertUser(uid);
+    for (const d of snap.docs) {
+      const c = d.data() as any;
+      await upsertRemoteConversation({
+        id: d.id, remote_id: d.id, type: c.type === 'group' ? 'group' : 'direct',
+        title: c.name ?? null, avatar_url: c.photoURL ?? null,
+        owner_uid: c.ownerUid ?? null, status: c.status ?? 'active', member_count: c.memberCount ?? 0,
+        pinned_message_id: c.pinnedMessage?.messageId ?? null, last_message_id: c.lastMessage?.messageId ?? null,
+        last_message_preview: c.lastMessage?.preview ?? c.lastMessageText ?? null,
+        last_message_at: ms(c.lastMessage?.createdAt ?? c.lastMessageAt ?? c.updatedAt),
+        remote_updated_at: ms(c.updatedAt),
+      });
+    }
+    // Bound per-user state reads rather than starting 50 requests at once.
+    for (let offset = 0; offset < snap.docs.length; offset += 4) {
+      await Promise.all(snap.docs.slice(offset, offset + 4).map(async d => {
+        try {
+          const state = await getDoc(doc(db, 'conversations', d.id, 'userState', uid));
+          assertUser(uid);
+          if (!state.exists()) return;
+          const s = state.data();
+          await applyUserState(d.id, { unread_count: s.unreadCount ?? 0, muted: s.muted ? 1 : 0,
+            pinned: s.pinned ? 1 : 0, favorite: s.favorite ? 1 : 0, archived: s.archived ? 1 : 0 });
+        } catch { /* the user-state feeder also reconciles these flags */ }
+      }));
+    }
+    assertUser(uid);
+    const last = snap.docs[snap.docs.length - 1];
+    if (last) { cursor = cursorOf(last, 'updatedAt'); await setState('conversations_cursor_v2', JSON.stringify(cursor)); }
+    if (snap.size < CONV_PAGE) break;
+  }
 }
 
-/**
- * Pull messages for one conversation created since the last pull. Incremental:
- * queries `createdAt >= cursor` ascending and advances a per-conversation
- * high-water mark (`msg_cursor:<id>`). Uses the shared remote→local mapper and
- * applies the page in one transaction. Edits/deletes of older messages are
- * reconciled by the feeder when the chat is opened.
+// Persist the complete server timestamp and document id. Millisecond-only
+// cursors stall/skip when a page contains messages with the same timestamp.
+interface PageCursor { seconds: number; nanoseconds: number; id: string }
+function cursorOf(d: { id: string; data(): any }, field = 'createdAt'): PageCursor {
+  const t = d.data()[field];
+  return { seconds: t.seconds, nanoseconds: t.nanoseconds, id: d.id };
+}
+function after(c: PageCursor) { return startAfter(new Timestamp(c.seconds, c.nanoseconds), c.id); }
+function assertUser(uid: string | null) {
+  if (getCurrentUid() !== uid || auth.currentUser?.uid !== uid) throw new Error('sync-session-changed');
+}
+const forwardFlights = new Map<string, Promise<number>>();
+
+/** Bounded catch-up; a complete tuple cursor resumes the next run exactly. */
+export function pullMessages(conversationId: string, max = MSG_PAGE, pages = 8): Promise<number> {
+  const uid = getCurrentUid();
+  const flightKey = `${uid}/${conversationId}`;
+  const existing = forwardFlights.get(flightKey);
+  if (existing) return existing;
+  const task = (async () => {
+    const key = `msg_cursor_v2:${conversationId}` as const;
+    const saved = await getState(key);
+    let cursor: PageCursor | null = saved ? JSON.parse(saved) : null;
+    const since = Math.max(await getCursor(`msg_cursor:${conversationId}`), await getCursor(`chat_cleared:${conversationId}`));
+    // A new device starts with RECENT messages. History has its own durable
+    // backward cursor and cannot infer completeness from this recent window.
+    if (!cursor && since <= 0) {
+      const recent = await getDocs(query(collection(db, 'conversations', conversationId, 'messages'),
+        orderBy('createdAt', 'desc'), orderBy(documentId(), 'desc'), qlimit(max)));
+      assertUser(uid);
+      await applyRemoteMessages(recent.docs.map(d => remoteMessageInput(d.id, conversationId, d.data())));
+      if (recent.docs[0]) await setState(key, JSON.stringify(cursorOf(recent.docs[0])));
+      return recent.size;
+    }
+    let total = 0;
+    for (let page = 0; page < pages; page++) {
+      const snap = await getDocs(query(
+        collection(db, 'conversations', conversationId, 'messages'),
+        where('createdAt', '>=', Timestamp.fromMillis(since)),
+        orderBy('createdAt', 'asc'), orderBy(documentId(), 'asc'),
+        ...(cursor ? [after(cursor)] : []), qlimit(max),
+      ));
+      assertUser(uid);
+      await applyRemoteMessages(snap.docs.map(d => remoteMessageInput(d.id, conversationId, d.data())));
+      total += snap.size;
+      const last = snap.docs[snap.docs.length - 1];
+      if (last) { cursor = cursorOf(last); await setState(key, JSON.stringify(cursor)); }
+      if (snap.size < max) break;
+      // Let notification/UI work run between history pages.
+      await new Promise<void>(resolve => setTimeout(resolve, 0));
+    }
+    return total;
+  })().finally(() => { forwardFlights.delete(flightKey); });
+  forwardFlights.set(flightKey, task);
+  return task;
+}
+
+const historyFlights = new Map<string, Promise<number>>();
+/** A backward frontier owned by SERVER pages, never the oldest local row.
+ * Version 2 deliberately ignores old done flags: they could hide middle gaps.
+ * The first page starts at the server's newest document, without a device clock.
  */
-export async function pullMessages(conversationId: string, max = MSG_PAGE): Promise<number> {
-  const cursorKey: `msg_cursor:${string}` = `msg_cursor:${conversationId}`;
-  const since = await getCursor(cursorKey);
-  // `>=` so messages sharing the boundary millisecond aren't dropped when a page
-  // truncates at the limit; the upsert is idempotent so re-processing is safe.
-  const snap = await getDocs(query(
-    collection(db, 'conversations', conversationId, 'messages'),
-    where('createdAt', '>=', Timestamp.fromMillis(since)),
-    orderBy('createdAt', 'asc'),
-    qlimit(max),
-  ));
-  let maxTs = since;
-  const batch = snap.docs.map(d => {
-    const input = remoteMessageInput(d.id, conversationId, d.data());
-    if (input.remoteCreatedAt != null && input.remoteCreatedAt > maxTs) maxTs = input.remoteCreatedAt;
-    return input;
-  });
-  await applyRemoteMessages(batch);
-  if (maxTs > since) await setCursor(cursorKey, maxTs);
-  return snap.size;
+export function pullMessageHistoryPage(conversationId: string, max = 100): Promise<number> {
+  const uid = getCurrentUid();
+  const flightKey = `${uid}/${conversationId}`;
+  const existing = historyFlights.get(flightKey);
+  if (existing) return existing;
+  const task = (async () => {
+    const key = `history_v2:${conversationId}` as const;
+    const raw = await getState(key);
+    const saved: { cursor?: PageCursor; done?: boolean } = raw ? JSON.parse(raw) : {};
+    if (saved.done) return 0;
+    const floor = await getCursor(`chat_cleared:${conversationId}`);
+    const snap = await getDocs(query(
+      collection(db, 'conversations', conversationId, 'messages'),
+      ...(floor > 0 ? [where('createdAt', '>', Timestamp.fromMillis(floor))] : []),
+      orderBy('createdAt', 'desc'), orderBy(documentId(), 'desc'),
+      ...(saved.cursor ? [after(saved.cursor)] : []), qlimit(max),
+    ));
+    assertUser(uid);
+    await applyRemoteMessages(snap.docs.map(d => remoteMessageInput(d.id, conversationId, d.data())));
+    const last = snap.docs[snap.docs.length - 1];
+    await setState(key, JSON.stringify({ cursor: last ? cursorOf(last) : saved.cursor, done: snap.size < max }));
+    return snap.size;
+  })().finally(() => { historyFlights.delete(flightKey); });
+  historyFlights.set(flightKey, task);
+  return task;
 }
 
 /**
@@ -117,7 +174,9 @@ export async function pullMessages(conversationId: string, max = MSG_PAGE): Prom
  * exist (deleted) or isn't readable.
  */
 export async function pullMessageById(conversationId: string, messageId: string): Promise<boolean> {
+  const uid = getCurrentUid();
   const snap = await getDoc(doc(db, 'conversations', conversationId, 'messages', messageId));
+  assertUser(uid);
   if (!snap.exists()) return false;
   await applyRemoteMessages([remoteMessageInput(snap.id, conversationId, snap.data())]);
   return true;

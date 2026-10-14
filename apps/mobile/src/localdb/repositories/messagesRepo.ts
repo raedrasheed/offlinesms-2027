@@ -1,10 +1,11 @@
+import { emitLocalMessagesChanged } from '../messageChanges';
 // Phase 22 — messages repository.
 //
 // The conversation screen reads from here. Outgoing messages are written
 // immediately as `pending` for optimistic UI; the sync engine reconciles them
 // to their canonical remote counterpart by local_id once the server confirms.
 
-import { getDb } from '../connection';
+import { getDb, type LocalDatabase } from '../connection';
 import { localMessageId } from '../sync/ids';
 import type { MessageRow, MessageStatus, MessageSyncStatus } from '../types';
 
@@ -358,27 +359,30 @@ export interface RemoteMessageInput {
  */
 export async function applyRemoteMessages(batch: RemoteMessageInput[]): Promise<void> {
   if (batch.length === 0) return;
-  await getDb().transaction(async () => {
+  const database = getDb();
+  await database.transaction(async () => {
     for (const r of batch) {
       // A deleted-for-everyone message keeps its row (it renders as "deleted"
       // in place, preserving order) but never keeps its content.
-      if (r.deletedForEveryone) await upsertRemoteMessage({ ...r, text: null, caption: null, media: null, payload: null });
-      else await upsertRemoteMessage(r);
+      if (r.deletedForEveryone) await upsertRemoteMessage({ ...r, text: null, caption: null, media: null, payload: null }, database);
+      else await upsertRemoteMessage(r, database);
     }
   });
+  for (const id of new Set(batch.map(r => r.conversationId))) emitLocalMessagesChanged(id);
 }
 
-export async function upsertRemoteMessage(r: RemoteMessageInput): Promise<void> {
-  let existing = await getByRemoteId(r.remoteId);
+export async function upsertRemoteMessage(r: RemoteMessageInput, database: LocalDatabase = getDb()): Promise<void> {
+  const find = () => database.first<MessageRow>('SELECT * FROM messages WHERE remote_id = ? LIMIT 1', [r.remoteId]);
+  let existing = await find();
   if (!existing && r.clientLocalId) {
     // Our own message, delivered by the realtime feed before the send call
     // returned: adopt the optimistic row instead of inserting a second copy
     // (it used to show twice until the outbox reconciled it).
-    await getDb().run(
+    await database.run(
       `UPDATE messages SET remote_id = ? WHERE local_id = ? AND conversation_id = ? AND remote_id IS NULL`,
       [r.remoteId, r.clientLocalId, r.conversationId],
     );
-    existing = await getByRemoteId(r.remoteId);
+    existing = await find();
   }
   const now = Date.now();
   const reactionsJson = r.reactions != null ? JSON.stringify(r.reactions) : null;
@@ -432,9 +436,9 @@ export async function upsertRemoteMessage(r: RemoteMessageInput): Promise<void> 
       );
     }
     params.push(r.remoteId);
-    await getDb().run(`UPDATE messages SET ${sets.join(', ')} WHERE remote_id = ?`, params);
+    await database.run(`UPDATE messages SET ${sets.join(', ')} WHERE remote_id = ?`, params);
   } else {
-    await getDb().run(
+    await database.run(
       `INSERT INTO messages
         (id, local_id, remote_id, conversation_id, sender_uid, sender_display_name, type, text, preview, caption,
          created_at, remote_created_at, updated_at, edited_at, deleted_for_everyone, deleted_for_me, deleted_at,

@@ -60,13 +60,15 @@ If your Google Cloud API key has *Application restrictions* set to Android apps,
 | Code | `2a61167` (before PR #29's changes) + `scripts/test-builds/baseline-instrumentation.patch` | this commit |
 | Package / name | `app.offlinesms.mobile.test` / "OfflineSMS Test" | same |
 | Signing | same key: repo debug key, or the secrets `MOBILE_TEST_KEYSTORE_*` | same |
-| Timing | `src/lib/perf.ts`, **byte-identical** (checked by the build), called at the same screen-level points | same |
-| versionCode / name | 900000 / `2.3.18-test-baseline-2a61167` | 900000 + commits since 2a61167 (e.g. 900021) / `2.3.18-test-<sha>` — a newer updated build upgrades in place over an older one (the 9034f31 build is 900001) |
+| Timing | `src/lib/perf.ts`, **byte-identical** (checked by the build); shared legacy data-ready spans are called at the same screen-level points | same library and legacy spans; additional native viewability spans are available only in updated builds |
+| versionCode / name | 900000 / `2.3.18-test-baseline-2a61167` | 900000 + commits since 2a61167 (e.g. 900021) / `<app.json version>-test-<sha>` — a newer updated build upgrades in place over an older one (the 9034f31 build is 900001) |
 | Local DB schema | v5 (as production 2.3.18) | v7 |
 
 **Performance:** on one phone, on the same network and account:
 1. Install `baseline` and sign in. Run `scripts/device/perf-capture.sh coldstart baseline 10` and `… session baseline`.
 2. Install `updated` **over it**, without uninstalling, and repeat with the label `updated`.
+
+Compare only spans present in both builds with the same meaning. The baseline's legacy data-ready spans do not measure actual native visibility; do not compare them with the updated build's `conversation_first_viewable` or `push_to_viewable` spans. Those require a separately instrumented comparison build.
 
 **In-place upgrade:** step 2 above *is* the existing-user upgrade, v5 → v7, with real data on a real phone. After it:
 - the chat list and messages are all present, without a full re-download;

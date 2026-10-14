@@ -65,7 +65,9 @@ case "$VARIANT" in
     # 900000 + commits since the baseline: always above the baseline, and a
     # later commit installs as an in-place upgrade over an earlier updated build.
     SRC="$REPO"; VCODE=$((900000 + $(git -C "$REPO" rev-list --count "$BASELINE_COMMIT..HEAD")))
-    SHA=$(git -C "$REPO" rev-parse --short=7 HEAD); VNAME="2.4.0-test-$SHA" ;;
+    SHA=$(git -C "$REPO" rev-parse --short=7 HEAD)
+    RELEASE_VERSION=$(node -p 'require(process.argv[1]).expo.version' "$REPO/apps/mobile/app.json")
+    VNAME="$RELEASE_VERSION-test-$SHA" ;;
   *) echo "variant must be baseline or updated" >&2; exit 2 ;;
 esac
 

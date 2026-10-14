@@ -4,12 +4,8 @@ service firebase.storage {
     function isAuthed() { return request.auth != null; }
     function isSelf(uid) { return isAuthed() && request.auth.uid == uid; }
 
-    // Phase 23 — chat media (images & voice notes). The uploader's uid is part of
-    // the path (set by createMediaMessage), so the write is authorized by a direct
-    // path-segment check — no cross-service Firestore read, matching the
-    // conversations/{convoId}/{senderId} pattern below. The download URL is a
-    // tokenized link, so read is gated to any authed user (as with avatars,
-    // conversations and statuses). Size <= 10MB and a strict MIME allow-list.
+    // Uploads belong to a live message reservation. Retention marks that
+    // reservation before cleanup so a stale client cannot recreate its files.
     function isAllowedMediaMime(ct) {
       return ct in [
         'image/jpeg', 'image/png', 'image/webp',
@@ -19,6 +15,8 @@ service firebase.storage {
     match /chatMedia/{conversationId}/{senderId}/{messageId}/{file} {
       allow read:  if isAuthed();
       allow write: if isAuthed() && request.auth.uid == senderId
+                      && firestore.exists(/databases/(default)/documents/conversations/$(conversationId)/messages/$(messageId))
+                      && firestore.get(/databases/(default)/documents/conversations/$(conversationId)/messages/$(messageId)).data.get('retentionDeleting', false) != true
                       && request.resource.size < 10 * 1024 * 1024
                       && isAllowedMediaMime(request.resource.contentType);
     }

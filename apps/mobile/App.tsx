@@ -319,6 +319,7 @@ export default function App() {
       const tappedId = (data as { messageId?: unknown } | undefined)?.messageId;
       perfMark('push:tap');
       perfBegin('push_to_visible', { id: typeof tappedId === 'string' ? tappedId : null });
+      perfBegin('push_to_viewable', { id: typeof tappedId === 'string' ? tappedId : null, phase: 'viewable' });
       // Kick a targeted pull immediately so the chat is loaded by the time it
       // opens, then navigate (stashing + retrying if we're not ready yet).
       prefetchFromData(data);

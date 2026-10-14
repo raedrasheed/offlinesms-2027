@@ -246,3 +246,51 @@ describe('remoteMessageInput', () => {
   });
 });
 
+
+describe('notification recovery regression', () => {
+  it('retries a transient online error without needing a new push or screen open', async () => {
+    vi.useFakeTimers();
+    const fetchOne = vi.fn().mockRejectedValueOnce({ code: 'unavailable' }).mockResolvedValue(true);
+    const t = createNotificationTargets(deps({ fetchOne }));
+    try {
+      expect(await t.request('c', 'm')).toBe('error');
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(t.state('c', 'm')).toBe('ready');
+      expect(fetchOne).toHaveBeenCalledTimes(2);
+    } finally { t.reset(); vi.useRealTimers(); }
+  });
+  it('reconnect retries an online failure but never loops on permission-denied', async () => {
+    const fetchOne = vi.fn().mockRejectedValueOnce({ code: 'unavailable' }).mockResolvedValue(true);
+    const d = deps({ fetchOne }); const t = createNotificationTargets(d);
+    await t.request('c', 'm'); d.goOnline();
+    await tick(); await tick();
+    expect(t.state('c', 'm')).toBe('ready'); t.reset();
+    const denied = vi.fn().mockRejectedValue({ code: 'permission-denied' });
+    const d2 = deps({ fetchOne: denied }); const t2 = createNotificationTargets(d2);
+    await t2.request('c', 'm'); d2.goOnline(); await tick();
+    expect(denied).toHaveBeenCalledTimes(1); t2.reset();
+  });
+  it('bounds automatic retries and cancels late completion on logout', async () => {
+    vi.useFakeTimers();
+    const fetchOne = vi.fn().mockRejectedValue({ code: 'unavailable' });
+    const t = createNotificationTargets(deps({ fetchOne }));
+    try {
+      await t.request('c', 'm'); await vi.runAllTimersAsync();
+      expect(fetchOne).toHaveBeenCalledTimes(5);
+      t.reset(); expect(vi.getTimerCount()).toBe(0);
+    } finally { t.reset(); vi.useRealTimers(); }
+    let release!: (ok: boolean) => void;
+    const t2 = createNotificationTargets(deps({ fetchOne: () => new Promise(r => { release = r; }) }));
+    const work = t2.request('c', 'm'); await tick();
+    t2.reset(); release(true); await work;
+    expect(t2.state('c', 'm')).toBeUndefined();
+  });
+  it('restores queued targets from the per-user local store after reopening', async () => {
+    const fetchOne = vi.fn(async () => true);
+    const savePending = vi.fn(async () => {});
+    const t = createNotificationTargets(deps({ fetchOne, savePending, loadPending: async () => [{ conversationId: 'c', messageId: 'm' }] }));
+    t.onDbOpened(); await tick(); await tick();
+    expect(fetchOne).toHaveBeenCalledWith('c', 'm');
+    expect(savePending).toHaveBeenLastCalledWith([]); t.reset();
+  });
+});

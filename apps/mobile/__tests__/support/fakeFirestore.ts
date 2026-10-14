@@ -5,13 +5,19 @@
 // `docs` = the whole query window every time; `docChanges()` = only what changed.
 
 type Data = Record<string, any>;
-interface Ref { kind: 'doc' | 'query'; path: string; limit?: number; order?: 'asc' | 'desc' }
+interface Ref { kind: 'doc' | 'query'; path: string; limit?: number; order?: 'asc' | 'desc'; fields?: string[]; filters?: any[]; cursor?: any[] }
 type Listener = { target: Ref; next: (snap: any) => void; prev: Map<string, string> };
 
 const store = new Map<string, Data>();       // doc path -> data
 const listeners: Listener[] = [];
 
-const ts = (ms: number) => ({ toMillis: () => ms, toDate: () => new Date(ms) });
+class FakeTimestamp {
+  constructor(public seconds: number, public nanoseconds: number) {}
+  toMillis() { return this.seconds * 1000 + this.nanoseconds / 1e6; }
+  toDate() { return new Date(this.toMillis()); }
+  static fromMillis(ms: number) { return new FakeTimestamp(Math.floor(ms / 1000), (ms % 1000) * 1e6); }
+}
+const ts = FakeTimestamp.fromMillis;
 
 export function resetFake() { store.clear(); listeners.length = 0; }
 export const fakeTs = ts;
@@ -27,8 +33,27 @@ function children(collPath: string): Array<[string, Data]> {
 
 function evalQuery(q: Ref): Array<[string, Data]> {
   let rows = children(q.path);
-  rows.sort((a, b) => (a[1].createdAt?.toMillis?.() ?? a[1].updatedAt?.toMillis?.() ?? 0) - (b[1].createdAt?.toMillis?.() ?? b[1].updatedAt?.toMillis?.() ?? 0));
-  if (q.order === 'desc') rows.reverse();
+  const value = (x: any): any => x?.toMillis?.() ?? x;
+  for (const f of q.filters ?? []) rows = rows.filter(([, d]) => {
+    const a = value(d[f.field]), b = value(f.value);
+    switch (f.op) {
+      case '>': return a > b;
+      case '>=': return a >= b;
+      case '<': return a < b;
+      case '<=': return a <= b;
+      case '==': return a === b;
+      case 'array-contains': return a?.includes(b);
+      default: throw new Error(`Unimplemented fake query operator: ${f.op}`);
+    }
+  });
+  const values = (r: [string, Data]) => (q.fields ?? ['createdAt', '__name__']).map(f => f === '__name__' ? r[0] : value(r[1][f]));
+  const compare = (a: any[], b: any[]) => {
+    for (let i = 0; i < a.length; i++) { if (a[i] < b[i]) return -1; if (a[i] > b[i]) return 1; }
+    return 0;
+  };
+  const sign = q.order === 'desc' ? -1 : 1;
+  rows.sort((a, b) => sign * compare(values(a), values(b)));
+  if (q.cursor) rows = rows.filter(r => sign * compare(values(r), q.cursor!.map(value)) > 0);
   if (q.limit) rows = rows.slice(0, q.limit);
   return rows;
 }
@@ -65,24 +90,34 @@ export function fakeWrite(path: string, data: Data) {
 /** Seed without firing listeners. */
 export function fakeSeed(path: string, data: Data) { store.set(path, data); }
 
-export const firestoreMock = {
+const baseMock = {
   collection: (_db: unknown, ...segs: string[]): Ref => ({ kind: 'query', path: segs.join('/') }),
   doc: (_db: unknown, ...segs: string[]): Ref => ({ kind: 'doc', path: segs.join('/') }),
   query: (base: Ref, ...cs: any[]): Ref => {
     const q = { ...base };
-    for (const c of cs) { if (c?.limit) q.limit = c.limit; if (c?.order) q.order = c.order; }
+    q.fields = []; q.filters = [];
+    for (const c of cs) {
+      if (c?.limit) q.limit = c.limit;
+      if (c?.order) { q.order = c.order; q.fields.push(c.field); }
+      if (c?.filter) q.filters.push(c.filter);
+      if (c?.cursor) q.cursor = c.cursor;
+    }
     return q;
   },
-  where: () => ({}),
-  orderBy: (_f: string, dir?: 'asc' | 'desc') => ({ order: dir ?? 'asc' }),
+  where: (field: string, op: string, value: any) => ({ filter: { field, op, value } }),
+  documentId: () => '__name__',
+  startAfter: (...cursor: any[]) => ({ cursor }),
+  orderBy: (field: string, dir?: 'asc' | 'desc') => ({ field, order: dir ?? 'asc' }),
   limit: (n: number) => ({ limit: n }),
-  Timestamp: { fromMillis: ts },
+  Timestamp: FakeTimestamp,
   onSnapshot: (target: Ref, next: (s: any) => void) => {
     const l: Listener = { target, next, prev: new Map() };
     listeners.push(l);
     queueMicrotask(() => next(snapshotFor(l)));
     return () => { const i = listeners.indexOf(l); if (i >= 0) listeners.splice(i, 1); };
   },
-  getDoc: async (r: Ref) => { const d = store.get(r.path); return { exists: () => !!d, data: () => d, id: r.path.split('/').pop() }; },
-  getDocs: async (q: Ref) => { const rows = evalQuery(q); return { docs: rows.map(([id, d]) => ({ id, data: () => d })), size: rows.length }; },
+  getDocFromServer: async (r: Ref) => { const d = store.get(r.path); return { exists: () => !!d, data: () => d, id: r.path.split('/').pop() }; },
+  getDocsFromServer: async (q: Ref) => { const rows = evalQuery(q); return { docs: rows.map(([id, d]) => ({ id, data: () => d })), size: rows.length }; },
 };
+
+export const firestoreMock = { ...baseMock, getDoc: baseMock.getDocFromServer, getDocs: baseMock.getDocsFromServer };
