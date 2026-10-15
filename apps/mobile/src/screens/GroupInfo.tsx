@@ -62,10 +62,19 @@ export default function GroupInfo({ route, navigation }: any) {
   const [actionMember, setActionMember] = useState<GroupMember | null>(null);
   // Member names from the shared resolver (live profile; the join-time
   // snapshot only while loading). Also above the early returns.
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const compareNames = useMemo(() => new Intl.Collator(i18n.resolvedLanguage ?? i18n.language, {
+    usage: 'sort', sensitivity: 'base', numeric: true, ignorePunctuation: true,
+  }).compare, [i18n.resolvedLanguage, i18n.language]);
   const memberUids = useMemo(() => (members ?? []).map(m => m.uid), [members]);
   const nameFor = useDisplayNames(memberUids);
   const memberName = (m: GroupMember) => nameFor(m.uid, { snapshot: m.displayNameSnapshot });
+  // Resolve each label once per profile/list change. Sort by the visible name,
+  // before the localized "(you)" suffix; roles do not override alphabetic order.
+  const sortedMembers = useMemo(() => (members ?? [])
+    .map(member => ({ member, name: nameFor(member.uid, { snapshot: member.displayNameSnapshot }) }))
+    .sort((a, b) => compareNames(a.name, b.name) || a.member.uid.localeCompare(b.member.uid))
+    .map(({ member }) => member), [members, nameFor, compareNames]);
 
   useEffect(() => {
     return onSnapshot(doc(db, 'conversations', id), snap => {
@@ -105,7 +114,9 @@ export default function GroupInfo({ route, navigation }: any) {
     return () => { alive = false; };
   }, [id, remoteExternals]);
 
-  const externals = useMemo(() => [...remoteExternals, ...pendingExternals], [remoteExternals, pendingExternals]);
+  const externals = useMemo(() => [...remoteExternals, ...pendingExternals]
+    .sort((a, b) => compareNames((a.displayName ?? '').trim(), (b.displayName ?? '').trim()) || a.contactId.localeCompare(b.contactId)),
+  [remoteExternals, pendingExternals, compareNames]);
 
   const myRole: GroupMember['role'] | null = useMemo(() => {
     const m = members?.find(x => x.uid === me);
@@ -333,7 +344,7 @@ export default function GroupInfo({ route, navigation }: any) {
           ) : (
             <FlatList
               scrollEnabled={false}
-              data={members}
+              data={sortedMembers}
               keyExtractor={m => m.uid}
               renderItem={({ item }) => {
                 const badge = roleBadge(item.role);
