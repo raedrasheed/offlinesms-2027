@@ -25,7 +25,8 @@ import {
   notificationTargets, type TargetState,
 } from '../localdb';
 import { startConversationFeeder } from '../localdb/sync/conversationFeeder';
-import { pullMessageHistoryPage } from '../localdb/sync/firebasePull';
+import { pullMessageHistoryPage, pullRecentMessages } from '../localdb/sync/firebasePull';
+import { perfMark, perfNow } from '../lib/perf';
 import { isOnline, onConnectivityChange } from '../localdb/sync/networkState';
 import { importLegacyQueueOnce } from '../localdb/sync/legacyImport';
 import { createMessageMapper } from './messageModel';
@@ -92,6 +93,7 @@ export function useLocalConversation(
       const generation = lifecycle.generation;
       const current = () => lifecycle.active && lifecycle.generation === generation;
       try {
+        const started = perfNow();
         const all = await messagesRepo.listMessages(conversationId, limitRef.current);
         if (!current()) return;
         // Hide messages whose SERVER time is at/older than the "cleared"
@@ -101,6 +103,7 @@ export function useLocalConversation(
           : all;
         localCountRef.current = rows.length;
         setMessages(mapRows(rows));
+        perfMark('sync:local:read', { durationMs: Math.round(perfNow() - started), count: rows.length });
         setSource('local');
       } catch {
         if (current()) setSource('firestoreFallback');
@@ -147,13 +150,16 @@ export function useLocalConversation(
         await runner();
       },
       startLive: () => {
-        // Catch-up starts only after the saved messages have been read.
+        // The first saved-message read is already queued before network work.
         setActiveConversation(conversationId);
         let stopFeeder: () => void = () => {};
         const restart = () => {
           if (cancelled) return;
           stopFeeder();
           setLive(isOnline() ? 'connecting' : 'offline');
+          // Single-flight with active-change. Retry also restarts this short
+          // REST read, independently of the listener's WebChannel backoff.
+          if (isOnline()) void pullRecentMessages(conversationId).catch(() => {});
           stopFeeder = startConversationFeeder(conversationId, (change) => {
             if (cancelled) return;
             if (!change.fromCache) setLive('live');

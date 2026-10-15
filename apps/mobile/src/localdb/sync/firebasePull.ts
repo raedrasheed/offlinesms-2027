@@ -14,8 +14,10 @@ import { upsertRemoteConversation, applyUserState } from '../repositories/conver
 import { applyRemoteMessages } from '../repositories/messagesRepo';
 import { remoteMessageInput } from './remoteMessage';
 import { upsertMember } from '../repositories/membersRepo';
-import { getCurrentUid } from '../connection';
+import { getCurrentUid, getDb, type LocalDatabase } from '../connection';
 import { getCursor, getState, setState } from '../repositories/syncStateRepo';
+import { readRecentMessages, readMessageById } from './messageReads';
+import { perfMark, perfNow } from '../../lib/perf';
 
 const CONV_PAGE = 50;
 const MSG_PAGE = 50;
@@ -88,6 +90,31 @@ function assertUser(uid: string | null) {
   if (getCurrentUid() !== uid || auth.currentUser?.uid !== uid) throw new Error('sync-session-changed');
 }
 const forwardFlights = new Map<string, Promise<number>>();
+
+const recentFlights = new Map<string, { database: LocalDatabase; task: Promise<number> }>();
+/** Newest first on EVERY open, even with a deep gap or an in-flight backfill.
+ * This short REST read does not advance either completeness cursor. The live
+ * feed reconciles existing rows; history/catch-up still fill the entire gap.
+ */
+export function pullRecentMessages(conversationId: string): Promise<number> {
+  const uid = getCurrentUid();
+  const database = getDb();
+  const key = `${uid}/${conversationId}`;
+  const existing = recentFlights.get(key);
+  if (existing?.database === database) return existing.task;
+  const task = (async () => {
+    assertUser(uid);
+    const batch = await readRecentMessages(conversationId);
+    assertUser(uid);
+    if (getDb() !== database) throw new Error('sync-session-changed');
+    const started = perfNow();
+    await applyRemoteMessages(batch, { insertOnly: true });
+    perfMark('sync:recent:commit', { durationMs: Math.round(perfNow() - started), count: batch.length });
+    return batch.length;
+  })().finally(() => { if (recentFlights.get(key)?.task === task) recentFlights.delete(key); });
+  recentFlights.set(key, { database, task });
+  return task;
+}
 
 /** Bounded catch-up; a complete tuple cursor resumes the next run exactly. */
 export function pullMessages(conversationId: string, max = MSG_PAGE, pages = 8): Promise<number> {
@@ -175,10 +202,15 @@ export function pullMessageHistoryPage(conversationId: string, max = 100): Promi
  */
 export async function pullMessageById(conversationId: string, messageId: string): Promise<boolean> {
   const uid = getCurrentUid();
-  const snap = await getDoc(doc(db, 'conversations', conversationId, 'messages', messageId));
+  const database = getDb();
   assertUser(uid);
-  if (!snap.exists()) return false;
-  await applyRemoteMessages([remoteMessageInput(snap.id, conversationId, snap.data())]);
+  const message = await readMessageById(conversationId, messageId);
+  assertUser(uid);
+  if (!message) return false;
+  if (getDb() !== database) throw new Error('sync-session-changed');
+  // Targeted retries also finish an existing image/voice upload, so unlike the
+  // recent bootstrap they must reconcile an incomplete local media row.
+  await applyRemoteMessages([message]);
   return true;
 }
 
@@ -210,8 +242,13 @@ export async function pullMessagesBefore(conversationId: string, beforeMs: numbe
 
 /** Pull group members for a conversation. */
 export async function pullMembers(conversationId: string): Promise<void> {
+  const uid = getCurrentUid();
+  const database = getDb();
+  assertUser(uid);
   const snap = await getDocs(collection(db, 'conversations', conversationId, 'members'));
   for (const d of snap.docs) {
+    assertUser(uid);
+    if (getDb() !== database) throw new Error('sync-session-changed');
     const m = d.data() as any;
     await upsertMember({
       conversationId,

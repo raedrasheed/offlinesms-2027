@@ -14,7 +14,7 @@ vi.mock('../src/localdb', () => ({
   notificationTargets: { request: mocks.request, retry: mocks.retry, subscribe: () => () => {} },
 }));
 vi.mock('../src/localdb/sync/conversationFeeder', () => ({ startConversationFeeder: mocks.start }));
-vi.mock('../src/localdb/sync/firebasePull', () => ({ pullMessageHistoryPage: async () => 0 }));
+vi.mock('../src/localdb/sync/firebasePull', () => ({ pullMessageHistoryPage: async () => 0, pullRecentMessages: async () => 0 }));
 vi.mock('../src/localdb/sync/networkState', () => ({ isOnline: () => true, onConnectivityChange: () => () => {} }));
 vi.mock('../src/localdb/sync/legacyImport', () => ({ importLegacyQueueOnce: async () => {} }));
 

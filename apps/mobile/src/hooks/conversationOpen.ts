@@ -18,10 +18,18 @@ export function openConversation(steps: ConversationOpenSteps): () => void {
       // Never briefly resurrect a cleared chat, even on the first local read.
       const clearedAt = await steps.readClearedAt();
       if (cancelled) return;
-      await steps.showLocal(clearedAt);
+      // Queue the local read first, then start network work while it completes.
+      // The saved rows never wait for the network, and the network no longer
+      // waits for the SQLite/UI read to finish before starting its handshake.
+      const localRead = steps.showLocal(clearedAt);
+      // Observe both promises even if starting a listener throws synchronously.
+      await Promise.all([localRead, Promise.resolve().then(() => {
+        if (!cancelled) stopLive = steps.startLive();
+      })]);
       if (cancelled) return;
-      stopLive = steps.startLive();
     } catch {
+      stopLive?.();
+      stopLive = undefined;
       if (!cancelled) steps.onReadError();
       return;
     }
