@@ -13,7 +13,7 @@ import { collection, query, orderBy, limit as qlimit, onSnapshot } from 'firebas
 import { db } from '../../lib/firebase';
 import { applyRemoteMessages } from '../repositories/messagesRepo';
 import { remoteMessageInput } from './remoteMessage';
-import { getCurrentUid } from '../connection';
+import { getCurrentUid, getDb } from '../connection';
 import { perfMark, perfNow } from '../../lib/perf';
 
 export const FEEDER_WINDOW = 100;
@@ -26,22 +26,24 @@ export function startConversationFeeder(
   conversationId: string,
   onChange: (change: FeederChange) => void,
   onError?: (code: string) => void,
+  windowSize = FEEDER_WINDOW,
 ): () => void {
   // Serialize applies so a burst of snapshots commits in order.
   let chain: Promise<void> = Promise.resolve();
   let stopped = false;
   let needsResync = false;
   const uid = getCurrentUid();
+  const database = getDb();
   const started = perfNow();
   let firstServer = true;
-  const active = () => !stopped && getCurrentUid() === uid;
+  const active = () => !stopped && getCurrentUid() === uid && getDb() === database;
   const q = query(
     collection(db, 'conversations', conversationId, 'messages'),
     orderBy('createdAt', 'desc'),
-    qlimit(FEEDER_WINDOW),
+    qlimit(windowSize),
   );
   const unsub = onSnapshot(q, { includeMetadataChanges: true }, snap => {
-    // 'removed' only means "left the 100-message window" — never a deletion
+    // 'removed' only means "left the query window" — never a deletion
     // (deletes arrive as a modified doc with deletedForEveryone).
     const changed = snap.docChanges().filter(c => c.type !== 'removed').map(c => c.doc);
     const fromCache = snap.metadata.fromCache;

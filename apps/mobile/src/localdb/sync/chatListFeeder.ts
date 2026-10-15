@@ -95,8 +95,9 @@ export function startChatListFeeder(uid: string, onChange: () => void): () => vo
         status: c.status ?? 'active',
         member_count: c.memberCount ?? 0,
         pinned_message_id: c.pinnedMessage?.messageId ?? null,
-        last_message_preview: c.lastMessageText ?? null,
-        last_message_at: ms(c.updatedAt),
+        last_message_id: c.lastMessage?.messageId ?? null,
+        last_message_preview: c.lastMessage?.preview ?? c.lastMessageText ?? null,
+        last_message_at: ms(c.lastMessage?.createdAt ?? c.lastMessageAt ?? c.updatedAt),
         remote_updated_at: ms(c.updatedAt),
       };
     });
