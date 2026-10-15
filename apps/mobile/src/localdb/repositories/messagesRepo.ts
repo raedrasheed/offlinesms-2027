@@ -357,23 +357,26 @@ export interface RemoteMessageInput {
  * is what keeps applying a snapshot off the user's critical path. Deleted-for-
  * everyone messages are tombstoned in the same transaction.
  */
-export async function applyRemoteMessages(batch: RemoteMessageInput[]): Promise<void> {
+export async function applyRemoteMessages(batch: RemoteMessageInput[], options: { insertOnly?: boolean } = {}): Promise<void> {
   if (batch.length === 0) return;
   const database = getDb();
   await database.transaction(async tx => {
     for (const r of batch) {
       // A deleted-for-everyone message keeps its row (it renders as "deleted"
       // in place, preserving order) but never keeps its content.
-      if (r.deletedForEveryone) await upsertRemoteMessage({ ...r, text: null, caption: null, media: null, payload: null }, tx);
-      else await upsertRemoteMessage(r, tx);
+      if (r.deletedForEveryone) await upsertRemoteMessage({ ...r, text: null, caption: null, media: null, payload: null }, tx, options.insertOnly);
+      else await upsertRemoteMessage(r, tx, options.insertOnly);
     }
   });
   for (const id of new Set(batch.map(r => r.conversationId))) emitLocalMessagesChanged(id);
 }
 
-export async function upsertRemoteMessage(r: RemoteMessageInput, database: LocalDatabase = getDb()): Promise<void> {
+export async function upsertRemoteMessage(r: RemoteMessageInput, database: LocalDatabase = getDb(), insertOnly = false): Promise<void> {
   const find = () => database.first<MessageRow>('SELECT * FROM messages WHERE remote_id = ? LIMIT 1', [r.remoteId]);
   let existing = await find();
+  // A bootstrap read may finish after a newer live edit/delete.
+  // Fill missing rows atomically, but let the ordered live feed own updates.
+  if (existing && insertOnly) return;
   if (!existing && r.clientLocalId) {
     // Our own message, delivered by the realtime feed before the send call
     // returned: adopt the optimistic row instead of inserting a second copy

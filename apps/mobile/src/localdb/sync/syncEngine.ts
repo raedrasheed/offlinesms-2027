@@ -5,12 +5,13 @@ import * as outboxRepo from '../repositories/outboxRepo';
 import * as messagesRepo from '../repositories/messagesRepo';
 import * as conversationsRepo from '../repositories/conversationsRepo';
 import { getCursor, setCursor, getState, setState } from '../repositories/syncStateRepo';
-import { pullConversations, pullMessages, pullMembers, pullMessageHistoryPage } from './firebasePull';
+import { pullConversations, pullMessages, pullMembers, pullMessageHistoryPage, pullRecentMessages } from './firebasePull';
 import { pushOutboxItem } from './firebasePush';
 import { isOnline } from './networkState';
 import { isPermanent, errorCode, nextAttemptAt } from './retryPolicy';
 import { emitLocalMessagesChanged } from '../messageChanges';
 import { LOCAL_MESSAGE_RETENTION_LIMIT } from '../../config/features';
+import { getCurrentUid } from '../connection';
 
 let running = false;   // guards the heavy pull + history backfill
 let pushing = false;   // guards the outbox push (independent → sends never wait on a pull)
@@ -170,14 +171,18 @@ export async function flushOutbox(): Promise<void> {
 // (that skip is what left a freshly-notified message missing on open).
 const targeted = new Map<string, Promise<void>>();
 export function pullConversationNow(conversationId: string): Promise<void> {
-  const inFlight = targeted.get(conversationId);
+  const uid = getCurrentUid();
+  const key = `${uid}/${conversationId}`;
+  const inFlight = targeted.get(key);
   if (inFlight) return inFlight;
   const p = (async () => {
     if (!isOnline()) return;
-    try { await pullMessages(conversationId); } catch { /* the feeder still delivers */ }
-    try { await pullMembers(conversationId); } catch { /* best-effort */ }
-  })().finally(() => { targeted.delete(conversationId); });
-  targeted.set(conversationId, p);
+    try { await pullRecentMessages(conversationId); } catch { /* the feeder still delivers */ }
+    if (getCurrentUid() !== uid) return;
+    // A slow members request must not hold the next foreground message read.
+    void pullMembers(conversationId).catch(() => { /* best-effort */ });
+  })().finally(() => { if (targeted.get(key) === p) targeted.delete(key); });
+  targeted.set(key, p);
   return p;
 }
 

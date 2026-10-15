@@ -12,7 +12,8 @@ import { firestoreMock, fakeSeed, fakeWrite, fakeTs, resetFake } from '../suppor
 let db: CountingDb;
 vi.mock('../../src/localdb/connection', () => ({ getDb: () => db, getCurrentUid: () => 'u_me' }));
 vi.mock('firebase/firestore', () => firestoreMock);
-vi.mock('../../src/lib/firebase', () => ({ db: {}, auth: { currentUser: { uid: 'u_me' } } }));
+vi.mock('firebase/firestore/lite', () => ({ ...firestoreMock, getFirestore: () => ({}) }));
+vi.mock('../../src/lib/firebase', () => ({ app: {}, db: {}, auth: { currentUser: { uid: 'u_me' } } }));
 
 import * as messagesRepo from '../../src/localdb/repositories/messagesRepo';
 import { startConversationFeeder, type FeederChange } from '../../src/localdb/sync/conversationFeeder';
@@ -36,6 +37,22 @@ beforeEach(async () => { db = await createSqlJsDb(); resetFake(); });
 afterEach(() => db.close());
 
 describe('conversation feeder', () => {
+  it('publishes the newest chunk before writing the rest of the initial 100-message window', async () => {
+    for (let k = 0; k < 100; k++) fakeSeed(`conversations/${C}/messages/m${k}`, msg(k));
+    const sizes: number[] = [];
+    const initialNewest: string[] = [];
+    const stop = startConversationFeeder(C, ch => {
+      sizes.push(ch.ids.length);
+      if (!initialNewest.length) initialNewest.push(...ch.ids);
+    });
+    await vi.waitFor(() => expect(sizes.reduce((a, b) => a + b, 0)).toBe(100));
+    expect(sizes).toEqual([20, 20, 20, 20, 20]);
+    expect(initialNewest[0]).toBe('m99');
+    expect(initialNewest).not.toContain('m0');
+    expect(await visibleIds()).toHaveLength(100);
+    stop();
+  });
+
   it('retries a rejected local write without waiting for another server snapshot', async () => {
     vi.useFakeTimers();
     fakeSeed(`conversations/${C}/messages/retry`, msg(1));

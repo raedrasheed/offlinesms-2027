@@ -55,14 +55,15 @@ describe('conversation opening', () => {
     cancel();
   });
 
-  it('does not start sync or live writes while the initial local read is pending', async () => {
+  it('starts network work while the initial local read is pending, with local read queued first', async () => {
     const { steps } = fixture();
     const read = deferred<void>();
     steps.showLocal.mockImplementation(() => read.promise);
     const cancel = openConversation(steps);
     await settle();
     expect(steps.showLocal).toHaveBeenCalledOnce();
-    expect(steps.startLive).not.toHaveBeenCalled();
+    expect(steps.startLive).toHaveBeenCalledOnce();
+    expect(steps.showLocal.mock.invocationCallOrder[0]).toBeLessThan(steps.startLive.mock.invocationCallOrder[0]);
     expect(steps.maintain).not.toHaveBeenCalled();
     read.resolve();
     await settle();
@@ -81,9 +82,9 @@ describe('conversation opening', () => {
       pending.resolve(42);
       await settle();
       if (phase !== 'showLocal') expect(steps.showLocal).not.toHaveBeenCalled();
-      expect(steps.startLive).not.toHaveBeenCalled();
+      expect(steps.startLive).toHaveBeenCalledTimes(phase === 'showLocal' ? 1 : 0);
       expect(steps.maintain).not.toHaveBeenCalled();
-      expect(stopLive).not.toHaveBeenCalled();
+      expect(stopLive).toHaveBeenCalledTimes(phase === 'showLocal' ? 1 : 0);
       expect(steps.onReadError).not.toHaveBeenCalled();
     },
   );
@@ -120,7 +121,7 @@ describe('conversation opening', () => {
     const cancel = openConversation(steps);
     await settle();
     expect(steps.onReadError).toHaveBeenCalledOnce();
-    expect(steps.startLive).not.toHaveBeenCalled();
+    expect(steps.startLive).toHaveBeenCalledTimes(phase === 'showLocal' ? 1 : 0);
     expect(steps.maintain).not.toHaveBeenCalled();
     cancel();
   });
