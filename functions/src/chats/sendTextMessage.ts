@@ -208,6 +208,23 @@ export const sendTextMessage = onCall(async (request) => {
     }
   }
 
+  // The client selects an account, but cannot invent its name or attach its
+  // private phone/email. Resolve the public profile after the permission and
+  // idempotency gates; an already-sent card still retries if its user is gone.
+  if (contact?.uid) {
+    const sharedUser = await db.collection('users').doc(contact.uid).get();
+    if (!sharedUser.exists || (sharedUser.get('status') ?? 'active') !== 'active') {
+      throw new HttpsError('not-found', 'contact-user-unavailable');
+    }
+    contact = parseContact({
+      uid: contact.uid,
+      name: (publicNameFrom(sharedUser.data(), contact.uid) || 'OfflineSMS').slice(0, 160),
+      username: sharedUser.get('username'),
+    });
+    if (!contact) throw new HttpsError('invalid-argument', 'contact-invalid');
+    text = attachmentFallback({kind:'contact',contact});
+  }
+
   const msgRef = convoRef.collection('messages').doc();
   const now = FieldValue.serverTimestamp();
   await msgRef.set({

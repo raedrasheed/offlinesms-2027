@@ -714,10 +714,10 @@
     "locationUnavailable": "Unable to get your location",
     "manualCoordinates": "Check location services, try again, or enter coordinates manually.",
     "invalidLocation": "Enter valid latitude and longitude.",
-    "invalidContact": "Enter a name and up to five valid phone numbers or email addresses.",
+    "invalidContact": "Choose an OfflineSMS user.",
     "invalidFile": "This attachment is unsupported or exceeds the size limit.",
     "sendError": "The attachment was not queued. Please try again.",
-    "contactReview": "Only the details below will be shared. Edit or remove any information before sending.",
+    "contactReview": "The recipient can tap this card to message this user in OfflineSMS.",
     "name": "Contact name",
     "phones": "Phone numbers (one per line)",
     "emails": "Email addresses (one per line)",
@@ -736,6 +736,18 @@
     "openError": "Unable to open attachment",
     "retryHint": "Check your connection and try again. The file remains available in the conversation.",
     "waitingUpload": "Waiting for upload",
-    "pickerError": "Try another file. Images/GIF: 10 MB. Documents, audio and video: 25 MB."
+    "pickerError": "Try another file. Images/GIF: 10 MB. Documents, audio and video: 25 MB.",
+    "appContacts": "OfflineSMS contacts",
+    "chooseAppContact": "Choose an OfflineSMS user to share their profile.",
+    "searchAppContacts": "Search by name prefix or @username",
+    "noAppContacts": "No matching OfflineSMS users.",
+    "contactSearchError": "Unable to load users. Check your connection and try again.",
+    "moreContacts": "Load more users",
+    "changeContact": "Choose another user",
+    "messageContact": "Message",
+    "yourContact": "This is your profile",
+    "contactOpenError": "Unable to open chat",
+    "contactUnavailable": "This account is no longer available.",
+    "contactOpenRetry": "Check your connection and try again."
   }
 }

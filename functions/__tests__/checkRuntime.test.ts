@@ -42,21 +42,22 @@ const on = (names: string[], runtime: string): Fn[] => names.map(name => ({ name
 const without = (names: string[], drop: string[]) => names.filter(n => !drop.includes(n));
 
 describe('check-runtime.sh', () => {
-  it('expects the 96 functions of this source', () => {
-    expect(EXPECTED).toHaveLength(96);
+  it('expects the 97 functions of this source', () => {
+    expect(EXPECTED).toHaveLength(97);
     expect(EXPECTED).not.toContain('sweepExpiredMessages');
+    expect(EXPECTED).toContain('listAppContacts');
   });
 
   it('passes when exactly the expected functions run on nodejs22', () => {
     const r = run(on(EXPECTED, 'nodejs22'));
     expect(r.status, r.out).toBe(0);
-    expect(r.out).toContain('OK: offlinesms-staging-2027 runs exactly the 96 functions of this source, all on nodejs22');
+    expect(r.out).toContain('OK: offlinesms-staging-2027 runs exactly the 97 functions of this source, all on nodejs22');
   });
 
   it('fails when only one function is deployed, even on nodejs22', () => {
     const r = run(on(['relayHeartbeat'], 'nodejs22'));
     expect(r.status).toBe(1);
-    expect(r.out).toContain('Missing in offlinesms-staging-2027 (95):');
+    expect(r.out).toContain('Missing in offlinesms-staging-2027 (96):');
     expect(r.out).toContain('FAIL:');
   });
 
@@ -94,7 +95,7 @@ describe('check-runtime.sh', () => {
   it('fails when nothing is deployed', () => {
     const r = run([]);
     expect(r.status).toBe(1);
-    expect(r.out).toContain('Missing in offlinesms-staging-2027 (96):');
+    expect(r.out).toContain('Missing in offlinesms-staging-2027 (97):');
   });
 
   it('fails when gcloud fails', () => {

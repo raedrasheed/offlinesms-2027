@@ -12,7 +12,7 @@ vi.mock('expo-file-system',()=>({
   getInfoAsync:vi.fn(async()=>({exists:true,isDirectory:false,size:100})),
   makeDirectoryAsync:vi.fn(async()=>{}),copyAsync:vi.fn(async()=>{}),
 }));
-import {queueSendAttachment} from '../../src/localdb';
+import {queueSendAttachment,queueSendMessage} from '../../src/localdb';
 import {copyAsync} from 'expo-file-system';
 import {insertLocalMediaMessage,applyRemoteMessages,listMessages,insertLocalMessage} from '../../src/localdb/repositories/messagesRepo';
 import {remoteMessageInput} from '../../src/localdb/sync/remoteMessage';
@@ -60,6 +60,16 @@ describe('attachments survive SQLite and remote reconciliation',()=>{
     expect((await claimDue(Date.now(),10,'messages')).map(r=>r.type)).toEqual(['send_message']);
     await requeueStaleProcessing(1,Date.now(),'messages');
     expect((await getById(media.id))?.status).toBe('processing');
+  });
+  it('retains an OfflineSMS account through offline queueing and server reconciliation',async()=>{
+    const contact={uid:'account-123',name:'رائد',username:'raed',phones:[],emails:[]};
+    const local=await queueSendMessage({conversationId:'c',senderUid:'me',kind:'contact',text:'',contact});
+    expect(mapMessageRow(local).contact).toEqual(contact);
+    expect(JSON.parse((await claimDue())[0].payload_json)).toMatchObject({kind:'contact',contact});
+    await applyRemoteMessages([remoteMessageInput('remote-card','c',{type:'contact',senderUid:'me',clientLocalId:local.local_id,contact:{...contact,name:'الاسم الموثق'},createdAt:1000})]);
+    const messages=(await listMessages('c')).map(mapMessageRow);
+    expect(messages).toHaveLength(1);
+    expect(messages[0].contact).toEqual({...contact,name:'الاسم الموثق'});
   });
   it('explicit retry recovers dead media jobs with the original idempotency key',async()=>{
     const row=await enqueue({type:'send_attachment_message',entityId:'local',idempotencyKey:'same',payload:{}});

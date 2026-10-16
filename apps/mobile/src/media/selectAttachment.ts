@@ -1,5 +1,3 @@
-import { Platform } from 'react-native';
-import * as Contacts from 'expo-contacts';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
@@ -8,15 +6,7 @@ import { attachmentMimeAllowed, attachmentLimit, inferAttachmentMime, DOCUMENT_M
 
 export async function selectAttachment(key: 'file' | 'audio' | 'video' | 'gif' | 'contact' | 'location'): Promise<AttachmentDraft | null> {
   if (key === 'location') return {kind:'location'};
-  if (key === 'contact') {
-    if (Platform.OS === 'web') return {kind:'contact'};
-    if (Platform.OS === 'android' && !(await Contacts.requestPermissionsAsync()).granted) return {kind:'contact'};
-    const c = await Contacts.presentContactPickerAsync();
-    if (!c) return null;
-    return {kind:'contact',contact:{name:c.name || [c.firstName,c.lastName].filter(Boolean).join(' '),
-      phones:(c.phoneNumbers ?? []).map(p => p.number ?? '').filter(Boolean).slice(0,5),
-      emails:(c.emails ?? []).map(p => p.email ?? '').filter(Boolean).slice(0,5)}};
-  }
+  if (key === 'contact') return {kind:'contact'};
   let uri:string, fileName:string, mimeType:string, sizeBytes:number;
   let width:number|undefined,height:number|undefined,durationMs:number|undefined;
   const mediaType = key === 'gif' ? 'image' : key;

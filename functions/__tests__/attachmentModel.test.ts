@@ -32,6 +32,15 @@ describe('attachment boundary',()=>{
     expect(cleanFileName('../evil\u202ename.pdf')).not.toMatch(/[\/\u202e]/);
     expect(fileNameMatchesMime('file.exe','application/pdf')).toBe(false);
   });
+  it('preserves app account identity while stripping private contact fields',()=>{
+    const contact = parseContact({uid:'account-123',name:' رائد ',username:'raed',phones:['+970599123456'],emails:['private@example.com'],photoURL:'untrusted'});
+    expect(contact).toEqual({uid:'account-123',name:'رائد',username:'raed',phones:[],emails:[]});
+    expect(attachmentFallback({kind:'contact',contact:contact!})).toBe('👤 رائد\nOfflineSMS · @raed');
+    expect(parseContact({uid:'account-123',name:'رائد'})).toEqual({uid:'account-123',name:'رائد',phones:[],emails:[]});
+  });
+  it.each(['', ' ', 'a/b', '..', 'ext:1234', 'a\n', 'a'.repeat(129), null, 123])('rejects an invalid account id without falling back to a phone card: %j', uid=>{
+    expect(parseContact({uid,name:'User',phones:['12345'],emails:[]})).toBeNull();
+  });
   it('detects mislabeled files from bytes, not a claimed Content-Type',()=>{
     const bytes=(s:string)=>new Uint8Array(Buffer.from(s));
     expect(signatureMatches('application/pdf',bytes('%PDF-1.7\n'))).toBe(true);

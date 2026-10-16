@@ -9,6 +9,7 @@ export {
   estimateBroadcastAudience, createNotificationBroadcast, sendNotificationBroadcast,
 } from './notifications/broadcasts';
 export { getOrCreateDirectConversation } from './chats/getOrCreateDirectConversation';
+export { listAppContacts }               from './contacts/listAppContacts';
 export { sendTextMessage }                from './chats/sendTextMessage';
 
 // Phase 23 — media messages (images & voice notes).

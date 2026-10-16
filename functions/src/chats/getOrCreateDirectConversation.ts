@@ -26,7 +26,7 @@ export const getOrCreateDirectConversation = onCall(async (request) => {
 
   // Reject if the other user doesn't exist.
   const otherSnap = await db.collection('users').doc(otherUid).get();
-  if (!otherSnap.exists) {
+  if (!otherSnap.exists || (otherSnap.get('status') ?? 'active') !== 'active') {
     throw new HttpsError('not-found', 'other-user-not-found');
   }
 
