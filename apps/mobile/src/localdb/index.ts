@@ -357,24 +357,25 @@ export async function queueSendAttachment(input: QueueSendImageInput & {
 }): Promise<MessageRow> {
   if (!getCurrentUid() || getCurrentUid() !== input.senderUid) throw new Error('localdb: not initialised');
   const FileSystem = await import('expo-file-system');
-  const { attachmentLimit, attachmentMimeAllowed, MIME_EXTENSIONS, cleanFileName } = await import('../media/attachmentModel');
+  const { attachmentLimit, attachmentMimeAllowed, MIME_EXTENSIONS, cleanFileName, normalizeAttachmentMime } = await import('../media/attachmentModel');
+  const mimeType = normalizeAttachmentMime(input.mimeType);
   const stat = await FileSystem.getInfoAsync(input.localUri);
   const size = stat.exists && !stat.isDirectory ? stat.size : 0;
-  if (!size || size > attachmentLimit(input.mediaType) || !attachmentMimeAllowed(input.mediaType, input.mimeType)) throw new Error('attachment-invalid');
+  if (!size || size > attachmentLimit(input.mediaType) || !attachmentMimeAllowed(input.mediaType, mimeType)) throw new Error('attachment-invalid');
   const dir = `${FileSystem.documentDirectory}OfflineSMS/Outgoing/${input.senderUid}/`;
   await FileSystem.makeDirectoryAsync(dir, {intermediates:true});
-  const uri = `${dir}${localId('attachment')}.${MIME_EXTENSIONS[input.mimeType]}`;
+  const uri = `${dir}${localId('attachment')}.${MIME_EXTENSIONS[mimeType]}`;
   await FileSystem.copyAsync({from:input.localUri,to:uri});
   const fileName = cleanFileName(input.fileName);
   const deviceId = await getDeviceId();
   const row = await messagesRepo.insertLocalMediaMessage({
-    ...input, fileName, localUri:uri, sizeBytes:size, deviceId,
+    ...input, mimeType, fileName, localUri:uri, sizeBytes:size, deviceId,
     clientSequence:await messagesRepo.nextClientSequence(input.conversationId),
     replyToMessageId:input.replyTo?.messageId, replyToPreview:input.replyTo?.preview,
   });
   await outboxRepo.enqueue({type:'send_attachment_message',entityType:'message',entityId:row.local_id,
     conversationId:input.conversationId,idempotencyKey:idempotencyKey(['attachment',deviceId,row.local_id]),
-    payload:{...input,localUri:uri,sizeBytes:size,fileName,localMessageId:row.local_id},
+    payload:{...input,mimeType,localUri:uri,sizeBytes:size,fileName,localMessageId:row.local_id},
   });
   emitLocalMessagesChanged(input.conversationId);
   kick('outbox');

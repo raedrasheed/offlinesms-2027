@@ -34,10 +34,17 @@ export function attachmentLabel(type: BinaryAttachmentType): string {
   return { image: 'Photo', voice: 'Voice message', file: 'File', audio: 'Audio', video: 'Video' }[type];
 }
 export function cleanFileName(value: unknown): string {
-  return typeof value === 'string' ? value.replace(/[\\/\x00-\x1f\x7f\u202a-\u202e\u2066-\u2069]/g, '_').trim().slice(0, 180) : '';
+  if (typeof value !== 'string') return '';
+  const name = value.replace(/[\\/\x00-\x1f\x7f\u202a-\u202e\u2066-\u2069]/g, '_').trim();
+  if (name.length <= 180) return name;
+  const extension = name.match(/\.[a-z0-9]{1,10}$/i)?.[0] ?? '';
+  return name.slice(0, 180 - extension.length) + extension;
+}
+export function normalizeAttachmentMime(mime: string): string {
+  return mime.split(';')[0].trim().toLowerCase();
 }
 export function inferAttachmentMime(name: string, mime?: string | null): string {
-  const normalized = (mime ?? '').toLowerCase().split(';')[0];
+  const normalized = normalizeAttachmentMime(mime ?? '');
   if (Object.prototype.hasOwnProperty.call(MIME_EXTENSIONS, normalized)) return normalized;
   const ext = name.toLowerCase().split('.').pop();
   return Object.keys(MIME_EXTENSIONS).find(k => MIME_EXTENSIONS[k] === ext) ?? normalized;

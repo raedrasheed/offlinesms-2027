@@ -59,9 +59,9 @@ Expo app version and checked-in Android Gradle version both read **2.4.2**, buil
 
 ## Verification
 
-Validation completed locally: 1,118 unit tests, 6 Firebase handler integration tests, 3 Storage rules tests; functions build, mobile TypeScript, Arabic/English key parity, and Android/iOS Metro-Hermes exports. No signed APK/IPA was produced in this environment.
+Validation completed locally: 1,123 unit tests, 6 Firebase handler integration tests, 3 Storage rules tests; functions build, mobile TypeScript, Arabic/English key parity, and Android/iOS Metro-Hermes exports. No signed APK/IPA was produced in this environment.
 
-Automated coverage includes payload validation, invalid coordinates, bounded contact fields, MIME/extension/signature mismatches, local SQLite roundtrips and reconciliation, media retry, independent text queue selection, concurrent server reservation retries, finalization, forwarding copies, and Storage membership/path/size/overwrite rules.
+Automated coverage includes long-filename extension preservation, MIME normalization through the persistent queue, payload validation, invalid coordinates, bounded contact fields, MIME/extension/signature mismatches, local SQLite roundtrips and reconciliation, media retry, independent text queue selection, concurrent server reservation retries, finalization, forwarding copies, and Storage membership/path/size/overwrite rules.
 
 Before store distribution, run on a physical Android/iOS device: select and cancel each picker; deny permissions; send each type in a direct chat and group; send while offline then reconnect; restart during a transfer; open cached files offline; forward a file; verify Arabic/English, keyboard layout and RTL. Native pickers, location fixes, codecs and OS contact/share screens require device testing.
 

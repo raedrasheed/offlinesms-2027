@@ -42,4 +42,10 @@ describe('attachment boundary',()=>{
     expect(signatureMatches('text/plain',bytes('plain text'))).toBe(true);
     expect(signatureMatches('text/plain',new Uint8Array([0,1,2]))).toBe(false);
   });
+  it.each([['pdf','application/pdf'],['mp3','audio/mpeg'],['mp4','video/mp4']])('preserves the %s extension in long filenames', (ext,mime)=>{
+    const name=cleanFileName('report'.repeat(50)+'.'+ext);
+    expect(name).toHaveLength(180);
+    expect(name.endsWith('.'+ext)).toBe(true);
+    expect(fileNameMatchesMime(name,mime)).toBe(true);
+  });
 });
