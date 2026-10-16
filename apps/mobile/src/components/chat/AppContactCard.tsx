@@ -2,7 +2,6 @@ import { useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
-import { useDisplayName } from '../../lib/userProfiles';
 import type { ContactAttachment } from '../../media/attachmentModel';
 import { colors } from '../../theme';
 
@@ -11,7 +10,8 @@ export function AppContactCard({ contact, myUid, onOpen, onLongPress }: {
   onOpen?: (uid: string) => Promise<void>; onLongPress?: () => void;
 }) {
   const { t } = useTranslation();
-  const name = useDisplayName(contact.uid, { snapshot: contact.name });
+  // The server-verified snapshot avoids fetching a complete legacy user doc.
+  const name = contact.name;
   const opening = useRef(false);
   const [busy, setBusy] = useState(false);
   const self = contact.uid === myUid;

@@ -18,7 +18,6 @@ vi.mock('expo-contacts', () => ({presentContactPickerAsync:mocks.nativePicker,re
 vi.mock('react-i18next', () => ({useTranslation:()=>({t:(key:string)=>key})}));
 vi.mock('react-native-safe-area-context', () => ({useSafeAreaInsets:()=>({top:24,bottom:20})}));
 vi.mock('../src/lib/appContacts', () => ({loadAppContacts:mocks.load,mergeAppContacts:(_:unknown,rows:unknown)=>rows}));
-vi.mock('../src/lib/userProfiles', () => ({useDisplayName:(_:string,options:{snapshot:string})=>options.snapshot}));
 
 import { AttachmentComposer } from '../src/components/chat/AttachmentComposer';
 import { AppContactPicker } from '../src/components/chat/AppContactPicker';
@@ -27,7 +26,7 @@ import { selectAttachment } from '../src/media/selectAttachment';
 
 let renderer: ReactTestRenderer;
 const contact={uid:'target-user',name:'رائد',username:'raed',phones:[],emails:[]};
-const page={parts:[],hasMore:false};
+const page={cursor:[],hasMore:false};
 const nodes=(type:string)=>renderer.root.findAll(node=>String(node.type)===type);
 const sendButton=()=>nodes('Pressable').find(node=>node.props.children?.props?.children==='attachments.send')!;
 beforeEach(()=>{

@@ -16,6 +16,11 @@ phone/email details. The card uid survives the SQLite outbox, reconciliation and
 forwarding. Old phone/email cards remain readable. Older app versions need an
 update to use the in-app Message action on new cards.
 
+The authenticated directory callable uses a field-limited server query, so even
+legacy user documents with phone/email/PIN fields cannot expose those fields to
+the picker. The card renders the verified name snapshot without reading a full
+profile document. Opening a card also checks the target account is still active.
+
 Search uses existing public Firestore indexes: display-name prefixes (entered,
 lower-case and title-case variants) and normalized username prefixes. It is not
 full-text or arbitrary case-insensitive name search. Empty search pages through
@@ -24,7 +29,7 @@ private profiles, phone numbers or emails are queried.
 
 ## Deployment
 
-Deploy the changed callable **before** installing the new mobile build. The old
+Deploy the three affected callables **before** installing the new mobile build. The old
 callable rejects account cards that have no phone/email. No Storage/Firestore
 rule change or database migration is needed.
 
@@ -34,7 +39,7 @@ production environment file:
 ```sh
 npm ci
 npm --workspace functions run build
-npx firebase deploy --project offlinesms-prod-2027 --only functions:sendTextMessage
+npx firebase deploy --project offlinesms-prod-2027 --only "functions:listAppContacts,functions:sendTextMessage,functions:getOrCreateDirectConversation"
 ```
 
 Then, from an updated Windows checkout:

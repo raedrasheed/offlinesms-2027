@@ -1,47 +1,18 @@
-import {
-  collection, documentId, getDocs, limit, orderBy, query, startAfter, where,
-  type QueryDocumentSnapshot, type QueryConstraint,
-} from 'firebase/firestore';
-import { db } from './firebase';
-import { displayNameFor, normalizeProfile } from './displayNames.pure';
+import { getFunctions, httpsCallable } from 'firebase/functions';
+import { app } from './firebase';
 import { parseContact, type ContactAttachment } from '../media/attachmentModel';
 
 export type AppContact = ContactAttachment & { uid: string };
-type SearchPart = { field: 'displayName' | 'usernameLower' | null; prefix: string; cursor?: QueryDocumentSnapshot; done: boolean };
-export type ContactPage = { parts: SearchPart[]; hasMore: boolean };
-const PAGE_SIZE = 30;
+export type ContactPage = { cursor: Array<{done:boolean;afterUid?:string;afterValue?:string}>; hasMore:boolean };
 
-/** Only the public users collection is read. No address-book or private-profile access. */
+/** The callable returns public fields only, including for legacy profiles. */
 export async function loadAppContacts(term: string, page?: ContactPage): Promise<{ contacts: AppContact[]; page: ContactPage }> {
-  const text = term.trim().slice(0, 80);
-  // Existing profiles have no lower-case display-name index. Query the entered
-  // prefix plus common letter-case variants, alongside the normalized username.
-  const prefixes = [...new Set([text, text.toLowerCase(), text.replace(/(^|\s)\S/g, s => s.toUpperCase())])];
-  const parts: SearchPart[] = page?.parts ?? (text ? [
-    ...(!text.startsWith('@') ? prefixes.map(prefix => ({ field: 'displayName' as const, prefix, done: false })) : []),
-    { field: 'usernameLower', prefix: text.replace(/^@/, '').toLowerCase(), done: false },
-  ] : [{ field: null, prefix: '', done: false }]);
-  const contacts = new Map<string, AppContact>();
-  const next = await Promise.all(parts.map(async part => {
-    if (part.done) return part;
-    const constraints: QueryConstraint[] = [orderBy(part.field ?? documentId())];
-    if (part.field) constraints.push(where(part.field, '>=', part.prefix), where(part.field, '<=', part.prefix + '\uf8ff'));
-    if (part.cursor) constraints.push(startAfter(part.cursor));
-    constraints.push(limit(PAGE_SIZE));
-    const snapshot = await getDocs(query(collection(db, 'users'), ...constraints));
-    for (const row of snapshot.docs) {
-      const raw = row.data();
-      if ((raw.status ?? 'active') !== 'active') continue;
-      const profile = normalizeProfile(raw);
-      const contact = parseContact({ uid: row.id,
-        name: displayNameFor(profile, { uid: row.id, fallback: 'OfflineSMS' }).slice(0, 160),
-        username: profile.username,
-      });
-      if (contact?.uid) contacts.set(contact.uid, contact as AppContact);
-    }
-    return { ...part, cursor: snapshot.docs[snapshot.docs.length - 1] ?? part.cursor, done: snapshot.size < PAGE_SIZE };
-  }));
-  return { contacts: [...contacts.values()], page: { parts: next, hasMore: next.some(p => !p.done) } };
+  const result = await httpsCallable<
+    {search:string;cursor?:ContactPage['cursor']},
+    {contacts:unknown[];page:ContactPage}
+  >(getFunctions(app),'listAppContacts')({search:term.trim().slice(0,80),...(page ? {cursor:page.cursor} : {})});
+  const contacts = result.data.contacts.map(parseContact).filter((contact): contact is AppContact => !!contact?.uid);
+  return {contacts,page:result.data.page};
 }
 
 export function mergeAppContacts(current: AppContact[], incoming: AppContact[]): AppContact[] {
