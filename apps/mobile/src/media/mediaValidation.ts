@@ -4,9 +4,10 @@
 // so it is unit-testable and can mirror the server-side checks in the callables
 // (the real security boundary lives in functions/src/chats/*MediaMessage.ts).
 
-export type MediaType = 'image' | 'voice';
+import { attachmentMimeAllowed, attachmentLimit, attachmentLabel, isBinaryAttachment, type BinaryAttachmentType } from './attachmentModel';
+export type MediaType = BinaryAttachmentType;
 
-export const IMAGE_MIME_ALLOW = ['image/jpeg', 'image/png', 'image/webp'] as const;
+export const IMAGE_MIME_ALLOW = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'] as const;
 export const AUDIO_MIME_ALLOW = ['audio/m4a', 'audio/aac', 'audio/mp4', 'audio/x-m4a'] as const;
 
 export const MAX_MEDIA_BYTES = 10 * 1024 * 1024; // 10 MB (image and voice)
@@ -29,7 +30,7 @@ export function isAllowedAudioMime(mime: string): boolean {
 }
 
 export function isAllowedMime(type: MediaType, mime: string): boolean {
-  return type === 'image' ? isAllowedImageMime(mime) : isAllowedAudioMime(mime);
+  return attachmentMimeAllowed(type, mime.toLowerCase());
 }
 
 /** Validate a media message's metadata before upload. Pure; no I/O. */
@@ -39,17 +40,17 @@ export function validateMediaMessage(input: {
   sizeBytes: number;
   durationMs?: number | null;
 }): ValidationResult {
-  if (input.mediaType !== 'image' && input.mediaType !== 'voice') {
+  if (!isBinaryAttachment(input.mediaType)) {
     return { ok: false, reason: 'unsupported-type' };
   }
   if (!isAllowedMime(input.mediaType, input.mimeType)) {
     return { ok: false, reason: 'mime-not-allowed' };
   }
-  if (!(input.sizeBytes > 0) || input.sizeBytes > MAX_MEDIA_BYTES) {
+  if (!Number.isSafeInteger(input.sizeBytes) || input.sizeBytes <= 0 || input.sizeBytes > attachmentLimit(input.mediaType)) {
     return { ok: false, reason: 'too-large' };
   }
   if (input.mediaType === 'voice') {
-    if (input.durationMs == null) return { ok: false, reason: 'duration-missing' };
+    if (input.durationMs == null || !Number.isFinite(input.durationMs)) return { ok: false, reason: 'duration-missing' };
     if (input.durationMs < VOICE_MIN_MS) return { ok: false, reason: 'too-short' };
     if (input.durationMs > VOICE_MAX_MS) return { ok: false, reason: 'too-long' };
   }
@@ -89,12 +90,12 @@ export function formatDuration(ms: number): string {
 }
 
 /** Conversation list / lastMessage preview label for a media message. */
-export function mediaPreviewLabel(type: MediaType): 'Photo' | 'Voice message' {
-  return type === 'image' ? 'Photo' : 'Voice message';
+export function mediaPreviewLabel(type: MediaType): string {
+  return attachmentLabel(type);
 }
 
 export type AttachmentKey =
-  | 'photos' | 'camera' | 'file' | 'location' | 'contact' | 'poll' | 'audio' | 'gif';
+  | 'photos' | 'camera' | 'video' | 'file' | 'location' | 'contact' | 'poll' | 'audio' | 'gif';
 
 export interface AttachmentOption {
   key: AttachmentKey;
@@ -105,17 +106,16 @@ export interface AttachmentOption {
 }
 
 /**
- * The 8 attachment-sheet tiles. Only Photos and Camera are enabled in Phase 23;
- * the rest render as "coming soon" so the sheet matches the design without
- * shipping unfinished flows.
+ * All supported attachment types. Video has a dedicated picker.
  */
 export const ATTACHMENT_OPTIONS: readonly AttachmentOption[] = [
   { key: 'photos',   labelKey: 'media.photo',   icon: 'image',            enabled: true },
   { key: 'camera',   labelKey: 'media.camera',  icon: 'camera',           enabled: true },
-  { key: 'file',     labelKey: 'media.file',    icon: 'document',         enabled: false },
-  { key: 'location', labelKey: 'media.location', icon: 'location',        enabled: false },
-  { key: 'contact',  labelKey: 'media.contact', icon: 'person',           enabled: false },
+  { key: 'video', labelKey: 'attachments.video', icon: 'videocam', enabled: true },
+  { key: 'file',     labelKey: 'media.file',    icon: 'document',         enabled: true },
+  { key: 'location', labelKey: 'media.location', icon: 'location',        enabled: true },
+  { key: 'contact',  labelKey: 'media.contact', icon: 'person',           enabled: true },
   { key: 'poll',     labelKey: 'media.poll',    icon: 'stats-chart',      enabled: true },
-  { key: 'audio',    labelKey: 'media.audio',   icon: 'musical-notes',    enabled: false },
-  { key: 'gif',      labelKey: 'media.gif',     icon: 'film',             enabled: false },
+  { key: 'audio',    labelKey: 'media.audio',   icon: 'musical-notes',    enabled: true },
+  { key: 'gif',      labelKey: 'media.gif',     icon: 'film',             enabled: true },
 ];

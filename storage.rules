@@ -12,13 +12,28 @@ service firebase.storage {
         'audio/m4a', 'audio/aac', 'audio/mp4', 'audio/x-m4a'
       ];
     }
+    function activeParticipant(conversationId) {
+      let c = firestore.get(/databases/(default)/documents/conversations/$(conversationId)).data;
+      return isAuthed() && request.auth.uid in c.get('participantUids', c.get('memberIds', []))
+        && (c.get('type', 'direct') != 'group' ||
+          firestore.get(/databases/(default)/documents/conversations/$(conversationId)/members/$(request.auth.uid)).data.get('status', 'active') == 'active');
+    }
     match /chatMedia/{conversationId}/{senderId}/{messageId}/{file} {
-      allow read:  if isAuthed();
-      allow write: if isAuthed() && request.auth.uid == senderId
-                      && firestore.exists(/databases/(default)/documents/conversations/$(conversationId)/messages/$(messageId))
-                      && firestore.get(/databases/(default)/documents/conversations/$(conversationId)/messages/$(messageId)).data.get('retentionDeleting', false) != true
-                      && request.resource.size < 10 * 1024 * 1024
-                      && isAllowedMediaMime(request.resource.contentType);
+      function message() { return firestore.get(/databases/(default)/documents/conversations/$(conversationId)/messages/$(messageId)).data; }
+      allow read: if activeParticipant(conversationId)
+        && message().get('deletedForEveryone', false) != true
+        && message().get('retentionDeleting', false) != true
+        && (message().media.uploadStatus == 'uploaded' || request.auth.uid == senderId);
+      allow write: if resource == null && request.resource != null && isSelf(senderId) && activeParticipant(conversationId)
+        && message().senderUid == senderId
+        && message().get('deletedForEveryone', false) != true
+        && message().get('retentionDeleting', false) != true
+        && message().media.uploadStatus == 'pending'
+        && message().media.storagePath == 'chatMedia/' + conversationId + '/' + senderId + '/' + messageId + '/' + file
+        && request.resource.contentType == message().media.mimeType
+        && request.resource.size == message().media.sizeBytes
+        && request.resource.size > 0
+        && request.resource.size <= (message().type in ['image', 'voice'] ? 10 : 25) * 1024 * 1024;
     }
 
     // Avatars

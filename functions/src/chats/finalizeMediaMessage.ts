@@ -1,69 +1,55 @@
-// Callable: finalize a media message after its binary has been uploaded.
-//
-// Phase 23 — sender-only. Flips media.uploadStatus to 'uploaded' and records the
-// optional download URLs + final metadata. Idempotent: re-running on an already
-// finalized message is a no-op success (covers retry after a finalize that
-// succeeded server-side but whose response was lost). Audit metadata only.
-
+// Finalize only after checking the actual Storage object; never trust client size/URL.
+import { randomUUID } from 'node:crypto';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { getStorage } from 'firebase-admin/storage';
 import { writeAuditLog } from '../lib/auditLog';
+import { isBinaryAttachment, attachmentLimit, attachmentMimeAllowed } from './attachmentModel';
+import { assertDirectNotBlocked } from './blockGuard';
+import { signatureMatches } from './attachmentIntegrity';
 
-export const finalizeMediaMessage = onCall(async (request) => {
-  const uid = request.auth?.uid;
-  if (!uid) throw new HttpsError('unauthenticated', 'sign-in-required');
-
-  const data = (request.data ?? {}) as {
-    conversationId?: unknown; messageId?: unknown;
-    downloadURL?: unknown; thumbnailURL?: unknown;
-    width?: unknown; height?: unknown; sizeBytes?: unknown;
-  };
-  if (typeof data.conversationId !== 'string' || !data.conversationId) {
-    throw new HttpsError('invalid-argument', 'conversationId-required');
+export const finalizeMediaMessage = onCall(async request => {
+  const uid=request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated','sign-in-required');
+  const {conversationId,messageId}=request.data ?? {};
+  if (typeof conversationId !== 'string' || !conversationId || conversationId.includes('/') || typeof messageId !== 'string' || !messageId || messageId.includes('/')) throw new HttpsError('invalid-argument','message-identifiers-required');
+  const db=getFirestore();
+  const ref=db.collection('conversations').doc(conversationId).collection('messages').doc(messageId);
+  const snap=await ref.get();
+  const m=snap.data();
+  if (!m || m.retentionDeleting || m.deletedForEveryone) throw new HttpsError('not-found','message-not-found');
+  if ((m.senderUid ?? m.senderId) !== uid) throw new HttpsError('permission-denied','not-the-sender');
+  if (!isBinaryAttachment(m.type)) throw new HttpsError('failed-precondition','not-a-media-message');
+  if (m.media?.uploadStatus === 'uploaded') return {messageId,idempotent:true,downloadURL:m.media.downloadURL};
+  const path=m.media?.storagePath;
+  if (typeof path !== 'string' || !path.startsWith(`chatMedia/${conversationId}/${uid}/${messageId}/`)) throw new HttpsError('failed-precondition','storage-path-invalid');
+  const convo=await db.collection('conversations').doc(conversationId).get();
+  const c=convo.data();
+  if (!(c?.participantUids ?? c?.memberIds ?? []).includes(uid)) throw new HttpsError('permission-denied','not-a-participant');
+  if (c?.status === 'disabled') throw new HttpsError('failed-precondition','conversation-disabled');
+  await assertDirectNotBlocked(db,c!,uid);
+  if (c?.type === 'group') {
+    const member=await db.doc(`conversations/${conversationId}/members/${uid}`).get();
+    const role=member.get('role');
+    if (!member.exists || (member.get('status') ?? 'active') !== 'active') throw new HttpsError('permission-denied','not-an-active-member');
+    if (role !== 'admin' && role !== 'owner' && (c.status === 'locked' || c.settings?.onlyAdminsCanSend)) throw new HttpsError('permission-denied','group-restricted');
   }
-  if (typeof data.messageId !== 'string' || !data.messageId) {
-    throw new HttpsError('invalid-argument', 'messageId-required');
-  }
-
-  const db = getFirestore();
-  const msgRef = db.collection('conversations').doc(data.conversationId)
-    .collection('messages').doc(data.messageId);
-  const snap = await msgRef.get();
-  if (!snap.exists || snap.get('retentionDeleting') === true) throw new HttpsError('not-found', 'message-not-found');
-  const msg = snap.data() as {
-    senderUid?: string; senderId?: string; type?: string;
-    media?: { uploadStatus?: string };
-  };
-  const senderUid = msg.senderUid ?? msg.senderId;
-  if (senderUid !== uid) throw new HttpsError('permission-denied', 'not-the-sender');
-  if (msg.type !== 'image' && msg.type !== 'voice') {
-    throw new HttpsError('failed-precondition', 'not-a-media-message');
-  }
-
-  // Idempotent: already uploaded → return as-is.
-  if (msg.media?.uploadStatus === 'uploaded') {
-    return { messageId: msgRef.id, idempotent: true };
-  }
-
-  const patch: Record<string, unknown> = {
-    'media.uploadStatus': 'uploaded',
-    updatedAt: FieldValue.serverTimestamp(),
-  };
-  if (typeof data.downloadURL === 'string') patch['media.downloadURL'] = data.downloadURL;
-  if (typeof data.thumbnailURL === 'string') patch['media.thumbnailURL'] = data.thumbnailURL;
-  if (typeof data.width === 'number') patch['media.width'] = data.width;
-  if (typeof data.height === 'number') patch['media.height'] = data.height;
-  if (typeof data.sizeBytes === 'number') patch['media.sizeBytes'] = data.sizeBytes;
-
-  await msgRef.update(patch);
-
-  await writeAuditLog({
-    action: 'chat.media.finalized',
-    actor:  { uid },
-    target: { type: 'message', id: msgRef.id },
-    result: 'success',
-    metadata: { conversationId: data.conversationId, mediaType: msg.type },
+  const file=getStorage().bucket().file(path);
+  let metadata;
+  try {[metadata]=await file.getMetadata();} catch {throw new HttpsError('failed-precondition','upload-missing');}
+  const size=Number(metadata.size),mime=metadata.contentType ?? '';
+  if (!Number.isSafeInteger(size) || size <= 0 || size > attachmentLimit(m.type) || size !== m.media.sizeBytes || mime !== m.media.mimeType || !attachmentMimeAllowed(m.type,mime)) throw new HttpsError('invalid-argument','uploaded-metadata-mismatch');
+  const [header]=await file.download({start:0,end:Math.min(size-1,511)});
+  if (!signatureMatches(mime,header)) throw new HttpsError('invalid-argument','file-signature-invalid');
+  // Generate a URL for this verified object, not for an arbitrary client URL.
+  let token = String(metadata.metadata?.firebaseStorageDownloadTokens ?? '').split(',')[0];
+  if (!token) { token=randomUUID(); await file.setMetadata({metadata:{firebaseStorageDownloadTokens:token}}); }
+  const downloadURL=`https://firebasestorage.googleapis.com/v0/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${encodeURIComponent(token)}`;
+  await db.runTransaction(async tx => {
+    const latest=await tx.get(ref);
+    if (!latest.exists || latest.get('retentionDeleting') || latest.get('deletedForEveryone')) throw new HttpsError('not-found','message-not-found');
+    tx.update(ref,{'media.uploadStatus':'uploaded','media.downloadURL':downloadURL,'media.sizeBytes':size,updatedAt:FieldValue.serverTimestamp()});
   });
-
-  return { messageId: msgRef.id, idempotent: false };
+  void writeAuditLog({action:'chat.media.finalized',actor:{uid},target:{type:'message',id:messageId},result:'success',metadata:{conversationId,mediaType:m.type}}).catch(() => {});
+  return {messageId,idempotent:false,downloadURL};
 });

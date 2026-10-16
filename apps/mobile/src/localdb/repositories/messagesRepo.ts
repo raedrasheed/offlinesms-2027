@@ -170,7 +170,7 @@ export interface NewLocalMessage {
   deviceId: string;
   clientSequence: number;
   /** Sticker / poll messages (text holds the fallback). */
-  type?: 'text' | 'sticker' | 'poll';
+  type?: 'text' | 'sticker' | 'poll' | 'location' | 'contact';
   payloadJson?: string | null;
 }
 
@@ -201,7 +201,8 @@ export interface NewLocalMediaMessage {
   conversationId: string;
   senderUid: string;
   senderDisplayName?: string | null;
-  mediaType: 'image' | 'voice';
+  mediaType: 'image' | 'voice' | 'file' | 'audio' | 'video';
+  fileName?: string | null;
   caption?: string | null;
   localUri: string;
   mimeType: string;
@@ -220,7 +221,7 @@ export interface NewLocalMediaMessage {
 export async function insertLocalMediaMessage(m: NewLocalMediaMessage): Promise<MessageRow> {
   const now = Date.now();
   const id = localMessageId(m.deviceId);
-  const preview = m.mediaType === 'image' ? 'Photo' : 'Voice message';
+  const preview = m.fileName || ({image:'Photo',voice:'Voice message',file:'File',audio:'Audio',video:'Video'}[m.mediaType]);
   await getDb().run(
     `INSERT INTO messages
       (id, local_id, remote_id, conversation_id, sender_uid, sender_display_name, type, text, preview, caption,
@@ -228,14 +229,15 @@ export async function insertLocalMediaMessage(m: NewLocalMediaMessage): Promise<
        reply_to_message_id, reply_to_preview, forwarded, forwarded_from_message_id,
        status, error_code, error_message, sync_status, client_sequence, server_version,
        media_local_uri, media_mime, media_size, media_width, media_height, media_duration_ms, media_waveform,
-       media_upload_status, media_upload_progress)
+       media_upload_status, media_upload_progress, payload_json)
      VALUES (?,?,NULL,?,?,?, ?, NULL, ?, ?, ?, NULL, ?, NULL, 0, 0, NULL, ?, ?, 0, NULL, 'pending', NULL, NULL, 'pending', ?, 0,
-       ?, ?, ?, ?, ?, ?, ?, 'pending', 0)`,
+       ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?)`,
     [
       id, id, m.conversationId, m.senderUid, m.senderDisplayName ?? null, m.mediaType, preview, m.caption ?? null,
       now, now, m.replyToMessageId ?? null, m.replyToPreview ?? null, m.clientSequence,
       m.localUri, m.mimeType, m.sizeBytes, m.width ?? null, m.height ?? null, m.durationMs ?? null,
       m.waveform ? JSON.stringify(m.waveform) : null,
+      m.fileName ? JSON.stringify({fileName:m.fileName}) : null,
     ],
   );
   return (await getByLocalId(id))!;
@@ -336,7 +338,7 @@ export interface RemoteMediaInput {
 
 export interface RemoteMessageInput {
   remoteId: string; conversationId: string; senderUid: string; senderDisplayName?: string | null;
-  type?: 'text' | 'image' | 'voice' | 'sticker' | 'poll'; caption?: string | null;
+  type?: 'text' | 'image' | 'voice' | 'sticker' | 'poll' | 'file' | 'video' | 'audio' | 'location' | 'contact'; caption?: string | null;
   /** Sticker / poll payload JSON; undefined = leave as is. */
   payload?: string | null;
   text: string | null; remoteCreatedAt: number | null; editedAt?: number | null;
@@ -488,7 +490,7 @@ export async function updateText(remoteId: string, text: string): Promise<void> 
 
 export async function markDeletedForEveryone(remoteId: string): Promise<void> {
   await getDb().run(
-    `UPDATE messages SET deleted_for_everyone = 1, text = NULL, preview = NULL, updated_at = ? WHERE remote_id = ?`,
+    `UPDATE messages SET deleted_for_everyone = 1, text = NULL, preview = NULL, caption = NULL, payload_json = NULL, media_local_uri = NULL, media_download_url = NULL, media_thumb_url = NULL, updated_at = ? WHERE remote_id = ?`,
     [Date.now(), remoteId],
   );
 }

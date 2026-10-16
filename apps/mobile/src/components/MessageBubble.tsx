@@ -27,6 +27,7 @@ import { ChatActionSheet, SheetAction } from './ChatActionSheet';
 import { ReactionsSheet, ReactorInfo } from './ReactionsSheet';
 import { EmojiReactionPicker } from './chat/EmojiReactionPicker';
 import { ImageMessageBubble } from './chat/ImageMessageBubble';
+import { AttachmentMessageBubble } from './chat/AttachmentMessageBubble';
 import { VoiceMessageBubble } from './chat/VoiceMessageBubble';
 import { AnimatedEmoji3D } from './chat/AnimatedEmoji3D';
 import { StickerBubble } from './chat/StickerBubble';
@@ -317,13 +318,13 @@ function MessageBubbleImpl({
     : [
         { key: 'reply',   label: 'Reply',   icon: 'arrow-undo-outline', onPress: () => { close(); onReply(m); } },
         ...(!richKind ? [
-          { key: 'forward', label: 'Forward', icon: 'arrow-redo-outline', onPress: () => { close(); onForward(m); } } as SheetAction,
+          ...(!m.media || m.media.uploadStatus === 'uploaded' ? [{ key: 'forward', label: 'Forward', icon: 'arrow-redo-outline', onPress: () => { close(); onForward(m); } } as SheetAction] : []),
           { key: 'copy',    label: 'Copy',    icon: 'copy-outline', onPress: () => { close(); copyText(); } } as SheetAction,
         ] : []),
         { key: 'star',    label: context.isStarred ? 'Unstar' : 'Star', icon: context.isStarred ? 'star' : 'star-outline', onPress: () => { close(); toggleStar(); } },
         ...(canPin ? [{ key: 'pin', label: context.isPinned ? 'Unpin' : 'Pin', icon: 'pin-outline', onPress: () => { close(); togglePin(); } } as SheetAction] : []),
         ...(canEdit ? [{ key: 'edit', label: 'Edit', icon: 'create-outline', onPress: () => { close(); onEditStart(m); } } as SheetAction] : []),
-        ...(mine && onSendViaSms && !richKind ? [{ key: 'sms', label: 'Send via OfflineSMS', icon: 'paper-plane-outline', onPress: () => { close(); onSendViaSms(m); } } as SheetAction] : []),
+        ...(mine && onSendViaSms && (m.type === 'text' || m.type === 'location' || m.type === 'contact') ? [{ key: 'sms', label: 'Send via OfflineSMS', icon: 'paper-plane-outline', onPress: () => { close(); onSendViaSms(m); } } as SheetAction] : []),
         { key: 'info',   label: 'Message info', icon: 'information-circle-outline', highlighted: true, onPress: () => { close(); onInfo(m); } },
         { key: 'delete', label: 'Delete', icon: 'trash-outline', destructive: true, onPress: () => { close(); confirmDelete(); } },
       ];
@@ -406,6 +407,8 @@ function MessageBubbleImpl({
             onPlayed={() => onPlayedVoice?.(m)}
             onRetry={() => onRetryMedia?.(m)}
           />
+        ) : !deleted && ['file','audio','video','location','contact'].includes(m.type) ? (
+          <AttachmentMessageBubble message={m} mine={mine} onRetry={() => onRetryMedia?.(m)} onLongPress={() => setSheetOpen(true)}/>
         ) : stickerMessage ? (
           <Pressable
             onLongPress={() => setSheetOpen(true)}
@@ -640,6 +643,7 @@ function areBubblePropsEqual(prev: MessageBubbleProps, next: MessageBubbleProps)
     if ((a as any).forwardedFrom !== (b as any).forwardedFrom) return false;
     if (a.poll    !== b.poll)    return false; // ref compare (live votes)
     if (a.sticker !== b.sticker) return false;
+    if (a.location !== b.location || a.contact !== b.contact) return false;
     if (a.senderPhotoURL    !== b.senderPhotoURL)    return false;
     if (a.senderDisplayName !== b.senderDisplayName) return false;
   }

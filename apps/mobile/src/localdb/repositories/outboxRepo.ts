@@ -54,10 +54,14 @@ export async function getById(id: string): Promise<OutboxRow | null> {
  * 'pending'. The threshold avoids disturbing a genuinely in-flight push.
  * Returns the number of rows recovered.
  */
-export async function requeueStaleProcessing(staleMs = 90_000, now = Date.now()): Promise<number> {
+export type OutboxLane = 'all' | 'messages' | 'media';
+const MEDIA_TYPES = "('send_image_message','send_voice_message','send_attachment_message')";
+function laneClause(lane: OutboxLane): string { return lane === 'all' ? '' : ` AND type ${lane === 'media' ? 'IN' : 'NOT IN'} ${MEDIA_TYPES}`; }
+
+export async function requeueStaleProcessing(staleMs = 90_000, now = Date.now(), lane: OutboxLane = 'all'): Promise<number> {
   const res: any = await getDb().run(
     `UPDATE outbox SET status = 'pending', updated_at = ?
-      WHERE status = 'processing' AND updated_at <= ?`,
+      WHERE status = 'processing' AND updated_at <= ?${laneClause(lane)}`,
     [now, now - staleMs],
   );
   return res?.changes ?? res?.rowsAffected ?? 0;
@@ -70,13 +74,13 @@ export async function requeueStaleProcessing(staleMs = 90_000, now = Date.now())
  *    2 — read receipts (best-effort bookkeeping)
  *  Receipts are the LOWEST tier so a large or chronically-failing receipt backlog
  *  can't starve a real mutation like adding an external contact to a group. */
-export async function claimDue(now = Date.now(), limit = 10): Promise<OutboxRow[]> {
+export async function claimDue(now = Date.now(), limit = 10, lane: OutboxLane = 'all'): Promise<OutboxRow[]> {
   return getDb().all<OutboxRow>(
     `SELECT * FROM outbox
-      WHERE status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+      WHERE status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?)${laneClause(lane)}
       ORDER BY
         CASE
-          WHEN type IN ('send_message','send_image_message','send_voice_message') THEN 0
+          WHEN type IN ('send_message','send_image_message','send_voice_message','send_attachment_message') THEN 0
           WHEN type = 'mark_receipt' THEN 2
           ELSE 1
         END,
@@ -127,7 +131,7 @@ export async function retryItem(id: string): Promise<void> {
 /** Phase 23 — reset a failed item by its entity id (e.g. a media message's local id). */
 export async function retryByEntityId(entityId: string): Promise<void> {
   await getDb().run(
-    `UPDATE outbox SET status = 'pending', attempt_count = 0, next_attempt_at = ?, updated_at = ? WHERE entity_id = ? AND status = 'failed'`,
+    `UPDATE outbox SET status = 'pending', attempt_count = 0, next_attempt_at = ?, updated_at = ? WHERE entity_id = ? AND status IN ('failed','dead','pending')`,
     [Date.now(), Date.now(), entityId],
   );
 }

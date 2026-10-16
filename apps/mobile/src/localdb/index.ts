@@ -8,6 +8,7 @@
 // Read paths: import repositories directly (conversationsRepo, messagesRepo…).
 // Write path for an optimistic outgoing message: queueSendMessage(...).
 
+import { attachmentFallback, type LocationAttachment, type ContactAttachment } from '../media/attachmentModel';
 import { openForUser, closeDb, wipeUserData, getCurrentUid } from './connection';
 import { startScheduler, stopScheduler, kick } from './sync/syncScheduler';
 import * as messagesRepo from './repositories/messagesRepo';
@@ -50,7 +51,7 @@ export const notificationTargets = createNotificationTargets({
   hasLocal: async messageId => {
     const row = await messagesRepo.getByRemoteId(messageId);
     if (!row) return false;
-    return row.deleted_for_everyone === 1 || !['image', 'voice'].includes(row.type)
+    return row.deleted_for_everyone === 1 || !['image', 'voice', 'file', 'audio', 'video'].includes(row.type)
       || row.media_upload_status === 'uploaded' && !!row.media_download_url;
   },
   fetchOne: (conversationId, messageId) => pullMessageById(conversationId, messageId),
@@ -111,12 +112,16 @@ export interface QueueSendInput {
   replyTo?: { messageId: string; senderUid?: string; senderDisplayName?: string; preview?: string; type?: string } | null;
   mentions?: Array<{ userId: string; displayName: string; startIndex: number; endIndex: number }> | null;
   /** Sticker / poll messages ride the same send path (server: sendTextMessage kind). */
-  kind?: 'text' | 'sticker' | 'poll';
+  kind?: 'text' | 'sticker' | 'poll' | 'location' | 'contact';
+  location?: LocationAttachment;
+  contact?: ContactAttachment;
   sticker?: { packId: string; stickerId: string; alt: string } | null;
   poll?: { question: string; options: string[]; multiple: boolean } | null;
 }
 
 function kindPayload(input: QueueSendInput): { text: string; payloadJson: string | null } {
+  if (input.kind === 'location' && input.location) return { text: attachmentFallback({kind:'location',location:input.location}), payloadJson: JSON.stringify(input.location) };
+  if (input.kind === 'contact' && input.contact) return { text: attachmentFallback({kind:'contact',contact:input.contact}), payloadJson: JSON.stringify(input.contact) };
   if (input.kind === 'sticker' && input.sticker) {
     return { text: input.sticker.alt, payloadJson: JSON.stringify(input.sticker) };
   }
@@ -178,6 +183,8 @@ export async function queueSendMessage(input: QueueSendInput): Promise<MessageRo
       ...(kind !== 'text' ? { kind } : {}),
       ...(kind === 'sticker' && input.sticker ? { sticker: { packId: input.sticker.packId, stickerId: input.sticker.stickerId } } : {}),
       ...(kind === 'poll' && input.poll ? { poll: input.poll } : {}),
+      ...(kind === 'location' ? {location: input.location} : {}),
+      ...(kind === 'contact' ? {contact: input.contact} : {}),
     },
   });
 
@@ -344,11 +351,45 @@ export async function queueSendVoiceMessage(input: QueueSendVoiceInput): Promise
   return row;
 }
 
+/** Persist the selected file before queueing; picker cache can be evicted on restart. */
+export async function queueSendAttachment(input: QueueSendImageInput & {
+  mediaType: 'file' | 'video' | 'audio' | 'image'; fileName: string; durationMs?: number | null;
+}): Promise<MessageRow> {
+  if (!getCurrentUid() || getCurrentUid() !== input.senderUid) throw new Error('localdb: not initialised');
+  const FileSystem = await import('expo-file-system');
+  const { attachmentLimit, attachmentMimeAllowed, MIME_EXTENSIONS, cleanFileName, normalizeAttachmentMime } = await import('../media/attachmentModel');
+  const mimeType = normalizeAttachmentMime(input.mimeType);
+  const stat = await FileSystem.getInfoAsync(input.localUri);
+  const size = stat.exists && !stat.isDirectory ? stat.size : 0;
+  if (!size || size > attachmentLimit(input.mediaType) || !attachmentMimeAllowed(input.mediaType, mimeType)) throw new Error('attachment-invalid');
+  const dir = `${FileSystem.documentDirectory}OfflineSMS/Outgoing/${input.senderUid}/`;
+  await FileSystem.makeDirectoryAsync(dir, {intermediates:true});
+  const uri = `${dir}${localId('attachment')}.${MIME_EXTENSIONS[mimeType]}`;
+  await FileSystem.copyAsync({from:input.localUri,to:uri});
+  const fileName = cleanFileName(input.fileName);
+  const deviceId = await getDeviceId();
+  const row = await messagesRepo.insertLocalMediaMessage({
+    ...input, mimeType, fileName, localUri:uri, sizeBytes:size, deviceId,
+    clientSequence:await messagesRepo.nextClientSequence(input.conversationId),
+    replyToMessageId:input.replyTo?.messageId, replyToPreview:input.replyTo?.preview,
+  });
+  await outboxRepo.enqueue({type:'send_attachment_message',entityType:'message',entityId:row.local_id,
+    conversationId:input.conversationId,idempotencyKey:idempotencyKey(['attachment',deviceId,row.local_id]),
+    payload:{...input,mimeType,localUri:uri,sizeBytes:size,fileName,localMessageId:row.local_id},
+  });
+  emitLocalMessagesChanged(input.conversationId);
+  kick('outbox');
+  return row;
+}
+
 /** Phase 23 — retry a failed media upload: reset its outbox item + local state. */
 export async function retryMediaMessage(localMessageId: string): Promise<void> {
   if (!getCurrentUid()) return;
-  await messagesRepo.setMediaProgress(localMessageId, 0);
-  await outboxRepo.retryByEntityId(localMessageId);
+  const row = await messagesRepo.getByRemoteId(localMessageId) ?? await messagesRepo.getByLocalId(localMessageId);
+  const id = row?.local_id ?? localMessageId;
+  await messagesRepo.setMediaProgress(id, 0);
+  await outboxRepo.retryByEntityId(id);
+  if (row) emitLocalMessagesChanged(row.conversation_id);
   kick('outbox');
 }
 

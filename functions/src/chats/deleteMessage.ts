@@ -9,6 +9,8 @@
 
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { getStorage } from 'firebase-admin/storage';
+import { ownedMediaPrefix } from './messageRetentionPolicy';
 import { writeAuditLog } from '../lib/auditLog';
 
 const HIDE_CAP = 500;
@@ -72,7 +74,7 @@ export const deleteMessage = onCall(async (request) => {
 
   // ── for_everyone ──────────────────────────────────────────────
   const msg = msgSnap.data() as { senderUid?: string; senderId?: string; deletedForEveryone?: boolean };
-  if (msg.deletedForEveryone) return { ok: true };          // idempotent
+  const storagePrefix = ownedMediaPrefix(msgRef.path, msgSnap.data()!);
   const senderUid = msg.senderUid ?? msg.senderId;
 
   let byRole: 'sender' | 'owner' | 'admin' = 'sender';
@@ -83,10 +85,15 @@ export const deleteMessage = onCall(async (request) => {
     }
     const memberSnap = await convoRef.collection('members').doc(uid).get();
     const role = (memberSnap.data()?.role ?? '') as string;
-    if (role !== 'owner' && role !== 'admin') {
+    if ((memberSnap.data()?.status ?? 'active') !== 'active' || (role !== 'owner' && role !== 'admin')) {
       throw new HttpsError('permission-denied', 'admins-only');
     }
     byRole = role as 'owner' | 'admin';
+  }
+
+  if (msg.deletedForEveryone) {
+    if (storagePrefix) await getStorage().bucket().deleteFiles({prefix:storagePrefix});
+    return {ok:true};
   }
 
   const now = FieldValue.serverTimestamp();
@@ -105,6 +112,10 @@ export const deleteMessage = onCall(async (request) => {
     // A deleted poll/sticker keeps nothing (votes would otherwise stay readable).
     poll:               FieldValue.delete(),
     sticker:            FieldValue.delete(),
+    contact:            FieldValue.delete(),
+    location:           FieldValue.delete(),
+    caption:            FieldValue.delete(),
+    media:              FieldValue.delete(),
   });
 
   // Refresh conversation summary if this was the latest message.
@@ -124,6 +135,9 @@ export const deleteMessage = onCall(async (request) => {
   }
 
   await batch.commit();
+  // Retried calls also clean up this exact message-owned prefix. Forwarded
+  // copies have different prefixes and remain valid.
+  if (storagePrefix) await getStorage().bucket().deleteFiles({prefix:storagePrefix});
 
   await writeAuditLog({
     action: 'message.deleted.for_everyone',

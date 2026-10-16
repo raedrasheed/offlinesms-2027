@@ -20,7 +20,7 @@ export function chatMessagePath(path: string): boolean {
 }
 export function ownedMediaPrefix(path: string, msg: Record<string, any>): string | null {
   const uid = msg.senderUid ?? msg.senderId;
-  if (!chatMessagePath(path) || !['image', 'voice'].includes(msg.type) || typeof uid !== 'string' || !uid || uid.includes('/')) return null;
+  if (!chatMessagePath(path) || !['image', 'voice', 'file', 'video', 'audio'].includes(msg.type) || typeof uid !== 'string' || !uid || uid.includes('/')) return null;
   const [, conversationId, , messageId] = path.split('/');
   return `chatMedia/${conversationId}/${uid}/${messageId}/`;
 }

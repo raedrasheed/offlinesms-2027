@@ -26,7 +26,7 @@ import { sendPushToUser } from './send';
 /** Media is announced only when opening the notification can fetch its file. */
 export function notificationReady(msg: Record<string, any> | undefined): boolean {
   if (!msg || msg.deletedForEveryone || msg.retentionDeleting) return false;
-  return msg.type !== 'image' && msg.type !== 'voice'
+  return !['image','voice','file','audio','video'].includes(msg.type)
     || msg.media?.uploadStatus === 'uploaded' && !!msg.media?.downloadURL;
 }
 
@@ -37,7 +37,7 @@ export const onMessageCreateNotify = onDocumentCreated({ document: messagePath, 
 });
 export const onMessageMediaReadyNotify = onDocumentUpdated({ document: messagePath, retry: true }, async event => {
   const before = event.data?.before.data(), after = event.data?.after.data();
-  if (['image', 'voice'].includes(after?.type) && !notificationReady(before) && notificationReady(after)) {
+  if (['image', 'voice', 'file', 'audio', 'video'].includes(after?.type) && !notificationReady(before) && notificationReady(after)) {
     await notifyMessage(event.params.convoId, event.params.msgId, after!);
   }
 });

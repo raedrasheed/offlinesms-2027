@@ -12,6 +12,7 @@ describe('cloud retention policy', () => {
     expect(() => retentionPolicy({ messageRetentionEnabled: true, messageRetentionDays: 0 })).toThrow();
   });
   it('only derives storage prefixes owned by that exact chat message', () => {
+    for(const type of ['file','audio','video']) expect(ownedMediaPrefix('conversations/c/messages/m',{senderUid:'u',type})).toBe('chatMedia/c/u/m/');
     expect(ownedMediaPrefix('conversations/c/messages/m', { senderUid: 'u', type: 'image', media: { storagePath: 'other/data' } })).toBe('chatMedia/c/u/m/');
     expect(ownedMediaPrefix('tickets/t/messages/m', { senderUid: 'u', type: 'image' })).toBeNull();
     expect(ownedMediaPrefix('conversations/c/messages/m', { senderUid: 'u/x', type: 'image' })).toBeNull();

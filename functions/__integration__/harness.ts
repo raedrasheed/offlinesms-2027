@@ -13,7 +13,7 @@ if (!process.env.FIRESTORE_EMULATOR_HOST || !process.env.FIREBASE_AUTH_EMULATOR_
   // Hard stop: these tests must never run against a real project.
   throw new Error('integration tests require the Firestore + Auth emulators');
 }
-if (getApps().length === 0) initializeApp({ projectId: PROJECT });
+if (getApps().length === 0) initializeApp({ projectId: PROJECT, storageBucket: `${PROJECT}.appspot.com` });
 
 export const db = () => getFirestore();
 export const BUSINESS = 'biz-verify';

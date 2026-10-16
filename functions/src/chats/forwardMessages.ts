@@ -11,11 +11,15 @@ import { writeAuditLog } from '../lib/auditLog';
 import { cleanNameSnapshot, publicNameFrom } from '../lib/displayName';
 import { assertDirectNotBlocked } from './blockGuard';
 
+import { getStorage } from 'firebase-admin/storage';
+import { randomUUID } from 'node:crypto';
+import { isBinaryAttachment, MIME_EXTENSIONS } from './attachmentModel';
+
 const MAX_SOURCE = 10;
 const MAX_TARGETS = 10;
 const TEXT_MAX = 4000;
 
-export const forwardMessages = onCall(async (request) => {
+export const forwardMessages = onCall({timeoutSeconds:180}, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'sign-in-required');
 
@@ -56,21 +60,28 @@ export const forwardMessages = onCall(async (request) => {
   type SourceMessage = {
     id: string;
     text: string;
-    type: 'text';
+    type: string;
+    location?: unknown; contact?: unknown; sticker?: unknown;
+    media?: Record<string, any>; caption?: string | null;
     senderUid: string;
   };
   const forwardables: SourceMessage[] = [];
   for (const snap of msgSnaps) {
     if (!snap.exists) continue;
-    const m = snap.data() as { type?: string; text?: string; deletedForEveryone?: boolean; senderUid?: string; senderId?: string };
+    const m = snap.data() as { type?: string; text?: string; deletedForEveryone?: boolean; senderUid?: string; senderId?: string; location?: unknown; contact?: unknown; sticker?: unknown; media?: Record<string, any>; caption?: string | null };
     if (m.deletedForEveryone) continue;
-    if (m.type !== 'text') continue;
-    if (typeof m.text !== 'string' || m.text.length === 0) continue;
-    if (m.text.length > TEXT_MAX) continue;
+    if (!['text','location','contact','sticker'].includes(m.type ?? '') && !isBinaryAttachment(m.type)) continue;
+    if (isBinaryAttachment(m.type) && (m.media?.uploadStatus !== 'uploaded' || !m.media?.storagePath)) continue;
+    if (!isBinaryAttachment(m.type) && (typeof m.text !== 'string' || m.text.length === 0)) continue;
+    if ((m.text?.length ?? 0) > TEXT_MAX) continue;
     forwardables.push({
       id: snap.id,
-      text: m.text,
-      type: 'text',
+      text: m.text ?? m.type ?? 'Attachment',
+      ...(m.media ? {media:m.media,caption:m.caption ?? null} : {}),
+      type: m.type!,
+      ...(m.location ? {location:m.location} : {}),
+      ...(m.contact ? {contact:m.contact} : {}),
+      ...(m.sticker ? {sticker:m.sticker} : {}),
       senderUid: m.senderUid ?? m.senderId ?? '',
     });
   }
@@ -158,18 +169,37 @@ export const forwardMessages = onCall(async (request) => {
   const batch = db.batch();
   const now = FieldValue.serverTimestamp();
 
+  const copies: string[] = [];
+  try {
   for (const t of targets) {
     for (const src of forwardables) {
       const newRef = t.ref.collection('messages').doc();
       const senderDisplayName = t.isGroup ? (t.senderDisplayName ?? callerDisplayName) : callerDisplayName;
       const senderPhotoURL    = t.isGroup ? t.senderPhotoURL    : callerPhotoURL;
 
+      let media: Record<string, any> | null = null;
+      if (src.media) {
+        const original = src.media.storagePath;
+        const expected = `chatMedia/${data.sourceConversationId}/${src.senderUid}/${src.id}/`;
+        if (typeof original !== 'string' || !original.startsWith(expected)) throw new HttpsError('failed-precondition','source-media-path-invalid');
+        const path = `chatMedia/${t.id}/${uid}/${newRef.id}/attachment.${MIME_EXTENSIONS[src.media.mimeType] ?? 'bin'}`;
+        const file = getStorage().bucket().file(path);
+        await getStorage().bucket().file(original).copy(file);
+        copies.push(path);
+        const token=randomUUID();
+        await file.setMetadata({metadata:{firebaseStorageDownloadTokens:token}});
+        media = {...src.media,storagePath:path,downloadURL:`https://firebasestorage.googleapis.com/v0/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${token}`,thumbnailPath:null,thumbnailURL:null,uploadStatus:'uploaded'};
+      }
       batch.set(newRef, {
         conversationId:     t.id,
         senderUid:          uid,
         senderId:           uid,             // back-compat alias
-        type:               'text',
+        type:               src.type,
         text:               src.text,
+        ...(src.location ? {location:src.location} : {}),
+        ...(src.contact ? {contact:src.contact} : {}),
+        ...(src.sticker ? {sticker:src.sticker} : {}),
+        ...(media ? {media,caption:src.caption ?? null} : {}),
         status:             'sent',
         deletedForEveryone: false,
         editedAt:           null,
@@ -188,6 +218,18 @@ export const forwardMessages = onCall(async (request) => {
   }
 
   await batch.commit();
+  } catch (error) {
+    // A commit timeout can be ambiguous: never remove an object referenced by
+    // a committed target message. Remove only definitely uncommitted copies.
+    await Promise.all(copies.map(async path => {
+      const parts=path.split('/');
+      try {
+        const message=await db.doc(`conversations/${parts[1]}/messages/${parts[3]}`).get();
+        if (!message.exists) await getStorage().bucket().file(path).delete({ignoreNotFound:true});
+      } catch { /* Leave uncertain objects for a storage cleanup job. */ }
+    }));
+    throw error;
+  }
 
   await writeAuditLog({
     action: 'message.forwarded',

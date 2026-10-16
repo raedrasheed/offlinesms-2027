@@ -12,8 +12,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { auth } from '../lib/firebase';
-import { openLocalDb, queueSendImageMessage } from '../localdb';
+import { openLocalDb, queueSendAttachment } from '../localdb';
 import { validateMediaMessage } from '../media/mediaValidation';
+import { MIME_EXTENSIONS } from '../media/attachmentModel';
 import { isRTL } from '../i18n';
 
 export default function ImagePreviewScreen({ route, navigation }: any) {
@@ -39,7 +40,9 @@ export default function ImagePreviewScreen({ route, navigation }: any) {
     setBusy(true);
     try {
       await openLocalDb(me);
-      await queueSendImageMessage({
+      await queueSendAttachment({
+        mediaType:'image',
+        fileName:`photo.${MIME_EXTENSIONS[mimeType] ?? 'jpg'}`,
         conversationId,
         senderUid: me,
         localUri: uri,

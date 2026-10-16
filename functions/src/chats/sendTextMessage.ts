@@ -31,6 +31,8 @@ import { assertDirectNotBlocked } from './blockGuard';
 import { findSticker } from './stickerCatalog';
 import { buildPoll, pollFallbackText, PollError, type PollDoc } from './pollLogic';
 
+import { parseLocation, parseContact, attachmentFallback, type LocationAttachment, type ContactAttachment } from './attachmentModel';
+
 const TEXT_MAX = 4000;
 
 export const sendTextMessage = onCall(async (request) => {
@@ -40,9 +42,9 @@ export const sendTextMessage = onCall(async (request) => {
   const data = (request.data ?? {}) as {
     conversationId?: unknown; text?: unknown; replyTo?: unknown; mentions?: unknown;
     localId?: unknown; idempotencyKey?: unknown;
-    kind?: unknown; sticker?: unknown; poll?: unknown;
+    kind?: unknown; sticker?: unknown; poll?: unknown; location?: unknown; contact?: unknown;
   };
-  const kind: 'text' | 'sticker' | 'poll' = data.kind === 'sticker' || data.kind === 'poll' ? data.kind : 'text';
+  const kind = data.kind === 'sticker' || data.kind === 'poll' || data.kind === 'location' || data.kind === 'contact' ? data.kind : 'text';
   if (typeof data.conversationId !== 'string' || !data.conversationId) {
     throw new HttpsError('invalid-argument', 'conversationId-required');
   }
@@ -55,7 +57,17 @@ export const sendTextMessage = onCall(async (request) => {
   let text: string;
   let sticker: { packId: string; stickerId: string; alt: string } | null = null;
   let poll: PollDoc | null = null;
-  if (kind === 'sticker') {
+  let location: LocationAttachment | null = null;
+  let contact: ContactAttachment | null = null;
+  if (kind === 'location') {
+    location = parseLocation(data.location);
+    if (!location) throw new HttpsError('invalid-argument', 'location-invalid');
+    text = attachmentFallback({kind:'location',location});
+  } else if (kind === 'contact') {
+    contact = parseContact(data.contact);
+    if (!contact) throw new HttpsError('invalid-argument', 'contact-invalid');
+    text = attachmentFallback({kind:'contact',contact});
+  } else if (kind === 'sticker') {
     const ref = (data.sticker ?? {}) as { packId?: unknown; stickerId?: unknown };
     const st = findSticker(ref.packId, ref.stickerId);
     if (!st) throw new HttpsError('invalid-argument', 'sticker-unknown');
@@ -206,6 +218,8 @@ export const sendTextMessage = onCall(async (request) => {
     text,
     ...(sticker ? { sticker } : {}),
     ...(poll ? { poll } : {}),
+    ...(location ? { location } : {}),
+    ...(contact ? { contact } : {}),
     status:             'sent',
     deletedForEveryone: false,
     editedAt:           null,

@@ -2,7 +2,7 @@
   "expo": {
     "name": "OfflineSMS",
     "slug": "offlinesms",
-    "version": "2.4.1",
+    "version": "2.4.2",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "offlinesms",
@@ -17,18 +17,21 @@
       "supportsTablet": false,
       "requireFullScreen": true,
       "bundleIdentifier": "app.offlinesms.mobile",
-      "buildNumber": "18",
+      "buildNumber": "19",
       "entitlements": {
         "aps-environment": "production"
       },
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "UIBackgroundModes": ["remote-notification"],
+        "UIBackgroundModes": [
+          "remote-notification"
+        ],
         "NSCameraUsageDescription": "OfflineSMS uses your camera to capture and share photos in conversations.",
         "NSMicrophoneUsageDescription": "OfflineSMS uses your microphone to record and send voice messages.",
         "NSPhotoLibraryUsageDescription": "OfflineSMS accesses your photo library to share images in conversations.",
         "NSPhotoLibraryAddUsageDescription": "OfflineSMS saves received media to your photo library.",
-        "NSContactsUsageDescription": "OfflineSMS uses your contacts to help you find and message people."
+        "NSContactsUsageDescription": "OfflineSMS uses your contacts to help you find and message people.",
+        "NSLocationWhenInUseUsageDescription": "OfflineSMS uses your location only when you choose to share a location in a conversation."
       },
       "associatedDomains": [
         "applinks:links.offlinesms.com",
@@ -37,7 +40,7 @@
     },
     "android": {
       "package": "app.offlinesms.mobile",
-      "versionCode": 18,
+      "versionCode": 19,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
@@ -49,7 +52,9 @@
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.READ_CONTACTS",
-        "android.permission.POST_NOTIFICATIONS"
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
       ],
       "intentFilters": [
         {
@@ -98,9 +103,13 @@
             "NSExtensionActivationSupportsText": true,
             "NSExtensionActivationSupportsWebURLWithMaxCount": 1
           },
-          "androidIntentFilters": ["image/*", "text/*"]
+          "androidIntentFilters": [
+            "image/*",
+            "text/*"
+          ]
         }
-      ]
+      ],
+      "expo-document-picker"
     ],
     "extra": {
       "eas": {
