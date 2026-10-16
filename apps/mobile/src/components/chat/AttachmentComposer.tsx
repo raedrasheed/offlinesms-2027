@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../../theme';
 import { attachmentLimit, parseContact, parseLocation, type ContactAttachment, type LocationAttachment } from '../../media/attachmentModel';
+import { AppContactPicker } from './AppContactPicker';
 
 export type AttachmentDraft =
   | { kind: 'location'; location?: LocationAttachment }
@@ -22,9 +23,7 @@ export function AttachmentComposer({ draft, onClose, onSend }: {
   const [busy, setBusy] = useState(false);
   const [locating, setLocating] = useState(false);
   const [caption, setCaption] = useState('');
-  const [name, setName] = useState(draft.kind === 'contact' ? draft.contact?.name ?? '' : '');
-  const [phones, setPhones] = useState(draft.kind === 'contact' ? draft.contact?.phones.join('\n') ?? '' : '');
-  const [emails, setEmails] = useState(draft.kind === 'contact' ? draft.contact?.emails.join('\n') ?? '' : '');
+  const [selectedContact, setSelectedContact] = useState<ContactAttachment | undefined>(draft.kind === 'contact' ? draft.contact : undefined);
   const [latitude, setLatitude] = useState(draft.kind === 'location' && draft.location ? String(draft.location.latitude) : '');
   const [longitude, setLongitude] = useState(draft.kind === 'location' && draft.location ? String(draft.location.longitude) : '');
   const [position, setPosition] = useState<LocationAttachment | undefined>(draft.kind === 'location' ? draft.location : undefined);
@@ -54,8 +53,8 @@ export function AttachmentComposer({ draft, onClose, onSend }: {
     if (busy || locating) return;
     let value = draft;
     if (draft.kind === 'contact') {
-      const contact = parseContact({name,phones:phones.split('\n').map(s => s.trim()).filter(Boolean),emails:emails.split('\n').map(s => s.trim()).filter(Boolean)});
-      if (!contact) {Alert.alert(t('attachments.invalidContact'));return;}
+      const contact = parseContact(selectedContact);
+      if (!contact?.uid) {Alert.alert(t('attachments.invalidContact'));return;}
       value={kind:'contact',contact};
     } else if (draft.kind === 'location') {
       const location = latitude.trim() && longitude.trim() ? parseLocation({latitude:Number(latitude),longitude:Number(longitude),label,
@@ -75,10 +74,10 @@ export function AttachmentComposer({ draft, onClose, onSend }: {
     <KeyboardAvoidingView style={[s.root,{paddingTop:inset.top}]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={s.header}>
         <Pressable disabled={busy} onPress={onClose} accessibilityRole="button" accessibilityLabel={t('common.cancel')}><Ionicons name="close" size={27} color={colors.ink}/></Pressable>
-        <Text style={s.title}>{t('attachments.preview')}</Text>
+        <Text style={s.title}>{t(draft.kind === 'contact' && !selectedContact ? 'attachments.appContacts' : 'attachments.preview')}</Text>
         <View style={{width:27}}/>
       </View>
-      <ScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
+      {draft.kind === 'contact' && !selectedContact ? <AppContactPicker onPick={setSelectedContact}/> : <ScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
         {draft.kind === 'binary' ? <>
           {draft.mediaType === 'image' ? <Image source={{uri:draft.uri}} style={s.media} resizeMode="contain"/> : draft.mediaType === 'video' ?
             <Video source={{uri:draft.uri}} style={s.media} useNativeControls resizeMode={ResizeMode.CONTAIN} shouldPlay={false}/> :
@@ -89,9 +88,9 @@ export function AttachmentComposer({ draft, onClose, onSend }: {
         </> : draft.kind === 'contact' ? <>
           <Ionicons name="person-circle" size={64} color={colors.primary}/>
           <Text style={s.note}>{t('attachments.contactReview')}</Text>
-          {field(name,setName,'attachments.name',{maxLength:160})}
-          {field(phones,setPhones,'attachments.phones',{multiline:true,maxLength:204,keyboardType:'phone-pad'})}
-          {field(emails,setEmails,'attachments.emails',{multiline:true,maxLength:1274,keyboardType:'email-address',autoCapitalize:'none'})}
+          <Text style={s.title}>{selectedContact?.name}</Text>
+          <Text style={s.note}>{selectedContact?.username ? `@${selectedContact.username}` : 'OfflineSMS'}</Text>
+          <Pressable style={s.secondary} disabled={busy} onPress={() => setSelectedContact(undefined)} accessibilityRole="button"><Text style={s.actionText}>{t('attachments.changeContact')}</Text></Pressable>
         </> : <>
           <Ionicons name="location" size={64} color={colors.primary}/>
           <Text style={s.note}>{t('attachments.staticLocation')}</Text>
@@ -103,8 +102,8 @@ export function AttachmentComposer({ draft, onClose, onSend }: {
           {field(longitude,setLongitude,'attachments.longitude',{keyboardType:'numbers-and-punctuation',maxLength:22})}
           {position?.accuracy != null ? <Text style={s.note}>{t('attachments.accuracy',{meters:Math.round(position.accuracy)})}</Text> : null}
         </>}
-      </ScrollView>
-      <Pressable style={[s.send,{marginBottom:Math.max(inset.bottom,12),opacity:busy || locating ? .5 : 1}]} disabled={busy || locating} onPress={() => {void send();}} accessibilityRole="button">
+      </ScrollView>}
+      <Pressable style={[s.send,{marginBottom:Math.max(inset.bottom,12),opacity:busy || locating || draft.kind === 'contact' && !selectedContact ? .5 : 1}]} disabled={busy || locating || draft.kind === 'contact' && !selectedContact} onPress={() => {void send();}} accessibilityRole="button">
         {busy ? <ActivityIndicator color="#fff"/> : <Text style={s.sendText}>{t('attachments.send')}</Text>}
       </Pressable>
     </KeyboardAvoidingView>

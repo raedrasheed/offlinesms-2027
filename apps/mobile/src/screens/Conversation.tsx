@@ -365,6 +365,14 @@ export default function Conversation({ route, navigation }: any) {
     }
   }, [navigation]);
 
+  const openContactChat = useCallback(async (uid: string) => {
+    if (uid === me) return;
+    const conversationId = await getOrCreateDirectConversation(uid);
+    if (conversationId !== id) {
+      (navigation.push ?? navigation.navigate)('Conversation', { id: conversationId });
+    }
+  }, [navigation, id, me]);
+
   // Presence: peer online/last-seen + everyone's typing/recording activity.
   const presence = useChatPresence(id, isDirect ? peerUid : null);
   // Outbound typing (debounced; auto-stops on send/clear/leave; off while editing).
@@ -1132,6 +1140,7 @@ export default function Conversation({ route, navigation }: any) {
               onSendViaSms={onSendViaSms}
               onAvatarPress={onAvatarPress}
               onMentionPress={onAvatarPress}
+              onOpenContact={openContactChat}
             />
             </SwipeToReply>
           );

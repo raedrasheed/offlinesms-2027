@@ -6,10 +6,38 @@ import {finalizeMediaMessage} from '../src/chats/finalizeMediaMessage';
 import {sendTextMessage} from '../src/chats/sendTextMessage';
 import {deleteMessage} from '../src/chats/deleteMessage';
 import {forwardMessages} from '../src/chats/forwardMessages';
+import {getOrCreateDirectConversation} from '../src/chats/getOrCreateDirectConversation';
 // Explicit demo bucket; never run against production.
 beforeEach(async()=>{await resetEmulators();await db().doc('conversations/attachment-test').set({type:'group',participantUids:['me','peer']});await db().doc('conversations/attachment-test/members/me').set({role:'member',status:'active'});});
 const data={conversationId:'attachment-test',type:'file',fileName:'report.pdf',mimeType:'application/pdf',sizeBytes:9,localId:'same'};
 describe('attachment handlers',()=>{
+  it('shares the actual public account, forwards its identity and opens a direct chat',async()=>{
+    await db().doc('users/shared-user').set({displayName:'رائد',username:'raed',status:'active',email:'must-not-copy@example.com',phoneNumber:'+970599123456'});
+    const sent=await sendTextMessage.run(req('me',{conversationId:'attachment-test',kind:'contact',localId:'app-card',contact:{uid:'shared-user',name:'Spoofed admin',username:'forged',phones:['12345'],emails:['fake@example.com']}}));
+    const stored=await db().doc(`conversations/attachment-test/messages/${sent.messageId}`).get();
+    const expected={uid:'shared-user',name:'رائد',username:'raed',phones:[],emails:[]};
+    expect(stored.get('contact')).toEqual(expected);
+    expect(stored.get('text')).toBe('👤 رائد\nOfflineSMS · @raed');
+    await db().doc('conversations/target').set({type:'direct',participantUids:['me','peer']});
+    await forwardMessages.run(req('me',{sourceConversationId:'attachment-test',messageIds:[sent.messageId],targetConversationIds:['target']}));
+    const forwarded=await db().collection('conversations/target/messages').get();
+    expect(forwarded.docs[0].get('contact')).toEqual(expected);
+    const opened=await getOrCreateDirectConversation.run(req('peer',{otherUserId:forwarded.docs[0].get('contact.uid')}));
+    expect((await db().doc(`conversations/${opened.conversationId}`).get()).get('participantUids')).toEqual(['peer','shared-user']);
+    const again=await getOrCreateDirectConversation.run(req('peer',{otherUserId:'shared-user'}));
+    expect(again.conversationId).toBe(opened.conversationId);
+    await db().doc('users/shared-user').delete();
+    await expect(sendTextMessage.run(req('me',{conversationId:'attachment-test',kind:'contact',localId:'app-card',contact:expected}))).resolves.toMatchObject({messageId:sent.messageId,idempotent:true});
+  });
+  it('rejects missing or suspended app contacts and still accepts legacy phone cards',async()=>{
+    const payload={conversationId:'attachment-test',kind:'contact',contact:{uid:'missing',name:'User'}};
+    await expect(sendTextMessage.run(req('me',payload))).rejects.toThrow('contact-user-unavailable');
+    await db().doc('users/missing').set({displayName:'Suspended',status:'suspended'});
+    await expect(sendTextMessage.run(req('me',payload))).rejects.toThrow('contact-user-unavailable');
+    await expect(sendTextMessage.run(req('outsider',payload))).rejects.toMatchObject({code:'permission-denied'});
+    expect((await db().collection('conversations/attachment-test/messages').get()).empty).toBe(true);
+    await expect(sendTextMessage.run(req('me',{...payload,contact:{name:'Legacy contact',phones:['12345'],emails:[]}}))).resolves.toHaveProperty('messageId');
+  });
   it('enforces permissions and validates structured cards',async()=>{
     await expect(sendTextMessage.run(req('outsider',{conversationId:'attachment-test',kind:'location',location:{latitude:31,longitude:34}}))).rejects.toMatchObject({code:'permission-denied'});
     await expect(sendTextMessage.run(req('me',{conversationId:'attachment-test',kind:'location',location:{latitude:100,longitude:34}}))).rejects.toMatchObject({code:'invalid-argument'});

@@ -91,6 +91,7 @@ export type MessageBubbleProps = {
   onAvatarPress?: (uid: string) => void;
   // Tap a highlighted @mention to open that member's info.
   onMentionPress?: (uid: string) => void;
+  onOpenContact?: (uid: string) => Promise<void>;
   // Offline-first: locally queued outgoing message not yet on the server.
   pending?:   'queued' | 'syncing' | 'failed';
   onRetry?:   (message: Message) => void;
@@ -110,7 +111,7 @@ function formatTime(value: any): string {
 
 function MessageBubbleImpl({
   message: m, context, showSender, onReply, onEditStart, onForward, onJumpTo, onInfo, onSendViaSms,
-  onOpenImage, onRetryMedia, onPlayedVoice, onAvatarPress, onMentionPress, pending, onRetry,
+  onOpenImage, onRetryMedia, onPlayedVoice, onAvatarPress, onMentionPress, onOpenContact, pending, onRetry,
 }: MessageBubbleProps) {
   const { t } = useTranslation();
   const mine    = context.isMyMessage;
@@ -408,7 +409,7 @@ function MessageBubbleImpl({
             onRetry={() => onRetryMedia?.(m)}
           />
         ) : !deleted && ['file','audio','video','location','contact'].includes(m.type) ? (
-          <AttachmentMessageBubble message={m} mine={mine} onRetry={() => onRetryMedia?.(m)} onLongPress={() => setSheetOpen(true)}/>
+          <AttachmentMessageBubble message={m} mine={mine} myUid={context.myUid} onOpenContact={onOpenContact} onRetry={() => onRetryMedia?.(m)} onLongPress={() => setSheetOpen(true)}/>
         ) : stickerMessage ? (
           <Pressable
             onLongPress={() => setSheetOpen(true)}
@@ -622,6 +623,7 @@ function areBubblePropsEqual(prev: MessageBubbleProps, next: MessageBubbleProps)
   if (prev.onPlayedVoice !== next.onPlayedVoice) return false;
   if (prev.onAvatarPress !== next.onAvatarPress) return false;
   if (prev.onMentionPress !== next.onMentionPress) return false;
+  if (prev.onOpenContact !== next.onOpenContact) return false;
   if (prev.onRetry       !== next.onRetry)       return false;
 
   const a = prev.message, b = next.message;

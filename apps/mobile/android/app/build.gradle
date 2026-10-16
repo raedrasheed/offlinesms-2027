@@ -102,8 +102,8 @@ android {
         applicationId 'app.offlinesms.mobile'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 19
-        versionName "2.4.2"
+        versionCode 20
+        versionName "2.4.3"
         // Store build defaults; the test variant below overrides them.
         manifestPlaceholders += [
             appLabel: '@string/app_name', appScheme: 'offlinesms',

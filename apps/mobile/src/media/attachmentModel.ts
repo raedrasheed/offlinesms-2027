@@ -1,7 +1,9 @@
 // Attachment payload contract. Keep the mobile/server copies in sync (parity-tested).
 export type BinaryAttachmentType = 'image' | 'voice' | 'file' | 'audio' | 'video';
 export type LocationAttachment = { latitude: number; longitude: number; accuracy?: number; capturedAt?: number; label?: string };
-export type ContactAttachment = { name: string; phones: string[]; emails: string[] };
+// uid identifies an OfflineSMS account. Phone/email-only cards from older builds
+// remain readable; new app cards never include private contact details.
+export type ContactAttachment = { name: string; uid?: string; username?: string; phones: string[]; emails: string[] };
 export type StructuredAttachment = { kind: 'location'; location: LocationAttachment } | { kind: 'contact'; contact: ContactAttachment };
 
 export const MIME_EXTENSIONS: Record<string, string> = {
@@ -63,11 +65,17 @@ export function parseLocation(value: unknown): LocationAttachment | null {
 export function parseContact(value: unknown): ContactAttachment | null {
   const v = value as Partial<ContactAttachment> | null;
   if (!v || typeof v.name !== 'string' || !v.name.trim() || v.name.length > 160) return null;
+  const name = v.name.replace(/[\x00-\x1f\x7f]/g, '').trim();
+  if (!name) return null;
+  if (v.uid !== undefined) {
+    if (typeof v.uid !== 'string' || !v.uid || v.uid.length > 128 || v.uid !== v.uid.trim()
+      || /[\/\x00-\x1f\x7f]/.test(v.uid) || v.uid === '.' || v.uid === '..' || v.uid.startsWith('ext:')) return null;
+    const username = typeof v.username === 'string' && /^[a-z0-9._]{3,20}$/.test(v.username) ? v.username : undefined;
+    return { uid: v.uid, name, ...(username ? { username } : {}), phones: [], emails: [] };
+  }
   if (!Array.isArray(v.phones) || !Array.isArray(v.emails) || v.phones.length > 5 || v.emails.length > 5) return null;
   if (v.phones.some(p => typeof p !== 'string' || !/^[+\d ()-]{3,40}$/.test(p))) return null;
   if (v.emails.some(e => typeof e !== 'string' || e.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e))) return null;
-  const name = v.name.replace(/[\x00-\x1f\x7f]/g, '').trim();
-  if (!name) return null;
   const phones = [...new Set(v.phones.map(p => p.trim()))];
   const emails = [...new Set(v.emails.map(e => e.trim()))];
   return phones.length || emails.length ? { name, phones, emails } : null;
@@ -77,6 +85,7 @@ export function locationUrl(location: LocationAttachment): string {
 }
 export function attachmentFallback(a: StructuredAttachment): string {
   return a.kind === 'location' ? `📍 ${a.location.label || 'Location'}\n${locationUrl(a.location)}`
+    : a.contact.uid ? `👤 ${a.contact.name}\nOfflineSMS${a.contact.username ? ` · @${a.contact.username}` : ''}`
     : `👤 ${a.contact.name}\n${[...a.contact.phones, ...a.contact.emails].join('\n')}`;
 }
 export function parsePayload(json: string | null | undefined): Record<string, any> {

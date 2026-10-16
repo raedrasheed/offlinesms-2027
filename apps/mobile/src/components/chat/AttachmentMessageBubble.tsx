@@ -11,10 +11,12 @@ import { ensureCached, cachedMediaUri } from '../../media/mediaCache';
 import { useTransfer } from '../../hooks/useTransfer';
 import { togglePlay, subscribePlayback } from '../../media/audio/audioPlayer';
 import { locationUrl } from '../../media/attachmentModel';
+import { AppContactCard } from './AppContactCard';
 
 /** Large binaries do not download or mount a decoder until explicitly opened. */
-export function AttachmentMessageBubble({message:m,mine,onRetry,onLongPress}: {
+export function AttachmentMessageBubble({message:m,mine,onRetry,onLongPress,onOpenContact,myUid}: {
   message:Message;mine:boolean;onRetry:()=>void;onLongPress?:()=>void;
+  onOpenContact?:(uid:string)=>Promise<void>;myUid?:string;
 }) {
   const {t}=useTranslation();
   const transfer=useTransfer(m.id);
@@ -57,6 +59,7 @@ export function AttachmentMessageBubble({message:m,mine,onRetry,onLongPress}: {
     </Pressable>
     <Text style={s.meta}>{t('attachments.staticLocationShort')}</Text>
   </View>;
+  if (m.type === 'contact' && m.contact?.uid) return <AppContactCard contact={{...m.contact,uid:m.contact.uid}} myUid={myUid} onOpen={onOpenContact} onLongPress={onLongPress}/>;
   if (m.type === 'contact' && m.contact) return <View style={s.card}>
     <Pressable style={s.row} onPress={() => {void saveContact();}} onLongPress={onLongPress} accessibilityRole="button" accessibilityLabel={t('attachments.saveContact')}>
       <View style={s.icon}><Ionicons name="person" size={27} color={colors.primary}/></View><Text style={[s.title,s.details]}>{m.contact.name}</Text>
