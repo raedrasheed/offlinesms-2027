@@ -14,7 +14,7 @@ import { LOCAL_MESSAGE_RETENTION_LIMIT } from '../../config/features';
 import { getCurrentUid } from '../connection';
 
 let running = false;   // guards the heavy pull + history backfill
-let pushing = false;   // guards the outbox push (independent → sends never wait on a pull)
+const pushing = { messages: false, media: false }; // one upload; independent text/control lane
 
 // Realtime feeders own steady-state reads, so the engine only pulls on these
 // lifecycle transitions (cold start, reconnect, return to foreground) to close
@@ -79,10 +79,10 @@ export type SyncReason =
   | 'active-change' | 'outbox' | 'manual' | 'timer';
 
 /** Push all due outbox items. Returns how many completed. */
-export async function pushOutbox(): Promise<number> {
+export async function pushOutbox(lane: outboxRepo.OutboxLane = 'all'): Promise<number> {
   if (!isOnline()) { console.log('[outbox] skip: offline'); return 0; }
   let completed = 0;
-  const due = await outboxRepo.claimDue();
+  const due = await outboxRepo.claimDue(Date.now(), lane === 'media' ? 1 : 10, lane);
   if (due.length) console.log(`[outbox] pushing ${due.length} item(s)`);
   for (const item of due) {
     if (!isOnline()) break;
@@ -92,7 +92,7 @@ export async function pushOutbox(): Promise<number> {
       if (item.type.startsWith('send_')) console.log(`[outbox] sent ${item.type} ${item.id} → ${res.remoteId ?? '(no id)'}`);
       // Reconcile an optimistic send (text or media) with its canonical server
       // message id so the local row flips from pending → sent.
-      if ((item.type === 'send_message' || item.type === 'send_image_message' || item.type === 'send_voice_message') && res.remoteId) {
+      if ((item.type === 'send_message' || item.type === 'send_image_message' || item.type === 'send_voice_message' || item.type === 'send_attachment_message') && res.remoteId) {
         const payload = JSON.parse(item.payload_json || '{}');
         const localId = payload.localId ?? payload.localMessageId;
         if (localId) {
@@ -109,7 +109,7 @@ export async function pushOutbox(): Promise<number> {
       console.log(`[outbox] push FAILED ${item.type} ${item.id}: ${code} — ${message} (permanent=${isPermanent(err)})`);
       if (isPermanent(err)) {
         // Permanent: dead-letter immediately and surface on the message.
-        await outboxRepo.markFailed(item.id, code, message, Date.now() + 1e12, item.type === 'close_poll');
+        await outboxRepo.markFailed(item.id, code, message, Date.now() + 1e12, true);
         if (item.type === 'send_message') {
           const payload = JSON.parse(item.payload_json || '{}');
           if (payload.localId) await messagesRepo.setError(payload.localId, code, message);
@@ -145,24 +145,21 @@ export async function pullRemoteChanges(activeConversationId?: string): Promise<
 // send would sit in the outbox (stuck "pending", with no Message-info menu)
 // until the backfill released the lock.
 export async function flushOutbox(): Promise<void> {
-  if (pushing) return;
-  pushing = true;
+  await Promise.all([drainLane('messages'),drainLane('media')]);
+}
+async function drainLane(lane: 'messages' | 'media'): Promise<void> {
+  if (pushing[lane]) return;
+  pushing[lane] = true;
+  const uid = getCurrentUid();
   try {
-    // Recover sends orphaned in 'processing' by an interrupted push (otherwise
-    // they'd stay "Sending…" forever and never re-attempt).
-    try { await outboxRepo.requeueStaleProcessing(); } catch { /* best-effort */ }
-    // Drain in a loop so a large backlog (e.g. a queue of read-receipts) clears
-    // in one pass instead of 10 items per scheduler tick. Bounded so a run can't
-    // go on forever; pushOutbox returns 0 when nothing is due (or offline), which
-    // ends the loop. Newly-sent messages are still picked up first each
-    // iteration (claimDue prioritizes sends), so they never wait behind it.
-    for (let i = 0; i < 100; i++) {
-      const completed = await pushOutbox();
-      if (completed === 0) break;
+    // Only recover this idle lane. A long active upload in the other lane is
+    // not stale just because it has spent more than 90 seconds on a slow link.
+    await outboxRepo.requeueStaleProcessing(90_000,Date.now(),lane);
+    for (let i=0;i<100 && getCurrentUid() === uid;i++) {
+      if (await pushOutbox(lane) === 0) break;
     }
-  }
-  catch { /* per-item failures are recorded in the outbox */ }
-  finally { pushing = false; }
+  } catch { /* Per-item failures remain durable for retry. */ }
+  finally { pushing[lane] = false; }
 }
 
 // Targeted catch-up for ONE conversation (opening a chat, a notification tap).

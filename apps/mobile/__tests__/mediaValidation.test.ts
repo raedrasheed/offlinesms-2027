@@ -23,7 +23,7 @@ describe('MIME allow-list', () => {
     expect(isAllowedImageMime('image/jpeg')).toBe(true);
     expect(isAllowedImageMime('image/PNG')).toBe(true); // case-insensitive
     expect(isAllowedImageMime('image/webp')).toBe(true);
-    expect(isAllowedImageMime('image/gif')).toBe(false);
+    expect(isAllowedImageMime('image/gif')).toBe(true);
     expect(isAllowedImageMime('application/x-msdownload')).toBe(false);
   });
   it('accepts allowed audio types and rejects others', () => {
@@ -102,10 +102,10 @@ describe('mediaPreviewLabel & attachment options', () => {
     expect(mediaPreviewLabel('image')).toBe('Photo');
     expect(mediaPreviewLabel('voice')).toBe('Voice message');
   });
-  it('enables Photos, Camera and Poll', () => {
+  it('enables every implemented attachment flow', () => {
     const enabled = ATTACHMENT_OPTIONS.filter(o => o.enabled).map(o => o.key);
-    expect(enabled).toEqual(['photos', 'camera', 'poll']);
-    expect(ATTACHMENT_OPTIONS).toHaveLength(8);
+    expect(enabled).toEqual(['photos','camera','video','file','location','contact','poll','audio','gif']);
+    expect(ATTACHMENT_OPTIONS).toHaveLength(9);
   });
 });
 

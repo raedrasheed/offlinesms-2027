@@ -14,7 +14,7 @@ function ms(ts: any): number | null {
 }
 
 function messageType(t: unknown): RemoteMessageInput['type'] {
-  return t === 'image' || t === 'voice' || t === 'sticker' || t === 'poll' ? t : 'text';
+  return t === 'image' || t === 'voice' || t === 'sticker' || t === 'poll' || t === 'file' || t === 'video' || t === 'audio' || t === 'location' || t === 'contact' ? t : 'text';
 }
 
 export function remoteMessageInput(remoteId: string, conversationId: string, m: Record<string, any>): RemoteMessageInput {

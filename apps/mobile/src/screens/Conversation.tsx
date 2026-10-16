@@ -49,10 +49,12 @@ import { perfBegin, perfObserve, perfNow } from '../lib/perf';
 import { getDraft, setDraft as persistDraft, clearDraft } from '../lib/drafts';
 import { useLocalConversation } from '../hooks/useLocalConversation';
 import { useMessagePersistence } from '../hooks/useLocalPersistence';
-import { queueSendMessage, queueEditMessage, queueMarkReceipt, retryMediaMessage, queueSendVoiceMessage, openLocalDb, kickSync, retryQueuedMessage } from '../localdb';
+import { queueSendMessage, queueEditMessage, queueMarkReceipt, retryMediaMessage, queueSendVoiceMessage, queueSendAttachment, openLocalDb, kickSync, retryQueuedMessage } from '../localdb';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import { prefetchMedia } from '../media/mediaCache';
+import { AttachmentComposer, type AttachmentDraft } from '../components/chat/AttachmentComposer';
+import { selectAttachment } from '../media/selectAttachment';
 import { AttachmentSheet } from '../components/chat/AttachmentSheet';
 import { ComposerPanel } from '../components/chat/ComposerPanel';
 import type { PickedSticker } from '../components/chat/StickerPanel';
@@ -498,6 +500,7 @@ export default function Conversation({ route, navigation }: any) {
 
   // Phase 23 — attachment sheet + image picking.
   const [attachOpen, setAttachOpen] = useState(false);
+  const [attachmentDraft, setAttachmentDraft] = useState<AttachmentDraft | null>(null);
   // Emoji / sticker panel shown in place of the keyboard; sized like the last
   // keyboard so toggling between them doesn't make the conversation jump.
   const [panelOpen, setPanelOpen] = useState(false);
@@ -546,6 +549,12 @@ export default function Conversation({ route, navigation }: any) {
   }
 
   async function onAttachSelect(key: AttachmentKey) {
+    if (gate.kind !== 'allowed') return;
+    try {
+    if (key === 'location' || key === 'contact' || key === 'file' || key === 'audio' || key === 'video' || key === 'gif') {
+      setAttachmentDraft(await selectAttachment(key));
+      return;
+    }
     if (key === 'photos') {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) { Alert.alert(t('media.photosPermissionTitle'), t('media.photosPermissionMessage')); return; }
@@ -559,6 +568,23 @@ export default function Conversation({ route, navigation }: any) {
       const res = await ImagePicker.launchCameraAsync({ quality: 0.8 });
       await handleAsset(res);
     }
+    } catch { Alert.alert(t('attachments.invalidFile'), t('attachments.pickerError')); }
+  }
+
+  async function sendAttachment(draft: AttachmentDraft) {
+    if (gate.kind !== 'allowed') throw new Error('send-not-allowed');
+    if (draft.kind === 'binary') {
+      await openLocalDb(me);
+      await queueSendAttachment({conversationId:id,senderUid:me,localUri:draft.uri,mediaType:draft.mediaType,fileName:draft.fileName,mimeType:draft.mimeType,sizeBytes:draft.sizeBytes,width:draft.width,height:draft.height,durationMs:draft.durationMs,caption:draft.caption,replyTo:replyTo ?? null});
+    } else {
+      const rich = draft.kind === 'location' && draft.location ? {kind:'location' as const,location:draft.location} : draft.kind === 'contact' && draft.contact ? {kind:'contact' as const,contact:draft.contact} : null;
+      if (!rich) throw new Error('attachment-invalid');
+      if (useLocal) await queueSendMessage({conversationId:id,senderUid:me,text:'',...rich,replyTo:replyTo ?? null});
+      else await sendRichMessage(id,rich);
+    }
+    setReplyTo(null);
+    local.refresh();
+    kickSync('outbox');
   }
 
   const openImage  = useCallback((uri: string) => navigation.navigate('ImageViewer', { uri }), [navigation]);
@@ -1060,7 +1086,7 @@ export default function Conversation({ route, navigation }: any) {
           // 0" — and so the un-pushed message has no server-info menu (which
           // would 404 with message-not-found). Media keeps its own upload UI.
           const sendState: 'queued' | 'syncing' | 'failed' | undefined =
-            mine && !item.deletedForEveryone && ['text', 'sticker', 'poll'].includes(item.type ?? 'text')
+            mine && !item.deletedForEveryone && ['text', 'sticker', 'poll', 'location', 'contact'].includes(item.type ?? 'text')
               ? (item.status === 'failed' ? 'failed'
                 : item.status === 'sending' ? (isOffline ? 'queued' : 'syncing')
                 : undefined)
@@ -1440,6 +1466,7 @@ export default function Conversation({ route, navigation }: any) {
         </View>
       )}
 
+      {attachmentDraft ? <AttachmentComposer draft={attachmentDraft} onClose={() => setAttachmentDraft(null)} onSend={sendAttachment}/> : null}
       <AttachmentSheet
         visible={attachOpen}
         onClose={() => setAttachOpen(false)}

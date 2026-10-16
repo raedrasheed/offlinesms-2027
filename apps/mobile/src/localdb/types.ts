@@ -35,6 +35,7 @@ export type OutboxType =
   | 'send_message'
   | 'send_image_message'
   | 'send_voice_message'
+  | 'send_attachment_message'
   | 'vote_poll'
   | 'close_poll'
   | 'edit_message'
@@ -84,7 +85,7 @@ export interface MessageRow {
   conversation_id: string;
   sender_uid: string;
   sender_display_name: string | null;
-  type: 'text' | 'image' | 'voice' | 'sticker' | 'poll';
+  type: 'text' | 'image' | 'voice' | 'sticker' | 'poll' | 'file' | 'video' | 'audio' | 'location' | 'contact';
   text: string | null;
   preview: string | null;
   /** v7 — sticker reference / poll (JSON), see lib/pollModel. */

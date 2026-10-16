@@ -13,12 +13,13 @@ import { writeAuditLog } from '../lib/auditLog';
 import { cleanNameSnapshot, publicNameFrom } from '../lib/displayName';
 import { assertDirectNotBlocked } from './blockGuard';
 
-const MAX_MEDIA_BYTES = 10 * 1024 * 1024;
+import { isBinaryAttachment, attachmentLimit, attachmentMimeAllowed, attachmentLabel, cleanFileName, MIME_EXTENSIONS } from './attachmentModel';
+
+import { createHash } from 'node:crypto';
+import { fileNameMatchesMime } from './attachmentIntegrity';
 const VOICE_MAX_MS = 5 * 60 * 1000;
 const VOICE_MIN_MS = 1000;
 const CAPTION_MAX = 1000;
-const IMAGE_MIME = ['image/jpeg', 'image/png', 'image/webp'];
-const AUDIO_MIME = ['audio/m4a', 'audio/aac', 'audio/mp4', 'audio/x-m4a'];
 
 export const createMediaMessage = onCall(async (request) => {
   const uid = request.auth?.uid;
@@ -26,42 +27,43 @@ export const createMediaMessage = onCall(async (request) => {
 
   const data = (request.data ?? {}) as {
     conversationId?: unknown; type?: unknown; caption?: unknown;
-    mimeType?: unknown; sizeBytes?: unknown;
+    mimeType?: unknown; sizeBytes?: unknown; fileName?: unknown;
     width?: unknown; height?: unknown; durationMs?: unknown; waveform?: unknown;
     replyTo?: unknown; localId?: unknown; idempotencyKey?: unknown;
   };
 
-  if (typeof data.conversationId !== 'string' || !data.conversationId) {
+  if (typeof data.conversationId !== 'string' || (!data.conversationId || data.conversationId.includes('/'))) {
     throw new HttpsError('invalid-argument', 'conversationId-required');
   }
   const mediaType = data.type;
-  if (mediaType !== 'image' && mediaType !== 'voice') {
+  if (!isBinaryAttachment(mediaType)) {
     throw new HttpsError('invalid-argument', 'type-invalid');
   }
   if (typeof data.mimeType !== 'string') {
     throw new HttpsError('invalid-argument', 'mimeType-required');
   }
   const mimeType = data.mimeType.toLowerCase();
-  const allow = mediaType === 'image' ? IMAGE_MIME : AUDIO_MIME;
-  if (!allow.includes(mimeType)) {
+  if (!attachmentMimeAllowed(mediaType, mimeType)) {
     throw new HttpsError('invalid-argument', 'mime-not-allowed');
   }
   const sizeBytes = typeof data.sizeBytes === 'number' ? data.sizeBytes : 0;
-  if (!(sizeBytes > 0) || sizeBytes > MAX_MEDIA_BYTES) {
+  if (!Number.isSafeInteger(sizeBytes) || sizeBytes <= 0 || sizeBytes > attachmentLimit(mediaType)) {
     throw new HttpsError('invalid-argument', 'size-invalid');
   }
-  const durationMs = typeof data.durationMs === 'number' ? data.durationMs : null;
+  const durationMs = typeof data.durationMs === 'number' && Number.isFinite(data.durationMs) && data.durationMs >= 0 ? data.durationMs : null;
   if (mediaType === 'voice') {
-    if (durationMs == null) throw new HttpsError('invalid-argument', 'duration-required');
+    if (durationMs == null || !Number.isFinite(durationMs)) throw new HttpsError('invalid-argument', 'duration-required');
     if (durationMs < VOICE_MIN_MS) throw new HttpsError('invalid-argument', 'duration-too-short');
     if (durationMs > VOICE_MAX_MS) throw new HttpsError('invalid-argument', 'duration-too-long');
   }
-  const caption = mediaType === 'image' && typeof data.caption === 'string'
+  const fileName = cleanFileName(data.fileName);
+  if (['file','audio','video'].includes(mediaType) && (!fileName || !fileNameMatchesMime(fileName,mimeType))) throw new HttpsError('invalid-argument','filename-mime-mismatch');
+  const caption = mediaType !== 'voice' && typeof data.caption === 'string'
     ? data.caption.slice(0, CAPTION_MAX) : null;
-  const width = typeof data.width === 'number' ? data.width : null;
-  const height = typeof data.height === 'number' ? data.height : null;
+  const width = typeof data.width === 'number' && Number.isFinite(data.width) && data.width > 0 ? Math.min(data.width, 32768) : null;
+  const height = typeof data.height === 'number' && Number.isFinite(data.height) && data.height > 0 ? Math.min(data.height, 32768) : null;
   const waveform = Array.isArray(data.waveform)
-    ? (data.waveform as unknown[]).filter((n): n is number => typeof n === 'number').slice(0, 60)
+    ? (data.waveform as unknown[]).filter((n): n is number => typeof n === 'number' && Number.isFinite(n)).slice(0, 60).map(n => Math.max(0, Math.min(1, n)))
     : null;
 
   const clientLocalId = typeof data.localId === 'string' && data.localId ? data.localId : null;
@@ -129,34 +131,43 @@ export const createMediaMessage = onCall(async (request) => {
       .where('clientLocalId', '==', clientLocalId).limit(1).get();
     if (!dupSnap.empty) {
       const doc = dupSnap.docs[0];
-      const m = doc.data() as { media?: { storagePath?: string; thumbnailPath?: string | null } };
+      const m = doc.data();
+      if ((m.senderUid ?? m.senderId) !== uid) throw new HttpsError('permission-denied','local-id-owner-mismatch');
+      if (m.deletedForEveryone || m.retentionDeleting) throw new HttpsError('not-found','message-not-found');
       return {
         messageId: doc.id,
         storagePath: m.media?.storagePath ?? null,
         thumbnailPath: m.media?.thumbnailPath ?? null,
         idempotent: true,
+        uploadStatus:m.media?.uploadStatus,downloadURL:m.media?.downloadURL ?? null,
       };
     }
   }
 
-  const msgRef = convoRef.collection('messages').doc();
+  const msgRef = clientLocalId
+    ? convoRef.collection('messages').doc(createHash('sha256').update(`${uid}:${clientLocalId}`).digest('hex'))
+    : convoRef.collection('messages').doc();
   // The uid is embedded in the path so Storage rules can authorize the write by
   // comparing request.auth.uid to the path segment — no cross-service Firestore
   // read (mirrors the conversations/{convoId}/{senderId} pattern in storage.rules).
   const base = `chatMedia/${convoRef.id}/${uid}/${msgRef.id}`;
-  const storagePath = mediaType === 'image' ? `${base}/image-original.jpg` : `${base}/voice.m4a`;
-  const thumbnailPath = mediaType === 'image' ? `${base}/image-thumb.jpg` : null;
+  const storagePath = `${base}/${mediaType === 'image' ? 'image-original' : mediaType}.${MIME_EXTENSIONS[mimeType]}`;
+  const thumbnailPath = null; // No thumbnail is advertised until one actually exists.
   const now = FieldValue.serverTimestamp();
 
-  await msgRef.set({
+  const duplicate = await db.runTransaction(async tx => {
+    const previous=await tx.get(msgRef);
+    if(previous.exists) return previous.data();
+    tx.create(msgRef,{
     conversationId:     convoRef.id,
     senderUid:          uid,
     senderId:           uid,
     type:               mediaType,
-    text:               null,
+    text:               `${attachmentLabel(mediaType)}${fileName ? ': ' + fileName : ''}`,
     caption,
     media: {
       storagePath,
+      fileName: fileName || null,
       thumbnailPath,
       mimeType,
       sizeBytes,
@@ -182,6 +193,13 @@ export const createMediaMessage = onCall(async (request) => {
     idempotencyKey:     clientIdempotencyKey,
     ...(isGroup ? { senderDisplayName, senderPhotoURL } : {}),
   });
+
+    return null;
+  });
+  if(duplicate) {
+    if(duplicate.deletedForEveryone || duplicate.retentionDeleting) throw new HttpsError('not-found','message-not-found');
+    return {messageId:msgRef.id,storagePath:duplicate.media.storagePath,thumbnailPath:duplicate.media.thumbnailPath ?? null,uploadStatus:duplicate.media.uploadStatus,downloadURL:duplicate.media.downloadURL ?? null,idempotent:true};
+  }
 
   await writeAuditLog({
     action: 'chat.media.created',

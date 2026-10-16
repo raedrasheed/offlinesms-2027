@@ -5,6 +5,7 @@
 // module re-exports a subset of these helpers for screens that haven't
 // migrated yet.
 
+import type { LocationAttachment, ContactAttachment, StructuredAttachment } from '../media/attachmentModel';
 import type { StickerRef, PollData } from './pollModel';
 import {
   collection, doc, onSnapshot, orderBy, query, where, limit,
@@ -105,13 +106,14 @@ export type PinnedMessage = {
   pinnedBy:           string;
 } | null;
 
-export type MessageType = 'text' | 'image' | 'voice' | 'sticker' | 'poll';
+export type MessageType = 'text' | 'image' | 'voice' | 'sticker' | 'poll' | 'file' | 'video' | 'audio' | 'location' | 'contact';
 
 export type MediaUploadStatus = 'pending' | 'uploading' | 'uploaded' | 'failed';
 
 /** Phase 23 — media metadata stored on image/voice messages. Binary lives in
  *  Firebase Storage; this object carries metadata only (never base64). */
 export type MediaInfo = {
+  fileName?:      string | null;
   storagePath:    string;
   downloadURL?:   string | null;
   mimeType:       string;
@@ -167,6 +169,8 @@ export type Message = {
   // Stickers / polls (type 'sticker' | 'poll'); `text` holds a short fallback.
   sticker?:            StickerRef | null;
   poll?:               PollData | null;
+  location?:           LocationAttachment | null;
+  contact?:            ContactAttachment | null;
 };
 
 export type UserState = {
@@ -706,7 +710,7 @@ export async function closePoll(conversationId: string, messageId: string): Prom
 /** Send a sticker or a poll when the local-first path is off (legacy path). */
 export async function sendRichMessage(
   conversationId: string,
-  rich: { kind: 'sticker'; sticker: { packId: string; stickerId: string } } | { kind: 'poll'; poll: { question: string; options: string[]; multiple: boolean } },
+  rich: { kind: 'sticker'; sticker: { packId: string; stickerId: string } } | { kind: 'poll'; poll: { question: string; options: string[]; multiple: boolean } } | StructuredAttachment,
 ): Promise<string> {
   const res = await fn<Record<string, unknown>, { messageId: string }>('sendTextMessage')({ conversationId, ...rich });
   return res.data.messageId;

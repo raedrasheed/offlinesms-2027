@@ -26,6 +26,9 @@ export const POLL_OPTIONS_MAX = 12;
 
 /** Payload stored in messages.payload_json for a given message type. */
 export function payloadFromRemote(type: string | undefined, m: Record<string, any>): string | null {
+  if (type === 'location' && m.location) return JSON.stringify(m.location);
+  if (type === 'contact' && m.contact) return JSON.stringify(m.contact);
+  if (['file', 'video', 'audio'].includes(type ?? '') && m.media) return JSON.stringify({ fileName: m.media.fileName ?? '' });
   if (type === 'sticker' && m.sticker) {
     const s = m.sticker;
     return JSON.stringify({ packId: String(s.packId ?? ''), stickerId: String(s.stickerId ?? ''), alt: String(s.alt ?? '') });

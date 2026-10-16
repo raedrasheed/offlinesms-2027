@@ -13,16 +13,19 @@
 // cache is self-deduplicating and never collides across users on one device.
 
 import * as FileSystem from 'expo-file-system';
+import { isBinaryAttachment, MIME_EXTENSIONS } from './attachmentModel';
 import type { Message } from '../lib/conversations';
 import { setTransferProgress, setTransferFailed, clearTransfer } from './transferProgress';
 
 const ROOT = `${FileSystem.documentDirectory}OfflineSMS/`;
 const IMAGES_DIR = `${ROOT}Images/`;
+const FILES_DIR = `${ROOT}Files/`;
 const RECORDINGS_DIR = `${ROOT}Recordings/`;
 
 export const mediaDirs = { root: ROOT, images: IMAGES_DIR, recordings: RECORDINGS_DIR };
 
 function extFor(message: Message): string {
+  if (message.media?.mimeType && MIME_EXTENSIONS[message.media.mimeType]) return MIME_EXTENSIONS[message.media.mimeType];
   if (message.type === 'voice') return 'm4a';
   const mime = message.media?.mimeType ?? '';
   if (mime.includes('png')) return 'png';
@@ -31,12 +34,12 @@ function extFor(message: Message): string {
 }
 
 function dirFor(message: Message): string {
-  return message.type === 'voice' ? RECORDINGS_DIR : IMAGES_DIR;
+  return message.type === 'voice' ? RECORDINGS_DIR : message.type === 'image' ? IMAGES_DIR : FILES_DIR;
 }
 
 /** Deterministic local path for a message's media (null if no id/not media). */
 export function cachePathFor(message: Message): string | null {
-  if (message.type !== 'image' && message.type !== 'voice') return null;
+  if (!isBinaryAttachment(message.type)) return null;
   const id = message.id;
   if (!id) return null;
   return `${dirFor(message)}${id}.${extFor(message)}`;
@@ -46,7 +49,7 @@ let dirsReady: Promise<void> | null = null;
 function ensureDirs(): Promise<void> {
   if (!dirsReady) {
     dirsReady = (async () => {
-      for (const d of [IMAGES_DIR, RECORDINGS_DIR]) {
+      for (const d of [IMAGES_DIR, RECORDINGS_DIR, FILES_DIR]) {
         const info = await FileSystem.getInfoAsync(d);
         if (!info.exists) await FileSystem.makeDirectoryAsync(d, { intermediates: true });
       }

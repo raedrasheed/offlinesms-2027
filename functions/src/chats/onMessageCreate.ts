@@ -22,6 +22,11 @@ function buildPreview(msg: { type?: string; text?: string }): string {
   // Phase 23 — media messages get human-readable previews (no caption/content).
   if (msg.type === 'image') return 'Photo';
   if (msg.type === 'voice') return 'Voice message';
+  if (msg.type === 'file') return 'File';
+  if (msg.type === 'video') return 'Video';
+  if (msg.type === 'audio') return 'Audio';
+  if (msg.type === 'location') return 'Location';
+  if (msg.type === 'contact') return 'Contact';
   // Stickers / polls: their `text` is a short fallback ("👋" / "📊 question").
   if (msg.type === 'sticker') return `${typeof msg.text === 'string' ? msg.text + ' ' : ''}Sticker`;
   if ((msg.type === 'text' || msg.type === 'poll') && typeof msg.text === 'string') {

@@ -81,6 +81,19 @@ async function uploadLocalFile(
   return `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${name}?alt=media${downloadToken ? `&token=${downloadToken}` : ''}`;
 }
 
+async function resumeUploaded(created: {messageId:string;idempotent?:boolean}, conversationId:string, localId:string | null): Promise<string | null> {
+  if (!created.idempotent) return null;
+  try {
+    const done=await call<{downloadURL:string}>('finalizeMediaMessage',{conversationId,messageId:created.messageId});
+    if(localId) await messagesRepo.setMediaUploaded(localId,{downloadURL:done.downloadURL});
+    clearTransfer(created.messageId);
+    return done.downloadURL;
+  } catch(e:any) {
+    if(String(e?.message).includes('upload-missing')) return null;
+    throw e;
+  }
+}
+
 export async function pushOutboxItem(item: OutboxRow): Promise<PushResult> {
   const payload = JSON.parse(item.payload_json || '{}');
 
@@ -90,15 +103,50 @@ export async function pushOutboxItem(item: OutboxRow): Promise<PushResult> {
         conversationId: payload.conversationId,
         // Only the new backend may create the text fallback for rich messages.
         // Omitting it makes an older backend refuse instead of losing the options.
-        ...(payload.kind === 'poll' || payload.kind === 'sticker' ? {} : { text: payload.text }),
+        ...(payload.kind && payload.kind !== 'text' ? {} : { text: payload.text }),
         replyTo: payload.replyTo ?? null,
         mentions: payload.mentions ?? null,
         localId: payload.localId,
         idempotencyKey: item.idempotency_key,
         clientCreatedAt: payload.clientCreatedAt ?? null,
-        ...(payload.kind ? { kind: payload.kind, sticker: payload.sticker ?? null, poll: payload.poll ?? null } : {}),
+        ...(payload.kind ? { kind: payload.kind, sticker: payload.sticker ?? null, poll: payload.poll ?? null, location: payload.location ?? null, contact: payload.contact ?? null } : {}),
       });
       return { ok: true, remoteId: res?.messageId, idempotent: res?.idempotent };
+    }
+    case 'send_attachment_message': {
+      const localId = payload.localMessageId;
+      try {
+        const sizeBytes = await localFileSize(payload.localUri);
+        if (!sizeBytes) throw Object.assign(new Error('local-file-missing'), {code:'file/not-found'});
+        const created = await call<{messageId:string;storagePath:string;uploadStatus?:string;downloadURL?:string;idempotent?:boolean}>('createMediaMessage', {
+          conversationId:payload.conversationId,type:payload.mediaType,mimeType:payload.mimeType,
+          fileName:payload.fileName,sizeBytes,caption:payload.caption ?? null,
+          width:payload.width ?? null,height:payload.height ?? null,durationMs:payload.durationMs ?? null,
+          replyTo:payload.replyTo ?? null,localId,idempotencyKey:item.idempotency_key,
+        });
+        await messagesRepo.reconcileToRemote(localId,{remoteId:created.messageId,remoteCreatedAt:null});
+        emitLocalMessagesChanged(payload.conversationId);
+        let downloadURL = created.downloadURL;
+        if (created.uploadStatus !== 'uploaded') downloadURL = await resumeUploaded(created,payload.conversationId,localId) ?? undefined;
+        if (created.uploadStatus !== 'uploaded' && !downloadURL) {
+          downloadURL = await uploadLocalFile(payload.localUri,created.storagePath,payload.mimeType,f => {
+            setTransferProgress(created.messageId,'upload',f);
+            void messagesRepo.setMediaProgress(localId,f).catch(() => {});
+          });
+          const finalized = await call<{downloadURL?:string}>('finalizeMediaMessage', {
+            conversationId:payload.conversationId,messageId:created.messageId,downloadURL,
+          });
+          downloadURL = finalized.downloadURL ?? downloadURL;
+        }
+        await messagesRepo.setMediaUploaded(localId,{downloadURL});
+        clearTransfer(created.messageId);
+        emitLocalMessagesChanged(payload.conversationId);
+        return {ok:true,remoteId:created.messageId,idempotent:created.idempotent};
+      } catch (e) {
+        await messagesRepo.setMediaFailed(localId,mediaError(e));
+        emitLocalMessagesChanged(payload.conversationId);
+        throw e;
+      }
     }
     case 'send_image_message': {
       const localId: string | null = payload.localMessageId ?? null;
@@ -125,12 +173,14 @@ export async function pushOutboxItem(item: OutboxRow): Promise<PushResult> {
         if (localId) { try { await messagesRepo.reconcileToRemote(localId, { remoteId: created.messageId, remoteCreatedAt: null }); } catch { /* noop */ } }
         // 2. Upload the binary with live progress (keyed by the message id the
         //    bubble renders, so the % counter increments).
-        const downloadURL = await uploadLocalFile(
+        const resumed = await resumeUploaded(created,payload.conversationId,localId);
+        if (resumed) return {ok:true,remoteId:created.messageId,idempotent:true};
+        let downloadURL = await uploadLocalFile(
           payload.localUri, created.storagePath, payload.mimeType,
           (f) => { setTransferProgress(created.messageId, 'upload', f); if (localId) void messagesRepo.setMediaProgress(localId, f); },
         );
         // 3. Finalize (idempotent).
-        await call('finalizeMediaMessage', {
+        const finalized = await call<{downloadURL?:string}>('finalizeMediaMessage', {
           conversationId: payload.conversationId,
           messageId: created.messageId,
           downloadURL,
@@ -138,6 +188,7 @@ export async function pushOutboxItem(item: OutboxRow): Promise<PushResult> {
           height: payload.height ?? null,
           sizeBytes: payload.sizeBytes,
         });
+        downloadURL = finalized.downloadURL ?? downloadURL;
         if (localId) await messagesRepo.setMediaUploaded(localId, { downloadURL });
         clearTransfer(created.messageId);
         return { ok: true, remoteId: created.messageId, idempotent: created.idempotent };
@@ -162,16 +213,19 @@ export async function pushOutboxItem(item: OutboxRow): Promise<PushResult> {
           idempotencyKey: item.idempotency_key,
         });
         if (localId) { try { await messagesRepo.reconcileToRemote(localId, { remoteId: created.messageId, remoteCreatedAt: null }); } catch { /* noop */ } }
-        const downloadURL = await uploadLocalFile(
+        const resumed = await resumeUploaded(created,payload.conversationId,localId);
+        if (resumed) return {ok:true,remoteId:created.messageId,idempotent:true};
+        let downloadURL = await uploadLocalFile(
           payload.localUri, created.storagePath, payload.mimeType,
           (f) => { setTransferProgress(created.messageId, 'upload', f); if (localId) void messagesRepo.setMediaProgress(localId, f); },
         );
-        await call('finalizeMediaMessage', {
+        const finalized = await call<{downloadURL?:string}>('finalizeMediaMessage', {
           conversationId: payload.conversationId,
           messageId: created.messageId,
           downloadURL,
           sizeBytes: payload.sizeBytes,
         });
+        downloadURL = finalized.downloadURL ?? downloadURL;
         if (localId) await messagesRepo.setMediaUploaded(localId, { downloadURL });
         clearTransfer(created.messageId);
         return { ok: true, remoteId: created.messageId, idempotent: created.idempotent };
