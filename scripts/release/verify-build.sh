@@ -50,6 +50,9 @@ fi
 ARGS=(--apk "$APK" --project "$PROD" --google-services "$GS" --package "$PKG")
 [ "$WEB" = --web-config-env ] && ARGS+=(--web-config-env)
 node scripts/ci/check-apk-backend.mjs "${ARGS[@]}"
+if [ "$PKG" = app.offlinesms.mobile ]; then
+  node scripts/ci/check-android-back.mjs --apk "$APK"
+fi
 
 bash scripts/release/check-16kb.sh "$APK" ${AAB:+"$AAB"} | tee "$RUNNER_TEMP/16kb.txt" || fail "16 KB page size check failed"
 

@@ -65,6 +65,7 @@ import { SwipeToReply } from '../components/chat/SwipeToReply';
 import { detectMentionQuery, filterMembers, insertMention, resolveMentions, renderMentionSegments, type MentionCandidate } from '../lib/mentions';
 import { LockedVoiceRecorderBar } from '../components/chat/LockedVoiceRecorderBar';
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
+import { useAndroidBackDismiss } from '../hooks/useAndroidBackDismiss';
 import { validateMediaMessage, formatDuration, type AttachmentKey } from '../media/mediaValidation';
 
 type ComposerGate =
@@ -515,6 +516,8 @@ export default function Conversation({ route, navigation }: any) {
   // Emoji / sticker panel shown in place of the keyboard; sized like the last
   // keyboard so toggling between them doesn't make the conversation jump.
   const [panelOpen, setPanelOpen] = useState(false);
+  const dismissPanel = useCallback(() => setPanelOpen(false), []);
+  useAndroidBackDismiss(panelOpen, dismissPanel);
   const [pollOpen, setPollOpen] = useState(false);
   const [panelHeight, setPanelHeight] = useState(290);
   const inputRef = useRef<TextInput>(null);

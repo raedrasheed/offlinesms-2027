@@ -46,9 +46,9 @@ describe('sticker editor',()=>{
     await act(async()=>button('common.save').props.onPress());expect(saved).not.toHaveBeenCalled();expect(mock.alert).toHaveBeenCalled();
     expect(nodes('TextInput')[0].props.value).toBe('Keep this');expect(button('common.save').props.disabled).toBe(false);
   });
-  it('asks before discarding edits and never persists a cancelled editor',async()=>{
+  it('asks before discarding through system Back and never persists a cancelled editor',async()=>{
     const close=vi.fn();await act(async()=>{renderer=create(createElement(StickerEditor,{uid:'me',source,onClose:close,onSaved:vi.fn()}));});
-    await act(async()=>button('stickers.crop').props.onPress());await act(async()=>button('common.cancel').props.onPress());
+    await act(async()=>button('stickers.crop').props.onPress());await act(async()=>nodes('Modal')[0].props.onRequestClose());
     expect(close).not.toHaveBeenCalled();expect(mock.save).not.toHaveBeenCalled();
     await act(async()=>mock.alert.mock.calls.at(-1)![2][1].onPress());expect(close).toHaveBeenCalledOnce();
   });
