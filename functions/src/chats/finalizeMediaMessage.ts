@@ -4,9 +4,9 @@ import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
 import { writeAuditLog } from '../lib/auditLog';
-import { isBinaryAttachment, attachmentLimit, attachmentMimeAllowed } from './attachmentModel';
+import { isBinaryAttachment, attachmentLimit, attachmentMimeAllowed, validCustomStickerMetadata } from './attachmentModel';
 import { assertDirectNotBlocked } from './blockGuard';
-import { signatureMatches } from './attachmentIntegrity';
+import { signatureMatches, validStickerPngHeader } from './attachmentIntegrity';
 
 export const finalizeMediaMessage = onCall(async request => {
   const uid=request.auth?.uid;
@@ -41,6 +41,8 @@ export const finalizeMediaMessage = onCall(async request => {
   if (!Number.isSafeInteger(size) || size <= 0 || size > attachmentLimit(m.type) || size !== m.media.sizeBytes || mime !== m.media.mimeType || !attachmentMimeAllowed(m.type,mime)) throw new HttpsError('invalid-argument','uploaded-metadata-mismatch');
   const [header]=await file.download({start:0,end:Math.min(size-1,511)});
   if (!signatureMatches(mime,header)) throw new HttpsError('invalid-argument','file-signature-invalid');
+  if (m.media.presentation === 'sticker' && (m.type !== 'image' || !validCustomStickerMetadata({...m.media,mimeType:mime,sizeBytes:size})
+    || !validStickerPngHeader(header))) throw new HttpsError('invalid-argument','sticker-invalid');
   // Generate a URL for this verified object, not for an arbitrary client URL.
   let token = String(metadata.metadata?.firebaseStorageDownloadTokens ?? '').split(',')[0];
   if (!token) { token=randomUUID(); await file.setMetadata({metadata:{firebaseStorageDownloadTokens:token}}); }

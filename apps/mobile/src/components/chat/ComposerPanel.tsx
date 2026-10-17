@@ -48,7 +48,7 @@ export function ComposerPanel({
         {seen.emoji ? <EmojiPanel uid={uid} onPick={onEmoji} initialQuery={initialQuery} /> : null}
       </View>
       <View style={{ flex: 1, display: tab === 'stickers' ? 'flex' : 'none' }}>
-        {seen.stickers ? <StickerPanel uid={uid} onSend={onSticker} /> : null}
+        {seen.stickers ? <StickerPanel key={uid} uid={uid} onSend={onSticker} /> : null}
       </View>
     </View>
   );

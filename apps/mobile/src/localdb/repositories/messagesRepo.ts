@@ -198,6 +198,7 @@ export async function insertLocalMessage(m: NewLocalMessage): Promise<MessageRow
 }
 
 export interface NewLocalMediaMessage {
+  presentation?: 'sticker';
   conversationId: string;
   senderUid: string;
   senderDisplayName?: string | null;
@@ -221,7 +222,7 @@ export interface NewLocalMediaMessage {
 export async function insertLocalMediaMessage(m: NewLocalMediaMessage): Promise<MessageRow> {
   const now = Date.now();
   const id = localMessageId(m.deviceId);
-  const preview = m.fileName || ({image:'Photo',voice:'Voice message',file:'File',audio:'Audio',video:'Video'}[m.mediaType]);
+  const preview = m.presentation === 'sticker' ? 'Sticker' : m.fileName || ({image:'Photo',voice:'Voice message',file:'File',audio:'Audio',video:'Video'}[m.mediaType]);
   await getDb().run(
     `INSERT INTO messages
       (id, local_id, remote_id, conversation_id, sender_uid, sender_display_name, type, text, preview, caption,
@@ -237,7 +238,7 @@ export async function insertLocalMediaMessage(m: NewLocalMediaMessage): Promise<
       now, now, m.replyToMessageId ?? null, m.replyToPreview ?? null, m.clientSequence,
       m.localUri, m.mimeType, m.sizeBytes, m.width ?? null, m.height ?? null, m.durationMs ?? null,
       m.waveform ? JSON.stringify(m.waveform) : null,
-      m.fileName ? JSON.stringify({fileName:m.fileName}) : null,
+      m.fileName || m.presentation ? JSON.stringify({fileName:m.fileName ?? '', ...(m.presentation ? {presentation:m.presentation} : {})}) : null,
     ],
   );
   return (await getByLocalId(id))!;

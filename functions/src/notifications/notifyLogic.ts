@@ -55,6 +55,7 @@ export function someoneLabel(lang: NotifLang = 'en'): string {
 }
 
 export interface MsgLike {
+  media?: {presentation?: string};
   type?: string;          // text | image | voice | sticker | poll | ...
   text?: string;
 }
@@ -75,7 +76,7 @@ const PREVIEW_MAX = 120;
 export function messagePreview(msg: MsgLike, lang: NotifLang = 'en'): string {
   const L = STRINGS[lang];
   if (msg.type === 'file' || msg.type === 'video' || msg.type === 'audio' || msg.type === 'location' || msg.type === 'contact') return L[msg.type];
-  if (msg.type === 'image') return L.photo;
+  if (msg.type === 'image') return msg.media?.presentation === 'sticker' ? L.sticker : L.photo;
   if (msg.type === 'voice') return L.voice;
   if (msg.type === 'sticker') return `${typeof msg.text === 'string' && msg.text ? msg.text + ' ' : ''}${L.sticker}`;
   if (((msg.type ?? 'text') === 'text' || msg.type === 'poll') && typeof msg.text === 'string') {

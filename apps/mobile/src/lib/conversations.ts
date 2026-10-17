@@ -113,6 +113,7 @@ export type MediaUploadStatus = 'pending' | 'uploading' | 'uploaded' | 'failed';
 /** Phase 23 — media metadata stored on image/voice messages. Binary lives in
  *  Firebase Storage; this object carries metadata only (never base64). */
 export type MediaInfo = {
+  presentation?: 'sticker' | null;
   fileName?:      string | null;
   storagePath:    string;
   downloadURL?:   string | null;

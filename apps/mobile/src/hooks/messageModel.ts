@@ -58,6 +58,7 @@ function mapMedia(row: MessageRow): Message['media'] {
   if (!isBinaryAttachment(row.type)) return null;
   return {
     fileName: parsePayload(row.payload_json).fileName ?? null,
+    presentation: row.type === 'image' && parsePayload(row.payload_json).presentation === 'sticker' ? 'sticker' : null,
     storagePath: row.media_storage_path ?? '',
     downloadURL: row.media_download_url ?? null,
     mimeType: row.media_mime ?? '',

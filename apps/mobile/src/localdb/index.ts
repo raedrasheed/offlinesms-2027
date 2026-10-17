@@ -353,15 +353,16 @@ export async function queueSendVoiceMessage(input: QueueSendVoiceInput): Promise
 
 /** Persist the selected file before queueing; picker cache can be evicted on restart. */
 export async function queueSendAttachment(input: QueueSendImageInput & {
-  mediaType: 'file' | 'video' | 'audio' | 'image'; fileName: string; durationMs?: number | null;
+  mediaType: 'file' | 'video' | 'audio' | 'image'; fileName: string; durationMs?: number | null; presentation?: 'sticker';
 }): Promise<MessageRow> {
   if (!getCurrentUid() || getCurrentUid() !== input.senderUid) throw new Error('localdb: not initialised');
   const FileSystem = await import('expo-file-system');
-  const { attachmentLimit, attachmentMimeAllowed, MIME_EXTENSIONS, cleanFileName, normalizeAttachmentMime } = await import('../media/attachmentModel');
+  const { attachmentLimit, attachmentMimeAllowed, MIME_EXTENSIONS, cleanFileName, normalizeAttachmentMime, validCustomStickerMetadata } = await import('../media/attachmentModel');
   const mimeType = normalizeAttachmentMime(input.mimeType);
   const stat = await FileSystem.getInfoAsync(input.localUri);
   const size = stat.exists && !stat.isDirectory ? stat.size : 0;
   if (!size || size > attachmentLimit(input.mediaType) || !attachmentMimeAllowed(input.mediaType, mimeType)) throw new Error('attachment-invalid');
+  if (input.presentation && (input.mediaType !== 'image' || !validCustomStickerMetadata({...input, mimeType, sizeBytes:size}))) throw new Error('sticker-invalid');
   const dir = `${FileSystem.documentDirectory}OfflineSMS/Outgoing/${input.senderUid}/`;
   await FileSystem.makeDirectoryAsync(dir, {intermediates:true});
   const uri = `${dir}${localId('attachment')}.${MIME_EXTENSIONS[mimeType]}`;
