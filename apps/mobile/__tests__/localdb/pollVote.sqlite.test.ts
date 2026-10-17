@@ -55,7 +55,7 @@ describe('anonymous votes on real SQLite', () => {
     expect(await own()).toMatchObject({ selection: ['o1'], pending: true });
     const aliceDb = db; db = await createSqlJsDb(); uid = 'bob';
     expect(await own()).toMatchObject({ known: false, selection: [] });
-    expect(await enqueuePollVote(args)).toEqual({ ok: false, reason: 'not-initialised' });
+    expect(await enqueuePollVote(args)).toEqual({ ok: false, reason: 'account-changed' });
     aliceDb.close();
   });
   it('preserves the newest rapid change, even if a retry ACK arrives later', async () => {
@@ -82,7 +82,7 @@ describe('anonymous votes on real SQLite', () => {
     const item = (await jobs())[0], seq = JSON.parse(item.payload_json).seq;
     remoteCall.mockResolvedValue({ ok: true, stale: true, selection: ['o2'], seq: seq + 1 });
     await pushOutboxItem(item); await outbox.markCompleted(item.id);
-    expect(remoteCall).toHaveBeenCalledWith('votePoll', { conversationId: 'chat', messageId: 'poll', optionIds: ['o1'], seq });
+    expect(remoteCall).toHaveBeenCalledWith('votePoll', { conversationId: 'chat', messageId: 'poll', optionIds: ['o1'], seq, voterUid: 'alice' });
     expect(await own()).toMatchObject({ selection: ['o2'], pending: false, failed: false });
     expect(JSON.parse((await messages.getByRemoteId('poll'))!.payload_json!)).toEqual(poll());
   });

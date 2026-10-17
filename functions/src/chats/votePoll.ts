@@ -52,6 +52,9 @@ export const votePoll = onCall(async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'sign-in-required');
   const data = (request.data ?? {}) as Record<string, unknown>;
+  // Bind queued votes to the account that chose them, including an auth switch
+  // while the callable SDK is obtaining its token. Legacy clients omit this.
+  if (data.voterUid !== undefined && data.voterUid !== uid) throw new HttpsError('permission-denied', 'account-changed');
   const { conversationId, messageId } = ids(data);
   const seq = typeof data.seq === 'number' && Number.isFinite(data.seq) ? data.seq : 0;
 

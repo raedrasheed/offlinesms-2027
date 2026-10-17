@@ -47,7 +47,9 @@ Pending selections survive remote message snapshots and app restart. Counts stay
 server-confirmed while an anonymous vote is queued. Rejected changes restore the
 last confirmed choice. Unknown private ballots require a first online read;
 cached choices can subsequently be changed offline. Account changes clear the
-listener and never copy a late response into another user's database.
+listener and never copy a late response into another user's database. Queued and
+direct votes carry the original voter UID; the server rejects the vote if auth
+switches accounts during token retrieval/dispatch.
 
 ## Deploy from Cloud Shell
 
@@ -103,9 +105,9 @@ Consumer version **2.4.10 (27)**. Business/relay version is unchanged.
 - Mobile TypeScript and Functions TypeScript build; EN/AR parity (737 keys).
 - Android Hermes/Metro export succeeds. Native APK compilation runs in CI; no
   physical-device or production Firebase tests were performed locally.
-- Full unit run: 127 suites / 1260 tests, plus 3 direct-feed/routing tests. Release inventory assertions were
+- Full unit run: 127 suites / 1260 tests, plus 4 direct-feed/routing tests. Release inventory assertions were
   updated for the new callable and their 12 tests rerun successfully.
-- Real Firestore emulator: 20 poll/sticker callable integration tests, including
+- Real Firestore emulator: 21 poll/sticker callable integration tests, including
   concurrent anonymous/public votes, retries, changing/retracting votes, closing,
   membership gates and identity-free aggregate payloads.
 - Firestore rules emulator: 14 privacy tests (own read, no enumeration/other

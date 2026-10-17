@@ -42,7 +42,8 @@ export async function saveOwnPollVote(db: LocalDatabase, cid: string, mid: strin
 
 let lastSeq = 0;
 export async function enqueuePollVote(args: { conversationId: string; messageId: string; uid: string; optionIds: string[] }) {
-  if (!getCurrentUid() || getCurrentUid() !== args.uid) return { ok: false, reason: 'not-initialised' as const };
+  if (!getCurrentUid()) return { ok: false, reason: 'not-initialised' as const };
+  if (getCurrentUid() !== args.uid) return { ok: false, reason: 'account-changed' as const };
   const db = getDb();
   let result: { ok: boolean; reason?: 'not-delivered' | 'not-a-poll' | 'vote-not-ready' } = { ok: true };
   await db.transaction(async tx => {
@@ -60,7 +61,7 @@ export async function enqueuePollVote(args: { conversationId: string; messageId:
     const device = await tx.first<{ value: string }>("SELECT value FROM sync_state WHERE key = 'device_id'");
     await enqueue({ type: 'vote_poll', entityType: 'message', entityId: args.messageId, conversationId: args.conversationId,
       idempotencyKey: idempotencyKey(['vote', device?.value ?? 'unknown', args.messageId, String(seq)]),
-      payload: { conversationId: args.conversationId, messageId: args.messageId, optionIds: selection, seq },
+      payload: { conversationId: args.conversationId, messageId: args.messageId, optionIds: selection, seq, voterUid: args.uid },
     }, tx);
     if (!poll.anonymous) await tx.run('UPDATE messages SET payload_json = ?, updated_at = ? WHERE id = ?',
       [JSON.stringify(applyLocalVote(poll, args.uid, selection)), Date.now(), msg.id]);

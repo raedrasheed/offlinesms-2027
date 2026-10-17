@@ -289,7 +289,7 @@ function MessageBubbleImpl({
   }
 
   function vote(selection: string[], afterSeq = 0) {
-    const direct = () => votePoll(context.conversationId, m.id, selection, afterSeq);
+    const direct = () => votePoll(context.conversationId, m.id, selection, afterSeq, context.myUid);
     const action = context.localFirst
       ? queueVotePoll({ conversationId: context.conversationId, messageId: m.id, uid: context.myUid, optionIds: selection }).then(r => {
         if (!r.ok && r.reason === 'not-initialised') return direct();

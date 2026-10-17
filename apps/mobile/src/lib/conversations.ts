@@ -701,10 +701,10 @@ export async function reactToMessage(
 /** Vote in a poll (direct callable; the local-first path queues it instead).
  *  `seq` orders this voter's votes so a late retry never overrides a newer one. */
 let lastPollVoteSeq = 0;
-export async function votePoll(conversationId: string, messageId: string, optionIds: string[], afterSeq = 0): Promise<void> {
+export async function votePoll(conversationId: string, messageId: string, optionIds: string[], afterSeq = 0, voterUid = auth.currentUser?.uid): Promise<void> {
   lastPollVoteSeq = Math.max(Date.now(), lastPollVoteSeq + 1, afterSeq + 1);
-  await fn<{ conversationId: string; messageId: string; optionIds: string[]; seq: number }, { ok: true }>('votePoll')({
-    conversationId, messageId, optionIds, seq: lastPollVoteSeq,
+  await fn<{ conversationId: string; messageId: string; optionIds: string[]; seq: number; voterUid?: string }, { ok: true }>('votePoll')({
+    conversationId, messageId, optionIds, seq: lastPollVoteSeq, voterUid,
   });
 }
 

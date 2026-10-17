@@ -238,6 +238,13 @@ describe('anonymous polls', () => {
     await vote(voters[0], id, ['o2', 'o3'], 200);
     expect(await pollOf(id)).toMatchObject({ counts: { o1: 7, o2: 8, o3: 1 }, voterCount: 8 });
   }, 600_000);
+  it('refuses a queued ballot if authentication switched accounts during dispatch', async () => {
+    const id = await createAnonymous();
+    await expectHttps(votePoll.run(req(members[1], { conversationId: G, messageId: id,
+      optionIds: ['o1'], seq: 100, voterUid: members[0],
+    })), 'permission-denied', 'account-changed');
+    expect(await pollOf(id)).toMatchObject({ votes: {}, voterCount: 0 });
+  });
   it('keeps membership, selection and closing gates for anonymous polls', async () => {
     const id = await createAnonymous();
     await expectHttps(vote(members[0], id, ['o1', 'o2']), 'invalid-argument', 'poll-single-choice');

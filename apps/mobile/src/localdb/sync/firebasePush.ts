@@ -239,7 +239,8 @@ export async function pushOutboxItem(item: OutboxRow): Promise<PushResult> {
     case 'vote_poll': {
       const uid = getCurrentUid();
       const local = uid ? getDb() : null;
-      const result = await call('votePoll', { conversationId: payload.conversationId, messageId: payload.messageId, optionIds: payload.optionIds, seq: payload.seq });
+      const result = await call('votePoll', { conversationId: payload.conversationId, messageId: payload.messageId,
+        optionIds: payload.optionIds, seq: payload.seq, voterUid: payload.voterUid ?? uid ?? auth.currentUser?.uid });
       if (local && getCurrentUid() === uid) await saveOwnPollVote(local, payload.conversationId, payload.messageId, result.selection, result.seq);
       return { ok: true };
     }
