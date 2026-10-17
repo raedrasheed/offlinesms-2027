@@ -17,7 +17,7 @@
       "supportsTablet": false,
       "requireFullScreen": true,
       "bundleIdentifier": "app.offlinesms.mobile",
-      "buildNumber": "26",
+      "buildNumber": "27",
       "entitlements": {
         "aps-environment": "production"
       },
