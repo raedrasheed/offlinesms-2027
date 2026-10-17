@@ -25,3 +25,11 @@ export function fileNameMatchesMime(fileName:string,mime:string):boolean {
   const ext=fileName.toLowerCase().split('.').pop();
   return ext === MIME_EXTENSIONS[mime] || mime === 'image/jpeg' && ext === 'jpeg';
 }
+
+/** The bounded PNG header also establishes actual sticker dimensions. */
+export function validStickerPngHeader(bytes: Uint8Array): boolean {
+  const text = (start:number,end:number) => String.fromCharCode(...bytes.slice(start,end));
+  if (!signatureMatches('image/png', bytes) || bytes.length < 33 || text(12,16) !== 'IHDR') return false;
+  const view = new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+  return view.getUint32(8) === 13 && view.getUint32(16) === 512 && view.getUint32(20) === 512;
+}

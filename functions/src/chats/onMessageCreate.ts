@@ -18,9 +18,9 @@ import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 
 const PREVIEW_MAX = 80;
 
-function buildPreview(msg: { type?: string; text?: string }): string {
+function buildPreview(msg: { type?: string; text?: string; media?: {presentation?: string} }): string {
   // Phase 23 — media messages get human-readable previews (no caption/content).
-  if (msg.type === 'image') return 'Photo';
+  if (msg.type === 'image') return msg.media?.presentation === 'sticker' ? 'Sticker' : 'Photo';
   if (msg.type === 'voice') return 'Voice message';
   if (msg.type === 'file') return 'File';
   if (msg.type === 'video') return 'Video';

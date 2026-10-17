@@ -120,7 +120,7 @@ export async function pushOutboxItem(item: OutboxRow): Promise<PushResult> {
         if (!sizeBytes) throw Object.assign(new Error('local-file-missing'), {code:'file/not-found'});
         const created = await call<{messageId:string;storagePath:string;uploadStatus?:string;downloadURL?:string;idempotent?:boolean}>('createMediaMessage', {
           conversationId:payload.conversationId,type:payload.mediaType,mimeType:payload.mimeType,
-          fileName:payload.fileName,sizeBytes,caption:payload.caption ?? null,
+          fileName:payload.fileName,sizeBytes,caption:payload.caption ?? null,presentation:payload.presentation ?? null,
           width:payload.width ?? null,height:payload.height ?? null,durationMs:payload.durationMs ?? null,
           replyTo:payload.replyTo ?? null,localId,idempotencyKey:item.idempotency_key,
         });

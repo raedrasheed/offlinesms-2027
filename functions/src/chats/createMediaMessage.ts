@@ -13,7 +13,7 @@ import { writeAuditLog } from '../lib/auditLog';
 import { cleanNameSnapshot, publicNameFrom } from '../lib/displayName';
 import { assertDirectNotBlocked } from './blockGuard';
 
-import { isBinaryAttachment, attachmentLimit, attachmentMimeAllowed, attachmentLabel, cleanFileName, MIME_EXTENSIONS } from './attachmentModel';
+import { isBinaryAttachment, attachmentLimit, attachmentMimeAllowed, attachmentLabel, cleanFileName, MIME_EXTENSIONS, validCustomStickerMetadata } from './attachmentModel';
 
 import { createHash } from 'node:crypto';
 import { fileNameMatchesMime } from './attachmentIntegrity';
@@ -28,7 +28,7 @@ export const createMediaMessage = onCall(async (request) => {
   const data = (request.data ?? {}) as {
     conversationId?: unknown; type?: unknown; caption?: unknown;
     mimeType?: unknown; sizeBytes?: unknown; fileName?: unknown;
-    width?: unknown; height?: unknown; durationMs?: unknown; waveform?: unknown;
+    width?: unknown; height?: unknown; durationMs?: unknown; waveform?: unknown; presentation?: unknown;
     replyTo?: unknown; localId?: unknown; idempotencyKey?: unknown;
   };
 
@@ -62,6 +62,9 @@ export const createMediaMessage = onCall(async (request) => {
     ? data.caption.slice(0, CAPTION_MAX) : null;
   const width = typeof data.width === 'number' && Number.isFinite(data.width) && data.width > 0 ? Math.min(data.width, 32768) : null;
   const height = typeof data.height === 'number' && Number.isFinite(data.height) && data.height > 0 ? Math.min(data.height, 32768) : null;
+  const presentation = data.presentation === 'sticker' ? 'sticker' : null;
+  if (data.presentation != null && (data.presentation !== 'sticker' || mediaType !== 'image'
+    || !validCustomStickerMetadata({mimeType,sizeBytes,width,height}))) throw new HttpsError('invalid-argument','sticker-invalid');
   const waveform = Array.isArray(data.waveform)
     ? (data.waveform as unknown[]).filter((n): n is number => typeof n === 'number' && Number.isFinite(n)).slice(0, 60).map(n => Math.max(0, Math.min(1, n)))
     : null;
@@ -163,9 +166,10 @@ export const createMediaMessage = onCall(async (request) => {
     senderUid:          uid,
     senderId:           uid,
     type:               mediaType,
-    text:               `${attachmentLabel(mediaType)}${fileName ? ': ' + fileName : ''}`,
+    text:               `${presentation ? 'Sticker' : attachmentLabel(mediaType)}${fileName ? ': ' + fileName : ''}`,
     caption,
     media: {
+      ...(presentation ? {presentation} : {}),
       storagePath,
       fileName: fileName || null,
       thumbnailPath,

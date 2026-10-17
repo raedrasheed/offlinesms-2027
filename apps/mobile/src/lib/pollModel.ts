@@ -28,6 +28,7 @@ export const POLL_OPTIONS_MAX = 12;
 export function payloadFromRemote(type: string | undefined, m: Record<string, any>): string | null {
   if (type === 'location' && m.location) return JSON.stringify(m.location);
   if (type === 'contact' && m.contact) return JSON.stringify(m.contact);
+  if (type === 'image' && m.media?.presentation === 'sticker') return JSON.stringify({ fileName: m.media.fileName ?? '', presentation: 'sticker' });
   if (['file', 'video', 'audio'].includes(type ?? '') && m.media) return JSON.stringify({ fileName: m.media.fileName ?? '' });
   if (type === 'sticker' && m.sticker) {
     const s = m.sticker;

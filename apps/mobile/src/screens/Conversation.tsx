@@ -775,7 +775,7 @@ export default function Conversation({ route, navigation }: any) {
 
   // Stickers and polls: same local-first outbox (and the same server send
   // gates) as text; the legacy path calls the callable directly.
-  async function sendRich(rich: { kind: 'sticker'; sticker: PickedSticker } | { kind: 'poll'; poll: PollDraft }) {
+  async function sendRich(rich: { kind: 'sticker'; sticker: Extract<PickedSticker, {packId:string}> } | { kind: 'poll'; poll: PollDraft }) {
     if (gate.kind !== 'allowed') return;
     setErr(null);
     try {
@@ -802,7 +802,21 @@ export default function Conversation({ route, navigation }: any) {
       else setErr(code);
     }
   }
-  const sendSticker = useCallback((st: PickedSticker) => { void sendRich({ kind: 'sticker', sticker: st }); },
+  const sendSticker = useCallback((st: PickedSticker) => {
+    if (!('custom' in st)) { void sendRich({ kind: 'sticker', sticker: st }); return; }
+    if (gate.kind !== 'allowed') return;
+    // Custom media needs the durable outbox. Keep library editing available
+    // in Firestore fallback, but never queue into an unavailable local store.
+    if (!useLocal) { Alert.alert(t('stickers.sendError'), t('stickers.sendingUnavailable')); return; }
+    void (async()=>{
+      try {
+        await openLocalDb(me);
+        await queueSendAttachment({conversationId:id,senderUid:me,localUri:st.uri,mediaType:'image',presentation:'sticker',
+          fileName:`sticker-${st.custom.id}.png`,mimeType:'image/png',sizeBytes:st.custom.sizeBytes,width:512,height:512,replyTo:replyTo ?? null});
+        setReplyTo(null);local.refresh();kickSync('outbox');
+      } catch {Alert.alert(t('stickers.sendError'),t('stickers.tryAgain'));}
+    })();
+  },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [useLocal, id, me, replyTo, gate.kind]);
 
@@ -1476,6 +1490,7 @@ export default function Conversation({ route, navigation }: any) {
               bottomInset={insets.bottom}
               onEmoji={insertEmoji}
               onSticker={sendSticker}
+              customSendingAvailable={useLocal}
             />
           ) : null}
         </View>

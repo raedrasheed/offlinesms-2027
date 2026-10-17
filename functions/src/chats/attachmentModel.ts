@@ -91,3 +91,14 @@ export function attachmentFallback(a: StructuredAttachment): string {
 export function parsePayload(json: string | null | undefined): Record<string, any> {
   try { const v = JSON.parse(json || '{}'); return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; } catch { return {}; }
 }
+
+/** Custom stickers retain image transport for older clients. */
+export const CUSTOM_STICKER_MAX_BYTES = 2 * 1024 * 1024;
+export function isCustomStickerMessage(message: {type?: string; media?: {presentation?: unknown} | null}): boolean {
+  return message.type === 'image' && message.media?.presentation === 'sticker';
+}
+export function validCustomStickerMetadata(media: {mimeType?: unknown; sizeBytes?: unknown; width?: unknown; height?: unknown}): boolean {
+  return media.mimeType === 'image/png' && media.width === 512 && media.height === 512
+    && typeof media.sizeBytes === 'number' && Number.isSafeInteger(media.sizeBytes)
+    && media.sizeBytes > 0 && media.sizeBytes <= CUSTOM_STICKER_MAX_BYTES;
+}

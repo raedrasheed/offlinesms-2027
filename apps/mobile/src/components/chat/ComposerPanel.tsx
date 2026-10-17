@@ -12,13 +12,14 @@ import { StickerPanel, type PickedSticker } from './StickerPanel';
 export type ComposerTab = 'emoji' | 'stickers';
 
 export function ComposerPanel({
-  uid, height, bottomInset, onEmoji, onSticker, initialTab = 'emoji', initialQuery,
+  uid, height, bottomInset, onEmoji, onSticker, customSendingAvailable, initialTab = 'emoji', initialQuery,
 }: {
   uid: string;
   height: number;
   bottomInset: number;
   onEmoji: (emoji: string) => void;
   onSticker: (s: PickedSticker) => void;
+  customSendingAvailable: boolean;
   initialTab?: ComposerTab;
   initialQuery?: string;
 }) {
@@ -48,7 +49,7 @@ export function ComposerPanel({
         {seen.emoji ? <EmojiPanel uid={uid} onPick={onEmoji} initialQuery={initialQuery} /> : null}
       </View>
       <View style={{ flex: 1, display: tab === 'stickers' ? 'flex' : 'none' }}>
-        {seen.stickers ? <StickerPanel uid={uid} onSend={onSticker} /> : null}
+        {seen.stickers ? <StickerPanel key={uid} uid={uid} onSend={onSticker} customSendingAvailable={customSendingAvailable} /> : null}
       </View>
     </View>
   );

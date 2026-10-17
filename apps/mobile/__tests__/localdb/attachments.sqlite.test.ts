@@ -20,6 +20,25 @@ import {mapMessageRow} from '../../src/hooks/messageModel';
 import {enqueue,claimDue,markProcessing,markFailed,retryByEntityId,requeueStaleProcessing,getById} from '../../src/localdb/repositories/outboxRepo';
 beforeEach(async()=>{db=await createSqlJsDb();});afterEach(()=>db.close());
 describe('attachments survive SQLite and remote reconciliation',()=>{
+  it('keeps a custom sticker through offline queueing, remote echo and history',async()=>{
+    const row=await queueSendAttachment({conversationId:'c',senderUid:'me',mediaType:'image',presentation:'sticker',fileName:'sticker-1.png',
+      localUri:'file:///stickers/1.png',mimeType:'image/png',sizeBytes:100,width:512,height:512});
+    const optimistic=mapMessageRow(row);
+    expect(optimistic).toMatchObject({type:'image',media:{presentation:'sticker',width:512,height:512}});
+    expect(optimistic.media?.localUri).not.toBe('file:///stickers/1.png');
+    const queued=(await claimDue())[0];
+    expect(JSON.parse(queued.payload_json)).toMatchObject({presentation:'sticker',localUri:optimistic.media?.localUri});
+    await applyRemoteMessages([remoteMessageInput('remote-sticker','c',{type:'image',senderUid:'me',clientLocalId:row.local_id,createdAt:1000,
+      media:{presentation:'sticker',fileName:'sticker-1.png',mimeType:'image/png',sizeBytes:100,width:512,height:512,uploadStatus:'uploaded',downloadURL:'https://example.test/sticker'}})]);
+    const messages=(await listMessages('c')).map(mapMessageRow);
+    expect(messages).toHaveLength(1);expect(messages[0]).toMatchObject({id:'remote-sticker',media:{presentation:'sticker',localUri:optimistic.media?.localUri,uploadStatus:'uploaded'}});
+    expect(mapMessageRow({...row,payload_json:null}).media?.presentation).not.toBe('sticker');
+  });
+  it('refuses invalid sticker metadata before copying or queueing',async()=>{
+    await expect(queueSendAttachment({conversationId:'c',senderUid:'me',mediaType:'image',presentation:'sticker',fileName:'bad.jpg',
+      localUri:'file:///stickers/bad.jpg',mimeType:'image/jpeg',sizeBytes:100,width:512,height:512})).rejects.toThrow('sticker-invalid');
+    expect(await claimDue()).toHaveLength(0);
+  });
   it.each([
     ['image','image/PNG','image/png','png'],
     ['file',' Application/PDF; charset=binary ','application/pdf','pdf'],

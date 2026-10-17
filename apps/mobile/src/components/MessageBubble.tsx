@@ -34,6 +34,8 @@ import {MessageReceipt} from './chat/MessageReceipt';
 import { VoiceMessageBubble } from './chat/VoiceMessageBubble';
 import { AnimatedEmoji3D } from './chat/AnimatedEmoji3D';
 import { StickerBubble } from './chat/StickerBubble';
+import { CustomStickerBubble } from './chat/CustomStickerBubble';
+import { isCustomStickerMessage } from '../media/attachmentModel';
 import { PollBubble } from './chat/PollBubble';
 import { matchAnimatedEmoji } from '../lib/emoji3d';
 import {
@@ -121,7 +123,8 @@ function MessageBubbleImpl({
   const mine    = context.isMyMessage;
   const deleted = m.deletedForEveryone === true;
   // Photos and videos use the same card and overlay receipts when captionless.
-  const mediaMessage = !deleted && (m.type === 'image' || m.type === 'video');
+  const customSticker = !deleted && isCustomStickerMessage(m);
+  const mediaMessage = !deleted && !customSticker && (m.type === 'image' || m.type === 'video');
   const mediaOverlayFooter = mediaMessage && !m.caption?.trim();
   const locationCard = !deleted && m.type==='location' && !!m.location;
   const attachmentCard = !deleted && (locationCard || m.type==='file' || m.type==='contact' && !!m.contact?.uid);
@@ -164,7 +167,7 @@ function MessageBubbleImpl({
   // Media (image/video) bubbles get a light-gray card frame; emoji bubbles
   // are chromeless (transparent — the 3D emoji floats on the wallpaper).
   // Stickers float on the wallpaper like the big 3D emoji (no bubble chrome).
-  const stickerMessage    = !deleted && m.type === 'sticker';
+  const stickerMessage    = !deleted && (m.type === 'sticker' || customSticker);
   const transparentBubble = !deleted && (!!emoji3d || stickerMessage);
   const richKind          = m.type === 'sticker' || m.type === 'poll';
   // Footer tone: white inside the emoji pill (sits on the wallpaper), ink on
@@ -176,7 +179,7 @@ function MessageBubbleImpl({
       ? { color: colors.ink500 }
       : (mine ? { color: TG_GREEN } : undefined);
 
-  if (pending && !attachmentCard) {
+  if (pending && !attachmentCard && !customSticker) {
     // Same row/column wrappers as a normal sent bubble so it hugs its content,
     // caps at 80% width, and right-aligns — instead of stretching full width.
     return (
@@ -402,7 +405,8 @@ function MessageBubbleImpl({
           </Pressable>
         ) : null}
 
-        {!deleted && m.type === 'image' ? (
+        {customSticker ? <CustomStickerBubble message={m} mine={mine} onOpen={onOpenImage}
+          onLongPress={() => setSheetOpen(true)} onRetry={() => onRetryMedia?.(m)} /> : !deleted && m.type === 'image' ? (
           <ImageMessageBubble
             message={m}
             mine={mine}
@@ -484,7 +488,7 @@ function MessageBubbleImpl({
             {m.editedAt ? <Text style={[s.foot, footColor]}>edited</Text> : null}
             {context.isStarred ? <Text style={s.star}>★</Text> : null}
             {context.isPinned ? <Text style={s.foot}>📌</Text> : null}
-            {mine && !deleted ? (
+            {mine && customSticker && m.media?.uploadStatus !== 'uploaded' ? <Ionicons name={m.media?.uploadStatus === 'failed' ? 'alert-circle' : 'time-outline'} size={13} color="#FFFFFF"/> : mine && !deleted ? (
               <MessageReceipt message={m} isGroup={context.isGroup} memberCount={context.memberCount} overlay={transparentBubble}/>
             ) : null}
             <Text style={[s.foot, footColor]}>{timeText}</Text>
