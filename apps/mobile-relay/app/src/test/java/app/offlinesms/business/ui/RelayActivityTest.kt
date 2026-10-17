@@ -168,7 +168,7 @@ class RelayActivityTest {
             bitmap.eraseColor(if (dark) 0xff181818.toInt() else 0xfff6f8fa.toInt())
             row.draw(Canvas(bitmap))
             val out = File("build/reports/relay-activity/$language-${if (dark) "dark-large" else "light"}.png")
-            out.parentFile.mkdirs()
+            checkNotNull(out.parentFile).mkdirs()
             out.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
             bitmap.recycle()
         }

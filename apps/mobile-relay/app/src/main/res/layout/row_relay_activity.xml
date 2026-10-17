@@ -15,19 +15,19 @@
                 android:textSize="17sp" android:textStyle="bold" android:textColor="?attr/colorOnSurface" />
             <TextView android:id="@+id/eventTime"
                 android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:layout_marginTop="4dp" android:textSize="13sp" android:textColor="?attr/colorOnSurfaceVariant" />
+                android:layout_marginTop="4dp" android:textSize="14sp" android:textColor="?attr/colorOnSurfaceVariant" />
             <TextView android:id="@+id/eventExplanation"
                 android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:layout_marginTop="10dp" android:textSize="15sp" android:lineSpacingExtra="3dp"
+                android:layout_marginTop="10dp" android:textSize="16sp" android:lineSpacingExtra="3dp"
                 android:textColor="?attr/colorOnSurface" />
             <TextView android:id="@+id/eventReference"
                 android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:layout_marginTop="8dp" android:textSize="13sp" android:textColor="?attr/colorOnSurfaceVariant" />
+                android:layout_marginTop="8dp" android:textSize="14sp" android:textColor="?attr/colorOnSurfaceVariant" />
             <com.google.android.material.button.MaterialButton android:id="@+id/eventDetails"
                 style="?attr/borderlessButtonStyle"
                 android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:layout_gravity="start" android:minHeight="48dp"
-                android:text="@string/log_details" android:textSize="14sp" />
+                android:text="@string/log_details" android:textSize="14sp" android:textColor="@color/activity_info" />
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 </FrameLayout>

@@ -73,12 +73,12 @@
         <com.google.android.material.button.MaterialButton android:id="@+id/logsAllBtn"
             style="?attr/materialButtonOutlinedStyle"
             android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
-            android:minHeight="48dp" android:checkable="true" android:text="@string/logs_all" />
+            android:minHeight="48dp" android:checkable="true" android:textColor="@color/activity_info" android:text="@string/logs_all" />
         <com.google.android.material.button.MaterialButton android:id="@+id/logsProblemsBtn"
             style="?attr/materialButtonOutlinedStyle"
             android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
             android:layout_marginStart="8dp" android:minHeight="48dp"
-            android:checkable="true" android:text="@string/logs_problems" />
+            android:checkable="true" android:textColor="@color/activity_info" android:text="@string/logs_problems" />
     </LinearLayout>
     <TextView android:id="@+id/logsEmptyText"
         android:layout_width="match_parent" android:layout_height="wrap_content"
