@@ -66,6 +66,8 @@ If your Google Cloud API key has *Application restrictions* set to Android apps,
 
 The baseline instrumentation patch also installs the same three attachment modules introduced in 2.4.2 (DocumentPicker, Location and Sharing), without adding the new attachment UI or delivery code to the baseline. The patch also includes the pinned JavaScript vector-map dependencies added in 2.4.7 and the image-editor/capture modules added in 2.4.8. This keeps the existing shipped-dependency equality check active; the baseline retains its original application code.
 
+Both APKs also carry the Android 16 system-Back compatibility setting from 2.4.9. CI checks the packaged manifest in each APK, so navigation buttons remain usable in both comparison builds.
+
 **Performance:** on one phone, on the same network and account:
 1. Install `baseline` and sign in. Run `scripts/device/perf-capture.sh coldstart baseline 10` and `… session baseline`.
 2. Install `updated` **over it**, without uninstalling, and repeat with the label `updated`.

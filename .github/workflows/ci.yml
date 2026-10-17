@@ -365,6 +365,10 @@ jobs:
           if [ "${{ matrix.variant }}" = updated ]; then export TEST_BUILD_AAB="$RUNNER_TEMP/app-release.aab"; fi
           scripts/test-builds/build.sh ${{ matrix.variant }} dist-apk
 
+      - name: Android system Back compatibility (APK)
+        run: |
+          for apk in dist-apk/*.apk; do node scripts/ci/check-android-back.mjs --apk "$apk"; done
+
       # Same check as the production release (Codex R6-2): ELF LOAD segments,
       # APK zip alignment, and the AAB's BundleConfig and generated splits.
       - name: 16 KB page size (APK and AAB)

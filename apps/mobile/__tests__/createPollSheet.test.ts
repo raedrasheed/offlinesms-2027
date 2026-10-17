@@ -53,6 +53,13 @@ afterEach(async () => {
 });
 
 describe('CreatePollSheet keyboard regression', () => {
+  it('closes through the Android system Back callback without submitting the poll', async () => {
+    const { onCreate, onClose } = await mount();
+    await act(async () => nodes('TextInput')[0].props.onChangeText('مسودة'));
+    await act(async () => nodes('Modal')[0].props.onRequestClose());
+    expect(onClose).toHaveBeenCalledOnce(); expect(onCreate).not.toHaveBeenCalled();
+    expect(native.dismiss).toHaveBeenCalledOnce();
+  });
   it('lets the Android modal resize once, with a bounded flex form and a fixed header', async () => {
     await mount();
     expect(nodes('KeyboardAvoidingView')).toHaveLength(0);

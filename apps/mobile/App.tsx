@@ -177,6 +177,7 @@ function MainTabs() {
   const unread = useUnreadTotal();
   return (
     <Tabs.Navigator
+      backBehavior="history"
       // The floating pill is positioned manually with `bottom: insets.bottom + 10`,
       // so BottomTabBar must NOT also add its own bottom safe-area padding — on
       // Android 15 (edge-to-edge) that ~48px padding, subtracted from the fixed
