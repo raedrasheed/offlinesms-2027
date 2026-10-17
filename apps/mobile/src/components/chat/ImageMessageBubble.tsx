@@ -5,26 +5,25 @@
 // opens the full-screen viewer. Footer (time/ticks) and long-press actions are
 // owned by the surrounding MessageBubble.
 
-import { View, Text, Image, Pressable, StyleSheet } from 'react-native';
-import type { ReactNode } from 'react';
+import { View, Image } from 'react-native';
+import { useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { colors } from '../../theme';
 import type { Message } from '../../lib/conversations';
 import { useCachedMediaUri } from '../../hooks/useCachedMediaUri';
 import { useTransfer } from '../../hooks/useTransfer';
 import { retryDownload } from '../../media/mediaCache';
 import { MediaUploadProgress } from './MediaUploadProgress';
-
-const MAX_W = 230;
-const MAX_H = 280;
+import { MediaMessageFrame, mediaFrameStyles as s } from './MediaMessageFrame';
+import { validMediaDimensions, type MediaDimensions } from '../../media/mediaDimensions';
 
 export function ImageMessageBubble({
-  message, mine, onOpen, onRetry, footer,
+  message, mine, onOpen, onRetry, onLongPress, footer,
 }: {
   message: Message;
   mine: boolean;
   onOpen: (uri: string) => void;
   onRetry?: () => void;
+  onLongPress?: () => void;
   footer?: ReactNode;
 }) {
   const { t } = useTranslation();
@@ -32,12 +31,8 @@ export function ImageMessageBubble({
   const uri = useCachedMediaUri(message);
   const transfer = useTransfer(message.id);
 
-  // Frame height from aspect ratio when known, else a sensible default box.
-  let h = 170;
-  if (media?.width && media?.height && media.width > 0) {
-    h = Math.round(MAX_W * (media.height / media.width));
-    h = Math.max(120, Math.min(MAX_H, h));
-  }
+  const [loaded, setLoaded] = useState<{ uri: string; size: MediaDimensions } | null>(null);
+  const dimensions = validMediaDimensions(media?.width, media?.height) || (loaded?.uri === uri ? loaded.size : null);
 
   const status = media?.uploadStatus ?? 'uploaded';
   // Upload progress/retry only applies to your own outgoing message.
@@ -47,22 +42,14 @@ export function ImageMessageBubble({
   // Download progress/retry applies to a received image being cached.
   const downloading = !mine && transfer?.kind === 'download' && !transfer.failed;
   const downloadFailed = !mine && transfer?.kind === 'download' && transfer.failed;
-  const caption = message.caption?.trim();
   const busy = uploading || uploadFailed || downloadFailed;
 
   return (
-    <View>
-      <Pressable
+      <MediaMessageFrame dimensions={dimensions} caption={message.caption} footer={footer}
         onPress={() => uri && !busy && onOpen(uri === media?.thumbnailURL ? media?.downloadURL || uri : uri)}
-        accessibilityRole="imagebutton"
-        accessibilityLabel={t('media.openImage')}
-        style={[s.frame, { width: MAX_W, height: h }]}
-      >
-        {uri ? (
-          <Image source={{ uri }} style={s.image} resizeMode="cover" />
-        ) : (
-          <View style={[s.image, s.placeholder]} />
-        )}
+        onLongPress={onLongPress}
+        label={t('media.openImage')}
+        overlay={uploading || uploadFailed || downloading || downloadFailed ? <>
         {uploading ? (
           <MediaUploadProgress progress={uploadPct} mode="upload" />
         ) : null}
@@ -75,21 +62,16 @@ export function ImageMessageBubble({
         {downloadFailed ? (
           <MediaUploadProgress progress={0} failed mode="download" onRetry={() => { void retryDownload(message); }} />
         ) : null}
-        {footer ? <View style={s.footerOverlay}>{footer}</View> : null}
-      </Pressable>
-      {/* Caption sits inside the light-gray media card (for both mine and
-          theirs), so it's always dark ink — never white. */}
-      {caption ? (
-        <Text style={s.caption}>{caption}</Text>
-      ) : null}
-    </View>
+        </> : null}
+      >
+        {uri ? (
+          <Image source={{ uri }} style={s.content} resizeMode="contain" onLoad={event => {
+            const size = validMediaDimensions(event.nativeEvent.source.width, event.nativeEvent.source.height);
+            if (size) setLoaded({ uri, size });
+          }} />
+        ) : (
+          <View style={[s.content, s.placeholder]} />
+        )}
+      </MediaMessageFrame>
   );
 }
-
-const s = StyleSheet.create({
-  frame:       { borderRadius: 14, overflow: 'hidden', backgroundColor: colors.ink100 },
-  image:       { width: '100%', height: '100%' },
-  footerOverlay: { position: 'absolute', right: 8, bottom: 8, flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, backgroundColor: 'rgba(0,0,0,0.4)' },
-  placeholder: { backgroundColor: colors.primaryTint },
-  caption:     { fontSize: 15, color: colors.ink, marginTop: 6, lineHeight: 21 },
-});

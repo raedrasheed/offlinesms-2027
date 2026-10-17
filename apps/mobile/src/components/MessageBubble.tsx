@@ -27,6 +27,7 @@ import { ChatActionSheet, SheetAction } from './ChatActionSheet';
 import { ReactionsSheet, ReactorInfo } from './ReactionsSheet';
 import { EmojiReactionPicker } from './chat/EmojiReactionPicker';
 import { ImageMessageBubble } from './chat/ImageMessageBubble';
+import { VideoMessageBubble } from './chat/VideoMessageBubble';
 import { AttachmentMessageBubble } from './chat/AttachmentMessageBubble';
 import { VoiceMessageBubble } from './chat/VoiceMessageBubble';
 import { AnimatedEmoji3D } from './chat/AnimatedEmoji3D';
@@ -116,9 +117,9 @@ function MessageBubbleImpl({
   const { t } = useTranslation();
   const mine    = context.isMyMessage;
   const deleted = m.deletedForEveryone === true;
-  // For images without a caption, overlay time + ticks on the photo (WhatsApp
-  // style) instead of below the bubble.
-  const imageOverlayFooter = !deleted && m.type === 'image' && !(m.caption && m.caption.trim());
+  // Photos and videos use the same card and overlay receipts when captionless.
+  const mediaMessage = !deleted && (m.type === 'image' || m.type === 'video');
+  const mediaOverlayFooter = mediaMessage && !m.caption?.trim();
   // Sender avatar/name. Prefer the resolved member profile (kept in sync with
   // the live user photo) over the per-message snapshot: the snapshot is frozen
   // at send time and goes stale once the sender changes their picture, leaving
@@ -157,10 +158,6 @@ function MessageBubbleImpl({
   const senderImgSrc  = useMemo(() => (senderPhoto ? { uri: senderPhoto } : null), [senderPhoto]);
   // Media (image/video) bubbles get a light-gray card frame; emoji bubbles
   // are chromeless (transparent — the 3D emoji floats on the wallpaper).
-  // Chat media is images today (voice has its own player bubble); the gray
-  // card frame is keyed off the image type. Reads as "image & video" since a
-  // video message would share the same `media` shape if/when it lands.
-  const mediaMessage      = !deleted && m.type === 'image';
   // Stickers float on the wallpaper like the big 3D emoji (no bubble chrome).
   const stickerMessage    = !deleted && m.type === 'sticker';
   const transparentBubble = !deleted && (!!emoji3d || stickerMessage);
@@ -394,13 +391,21 @@ function MessageBubbleImpl({
             mine={mine}
             onOpen={(uri) => onOpenImage?.(uri)}
             onRetry={() => onRetryMedia?.(m)}
-            footer={imageOverlayFooter ? (
+            onLongPress={() => setSheetOpen(true)}
+            footer={mediaOverlayFooter ? (
               <>
                 <Text style={s.imgFootTime}>{timeText}</Text>
                 {mine ? <ReceiptIndicator message={m} isGroup={context.isGroup} memberCount={context.memberCount} tone="white" /> : null}
               </>
             ) : null}
           />
+        ) : !deleted && m.type === 'video' ? (
+          <VideoMessageBubble key={m.id} message={m} mine={mine}
+            onRetry={() => onRetryMedia?.(m)} onLongPress={() => setSheetOpen(true)}
+            footer={mediaOverlayFooter ? <>
+              <Text style={s.imgFootTime}>{timeText}</Text>
+              {mine ? <ReceiptIndicator message={m} isGroup={context.isGroup} memberCount={context.memberCount} tone="white"/> : null}
+            </> : null}/>
         ) : !deleted && m.type === 'voice' ? (
           <VoiceMessageBubble
             message={m}
@@ -408,7 +413,7 @@ function MessageBubbleImpl({
             onPlayed={() => onPlayedVoice?.(m)}
             onRetry={() => onRetryMedia?.(m)}
           />
-        ) : !deleted && ['file','audio','video','location','contact'].includes(m.type) ? (
+        ) : !deleted && ['file','audio','location','contact'].includes(m.type) ? (
           <AttachmentMessageBubble message={m} mine={mine} myUid={context.myUid} onOpenContact={onOpenContact} onRetry={() => onRetryMedia?.(m)} onLongPress={() => setSheetOpen(true)}/>
         ) : stickerMessage ? (
           <Pressable
@@ -456,7 +461,7 @@ function MessageBubbleImpl({
           </View>
         )}
 
-        {imageOverlayFooter ? null : (
+        {mediaOverlayFooter ? null : (
           <View style={[s.bubbleFooter, transparentBubble && s.bubbleFooterEmoji]}>
             {m.editedAt ? <Text style={[s.foot, footColor]}>edited</Text> : null}
             {context.isStarred ? <Text style={s.star}>★</Text> : null}
