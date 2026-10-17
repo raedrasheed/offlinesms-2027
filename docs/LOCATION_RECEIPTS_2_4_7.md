@@ -56,6 +56,8 @@ same glyph family while retaining the selection control's white color.
   source URL validation, offscreen suppression, request coalescing, offline
   cache reuse after restart, timeouts/retry and component retry behavior.
 - Successful Android Hermes export with the new JS dependencies.
+- Updated the baseline build overlay with the same pinned map dependencies,
+  preserving the existing dependency-parity guard and original baseline UI.
 - A live OpenFreeMap tile for a Gaza coordinate returned HTTP 200 and decoded
   successfully. The actual preview component rendered its real streets and
   Arabic labels at 424px and 320px in RN Web. The native filesystem path is

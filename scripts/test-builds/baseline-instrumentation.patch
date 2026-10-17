@@ -259,10 +259,24 @@ index 62788d0..2361e4d 100644
  
    const scrollToBottom = useCallback(() => {
 diff --git a/apps/mobile/package-lock.json b/apps/mobile/package-lock.json
-index dd0f226..23d799b 100644
+index eacc605..bea1648 100644
 --- a/apps/mobile/package-lock.json
 +++ b/apps/mobile/package-lock.json
-@@ -22,15 +22,18 @@
+@@ -9,31 +9,37 @@
+       "version": "0.1.0",
+       "dependencies": {
+         "@expo/vector-icons": "^14.1.0",
++        "@mapbox/vector-tile": "2.0.4",
+         "@offlinesms/design-tokens": "file:../../packages/design-tokens",
+         "@react-native-async-storage/async-storage": "2.1.2",
+         "@react-native-community/netinfo": "11.4.1",
+         "@react-navigation/bottom-tabs": "^6.6.1",
+         "@react-navigation/native": "^6.1.18",
+         "@react-navigation/native-stack": "^6.11.0",
++        "base64-js": "1.5.1",
+         "expo": "^53.0.27",
+         "expo-asset": "~11.1.7",
+         "expo-av": "~15.1.7",
          "expo-camera": "~16.1.11",
          "expo-contacts": "~14.2.6",
          "expo-crypto": "~14.1.5",
@@ -281,7 +295,49 @@ index dd0f226..23d799b 100644
          "expo-sqlite": "~15.2.14",
          "expo-status-bar": "~2.2.3",
          "firebase": "^10.13.2",
-@@ -5292,6 +5295,15 @@
+         "i18next": "^23.15.1",
++        "pbf": "4.0.1",
+         "react": "19.0.0",
+         "react-dom": "19.0.0",
+         "react-i18next": "^15.0.2",
+@@ -2956,6 +2962,23 @@
+         "@jridgewell/sourcemap-codec": "^1.4.14"
+       }
+     },
++    "node_modules/@mapbox/point-geometry": {
++      "version": "1.1.0",
++      "resolved": "https://registry.npmjs.org/@mapbox/point-geometry/-/point-geometry-1.1.0.tgz",
++      "integrity": "sha512-YGcBz1cg4ATXDCM/71L9xveh4dynfGmcLDqufR+nQQy3fKwsAZsWd/x4621/6uJaeB9mwOHE6hPeDgXz9uViUQ==",
++      "license": "ISC"
++    },
++    "node_modules/@mapbox/vector-tile": {
++      "version": "2.0.4",
++      "resolved": "https://registry.npmjs.org/@mapbox/vector-tile/-/vector-tile-2.0.4.tgz",
++      "integrity": "sha512-AkOLcbgGTdXScosBWwmmD7cDlvOjkg/DetGva26pIRiZPdeJYjYKarIlb4uxVzi6bwHO6EWH82eZ5Nuv4T5DUg==",
++      "license": "BSD-3-Clause",
++      "dependencies": {
++        "@mapbox/point-geometry": "~1.1.0",
++        "@types/geojson": "^7946.0.16",
++        "pbf": "^4.0.1"
++      }
++    },
+     "node_modules/@offlinesms/design-tokens": {
+       "resolved": "../../packages/design-tokens",
+       "link": true
+@@ -3485,6 +3508,12 @@
+         "@babel/types": "^7.28.2"
+       }
+     },
++    "node_modules/@types/geojson": {
++      "version": "7946.0.16",
++      "resolved": "https://registry.npmjs.org/@types/geojson/-/geojson-7946.0.16.tgz",
++      "integrity": "sha512-6C8nqWur3j98U6+lXDfTUWIfgvZU+EumvpHKcYjujKH7woYyLj2sUmff0tRhrqM7BohUw7Pz3ZB1jj2gW9Fvmg==",
++      "license": "MIT"
++    },
+     "node_modules/@types/graceful-fs": {
+       "version": "4.1.9",
+       "resolved": "https://registry.npmjs.org/@types/graceful-fs/-/graceful-fs-4.1.9.tgz",
+@@ -5279,6 +5308,15 @@
          "expo": "*"
        }
      },
@@ -297,7 +353,7 @@ index dd0f226..23d799b 100644
      "node_modules/expo-file-system": {
        "version": "18.1.11",
        "resolved": "https://registry.npmjs.org/expo-file-system/-/expo-file-system-18.1.11.tgz",
-@@ -5372,6 +5384,15 @@
+@@ -5359,6 +5397,15 @@
          "react": "*"
        }
      },
@@ -313,7 +369,7 @@ index dd0f226..23d799b 100644
      "node_modules/expo-modules-autolinking": {
        "version": "2.1.15",
        "resolved": "https://registry.npmjs.org/expo-modules-autolinking/-/expo-modules-autolinking-2.1.15.tgz",
-@@ -5453,6 +5474,15 @@
+@@ -5440,6 +5487,15 @@
          "react-native": "*"
        }
      },
@@ -329,11 +385,73 @@ index dd0f226..23d799b 100644
      "node_modules/expo-sqlite": {
        "version": "15.2.14",
        "resolved": "https://registry.npmjs.org/expo-sqlite/-/expo-sqlite-15.2.14.tgz",
+@@ -8140,6 +8196,18 @@
+       "integrity": "sha512-JNAzZcXrCt42VGLuYz0zfAzDfAvJWW6AfYlDBQyDV5DClI2m5sAmK+OIO7s59XfsRsWHp02jAJrRadPRGTt6SQ==",
+       "license": "ISC"
+     },
++    "node_modules/pbf": {
++      "version": "4.0.1",
++      "resolved": "https://registry.npmjs.org/pbf/-/pbf-4.0.1.tgz",
++      "integrity": "sha512-SuLdBvS42z33m8ejRbInMapQe8n0D3vN/Xd5fmWM3tufNgRQFBpaW2YVJxQZV4iPNqb0vEFvssMEo5w9c6BTIA==",
++      "license": "BSD-3-Clause",
++      "dependencies": {
++        "resolve-protobuf-schema": "^2.1.0"
++      },
++      "bin": {
++        "pbf": "bin/pbf"
++      }
++    },
+     "node_modules/picocolors": {
+       "version": "1.1.1",
+       "resolved": "https://registry.npmjs.org/picocolors/-/picocolors-1.1.1.tgz",
+@@ -8349,6 +8417,12 @@
+         "node": ">=12.0.0"
+       }
+     },
++    "node_modules/protocol-buffers-schema": {
++      "version": "3.6.1",
++      "resolved": "https://registry.npmjs.org/protocol-buffers-schema/-/protocol-buffers-schema-3.6.1.tgz",
++      "integrity": "sha512-VG2K63Igkiv9p76tk1lilczEK1cT+kCjKtkdhw1dQZV3k3IXJbd3o6Ho8b9zJZaHSnT2hKe4I+ObmX9w6m5SmQ==",
++      "license": "MIT"
++    },
+     "node_modules/punycode": {
+       "version": "2.3.1",
+       "resolved": "https://registry.npmjs.org/punycode/-/punycode-2.3.1.tgz",
+@@ -8972,6 +9046,15 @@
+         "node": ">=8"
+       }
+     },
++    "node_modules/resolve-protobuf-schema": {
++      "version": "2.1.0",
++      "resolved": "https://registry.npmjs.org/resolve-protobuf-schema/-/resolve-protobuf-schema-2.1.0.tgz",
++      "integrity": "sha512-kI5ffTiZWmJaS/huM8wZfEMer1eRd7oJQhDuxeCLe3t7N7mX3z94CN0xPxBQxFYQTSNz9T0i+v6inKqSdK8xrQ==",
++      "license": "MIT",
++      "dependencies": {
++        "protocol-buffers-schema": "^3.3.1"
++      }
++    },
+     "node_modules/resolve-workspace-root": {
+       "version": "2.0.1",
+       "resolved": "https://registry.npmjs.org/resolve-workspace-root/-/resolve-workspace-root-2.0.1.tgz",
 diff --git a/apps/mobile/package.json b/apps/mobile/package.json
-index 1034cd7..0b906d9 100644
+index bdca9e8..b961267 100644
 --- a/apps/mobile/package.json
 +++ b/apps/mobile/package.json
-@@ -45,15 +45,18 @@
+@@ -32,31 +32,37 @@
+   },
+   "dependencies": {
+     "@expo/vector-icons": "^14.1.0",
++    "@mapbox/vector-tile": "2.0.4",
+     "@offlinesms/design-tokens": "file:../../packages/design-tokens",
+     "@react-native-async-storage/async-storage": "2.1.2",
+     "@react-native-community/netinfo": "11.4.1",
+     "@react-navigation/bottom-tabs": "^6.6.1",
+     "@react-navigation/native": "^6.1.18",
+     "@react-navigation/native-stack": "^6.11.0",
++    "base64-js": "1.5.1",
+     "expo": "^53.0.27",
+     "expo-asset": "~11.1.7",
+     "expo-av": "~15.1.7",
      "expo-camera": "~16.1.11",
      "expo-contacts": "~14.2.6",
      "expo-crypto": "~14.1.5",
@@ -352,3 +470,8 @@ index 1034cd7..0b906d9 100644
      "expo-sqlite": "~15.2.14",
      "expo-status-bar": "~2.2.3",
      "firebase": "^10.13.2",
+     "i18next": "^23.15.1",
++    "pbf": "4.0.1",
+     "react": "19.0.0",
+     "react-dom": "19.0.0",
+     "react-i18next": "^15.0.2",
