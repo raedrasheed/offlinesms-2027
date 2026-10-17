@@ -76,17 +76,17 @@ export function VideoMessageBubble({ message, mine, footer, onRetry, onLongPress
 
   return <>
     <MediaMessageFrame dimensions={dimensions} caption={message.caption} footer={footer}
-      label={t('media.tapToPlay')} onPress={() => { if (!uploading && !uploadFailed) void open(); }} onLongPress={onLongPress}>
-      {media?.thumbnailURL ? <Image source={{ uri: media.thumbnailURL }} style={mediaFrameStyles.content} resizeMode="contain"/>
-        : <View style={[mediaFrameStyles.content, mediaFrameStyles.placeholder]}/>}
-      {uploading ? <MediaUploadProgress mode="upload" progress={transfer?.kind === 'upload' ? transfer.progress : media?.uploadProgress ?? 0}/>
+      label={t('media.tapToPlay')} onPress={() => { if (!uploading && !uploadFailed) void open(); }} onLongPress={onLongPress}
+      overlay={uploading ? <MediaUploadProgress mode="upload" progress={transfer?.kind === 'upload' ? transfer.progress : media?.uploadProgress ?? 0}/>
         : uploadFailed ? <MediaUploadProgress mode="upload" progress={0} failed onRetry={onRetry}/>
         : busy ? <MediaUploadProgress mode="download" progress={transfer?.kind === 'download' ? transfer.progress : 0}/>
         : failed ? <MediaUploadProgress mode="download" progress={0} failed onRetry={() => { void open(); }}/>
         : <View pointerEvents="none" style={s.playOverlay}>
           <View style={s.play}><Ionicons name={ready ? 'play' : 'time-outline'} size={30} color="#fff"/></View>
           {!ready ? <Text style={s.waiting}>{t('attachments.waitingUpload')}</Text> : null}
-        </View>}
+        </View>}>
+      {media?.thumbnailURL ? <Image source={{ uri: media.thumbnailURL }} style={mediaFrameStyles.content} resizeMode="contain"/>
+        : <View style={[mediaFrameStyles.content, mediaFrameStyles.placeholder]}/>}
     </MediaMessageFrame>
     {viewerUri ? <Modal visible animationType="fade" onRequestClose={() => setViewerUri(null)}>
       <View style={[s.viewer, { paddingTop: insets.top, paddingBottom: insets.bottom, paddingLeft: insets.left, paddingRight: insets.right }]}>

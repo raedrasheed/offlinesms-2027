@@ -5,6 +5,10 @@ caption typography and time/receipt placement. Captionless messages overlay the
 receipt pill; captions put the usual message footer below the text. Video no
 longer appears as a filename/size document card.
 
+For very tall or panoramic media, controls and receipts move out of the media
+frame into their own space. The card keeps a readable text width and a usable
+touch target without cropping or stretching the media itself.
+
 The frame preserves the original width-to-height ratio for portrait, landscape,
 square and panoramic media. Both axes scale together within the available chat
 width (up to 230 points) and a viewport-aware height bound (up to 420 points).

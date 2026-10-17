@@ -50,6 +50,7 @@ let renderer: ReactTestRenderer;
 const nodes = (type:string)=>renderer.root.findAll(node=>String(node.type)===type);
 const style = (node:ReactTestInstance)=>Object.assign({},...[node.props.style].flat(Infinity));
 const frame = ()=>nodes('Pressable').find(node=>node.props.accessibilityRole==='imagebutton')!;
+const mediaBox = ()=>nodes('View').find(node=>node.props.testID==='media-content')!;
 const button = (label:string)=>nodes('Pressable').find(node=>node.props.accessibilityLabel===label)!;
 const message = (type:'image'|'video',extra:Partial<Message>={}):Message=>({
   id:'message-1',conversationId:'chat',senderUid:'me',type,text:'',createdAt:{toMillis:()=>1},
@@ -79,7 +80,7 @@ describe('proportional photo and video messages',()=>{
     for(const type of ['image','video'] as const){
       const m=message(type);m.media={...m.media!,width,height};
       await mountBubble(m);
-      const box=style(frame());frames.push(box);
+      const box=style(mediaBox());frames.push(box);
       expect(box.width/box.height).toBeCloseTo(width/height,8);
       expect(box.width).toBeLessThanOrEqual(230);expect(box.height).toBeLessThanOrEqual(420);
       expect(nodes('AttachmentMessageBubble')).toHaveLength(0);
@@ -110,21 +111,45 @@ describe('proportional photo and video messages',()=>{
   it('fits a narrow window and updates after a viewport resize without changing the ratio',async()=>{
     const m=message('video');m.media={...m.media!,width:1080,height:1920};
     mocks.window={width:240,height:500};await mountVideo(m);
-    expect(style(frame()).width+10).toBeLessThanOrEqual((240-24)*.8);
-    const first=style(frame());
+    expect(style(mediaBox()).width+10).toBeLessThanOrEqual((240-24)*.8);
+    const first=style(mediaBox());
     mocks.window={width:390,height:844};
     await act(async()=>renderer.update(createElement(VideoMessageBubble,{message:m,mine:true})));
-    const next=style(frame());expect(next.width).toBeGreaterThan(first.width);
+    const next=style(mediaBox());expect(next.width).toBeGreaterThan(first.width);
     expect(first.width/first.height).toBeCloseTo(9/16);expect(next.width/next.height).toBeCloseTo(9/16);
+  });
+  it.each([[4000,500],[500,4000]])('keeps controls, receipts and captions usable for %s × %s media',async(width,height)=>{
+    for(const type of ['image','video'] as const){
+      const m=message(type);m.media={...m.media!,width,height};
+      await mountBubble(m);
+      expect(style(frame()).minHeight).toBeGreaterThanOrEqual(44);
+      expect(style(frame().parent!).width).toBeGreaterThanOrEqual(180);
+      // No receipt text is clipped inside the narrow/short media frame.
+      expect(mediaBox().findAll(node=>String(node.type)==='Text')).toHaveLength(0);
+      expect(nodes('Text').some(node=>typeof node.props.children==='string' && /\d\d:\d\d/.test(node.props.children))).toBe(true);
+      if(type==='video'){
+        const controls=nodes('View').find(node=>node.props.testID==='media-controls')!;
+        expect(controls.parent).toBe(frame());
+        expect(style(controls).height).toBeGreaterThanOrEqual(56);
+        expect(mediaBox().findAll(node=>String(node.type)==='Icon')).toHaveLength(0);
+        await act(async()=>frame().props.onPress());expect(nodes('Video')).toHaveLength(1);
+      }
+      await act(async()=>renderer.unmount());
+      await mountBubble({...m,caption:'تعليق واضح على صورة طويلة أو عريضة'});
+      const caption=nodes('Text').find(node=>node.props.children==='تعليق واضح على صورة طويلة أو عريضة')!;
+      expect(style(caption.parent!).width).toBeGreaterThanOrEqual(180);
+      expect(style(mediaBox()).width/style(mediaBox()).height).toBeCloseTo(width/height);
+      await act(async()=>renderer.unmount());
+    }
   });
   it('learns missing legacy image dimensions on load and does not reuse them for another URI',async()=>{
     const m=message('image');m.media={...m.media!,width:null,height:null};
     await act(async()=>{renderer=create(createElement(ImageMessageBubble,{message:m,mine:false,onOpen:vi.fn()}));});
     await act(async()=>nodes('Image')[0].props.onLoad({nativeEvent:{source:{width:600,height:1200}}}));
-    expect(style(frame()).height/style(frame()).width).toBe(2);
+    expect(style(mediaBox()).height/style(mediaBox()).width).toBe(2);
     const next={...m,id:'another',media:{...m.media!,localUri:'file:///another'}};
     await act(async()=>renderer.update(createElement(ImageMessageBubble,{message:next,mine:false,onOpen:vi.fn()})));
-    expect(style(frame()).width/style(frame()).height).toBeCloseTo(4/3);
+    expect(style(mediaBox()).width/style(mediaBox()).height).toBeCloseTo(4/3);
   });
   it('uses a safe fallback for invalid or incomplete dimensions',()=>{
     for(const [width,height] of [[0,5],[-2,5],[NaN,5],[Infinity,5],[5,0]]){
@@ -178,7 +203,7 @@ describe('explicit video playback',()=>{
   it('corrects rotated dimensions from the decoder and recovers from playback errors',async()=>{
     await mountVideo();await act(async()=>frame().props.onPress());
     await act(async()=>nodes('Video')[0].props.onReadyForDisplay({naturalSize:{width:1920,height:1080,orientation:'portrait'}}));
-    expect(style(frame()).width/style(frame()).height).toBeCloseTo(9/16);
+    expect(style(mediaBox()).width/style(mediaBox()).height).toBeCloseTo(9/16);
     expect(style(nodes('Video')[0]).width/style(nodes('Video')[0]).height).toBeCloseTo(9/16);
     await act(async()=>nodes('Video')[0].props.onError('bad-video'));
     expect(nodes('Video')).toHaveLength(0);expect(button('media.retryDownload')).toBeTruthy();

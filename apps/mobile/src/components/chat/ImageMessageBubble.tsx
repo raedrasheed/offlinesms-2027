@@ -49,15 +49,7 @@ export function ImageMessageBubble({
         onPress={() => uri && !busy && onOpen(uri === media?.thumbnailURL ? media?.downloadURL || uri : uri)}
         onLongPress={onLongPress}
         label={t('media.openImage')}
-      >
-        {uri ? (
-          <Image source={{ uri }} style={s.content} resizeMode="contain" onLoad={event => {
-            const size = validMediaDimensions(event.nativeEvent.source.width, event.nativeEvent.source.height);
-            if (size) setLoaded({ uri, size });
-          }} />
-        ) : (
-          <View style={[s.content, s.placeholder]} />
-        )}
+        overlay={uploading || uploadFailed || downloading || downloadFailed ? <>
         {uploading ? (
           <MediaUploadProgress progress={uploadPct} mode="upload" />
         ) : null}
@@ -70,6 +62,16 @@ export function ImageMessageBubble({
         {downloadFailed ? (
           <MediaUploadProgress progress={0} failed mode="download" onRetry={() => { void retryDownload(message); }} />
         ) : null}
+        </> : null}
+      >
+        {uri ? (
+          <Image source={{ uri }} style={s.content} resizeMode="contain" onLoad={event => {
+            const size = validMediaDimensions(event.nativeEvent.source.width, event.nativeEvent.source.height);
+            if (size) setLoaded({ uri, size });
+          }} />
+        ) : (
+          <View style={[s.content, s.placeholder]} />
+        )}
       </MediaMessageFrame>
   );
 }
