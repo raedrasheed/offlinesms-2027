@@ -5,7 +5,8 @@
     <color name="brand_primary_dark">#155E83</color>
     <color name="ic_launcher_background">#01A0E1</color>
 
-    <!-- Recent-activity terminal. -->
-    <color name="terminal_bg">#000000</color>
-    <color name="terminal_fg">#FFFFFF</color>
+    <color name="activity_info">#155E83</color>
+    <color name="activity_success">#166534</color>
+    <color name="activity_warning">#92400E</color>
+    <color name="activity_error">#B91C1C</color>
 </resources>

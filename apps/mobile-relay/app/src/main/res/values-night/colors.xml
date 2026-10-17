@@ -1,0 +1,6 @@
+<resources>
+    <color name="activity_info">#7DD3FC</color>
+    <color name="activity_success">#86EFAC</color>
+    <color name="activity_warning">#FCD34D</color>
+    <color name="activity_error">#FCA5A5</color>
+</resources>

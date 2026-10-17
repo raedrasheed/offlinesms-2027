@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface JobDao {
@@ -49,6 +50,9 @@ interface JobDao {
 
     @Query("SELECT COUNT(*) FROM jobs WHERE localStatus IN ('claimed','sending')")
     suspend fun pendingCount(): Int
+
+    @Query("SELECT COUNT(*) FROM jobs WHERE localStatus IN ('claimed','sending')")
+    fun observePendingCount(): Flow<Int>
 }
 
 @Dao
@@ -71,8 +75,11 @@ interface LogDao {
     @Insert
     suspend fun insert(log: LogEntity): Long
 
-    @Query("SELECT * FROM logs ORDER BY at DESC LIMIT 200")
+    @Query("SELECT * FROM logs ORDER BY at DESC, id DESC LIMIT 200")
     suspend fun recent(): List<LogEntity>
+
+    @Query("SELECT * FROM logs ORDER BY at DESC, id DESC LIMIT 100")
+    fun observeRecent(): Flow<List<LogEntity>>
 
     @Query("DELETE FROM logs WHERE at < :before")
     suspend fun purgeOlderThan(before: Long)
