@@ -738,8 +738,8 @@
     "waitingUpload": "Waiting for upload",
     "pickerError": "Try another file. Images/GIF: 10 MB. Documents, audio and video: 25 MB.",
     "appContacts": "OfflineSMS contacts",
-    "chooseAppContact": "Choose an OfflineSMS user to share their profile.",
-    "searchAppContacts": "Search by name prefix or @username",
+    "chooseAppContact": "Choose one of your contacts, or search OfflineSMS accounts to share a profile.",
+    "searchAppContacts": "Search any part of a name or @username",
     "noAppContacts": "No matching OfflineSMS users.",
     "contactSearchError": "Unable to load users. Check your connection and try again.",
     "moreContacts": "Load more users",
@@ -748,6 +748,16 @@
     "yourContact": "This is your profile",
     "contactOpenError": "Unable to open chat",
     "contactUnavailable": "This account is no longer available.",
-    "contactOpenRetry": "Check your connection and try again."
+    "contactOpenRetry": "Check your connection and try again.",
+    "myAppContacts": "My OfflineSMS contacts",
+    "contactSearchResults": "Matching OfflineSMS accounts",
+    "noAccountContacts": "No saved OfflineSMS contacts yet. Search for an account to start a conversation.",
+    "chooseChatContact": "Choose one of your contacts, or search by name or @username.",
+    "contactServiceUnavailable": "The contacts service is temporarily unavailable. Please try again later.",
+    "newContact": "New contact",
+    "newChat": "New chat",
+    "newGroup": "New group",
+    "newCommunity": "New community",
+    "comingSoon": "Coming soon."
   }
 }

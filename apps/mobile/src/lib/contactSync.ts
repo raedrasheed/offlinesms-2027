@@ -54,7 +54,7 @@ export async function matchContactsOnServer(
   onProgress?: (p: SyncProgress) => void,
   onMatches?: (matches: ContactMatch[]) => void,
 ): Promise<ContactMatch[]> {
-  const fn = httpsCallable<{ phones: string[] }, { matches: ContactMatch[] }>(
+  const fn = httpsCallable<{ phones: string[]; saveMatches:boolean }, { matches: ContactMatch[] }>(
     getFunctions(app, 'us-central1'),
     'matchContacts',
   );
@@ -69,7 +69,7 @@ export async function matchContactsOnServer(
   const byUid = new Map<string, ContactMatch>();
   let scanned = 0;
   for (const batch of chunk(phones, PHONES_PER_CALL)) {
-    const res = await fn({ phones: batch });
+    const res = await fn({ phones: batch, saveMatches:true });
     let added = false;
     for (const m of res.data.matches ?? []) {
       if (!byUid.has(m.uid)) { byUid.set(m.uid, m); added = true; }

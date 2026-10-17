@@ -11,8 +11,10 @@
 //     base by passing millions of numbers.
 
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
-import { getFirestore } from 'firebase-admin/firestore';
+import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { findUidsByPhoneNumbers } from '../lib/userPrivate';
+import { newPhoneContactDoc } from './contactLogic';
+import { PUBLIC_CONTACT_FIELDS, publicAppContact } from './contactSearch';
 
 const MAX_PHONES_PER_CALL = 500;
 const FIRESTORE_IN_LIMIT = 30;
@@ -29,6 +31,7 @@ export const matchContacts = onCall({ region: 'us-central1' }, async (request) =
 
   const phones = (request.data?.phones ?? []) as unknown;
   if (!Array.isArray(phones)) throw new HttpsError('invalid-argument', 'phones-must-be-array');
+  const saveMatches=request.data?.saveMatches === true;
 
   const cleaned = (phones as unknown[])
     .filter((p): p is string => typeof p === 'string' && /^\+[1-9]\d{6,14}$/.test(p));
@@ -58,23 +61,44 @@ export const matchContacts = onCall({ region: 'us-central1' }, async (request) =
   const uids = [...new Set(phoneToUid.values())];
   const profiles = new Map<string, { displayName: string; username: string | null }>();
   for (const ids of chunk(uids, 100)) {
-    const snaps = await db.getAll(...ids.map(id => db.collection('users').doc(id)));
+    const snaps = await db.getAll(...ids.map(id => db.collection('users').doc(id)), {fieldMask:PUBLIC_CONTACT_FIELDS});
     for (const s of snaps) {
-      if (!s.exists) continue;
+      const contact=publicAppContact(s.id,s.exists ? s.data() : undefined);
+      if (!contact) continue;
       profiles.set(s.id, {
-        displayName: (s.get('displayName') as string) ?? '',
-        username:    (s.get('username') as string) ?? null,
+        displayName: contact.name,
+        username:    contact.username ?? null,
       });
     }
   }
 
   for (const [phone, ownerUid] of phoneToUid) {
     const p = profiles.get(ownerUid);
+    if (!p) continue;
     matches.push({
       uid:         ownerUid,
       displayName: p?.displayName ?? '',
       username:    p?.username ?? null,
       phoneE164:   phone,
+    });
+  }
+
+  // The explicit Find Friends sync saves only matched accounts, never the entire address book.
+  // Older read-only callers retain their existing behavior by omitting saveMatches.
+  if (saveMatches && matches.length) {
+    const docs=matches.map(m=>newPhoneContactDoc({ownerUid:uid,displayName:m.displayName,e164:m.phoneE164,linkedUid:m.uid}));
+    const refs=docs.map(d=>db.collection('phoneContacts').doc(d.contactId));
+    await db.runTransaction(async tx=>{
+      const existing=await tx.getAll(...refs,{fieldMask:['contactId']});
+      docs.forEach((d,i)=>{
+        // Existing aliases, organization metadata and creation time belong to the owner.
+        if(existing[i].exists) tx.update(refs[i],{
+          isRegistered:true,linkedUid:d.linkedUid,updatedAt:FieldValue.serverTimestamp(),
+        });
+        else tx.create(refs[i],{
+          ...d,createdAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp(),
+        });
+      });
     });
   }
 
