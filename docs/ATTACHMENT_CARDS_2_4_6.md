@@ -26,7 +26,8 @@ links to OpenStreetMap copyright information.
 
 Only visible location cards in the focused conversation request viewport tiles.
 Native requests identify OfflineSMS, share concurrent requests and limit network
-concurrency to three. The on-device cache honors expiry/validators, uses seven
+concurrency to three. Tiles live in the platform's purgeable cache directory,
+not permanent application documents/backups. The cache honors expiry/validators, uses seven
 days when expiry headers are absent, revalidates expired images conditionally,
 and can reuse previously cached images after a network error. There is no area
 download or background prefetch feature. See the provider's

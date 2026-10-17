@@ -1,7 +1,7 @@
 import {afterEach,beforeEach,describe,it,expect,vi} from 'vitest';
 const fs=vi.hoisted(()=>({files:new Map<string,{text:string;mtime:number}>(),download:vi.fn()}));
 vi.mock('expo-file-system',()=>({
-  documentDirectory:'file:///test/',FileSystemSessionType:{FOREGROUND:1},
+  documentDirectory:'file:///documents/',cacheDirectory:'file:///cache/',FileSystemSessionType:{FOREGROUND:1},
   makeDirectoryAsync:async()=>{},
   getInfoAsync:async(path:string)=>({exists:fs.files.has(path),isDirectory:false,size:fs.files.has(path)?10:0,modificationTime:fs.files.get(path)?.mtime ?? 0}),
   readAsStringAsync:async(path:string)=>{const file=fs.files.get(path);if(!file)throw Error('missing');return file.text;},
@@ -11,7 +11,7 @@ vi.mock('expo-file-system',()=>({
 }));
 import {cachedMapTile,tileMetadata} from '../src/media/mapTileCache';
 const tile=(x:number)=>({key:`16-${x}-0`,z:16,x,y:0,left:0,top:0});
-const path=(x:number)=>`file:///test/OfflineSMS/MapTiles/16-${x}-0.png`;
+const path=(x:number)=>`file:///cache/OfflineSMS/MapTiles/16-${x}-0.png`;
 beforeEach(()=>{
   fs.files.clear();vi.clearAllMocks();vi.spyOn(Date,'now').mockReturnValue(1800000000000);
   fs.download.mockImplementation(async(_url:string,p:string)=>{fs.files.set(p,{text:'PNG',mtime:Date.now()/1000});return {status:200,mimeType:'image/png',headers:{ETag:'"map-v1"','Cache-Control':'max-age=604800'}};});

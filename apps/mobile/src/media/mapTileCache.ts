@@ -1,11 +1,11 @@
 import * as FS from 'expo-file-system';
 import { mapTileUrl, type MapTile } from './locationMap';
 
-const ROOT=FS.documentDirectory ? `${FS.documentDirectory}OfflineSMS/MapTiles/` : null;
+// Map previews are disposable cache data, never permanent/backed-up documents.
+const ROOT=FS.cacheDirectory ? `${FS.cacheDirectory}OfflineSMS/MapTiles/` : null;
 const WEEK=7*24*60*60*1000;
 const USER_AGENT='OfflineSMS/2.4.6 (+https://offlinesms.com)';
 type Metadata={expiresAt:number;etag?:string;lastModified?:string};
-let directory:Promise<void>|undefined;
 const inflight=new Map<string,{promise:Promise<string|null>;viewers:Set<()=>boolean>}>();
 let active=0;
 const waiters:Array<()=>void>=[];
@@ -46,8 +46,8 @@ export async function cachedMapTile(tile:MapTile,stillVisible:()=>boolean):Promi
       if(!visible())return stale;
       release=await slot();
       if(!visible())return stale;
-      directory ??= FS.makeDirectoryAsync(ROOT!,{intermediates:true}).catch(e=>{directory=undefined;throw e;});
-      await directory;
+      // The OS may purge this directory while the app is backgrounded.
+      await FS.makeDirectoryAsync(ROOT!,{intermediates:true});
       const headers:Record<string,string>={'User-Agent':USER_AGENT};
       if(stale && metadata?.etag)headers['If-None-Match']=metadata.etag;
       if(stale && metadata?.lastModified)headers['If-Modified-Since']=metadata.lastModified;
