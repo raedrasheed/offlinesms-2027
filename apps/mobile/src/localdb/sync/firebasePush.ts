@@ -11,6 +11,8 @@ import { app, auth } from '../../lib/firebase';
 import * as messagesRepo from '../repositories/messagesRepo';
 import { setTransferProgress, clearTransfer } from '../../media/transferProgress';
 import { emitLocalMessagesChanged } from '../messageChanges';
+import { getCurrentUid, getDb } from '../connection';
+import { saveOwnPollVote } from '../pollVote';
 import type { OutboxRow } from '../types';
 
 export interface PushResult {
@@ -99,7 +101,7 @@ export async function pushOutboxItem(item: OutboxRow): Promise<PushResult> {
 
   switch (item.type) {
     case 'send_message': {
-      const res = await call<{ messageId: string; idempotent?: boolean }>('sendTextMessage', {
+      const res = await call<{ messageId: string; idempotent?: boolean }>(payload.kind === 'poll' && payload.poll?.anonymous === true ? 'sendPollMessage' : 'sendTextMessage', {
         conversationId: payload.conversationId,
         // Only the new backend may create the text fallback for rich messages.
         // Omitting it makes an older backend refuse instead of losing the options.
@@ -234,9 +236,13 @@ export async function pushOutboxItem(item: OutboxRow): Promise<PushResult> {
         throw err;
       }
     }
-    case 'vote_poll':
-      await call('votePoll', { conversationId: payload.conversationId, messageId: payload.messageId, optionIds: payload.optionIds, seq: payload.seq });
+    case 'vote_poll': {
+      const uid = getCurrentUid();
+      const local = uid ? getDb() : null;
+      const result = await call('votePoll', { conversationId: payload.conversationId, messageId: payload.messageId, optionIds: payload.optionIds, seq: payload.seq });
+      if (local && getCurrentUid() === uid) await saveOwnPollVote(local, payload.conversationId, payload.messageId, result.selection, result.seq);
       return { ok: true };
+    }
     case 'close_poll':
       await call('closePoll', { conversationId: payload.conversationId, messageId: payload.messageId });
       await messagesRepo.confirmPollClosed(payload.messageId);

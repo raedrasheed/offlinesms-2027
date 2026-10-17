@@ -90,3 +90,18 @@ describe('previews', () => {
     expect(messagePreview({ type: 'poll', text: '📊 Lunch?' })).toBe('📊 Lunch?');
   });
 });
+
+
+describe('anonymous privacy contract', () => {
+  it('makes old votePoll handlers reject before they could publish identities', () => {
+    const poll = buildPoll({ question: 'Private?', options: ['Yes', 'No'], anonymous: true });
+    expect(poll).toMatchObject({ anonymous: true, closed: true, votingClosed: false, votes: {}, voterCount: 0 });
+    // Old handlers gate on closed; only the upgraded handler understands votingClosed.
+    expect(poll.closed).toBe(true);
+    expect(() => applyVote(poll, 'alice', ['o1'])).toThrow('poll-private-ballot-required');
+  });
+  it('keeps legacy polls public and rejects malformed privacy flags', () => {
+    expect(buildPoll({ question: 'q', options: ['a', 'b'] })).toMatchObject({ anonymous: false, closed: false });
+    expect(() => buildPoll({ question: 'q', options: ['a', 'b'], anonymous: 'true' })).toThrow('poll-invalid-privacy');
+  });
+});

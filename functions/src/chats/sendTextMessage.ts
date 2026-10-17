@@ -23,7 +23,7 @@
 // recipient unread counters, and receipt fan-out are handled by the
 // onMessageCreate trigger.
 
-import { onCall, HttpsError } from 'firebase-functions/v2/https';
+import { onCall, HttpsError, type CallableRequest } from 'firebase-functions/v2/https';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { writeAuditLog } from '../lib/auditLog';
 import { cleanNameSnapshot, publicNameFrom } from '../lib/displayName';
@@ -35,7 +35,7 @@ import { parseLocation, parseContact, attachmentFallback, type LocationAttachmen
 
 const TEXT_MAX = 4000;
 
-export const sendTextMessage = onCall(async (request) => {
+async function sendMessage(request: CallableRequest, allowAnonymous = false) {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'sign-in-required');
 
@@ -76,6 +76,7 @@ export const sendTextMessage = onCall(async (request) => {
   } else if (kind === 'poll') {
     try { poll = buildPoll(data.poll); }
     catch (e) { throw new HttpsError('invalid-argument', e instanceof PollError ? e.code : 'poll-invalid'); }
+    if (poll.anonymous && !allowAnonymous) throw new HttpsError('failed-precondition', 'use-sendPollMessage');
     text = pollFallbackText(poll.question);
   } else {
     if (typeof data.text !== 'string') {
@@ -271,4 +272,14 @@ export const sendTextMessage = onCall(async (request) => {
   }).catch(() => {});
 
   return { messageId: msgRef.id, idempotent: false };
+}
+
+export const sendTextMessage = onCall(request => sendMessage(request));
+
+// A separate endpoint is a capability boundary: before the backend upgrade,
+// anonymous creation fails instead of an old sendTextMessage silently dropping
+// the privacy flag. Deploy votePoll + rules BEFORE enabling this endpoint.
+export const sendPollMessage = onCall(request => {
+  if (request.data?.kind !== 'poll') throw new HttpsError('invalid-argument', 'poll-required');
+  return sendMessage(request, true);
 });

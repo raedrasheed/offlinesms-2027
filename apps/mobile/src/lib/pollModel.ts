@@ -10,6 +10,9 @@ export interface PollData {
   question: string;
   options: PollOption[];
   multiple: boolean;
+  anonymous?: boolean;
+  /** Preserved through SQLite serialization; `closed` below is the UI state. */
+  votingClosed?: boolean;
   closed: boolean;
   /** Local-only: a durable close request is waiting for server confirmation. */
   closingPending?: boolean;
@@ -43,13 +46,22 @@ export function sanitizePoll(p: any): PollData {
     ? p.options.filter((o: any) => o && typeof o.id === 'string').map((o: any) => ({ id: o.id, text: String(o.text ?? '') }))
     : [];
   const votes: Record<string, string[]> = {};
-  if (p?.votes && typeof p.votes === 'object') {
+  if (p?.anonymous !== true && p?.votes && typeof p.votes === 'object') {
     for (const [uid, sel] of Object.entries(p.votes)) if (Array.isArray(sel)) votes[uid] = (sel as unknown[]).filter((x): x is string => typeof x === 'string');
   }
   return {
-    question: String(p?.question ?? ''), options, multiple: p?.multiple === true, closed: p?.closed === true,
-    votes, ...tally(options, votes),
+    question: String(p?.question ?? ''), options, multiple: p?.multiple === true,
+    closed: p?.anonymous === true && typeof p?.votingClosed === 'boolean' ? p.votingClosed : p?.closed === true,
+    ...(p?.anonymous === true ? { votingClosed: typeof p?.votingClosed === 'boolean' ? p.votingClosed : p?.closed === true } : {}),
+    anonymous: p?.anonymous === true,
+    votes, ...(p?.anonymous === true ? anonymousTotals(options, p) : tally(options, votes)),
   };
+}
+
+function anonymousTotals(options: PollOption[], p: any) {
+  const safeCount = (v: unknown) => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 ? v : 0;
+  const voterCount = safeCount(p?.voterCount);
+  return { voterCount, counts: Object.fromEntries(options.map(o => [o.id, Math.min(voterCount, safeCount(p?.counts?.[o.id]))])) };
 }
 
 export function parseSticker(json: string | null | undefined): StickerRef | null {
@@ -84,6 +96,9 @@ export function toggleSelection(poll: Pick<PollData, 'multiple' | 'options'>, cu
 
 /** Optimistic local application of my vote. */
 export function applyLocalVote(poll: PollData, uid: string, selection: string[]): PollData {
+  // Anonymous selections live in a per-account private cache/outbox. A remote
+  // snapshot must never erase them or copy identities into the public payload.
+  if (poll.anonymous) return poll;
   const votes = { ...poll.votes };
   if (selection.length) votes[uid] = selection; else delete votes[uid];
   return { ...poll, votes, ...tally(poll.options, votes) };

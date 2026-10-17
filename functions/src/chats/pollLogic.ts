@@ -1,16 +1,10 @@
 // Polls — pure rules shared by sendTextMessage (create) and votePoll/closePoll.
 // No Firestore here, so every rule is unit-tested in isolation.
 //
-// Stored on the message doc (type 'poll'):
-//   poll: {
-//     question, options: [{ id, text }], multiple, closed, closedAt,
-//     votes:  { [uid]: optionId[] }   ← one entry per voter (source of truth)
-//     counts: { [optionId]: number }  ← ALWAYS recomputed from `votes`
-//     voterCount: number
-//   }
-// Counts are derived, never incremented, so a retried or duplicated vote can't
-// be counted twice; the per-voter sequence (server-only doc) rejects a stale
-// retry that arrives after a newer vote.
+// Public polls store identities + selections on the message and derive totals.
+// Anonymous polls expose only aggregate totals; each private ballot lives in
+// pollVoters/{uid}. votePoll updates its ballot and aggregate delta atomically.
+// Per-voter sequences reject duplicated and stale requests in both modes.
 
 export const POLL_QUESTION_MAX = 300;
 export const POLL_OPTION_MAX = 100;
@@ -22,7 +16,12 @@ export interface PollDoc {
   question: string;
   options: PollOption[];
   multiple: boolean;
+  /** Absent on legacy polls, which remain public. Immutable after creation. */
+  anonymous?: boolean;
   closed: boolean;
+  /** Anonymous wire polls keep closed=true so OLD votePoll deployments reject
+   * them before ever publishing a UID. New clients/handlers use votingClosed. */
+  votingClosed?: boolean;
   closedAt?: unknown;
   votes: Record<string, string[]>;
   counts: Record<string, number>;
@@ -38,7 +37,8 @@ const clean = (s: unknown, max: number) =>
 
 /** Validate a client poll definition and build the initial stored poll. */
 export function buildPoll(input: unknown): PollDoc {
-  const p = (input ?? {}) as { question?: unknown; options?: unknown; multiple?: unknown };
+  const p = (input ?? {}) as { question?: unknown; options?: unknown; multiple?: unknown; anonymous?: unknown };
+  if (p.anonymous !== undefined && typeof p.anonymous !== 'boolean') throw new PollError('poll-invalid-privacy');
   const question = clean(p.question, POLL_QUESTION_MAX + 1);
   if (!question) throw new PollError('poll-question-required');
   if (question.length > POLL_QUESTION_MAX) throw new PollError('poll-question-too-long');
@@ -55,7 +55,8 @@ export function buildPoll(input: unknown): PollDoc {
   }
   const options = texts.map((text, i) => ({ id: `o${i + 1}`, text }));
   return {
-    question, options, multiple: p.multiple === true, closed: false,
+    question, options, multiple: p.multiple === true, anonymous: p.anonymous === true,
+    closed: p.anonymous === true, ...(p.anonymous === true ? { votingClosed: false } : {}),
     votes: {}, counts: Object.fromEntries(options.map(o => [o.id, 0])), voterCount: 0,
   };
 }
@@ -90,11 +91,24 @@ export function tally(options: PollOption[], votes: Record<string, string[]>): {
 
 /** Apply one voter's selection; returns the new poll (unchanged → same object). */
 export function applyVote(poll: PollDoc, uid: string, selection: string[]): PollDoc {
+  if (poll.anonymous) throw new PollError('poll-private-ballot-required');
   if (sameSelection(poll.votes?.[uid], selection)) return poll;
   const votes = { ...(poll.votes ?? {}) };
   if (selection.length === 0) delete votes[uid];
   else votes[uid] = selection;
   return { ...poll, votes, ...tally(poll.options, votes) };
+}
+
+/** Anonymous totals change by the caller's private ballot delta, in the SAME
+ * transaction as that ballot. Never copy a user identifier into the message. */
+export function applyAnonymousVote(poll: PollDoc, previous: string[], selection: string[]): PollDoc {
+  if (!poll.anonymous) throw new PollError('poll-not-anonymous');
+  if (sameSelection(previous, selection)) return poll;
+  const counts = Object.fromEntries(poll.options.map(o => [o.id,
+    (poll.counts[o.id] ?? 0) - Number(previous.includes(o.id)) + Number(selection.includes(o.id)),
+  ]));
+  return { ...poll, votes: {}, counts,
+    voterCount: poll.voterCount - Number(previous.length > 0) + Number(selection.length > 0) };
 }
 
 /** Short, content-light preview text (chat list / push / older clients). */

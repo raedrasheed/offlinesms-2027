@@ -121,7 +121,25 @@ describe('CreatePollSheet keyboard regression', () => {
     const send = nodes('Pressable').find(node => node.props.children?.props?.children === 'common.send')!;
     await act(async () => send.props.onPress());
     expect(onCreate).toHaveBeenCalledOnce();
-    expect(onCreate).toHaveBeenCalledWith({ question: 'هل يناسبك الموعد؟', options: ['نعم', 'لا'], multiple: true });
+    expect(onCreate).toHaveBeenCalledWith({ question: 'هل يناسبك الموعد؟', options: ['نعم', 'لا'], multiple: true, anonymous: false });
     expect(native.dismiss).toHaveBeenCalledOnce();
   });
+  it('discloses privacy, submits anonymous mode, and resets it on cancel', async () => {
+    const { onCreate } = await mount();
+    const toggle = () => nodes('Switch').find(node => node.props.accessibilityLabel === 'poll.anonymous')!;
+    expect(toggle().props.value).toBe(false);
+    expect(JSON.stringify(renderer.toJSON())).toContain('poll.publicHint');
+    await act(async () => toggle().props.onValueChange(true));
+    expect(JSON.stringify(renderer.toJSON())).toContain('poll.anonymousHint');
+    await act(async () => nodes('TextInput')[0].props.onChangeText('Question'));
+    await act(async () => nodes('TextInput')[1].props.onChangeText('Yes'));
+    await act(async () => nodes('TextInput')[2].props.onChangeText('No'));
+    await act(async () => nodes('Pressable').find(node => node.props.children?.props?.children === 'common.send')!.props.onPress());
+    expect(onCreate).toHaveBeenCalledWith({ question: 'Question', options: ['Yes', 'No'], multiple: false, anonymous: true });
+    expect(toggle().props.value).toBe(false);
+    await act(async () => toggle().props.onValueChange(true));
+    await act(async () => nodes('Modal')[0].props.onRequestClose());
+    expect(toggle().props.value).toBe(false);
+  });
+
 });

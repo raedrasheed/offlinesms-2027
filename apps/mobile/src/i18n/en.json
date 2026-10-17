@@ -657,7 +657,21 @@
       "tooLong": "The question or an option is too long."
     },
     "votes_zero": "No votes",
-    "voters_zero": "No votes yet"
+    "voters_zero": "No votes yet",
+    "anonymous": "Anonymous poll",
+    "public": "Public poll · names and choices visible",
+    "anonymousHint": "Other participants, including the creator, see totals only. Your name and choices are hidden from them.",
+    "publicHint": "Everyone in this conversation can see who voted and what they chose.",
+    "privacyFixed": "The privacy setting cannot be changed after sending.",
+    "viewVoters": "View voters",
+    "results": "View results",
+    "identitiesHidden": "Voter identities are hidden in this poll.",
+    "noVoters": "No one has voted yet.",
+    "loadOwnVote": "Connect to load your private vote before choosing.",
+    "votePending": "Your vote is saved on this device and waiting to sync.",
+    "voteFailed": "Your latest change was not accepted. Your last confirmed vote is shown; tap an option to try again.",
+    "voteErrorTitle": "Could not save vote",
+    "voteError": "Please reconnect and open the conversation again. The poll may be closed or unavailable."
   },
   "signInMethods": {
     "email": "Email",

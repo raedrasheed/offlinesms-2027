@@ -124,7 +124,7 @@ export async function pushOutbox(lane: outboxRepo.OutboxLane = 'all'): Promise<n
       }
       if (item.type === 'close_poll' && item.conversation_id) emitLocalMessagesChanged(item.conversation_id);
     }
-    if (item.type === 'send_message' && item.conversation_id) emitLocalMessagesChanged(item.conversation_id);
+    if ((item.type === 'send_message' || item.type === 'vote_poll') && item.conversation_id) emitLocalMessagesChanged(item.conversation_id);
   }
   return completed;
 }

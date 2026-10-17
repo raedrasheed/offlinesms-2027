@@ -526,6 +526,8 @@ export async function getPayload(remoteOrLocalId: string): Promise<string | null
 
 /** Server-confirmed close; preserve votes that may have arrived during the call. */
 export async function confirmPollClosed(messageId: string): Promise<void> {
-  await getDb().run(`UPDATE messages SET payload_json = json_set(payload_json, '$.closed', json('true')), updated_at = ?
+  await getDb().run(`UPDATE messages SET payload_json = CASE WHEN json_extract(payload_json, '$.anonymous') = 1
+      THEN json_set(payload_json, '$.closed', json('true'), '$.votingClosed', json('true'))
+      ELSE json_set(payload_json, '$.closed', json('true')) END, updated_at = ?
     WHERE remote_id = ? AND type = 'poll' AND json_valid(payload_json)`, [Date.now(), messageId]);
 }

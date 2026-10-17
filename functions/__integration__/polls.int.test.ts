@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../src/lib/auditLog', () => ({ writeAuditLog: vi.fn(async () => {}) }));
 
 import { db, resetEmulators, req, expectHttps } from './harness';
-import { sendTextMessage } from '../src/chats/sendTextMessage';
+import { sendTextMessage, sendPollMessage } from '../src/chats/sendTextMessage';
 import { votePoll, closePoll } from '../src/chats/votePoll';
 import { deleteMessage } from '../src/chats/deleteMessage';
 
@@ -196,5 +196,55 @@ describe('stickers', () => {
     await expectHttps(send('u_a', { kind: 'sticker', sticker: { packId: 'simsim', stickerId: 'love' } }, D), 'permission-denied', 'blocked-by-recipient');
     await expectHttps(vote('u_a', p.messageId, ['o1'], 1, D), 'permission-denied', 'blocked-by-recipient');
     await expectHttps(vote('u_b', p.messageId, ['o1'], 1, D), 'permission-denied', 'recipient-blocked');
+  });
+});
+
+
+describe('anonymous polls', () => {
+  const createAnonymous = async (multiple = false) => (await sendPollMessage.run(req(OWNER, {
+    conversationId: G, kind: 'poll', poll: { question: 'Private?', options: ['Yes', 'No', 'Maybe'], multiple, anonymous: true },
+  })) as { messageId: string }).messageId;
+
+  it('uses an explicit capable endpoint and rejects privacy typos', async () => {
+    await expectHttps(send(OWNER, { kind: 'poll', poll: { question: 'q', options: ['a', 'b'], anonymous: true } }), 'failed-precondition', 'use-sendPollMessage');
+    await expectHttps(send(OWNER, { kind: 'poll', poll: { question: 'q', options: ['a', 'b'], anonymous: 'true' } }), 'invalid-argument', 'poll-invalid-privacy');
+    await expectHttps(sendPollMessage.run(req(OWNER, { conversationId: G, text: 'hello' })), 'invalid-argument', 'poll-required');
+    const id = await createAnonymous();
+    expect(await pollOf(id)).toMatchObject({ anonymous: true, closed: true, votingClosed: false, votes: {}, voterCount: 0 });
+    expect(await pollOf(await createPoll())).toMatchObject({ anonymous: false });
+  });
+  it('shares only totals; duplicate/stale changes return only the caller’s own selection', async () => {
+    const id = await createAnonymous();
+    await vote(members[0], id, ['o1'], 100);
+    await vote(members[1], id, ['o3'], 100);
+    await vote(members[0], id, ['o2'], 200);
+    const late = await vote(members[0], id, ['o1'], 100);
+    expect(late).toMatchObject({ unchanged: true, stale: true, selection: ['o2'], seq: 200 });
+    expect(late).not.toHaveProperty('votes');
+    expect(await pollOf(id)).toMatchObject({ anonymous: true, closed: true, votingClosed: false, votes: {}, counts: { o1: 0, o2: 1, o3: 1 }, voterCount: 2 });
+    const shared = JSON.stringify(await pollOf(id));
+    for (const uid of members) expect(shared).not.toContain(uid);
+    expect((await db().doc(`conversations/${G}/messages/${id}/pollVoters/${members[0]}`).get()).data()).toMatchObject({ optionIds: ['o2'], seq: 200 });
+    await vote(members[0], id, [], 300);
+    await vote(members[0], id, [], 300);
+    expect(await pollOf(id)).toMatchObject({ votes: {}, counts: { o1: 0, o2: 0, o3: 1 }, voterCount: 1 });
+  });
+  it('counts concurrent anonymous multi-choice ballots and retries once per voter', async () => {
+    const id = await createAnonymous(true);
+    const voters = members.slice(0, 8);
+    const results = await Promise.allSettled(voters.flatMap(uid => [vote(uid, id, ['o1', 'o2'], 100), vote(uid, id, ['o1', 'o2'], 100)]));
+    expect(results.filter(result => result.status === 'rejected')).toHaveLength(0);
+    expect(await pollOf(id)).toMatchObject({ votes: {}, counts: { o1: 8, o2: 8, o3: 0 }, voterCount: 8 });
+    await vote(voters[0], id, ['o2', 'o3'], 200);
+    expect(await pollOf(id)).toMatchObject({ counts: { o1: 7, o2: 8, o3: 1 }, voterCount: 8 });
+  }, 600_000);
+  it('keeps membership, selection and closing gates for anonymous polls', async () => {
+    const id = await createAnonymous();
+    await expectHttps(vote(members[0], id, ['o1', 'o2']), 'invalid-argument', 'poll-single-choice');
+    await expectHttps(vote('outsider', id, ['o1']), 'permission-denied', 'not-a-participant');
+    await vote(members[0], id, ['o1'], 1);
+    await closePoll.run(req(OWNER, { conversationId: G, messageId: id }));
+    await expectHttps(vote(members[0], id, ['o2'], 2), 'failed-precondition', 'poll-closed');
+    expect(await pollOf(id)).toMatchObject({ anonymous: true, closed: true, votingClosed: true, votes: {}, voterCount: 1 });
   });
 });

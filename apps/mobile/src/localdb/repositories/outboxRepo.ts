@@ -5,7 +5,7 @@
 // action twice (or a retry after an ambiguous failure) collapses to one row and
 // can never create a duplicate remote write.
 
-import { getDb } from '../connection';
+import { getDb, type LocalDatabase } from '../connection';
 import { localId } from '../sync/ids';
 import type { OutboxRow, OutboxStatus, OutboxType } from '../types';
 
@@ -20,14 +20,14 @@ export interface EnqueueInput {
 }
 
 /** Enqueue an outbox item. Idempotent on idempotency_key (no-op if present). */
-export async function enqueue(input: EnqueueInput): Promise<OutboxRow> {
-  const existing = await getDb().first<OutboxRow>(
+export async function enqueue(input: EnqueueInput, db: LocalDatabase = getDb()): Promise<OutboxRow> {
+  const existing = await db.first<OutboxRow>(
     `SELECT * FROM outbox WHERE idempotency_key = ?`, [input.idempotencyKey]);
   if (existing) return existing;
 
   const now = Date.now();
   const id = localId('outbox');
-  await getDb().run(
+  await db.run(
     `INSERT INTO outbox
       (id, type, entity_type, entity_id, conversation_id, payload_json, status,
        attempt_count, max_attempts, next_attempt_at, last_error_code, last_error_message,
@@ -39,7 +39,7 @@ export async function enqueue(input: EnqueueInput): Promise<OutboxRow> {
       input.maxAttempts ?? 8, now, now, now, input.idempotencyKey,
     ],
   );
-  return (await getById(id))!;
+  return (await db.first<OutboxRow>('SELECT * FROM outbox WHERE id = ?', [id]))!;
 }
 
 export async function getById(id: string): Promise<OutboxRow | null> {
