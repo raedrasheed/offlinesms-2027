@@ -383,8 +383,28 @@ service cloud.firestore {
         // (editMessage / deleteMessage / reactToMessage / pinMessage)
         // using the Admin SDK. The pre-Phase-6 sender-may-update path
         // is closed at the rules layer; admin escape hatch remains.
-        allow update: if isAdmin();
+        // Poll definitions/privacy and results are changed only by callables.
+        allow update: if isAdmin() && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['poll']);
         allow delete: if isAdmin();
+
+        match /pollVoters/{uid} {
+          function canReadOwnBallot() {
+            let convo = get(/databases/$(database)/documents/conversations/$(convoId)).data;
+            let message = get(/databases/$(database)/documents/conversations/$(convoId)/messages/$(messageId)).data;
+            return isSelf(uid)
+              && request.auth.uid in convo.get('participantUids', convo.get('memberIds', []))
+              && convo.get('status', 'active') != 'disabled'
+              && (convo.get('type', '') != 'group'
+                || get(/databases/$(database)/documents/conversations/$(convoId)/members/$(uid)).data.get('status', 'active') == 'active')
+              && message.get('type', '') == 'poll'
+              && !message.get('deletedForEveryone', false)
+              && message.get('poll', {}).get('anonymous', false) == true;
+          }
+          // Even the poll creator and clients with an admin claim cannot
+          // retrieve another person's ballot or enumerate this collection.
+          allow get: if canReadOwnBallot();
+          allow list, write: if false;
+        }
 
         // Receipts (per recipient).
         //

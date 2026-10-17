@@ -288,17 +288,15 @@ function MessageBubbleImpl({
     Alert.alert('Delete message', undefined, buttons);
   }
 
-  function vote(selection: string[]) {
-    if (context.localFirst) {
-      void queueVotePoll({ conversationId: context.conversationId, messageId: m.id, uid: context.myUid, optionIds: selection })
-        .then(r => {
-          if (!r.ok && r.reason === 'not-initialised') {
-            votePoll(context.conversationId, m.id, selection).catch(e => Alert.alert('Poll', e?.message ?? 'try-again'));
-          }
-        });
-    } else {
-      votePoll(context.conversationId, m.id, selection).catch(e => Alert.alert('Poll', e?.message ?? 'try-again'));
-    }
+  function vote(selection: string[], afterSeq = 0) {
+    const direct = () => votePoll(context.conversationId, m.id, selection, afterSeq, context.myUid);
+    const action = context.localFirst
+      ? queueVotePoll({ conversationId: context.conversationId, messageId: m.id, uid: context.myUid, optionIds: selection }).then(r => {
+        if (!r.ok && r.reason === 'not-initialised') return direct();
+        if (!r.ok) throw new Error(r.reason);
+      })
+      : direct();
+    void action.catch(() => Alert.alert(t('poll.voteErrorTitle'), t('poll.voteError')));
   }
   function confirmClosePoll() {
     Alert.alert(t('poll.endTitle'), t('poll.endBody'), [
@@ -451,6 +449,8 @@ function MessageBubbleImpl({
             me={context.myUid}
             isCreator={mine}
             mine={mine}
+            conversationId={context.conversationId}
+            messageId={m.id}
             onVote={vote}
             onClose={confirmClosePoll}
           />

@@ -16,7 +16,7 @@ import {
   validatePollDraft, POLL_OPTIONS_MAX, POLL_OPTION_MAX, POLL_QUESTION_MAX,
 } from '../../lib/pollModel';
 
-export interface PollDraft { question: string; options: string[]; multiple: boolean }
+export interface PollDraft { question: string; options: string[]; multiple: boolean; anonymous?: boolean }
 
 export function CreatePollSheet({ visible, onClose, onCreate, initial }: {
   visible: boolean;
@@ -31,6 +31,7 @@ export function CreatePollSheet({ visible, onClose, onCreate, initial }: {
   const [question, setQuestion] = useState(initial?.question ?? '');
   const [options, setOptions] = useState<string[]>(initial ? [...initial.options, ''] : ['', '']);
   const [multiple, setMultiple] = useState(initial?.multiple ?? false);
+  const [anonymous, setAnonymous] = useState(initial?.anonymous ?? false);
   const [touched, setTouched] = useState(false);
 
   // RN's Android Modal already uses SOFT_INPUT_ADJUST_RESIZE. A second
@@ -63,14 +64,14 @@ export function CreatePollSheet({ visible, onClose, onCreate, initial }: {
   };
 
   const error = validatePollDraft(question, options);
-  const reset = () => { setQuestion(''); setOptions(['', '']); setMultiple(false); setTouched(false); };
+  const reset = () => { setQuestion(''); setOptions(['', '']); setMultiple(false); setAnonymous(false); setTouched(false); };
   const close = () => { Keyboard.dismiss(); focusedField.current = null; reset(); onClose(); };
   const submit = () => {
     setTouched(true);
     if (error) return;
     Keyboard.dismiss();
     focusedField.current = null;
-    onCreate({ question: question.trim(), options: options.map(o => o.trim()).filter(Boolean), multiple });
+    onCreate({ question: question.trim(), options: options.map(o => o.trim()).filter(Boolean), multiple, anonymous });
     reset();
   };
   const setOption = (i: number, v: string) => setOptions(prev => {
@@ -147,6 +148,14 @@ export function CreatePollSheet({ visible, onClose, onCreate, initial }: {
               </View>
               <Switch value={multiple} onValueChange={setMultiple} accessibilityLabel={t('poll.allowMultiple')} />
             </View>
+            <View style={s.switchRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={[s.switchLabel, { textAlign: align }]}>{t('poll.anonymous')}</Text>
+                <Text style={[s.hint, { textAlign: align }]}>{t(anonymous ? 'poll.anonymousHint' : 'poll.publicHint')}</Text>
+              </View>
+              <Switch value={anonymous} onValueChange={setAnonymous} accessibilityLabel={t('poll.anonymous')} />
+            </View>
+            <Text style={[s.hint, { textAlign: align }]}>{t('poll.privacyFixed')}</Text>
             {touched && error ? <Text style={s.err} accessibilityLiveRegion="polite">{t(`poll.errors.${error}`)}</Text> : null}
           </ScrollView>
         </View>

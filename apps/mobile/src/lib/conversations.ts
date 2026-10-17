@@ -6,7 +6,7 @@
 // migrated yet.
 
 import type { LocationAttachment, ContactAttachment, StructuredAttachment } from '../media/attachmentModel';
-import type { StickerRef, PollData } from './pollModel';
+import { sanitizePoll, type StickerRef, type PollData } from './pollModel';
 import {
   collection, doc, onSnapshot, orderBy, query, where, limit,
   setDoc, serverTimestamp, Timestamp,
@@ -246,7 +246,10 @@ export function subscribeMessages(
   return onSnapshot(
     q,
     snap => {
-      const rows = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Message[];
+      const rows = snap.docs.map(d => {
+        const data = d.data();
+        return { id: d.id, ...data, ...(data.type === 'poll' && data.poll ? { poll: sanitizePoll(data.poll) } : {}) };
+      }) as Message[];
       cb(rows.reverse());
     },
     // Without an error sink a failed query (e.g. a transient rules failure or
@@ -697,9 +700,11 @@ export async function reactToMessage(
 
 /** Vote in a poll (direct callable; the local-first path queues it instead).
  *  `seq` orders this voter's votes so a late retry never overrides a newer one. */
-export async function votePoll(conversationId: string, messageId: string, optionIds: string[]): Promise<void> {
-  await fn<{ conversationId: string; messageId: string; optionIds: string[]; seq: number }, { ok: true }>('votePoll')({
-    conversationId, messageId, optionIds, seq: Date.now(),
+let lastPollVoteSeq = 0;
+export async function votePoll(conversationId: string, messageId: string, optionIds: string[], afterSeq = 0, voterUid = auth.currentUser?.uid): Promise<void> {
+  lastPollVoteSeq = Math.max(Date.now(), lastPollVoteSeq + 1, afterSeq + 1);
+  await fn<{ conversationId: string; messageId: string; optionIds: string[]; seq: number; voterUid?: string }, { ok: true }>('votePoll')({
+    conversationId, messageId, optionIds, seq: lastPollVoteSeq, voterUid,
   });
 }
 
@@ -711,9 +716,10 @@ export async function closePoll(conversationId: string, messageId: string): Prom
 /** Send a sticker or a poll when the local-first path is off (legacy path). */
 export async function sendRichMessage(
   conversationId: string,
-  rich: { kind: 'sticker'; sticker: { packId: string; stickerId: string } } | { kind: 'poll'; poll: { question: string; options: string[]; multiple: boolean } } | StructuredAttachment,
+  rich: { kind: 'sticker'; sticker: { packId: string; stickerId: string } } | { kind: 'poll'; poll: { question: string; options: string[]; multiple: boolean; anonymous?: boolean } } | StructuredAttachment,
 ): Promise<string> {
-  const res = await fn<Record<string, unknown>, { messageId: string }>('sendTextMessage')({ conversationId, ...rich });
+  const endpoint = rich.kind === 'poll' && rich.poll.anonymous ? 'sendPollMessage' : 'sendTextMessage';
+  const res = await fn<Record<string, unknown>, { messageId: string }>(endpoint)({ conversationId, ...rich });
   return res.data.messageId;
 }
 

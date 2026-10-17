@@ -4,22 +4,22 @@
 //   • caller must be a participant (and an ACTIVE member of a group); a
 //     disabled conversation or a blocked direct chat refuses votes;
 //   • single-choice polls accept at most one option; [] retracts the vote;
-//   • one Firestore transaction reads the poll + the caller's server-only voter
-//     doc and rewrites the voter's entry; counts are recomputed from all votes,
-//     so a retried / duplicated request can never be counted twice;
+//   • a transaction updates the caller's private ballot and poll totals; public
+//     polls derive totals from their votes map, anonymous polls use the private
+//     previous selection as a delta and never publish voter identifiers;
 //   • `seq` (client time of the vote, strictly increasing per voter) makes a
 //     late retry of an OLDER vote a no-op instead of overwriting a newer one.
-//   Result: { ok, unchanged?, stale?, counts, voterCount, selection }.
+//   Result: { ok, unchanged?, stale?, counts, voterCount, selection, seq }.
 //
 // closePoll({ conversationId, messageId }) — the poll's creator ends voting.
 //
 // The voter doc lives at conversations/{c}/messages/{m}/pollVoters/{uid}; the
-// rules give clients no access to it (messages' subcollections default-deny).
+// rules allow only its owner to get an anonymous ballot, never to list them.
 
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore, FieldValue, type Transaction } from 'firebase-admin/firestore';
 import { assertDirectNotBlocked } from './blockGuard';
-import { applyVote, normalizeSelection, PollError, type PollDoc } from './pollLogic';
+import { applyVote, applyAnonymousVote, normalizeSelection, PollError, type PollDoc } from './pollLogic';
 
 type Convo = { type?: string; participantUids?: string[]; memberIds?: string[]; status?: string };
 
@@ -52,6 +52,9 @@ export const votePoll = onCall(async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'sign-in-required');
   const data = (request.data ?? {}) as Record<string, unknown>;
+  // Bind queued votes to the account that chose them, including an auth switch
+  // while the callable SDK is obtaining its token. Legacy clients omit this.
+  if (data.voterUid !== undefined && data.voterUid !== uid) throw new HttpsError('permission-denied', 'account-changed');
   const { conversationId, messageId } = ids(data);
   const seq = typeof data.seq === 'number' && Number.isFinite(data.seq) ? data.seq : 0;
 
@@ -76,27 +79,28 @@ export const votePoll = onCall(async (request) => {
     const msg = msgSnap.data() as { type?: string; poll?: PollDoc; deletedForEveryone?: boolean };
     if (msg.type !== 'poll' || !msg.poll || msg.deletedForEveryone) throw new HttpsError('failed-precondition', 'not-a-poll');
     const poll = msg.poll;
-    if (poll.closed) throw new HttpsError('failed-precondition', 'poll-closed');
+    if (poll.anonymous ? poll.votingClosed !== false : poll.closed) throw new HttpsError('failed-precondition', 'poll-closed');
 
     let selection: string[];
     try { selection = normalizeSelection(poll, data.optionIds); }
     catch (e) { throw new HttpsError('invalid-argument', e instanceof PollError ? e.code : 'poll-invalid-selection'); }
 
     const lastSeq = (voterSnap.data()?.seq as number | undefined) ?? -Infinity;
+    const previous = poll.anonymous ? (voterSnap.data()?.optionIds ?? []) as string[] : poll.votes?.[uid] ?? [];
     if (seq > 0 && seq <= lastSeq) {
       // A retry of an older (or the same) vote that already landed: keep the newer one.
-      const current = poll.votes?.[uid] ?? [];
-      return { unchanged: true, stale: seq < lastSeq, poll, selection: current };
+      return { unchanged: true, stale: seq < lastSeq, poll, selection: previous, seq: lastSeq };
     }
-    const next = applyVote(poll, uid, selection);
+    const next = poll.anonymous ? applyAnonymousVote(poll, previous, selection) : applyVote(poll, uid, selection);
     const unchanged = next === poll;
     if (!unchanged) {
       tx.update(msgRef, { poll: next, updatedAt: FieldValue.serverTimestamp() });
     }
-    // A request without seq (older client) never moves the watermark, so it
-    // can't make a later sequenced vote look stale.
-    tx.set(voterRef, { optionIds: selection, seq: seq > 0 ? seq : Math.max(lastSeq, 0), updatedAt: FieldValue.serverTimestamp() });
-    return { unchanged, stale: false, poll: next, selection };
+    // Anonymous ballots need a monotonic watermark even for unsequenced calls
+    // so a delayed reply cannot overwrite a newer private cache entry.
+    const acceptedSeq = seq > 0 ? seq : poll.anonymous ? Math.max(Date.now(), lastSeq + 1) : Math.max(lastSeq, 0);
+    tx.set(voterRef, { optionIds: selection, seq: acceptedSeq, updatedAt: FieldValue.serverTimestamp() });
+    return { unchanged, stale: false, poll: next, selection, seq: acceptedSeq };
   }, { maxAttempts: VOTE_TX_ATTEMPTS });
 
   return {
@@ -104,6 +108,7 @@ export const votePoll = onCall(async (request) => {
     unchanged: result.unchanged,
     stale: result.stale,
     selection: result.selection,
+    seq: result.seq,
     counts: result.poll.counts,
     voterCount: result.poll.voterCount,
   };
@@ -123,8 +128,9 @@ export const closePoll = onCall(async (request) => {
     const msg = snap.data() as { type?: string; poll?: PollDoc; senderUid?: string; senderId?: string };
     if (msg.type !== 'poll' || !msg.poll) throw new HttpsError('failed-precondition', 'not-a-poll');
     if ((msg.senderUid ?? msg.senderId) !== uid) throw new HttpsError('permission-denied', 'only-creator-can-close');
-    if (msg.poll.closed) return;
-    tx.update(msgRef, { 'poll.closed': true, 'poll.closedAt': FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
+    if (msg.poll.anonymous ? msg.poll.votingClosed !== false : msg.poll.closed) return;
+    tx.update(msgRef, { 'poll.closed': true, ...(msg.poll.anonymous ? { 'poll.votingClosed': true } : {}),
+      'poll.closedAt': FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
   });
   return { ok: true };
 });

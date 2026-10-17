@@ -16,7 +16,7 @@ import * as outboxRepo from './repositories/outboxRepo';
 import * as externalMembersRepo from './repositories/externalMembersRepo';
 import { getDeviceId, getCursor, setCursor, getState, setState } from './repositories/syncStateRepo';
 import { idempotencyKey, localId } from './sync/ids';
-import { sanitizePoll, parsePoll, applyLocalVote } from '../lib/pollModel';
+import { sanitizePoll } from '../lib/pollModel';
 import { toggleReaction } from './sync/reactionLogic';
 import { phoneDigits } from '../lib/phone';
 import { isOnline, onConnectivityChange } from './sync/networkState';
@@ -25,6 +25,7 @@ import { auth } from '../lib/firebase';
 import { createNotificationTargets } from './sync/notificationTarget';
 import type { MessageRow } from './types';
 import { enqueuePollClose } from './pollClose';
+import { enqueuePollVote } from './pollVote';
 import { retryQueuedSend } from './retrySend';
 import { emitLocalMessagesChanged, onLocalMessagesChanged } from './messageChanges';
 
@@ -116,7 +117,7 @@ export interface QueueSendInput {
   location?: LocationAttachment;
   contact?: ContactAttachment;
   sticker?: { packId: string; stickerId: string; alt: string } | null;
-  poll?: { question: string; options: string[]; multiple: boolean } | null;
+  poll?: { question: string; options: string[]; multiple: boolean; anonymous?: boolean } | null;
 }
 
 function kindPayload(input: QueueSendInput): { text: string; payloadJson: string | null } {
@@ -131,7 +132,7 @@ function kindPayload(input: QueueSendInput): { text: string; payloadJson: string
     const question = input.poll.question.replace(/\s+/g, ' ').trim();
     return {
       text: `📊 ${question}`,
-      payloadJson: JSON.stringify(sanitizePoll({ question, options, multiple: input.poll.multiple, closed: false, votes: {} })),
+      payloadJson: JSON.stringify(sanitizePoll({ question, options, multiple: input.poll.multiple, anonymous: input.poll.anonymous === true, closed: false, votes: {} })),
     };
   }
   return { text: input.text, payloadJson: null };
@@ -192,31 +193,11 @@ export async function queueSendMessage(input: QueueSendInput): Promise<MessageRo
   return row;
 }
 
-let lastVoteSeq = 0;
-
-/**
- * Vote in a poll: optimistic local tally + an outbox item. Each vote carries a
- * strictly increasing `seq`, so the server ignores a late retry of an older
- * vote; retries of the same vote are no-ops server-side (no double counting).
- */
-export async function queueVotePoll(args: { conversationId: string; messageId: string; uid: string; optionIds: string[] }): Promise<ActionResult> {
-  if (!getCurrentUid()) return { ok: false, reason: 'not-initialised' };
-  const msg = await messagesRepo.getByRemoteId(args.messageId);
-  if (!msg) return { ok: false, reason: 'not-delivered' };
-  const poll = parsePoll(msg.payload_json);
-  if (!poll || poll.closed) return { ok: false, reason: 'not-a-poll' };
-  await messagesRepo.setPayload(args.messageId, JSON.stringify(applyLocalVote(poll, args.uid, args.optionIds)));
-  const seq = lastVoteSeq = Math.max(Date.now(), lastVoteSeq + 1);
-  const deviceId = await getDeviceId();
-  await outboxRepo.enqueue({
-    type: 'vote_poll', entityType: 'message', entityId: args.messageId,
-    conversationId: args.conversationId,
-    idempotencyKey: idempotencyKey(['vote', deviceId, args.messageId, String(seq)]),
-    payload: { conversationId: args.conversationId, messageId: args.messageId, optionIds: args.optionIds, seq },
-  });
-  emitLocalMessagesChanged(args.conversationId);
-  kick('outbox');
-  return { ok: true };
+/** Queue an ordered, durable vote; anonymous choices never enter the message. */
+export async function queueVotePoll(args: { conversationId: string; messageId: string; uid: string; optionIds: string[] }) {
+  const result = await enqueuePollVote(args);
+  if (result.ok) kick('outbox');
+  return result;
 }
 
 /** Queue closing even offline, and deliver it after reconnect. */
