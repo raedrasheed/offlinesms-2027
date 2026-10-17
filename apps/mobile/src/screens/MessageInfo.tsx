@@ -86,7 +86,9 @@ export default function MessageInfo({ route, navigation }: any) {
   }, [id, messageId]);
 
   const a = info?.aggregates ?? { deliveredCount: 0, readCount: 0, viewedCount: 0, playedCount: 0, failedCount: 0, pendingCount: 0 };
-  const readTotal = a.readCount + a.viewedCount + a.playedCount;
+  // The server's viewedCount already includes read receipts. Played receipts
+  // are separate, so these two counts cover each read/viewed/played recipient once.
+  const readTotal = a.viewedCount + a.playedCount;
 
   const counts = useMemo(() => {
     const recs = info?.recipients ?? [];
