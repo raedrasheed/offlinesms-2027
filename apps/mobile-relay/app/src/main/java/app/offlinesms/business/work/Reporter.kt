@@ -32,7 +32,10 @@ object Reporter {
     ) {
         val app = context.applicationContext
         ReportStore(RelayDb.get(app)).record(jobId, attempt, status, reason, resultCode, noResend)
-        RelayLog.info(app, status, "job=$jobId attempt=${attempt ?: "?"}")
+        val safeReason = reason?.takeIf { it.matches(Regex("[a-z-]{1,60}")) }
+        val detail = "job=$jobId attempt=${attempt ?: "?"}" +
+            (safeReason?.let { " reason=$it" } ?: "") + (resultCode?.let { " result=$it" } ?: "")
+        if (status == "failed") RelayLog.error(app, status, detail) else RelayLog.info(app, status, detail)
         kickFlush(app)
     }
 
