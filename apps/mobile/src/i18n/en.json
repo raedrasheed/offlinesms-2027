@@ -758,6 +758,9 @@
     "newChat": "New chat",
     "newGroup": "New group",
     "newCommunity": "New community",
-    "comingSoon": "Coming soon."
+    "comingSoon": "Coming soon.",
+    "mapPreviewUnavailable": "Map preview unavailable. Tap to open the location.",
+    "queued": "Queued — sends when online",
+    "sending": "Sending…"
   }
 }
