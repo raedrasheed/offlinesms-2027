@@ -29,6 +29,7 @@ import { EmojiReactionPicker } from './chat/EmojiReactionPicker';
 import { ImageMessageBubble } from './chat/ImageMessageBubble';
 import { VideoMessageBubble } from './chat/VideoMessageBubble';
 import { AttachmentMessageBubble } from './chat/AttachmentMessageBubble';
+import { ATTACHMENT_SENT, ATTACHMENT_READ } from './chat/attachmentCardStyles';
 import { VoiceMessageBubble } from './chat/VoiceMessageBubble';
 import { AnimatedEmoji3D } from './chat/AnimatedEmoji3D';
 import { StickerBubble } from './chat/StickerBubble';
@@ -96,6 +97,8 @@ export type MessageBubbleProps = {
   // Offline-first: locally queued outgoing message not yet on the server.
   pending?:   'queued' | 'syncing' | 'failed';
   onRetry?:   (message: Message) => void;
+  /** Only visible map cards may request map tiles. */
+  locationVisible?: boolean;
 };
 
 function createdAtMillis(value: any): number {
@@ -112,7 +115,7 @@ function formatTime(value: any): string {
 
 function MessageBubbleImpl({
   message: m, context, showSender, onReply, onEditStart, onForward, onJumpTo, onInfo, onSendViaSms,
-  onOpenImage, onRetryMedia, onPlayedVoice, onAvatarPress, onMentionPress, onOpenContact, pending, onRetry,
+  onOpenImage, onRetryMedia, onPlayedVoice, onAvatarPress, onMentionPress, onOpenContact, pending, onRetry, locationVisible=false,
 }: MessageBubbleProps) {
   const { t } = useTranslation();
   const mine    = context.isMyMessage;
@@ -120,6 +123,8 @@ function MessageBubbleImpl({
   // Photos and videos use the same card and overlay receipts when captionless.
   const mediaMessage = !deleted && (m.type === 'image' || m.type === 'video');
   const mediaOverlayFooter = mediaMessage && !m.caption?.trim();
+  const locationCard = !deleted && m.type==='location' && !!m.location;
+  const attachmentCard = !deleted && (locationCard || m.type==='file' || m.type==='contact' && !!m.contact?.uid);
   // Sender avatar/name. Prefer the resolved member profile (kept in sync with
   // the live user photo) over the per-message snapshot: the snapshot is frozen
   // at send time and goes stale once the sender changes their picture, leaving
@@ -172,7 +177,7 @@ function MessageBubbleImpl({
       : (mine ? { color: TG_GREEN } : undefined);
   const receiptTone: ReceiptTone = transparentBubble ? 'white' : mediaMessage ? 'ink' : 'green';
 
-  if (pending) {
+  if (pending && !attachmentCard) {
     // Same row/column wrappers as a normal sent bubble so it hugs its content,
     // caps at 80% width, and right-aligns — instead of stretching full width.
     return (
@@ -308,6 +313,17 @@ function MessageBubbleImpl({
   }
 
   const close = () => setSheetOpen(false);
+  const attachmentFooter=attachmentCard ? <>
+    {context.isStarred?<Text style={s.star}>★</Text>:null}
+    {context.isPinned?<Text style={s.foot}>📌</Text>:null}
+    <Text style={[s.attachmentTime,locationCard && {color:'#fff'}]}>{timeText}</Text>
+    {pending?<Pressable accessibilityRole={pending==='failed'?'button':undefined}
+      accessibilityLabel={t(pending==='failed'?'media.retryUpload':pending==='queued'?'attachments.queued':'attachments.sending')}
+      onPress={pending==='failed'?event=>{event.stopPropagation();onRetry?.(m);}:undefined} hitSlop={8}>
+      <Ionicons name={pending==='failed'?'alert-circle':pending==='syncing'?'sync-outline':'time-outline'} size={13}
+        color={pending==='failed'?colors.err:locationCard?'#fff':'#86988D'}/>
+    </Pressable>:mine?<ReceiptIndicator message={m} isGroup={context.isGroup} memberCount={context.memberCount} tone={locationCard?'map':'reference'}/>:null}
+  </>:null;
   const sheetActions: SheetAction[] = deleted
     ? [
         { key: 'info',  label: 'Message info',  icon: 'information-circle-outline', highlighted: true, onPress: () => { close(); onInfo(m); } },
@@ -355,26 +371,28 @@ function MessageBubbleImpl({
         )
       ) : null}
 
-      <View style={[s.col, mine ? s.colMine : s.colTheirs]}>
+      <View style={[s.col, attachmentCard && s.colAttachment, mine ? s.colMine : s.colTheirs]}>
       <Pressable
-        onLongPress={() => setSheetOpen(true)}
+        onLongPress={pending?undefined:() => setSheetOpen(true)}
         delayLongPress={300}
         style={[
           s.bubble,
           transparentBubble ? s.bubbleEmoji : mediaMessage ? s.bubbleMedia : mine ? s.sent : s.recv,
+          attachmentCard && s.bubbleAttachment,
+          attachmentCard && mine && {backgroundColor:ATTACHMENT_SENT},
         ]}
       >
         {showSender ? (
-          <Text style={[s.senderLabel, { color: avatarColor(m.senderUid) }]} numberOfLines={1}>
+          <Text style={[s.senderLabel,attachmentCard && s.attachmentInset, { color: avatarColor(m.senderUid) }]} numberOfLines={1}>
             {senderName}
           </Text>
         ) : null}
-        {m.forwarded ? <Text style={s.meta}>↪︎ Forwarded</Text> : null}
+        {m.forwarded ? <Text style={[s.meta,attachmentCard && s.attachmentInset]}>↪︎ Forwarded</Text> : null}
 
         {m.replyTo ? (
           <Pressable
             onPress={() => onJumpTo(m.replyTo!.messageId)}
-            style={[s.replyPreview, mine && !mediaMessage && s.replyPreviewMine]}
+            style={[s.replyPreview, mine && !mediaMessage && s.replyPreviewMine,attachmentCard && s.attachmentInset]}
           >
             <Text style={[s.replyName, mine && !mediaMessage && s.replyNameMine]} numberOfLines={1}>
               {replyAuthor}
@@ -414,7 +432,8 @@ function MessageBubbleImpl({
             onRetry={() => onRetryMedia?.(m)}
           />
         ) : !deleted && ['file','audio','location','contact'].includes(m.type) ? (
-          <AttachmentMessageBubble message={m} mine={mine} myUid={context.myUid} onOpenContact={onOpenContact} onRetry={() => onRetryMedia?.(m)} onLongPress={() => setSheetOpen(true)}/>
+          <AttachmentMessageBubble message={m} mine={mine} myUid={context.myUid} onOpenContact={onOpenContact} onRetry={() => onRetryMedia?.(m)}
+            onLongPress={pending?undefined:() => setSheetOpen(true)} footer={attachmentFooter} locationVisible={locationVisible}/>
         ) : stickerMessage ? (
           <Pressable
             onLongPress={() => setSheetOpen(true)}
@@ -461,7 +480,7 @@ function MessageBubbleImpl({
           </View>
         )}
 
-        {mediaOverlayFooter ? null : (
+        {mediaOverlayFooter || attachmentCard ? null : (
           <View style={[s.bubbleFooter, transparentBubble && s.bubbleFooterEmoji]}>
             {m.editedAt ? <Text style={[s.foot, footColor]}>edited</Text> : null}
             {context.isStarred ? <Text style={s.star}>★</Text> : null}
@@ -524,18 +543,19 @@ function MessageBubbleImpl({
  * Small groups (< 20): eye + "Seen by N"
  * Larger groups: ✓✓ delivered count · eye read count
  */
-type ReceiptTone = 'green' | 'ink' | 'white';
+type ReceiptTone = 'green' | 'ink' | 'white' | 'reference' | 'map';
 
 function ReceiptIndicator({ message, isGroup, memberCount, tone = 'green' }: { message: Message; isGroup: boolean; memberCount?: number; tone?: ReceiptTone }) {
   const delivered = message.deliveredCount ?? 0;
   const read      = message.readCount ?? 0;
   // green → Telegram-style on the light-green sent bubble; ink → on the gray
   // media card; white → inside the translucent pill over the wallpaper.
-  const fg = tone === 'green' ? TG_GREEN : tone === 'ink' ? colors.ink500 : 'rgba(255,255,255,.95)';
+  const reference=tone==='reference' || tone==='map';
+  const fg = reference ? ATTACHMENT_READ : tone === 'green' ? TG_GREEN : tone === 'ink' ? colors.ink500 : 'rgba(255,255,255,.95)';
   // Read vs delivered: read keeps the strong accent, delivered drops to a
   // muted tint of the same tone (both bubbles are light now, so color — not
   // glyph count — still carries the distinction at a glance).
-  const fgMuted = tone === 'green' ? '#9CC78F' : tone === 'ink' ? colors.ink400 : 'rgba(255,255,255,.6)';
+  const fgMuted = tone==='reference'?'#8A9C92':tone==='map'?'rgba(255,255,255,.8)':tone === 'green' ? '#9CC78F' : tone === 'ink' ? colors.ink400 : 'rgba(255,255,255,.6)';
 
   if (isGroup) {
     if (memberCount && memberCount < SMALL_GROUP_MAX) {
@@ -555,6 +575,7 @@ function ReceiptIndicator({ message, isGroup, memberCount, tone = 'green' }: { m
       </View>
     );
   }
+  if(reference)return <Ionicons name={read>0 || delivered>0?'checkmark-done':'checkmark'} size={15} color={read>0?fg:fgMuted}/>;
   if (read > 0)      return <Text style={[s.tick, { color: fg }]}>✓✓</Text>;
   if (delivered > 0) return <Text style={[s.tick, { color: fgMuted }]}>✓✓</Text>;
   return <Text style={[s.tick, { color: fgMuted }]}>✓</Text>;
@@ -565,6 +586,7 @@ const s = StyleSheet.create({
   rowMine:        { justifyContent: 'flex-end' },
   rowTheirs:      { justifyContent: 'flex-start' },
   col:            { maxWidth: '80%' },
+  colAttachment:  { maxWidth: '86%' },
   colMine:        { alignItems: 'flex-end' },
   colTheirs:      { alignItems: 'flex-start' },
   avatar:         { width: 30, height: 30, borderRadius: 15, marginRight: 6, marginTop: 2, alignItems: 'center', justifyContent: 'center' },
@@ -579,6 +601,9 @@ const s = StyleSheet.create({
   // Image/video card: light-gray fill + thin border, tight padding so the
   // frame reads as a slim mat around the media.
   bubbleMedia:    { backgroundColor: colors.ink100, borderWidth: 1, borderColor: colors.ink200, paddingHorizontal: 4, paddingVertical: 4 },
+  bubbleAttachment:{paddingHorizontal:0,paddingVertical:0,borderRadius:7,shadowOpacity:0.06,elevation:1},
+  attachmentInset:{marginHorizontal:10,marginTop:6},
+  attachmentTime:{fontSize:11,color:'#667B70'},
   // Emoji message: no bubble chrome at all — the 3D emoji sits on the wallpaper
   // and its time/ticks live in a translucent pill (Telegram sticker style).
   bubbleEmoji:    { backgroundColor: 'transparent', paddingHorizontal: 0, paddingVertical: 0, shadowOpacity: 0, elevation: 0 },
@@ -615,6 +640,7 @@ const s = StyleSheet.create({
 function areBubblePropsEqual(prev: MessageBubbleProps, next: MessageBubbleProps): boolean {
   if (prev.showSender !== next.showSender) return false;
   if (prev.pending    !== next.pending)    return false;
+  if (prev.locationVisible !== next.locationVisible) return false;
 
   // Callbacks (parent stabilises them).
   if (prev.onReply       !== next.onReply)       return false;
@@ -638,6 +664,7 @@ function areBubblePropsEqual(prev: MessageBubbleProps, next: MessageBubbleProps)
     if ((a as any).caption !== (b as any).caption) return false;
     if (a.type !== b.type) return false;
     if (a.deletedForEveryone !== b.deletedForEveryone) return false;
+    if (a.deliveredCount !== b.deliveredCount || a.readCount !== b.readCount) return false;
     if ((a as any).updatedAt !== (b as any).updatedAt) return false;
     if ((a as any).editedAt !== (b as any).editedAt) return false;
     if ((a as any).status !== (b as any).status) return false;

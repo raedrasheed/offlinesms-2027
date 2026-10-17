@@ -2,11 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 
-const mocks = vi.hoisted(() => ({ load: vi.fn(), alert: vi.fn(), nativePicker: vi.fn(), permission: vi.fn(), openChat:vi.fn() }));
+const mocks = vi.hoisted(() => ({ load: vi.fn(), alert: vi.fn(), nativePicker: vi.fn(), permission: vi.fn(), openChat:vi.fn(),profiles:{} as Record<string,any> }));
 vi.mock('react-native', () => ({
   Modal:'Modal',View:'View',Text:'Text',TextInput:'TextInput',Pressable:'Pressable',FlatList:'FlatList',
   ScrollView:'ScrollView',KeyboardAvoidingView:'KeyboardAvoidingView',Image:'Image',ActivityIndicator:'ActivityIndicator',
-  Alert:{alert:mocks.alert},Linking:{openSettings:vi.fn()},Platform:{OS:'android'},StyleSheet:{create:(v:unknown)=>v},
+  Alert:{alert:mocks.alert},Linking:{openSettings:vi.fn()},Platform:{OS:'android'},StyleSheet:{create:(v:unknown)=>v,hairlineWidth:1},useWindowDimensions:()=>({width:424,height:800}),
 }));
 vi.mock('@expo/vector-icons', () => ({Ionicons:'Icon'}));
 vi.mock('expo-av', () => ({Video:'Video',ResizeMode:{CONTAIN:'contain'}}));
@@ -19,6 +19,7 @@ vi.mock('react-i18next', () => ({useTranslation:()=>({t:(key:string)=>key})}));
 vi.mock('react-native-safe-area-context', () => ({useSafeAreaInsets:()=>({top:24,bottom:20})}));
 vi.mock('../src/lib/appContacts', () => ({loadAppContacts:mocks.load,mergeAppContacts:(_:unknown,rows:unknown)=>rows,contactSearchErrorKey:()=> 'attachments.contactServiceUnavailable'}));
 vi.mock('../src/lib/conversations',()=>({getOrCreateDirectConversation:mocks.openChat}));
+vi.mock('../src/lib/userProfiles',()=>({useUserProfiles:()=>mocks.profiles}));
 
 import { AttachmentComposer } from '../src/components/chat/AttachmentComposer';
 import { AppContactPicker } from '../src/components/chat/AppContactPicker';
@@ -36,6 +37,7 @@ beforeEach(()=>{
   vi.clearAllMocks();vi.useFakeTimers();vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);
   mocks.load.mockResolvedValue({contacts:[contact],page});
   mocks.openChat.mockResolvedValue('direct-chat');
+  mocks.profiles={};
 });
 afterEach(async()=>{
   if(renderer) await act(async()=>renderer.unmount());
@@ -43,6 +45,16 @@ afterEach(async()=>{
 });
 
 describe('in-app contact sharing',()=>{
+  it('uses the current shared-account photo, falls back on image errors and retries a changed photo',async()=>{
+    mocks.profiles[contact.uid]={displayName:'Updated name',photoURL:'https://example.test/first.jpg'};
+    await act(async()=>{renderer=create(createElement(AppContactCard,{contact,myUid:'me',onOpen:vi.fn()}));});
+    expect(nodes('Image')[0].props.source.uri).toBe('https://example.test/first.jpg');
+    expect(JSON.stringify(renderer.toJSON())).toContain('Updated name');
+    await act(async()=>nodes('Image')[0].props.onError());expect(nodes('Image')).toHaveLength(0);
+    mocks.profiles[contact.uid].photoURL='https://example.test/new.jpg';
+    await act(async()=>renderer.update(createElement(AppContactCard,{contact,myUid:'me',onOpen:vi.fn()})));
+    expect(nodes('Image')[0].props.source.uri).toBe('https://example.test/new.jpg');
+  });
   it.each([NewChat,NewChatMenu])('shows account contacts before typing in %s and uses the same partial-name search',async Screen=>{
     const navigation={replace:vi.fn(),navigate:vi.fn(),goBack:vi.fn()};
     await act(async()=>{renderer=create(createElement(Screen,{navigation}));});

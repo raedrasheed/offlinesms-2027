@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useIsFocused } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
@@ -125,6 +126,8 @@ function daySeparatorLabel(ms: number, t: (k: string, d?: string) => string): st
 }
 
 export default function Conversation({ route, navigation }: any) {
+  const screenFocused=useIsFocused();
+  const [visibleLocationIds,setVisibleLocationIds]=useState<Set<string>>(()=>new Set());
   const { t } = useTranslation();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
@@ -912,6 +915,8 @@ export default function Conversation({ route, navigation }: any) {
   const onViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: Array<{ item: any; isViewable: boolean }> }) => {
     const ctx = viewContext.current;
     const visible = viewableItems.filter(v => v.isViewable).map(v => v.item);
+    const locations=new Set<string>(visible.filter(m=>m.type==='location' && !m.deletedForEveryone).map(m=>m.id));
+    setVisibleLocationIds(previous=>previous.size===locations.size && [...locations].every(id=>previous.has(id))?previous:locations);
     visibleMediaIdsRef.current = new Set(visible.map(m => m.id));
     perfObserve(visible.map(m => m.id), 'viewable');
     prefetchMedia(visible);
@@ -1115,6 +1120,7 @@ export default function Conversation({ route, navigation }: any) {
             <MessageBubble
               message={item}
               pending={sendState}
+              locationVisible={screenFocused && visibleLocationIds.has(item.id)}
               onRetry={retrySend}
               showSender={showSender}
               context={{

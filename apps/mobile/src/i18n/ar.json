@@ -767,6 +767,9 @@
     "newChat": "محادثة جديدة",
     "newGroup": "مجموعة جديدة",
     "newCommunity": "مجتمع جديد",
-    "comingSoon": "قريبًا."
+    "comingSoon": "قريبًا.",
+    "mapPreviewUnavailable": "تعذّر عرض الخريطة. اضغط لفتح الموقع.",
+    "queued": "في الانتظار — تُرسل عند الاتصال",
+    "sending": "جارٍ الإرسال…"
   }
 }
