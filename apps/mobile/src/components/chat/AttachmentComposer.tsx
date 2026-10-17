@@ -1,6 +1,5 @@
 import { useState } from 'react';
-import { Modal, View, Text, TextInput, Pressable, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, Image, Alert, ActivityIndicator, Linking } from 'react-native';
-import { Video, ResizeMode } from 'expo-av';
+import { Modal, View, Text, TextInput, Pressable, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, Alert, ActivityIndicator, Linking } from 'react-native';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
@@ -8,6 +7,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../../theme';
 import { attachmentLimit, parseContact, parseLocation, type ContactAttachment, type LocationAttachment } from '../../media/attachmentModel';
 import { AppContactPicker } from './AppContactPicker';
+import { AttachmentMediaPreview } from './AttachmentMediaPreview';
+import type { MediaDimensions } from '../../media/mediaDimensions';
 
 export type AttachmentDraft =
   | { kind: 'location'; location?: LocationAttachment }
@@ -23,6 +24,7 @@ export function AttachmentComposer({ draft, onClose, onSend }: {
   const [busy, setBusy] = useState(false);
   const [locating, setLocating] = useState(false);
   const [caption, setCaption] = useState('');
+  const [dimensions, setDimensions] = useState<MediaDimensions | null>(null);
   const [selectedContact, setSelectedContact] = useState<ContactAttachment | undefined>(draft.kind === 'contact' ? draft.contact : undefined);
   const [latitude, setLatitude] = useState(draft.kind === 'location' && draft.location ? String(draft.location.latitude) : '');
   const [longitude, setLongitude] = useState(draft.kind === 'location' && draft.location ? String(draft.location.longitude) : '');
@@ -63,7 +65,7 @@ export function AttachmentComposer({ draft, onClose, onSend }: {
       value={kind:'location',location};
     } else {
       if (draft.sizeBytes <= 0 || draft.sizeBytes > attachmentLimit(draft.mediaType)) {Alert.alert(t('attachments.invalidFile'));return;}
-      value={...draft,caption:caption.trim()};
+      value={...draft,...dimensions,caption:caption.trim()};
     }
     setBusy(true);
     try {await onSend(value);onClose();} catch {Alert.alert(t('media.uploadFailed'),t('attachments.sendError'));setBusy(false);}
@@ -79,8 +81,8 @@ export function AttachmentComposer({ draft, onClose, onSend }: {
       </View>
       {draft.kind === 'contact' && !selectedContact ? <AppContactPicker onPick={setSelectedContact}/> : <ScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
         {draft.kind === 'binary' ? <>
-          {draft.mediaType === 'image' ? <Image source={{uri:draft.uri}} style={s.media} resizeMode="contain"/> : draft.mediaType === 'video' ?
-            <Video source={{uri:draft.uri}} style={s.media} useNativeControls resizeMode={ResizeMode.CONTAIN} shouldPlay={false}/> :
+          {draft.mediaType === 'image' || draft.mediaType === 'video' ?
+            <AttachmentMediaPreview key={draft.uri} uri={draft.uri} type={draft.mediaType} width={draft.width} height={draft.height} onDimensions={setDimensions}/> :
             <Ionicons name={draft.mediaType === 'audio' ? 'musical-notes' : 'document-text'} size={70} color={colors.primary}/>}
           <Text style={s.title}>{draft.fileName}</Text>
           <Text style={s.note}>{(draft.sizeBytes / 1024 / 1024).toFixed(2)} MB · {t('attachments.limit',{size:attachmentLimit(draft.mediaType)/1024/1024})}</Text>
@@ -109,4 +111,4 @@ export function AttachmentComposer({ draft, onClose, onSend }: {
     </KeyboardAvoidingView>
   </Modal>;
 }
-const s=StyleSheet.create({root:{flex:1,backgroundColor:'#fff'},header:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',padding:18,borderBottomWidth:1,borderColor:colors.ink100},title:{fontSize:17,fontWeight:'700',color:colors.ink},content:{padding:22,gap:16},media:{width:'100%',height:260,backgroundColor:colors.ink100,borderRadius:12},note:{fontSize:14,color:colors.ink500,lineHeight:22},input:{borderWidth:1,borderColor:colors.ink200,borderRadius:12,padding:13,fontSize:16,color:colors.ink,minHeight:50,textAlign:'auto'},secondary:{padding:15,borderRadius:12,backgroundColor:colors.primaryLight,alignItems:'center'},actionText:{color:colors.primary,fontWeight:'700'},send:{marginHorizontal:20,padding:16,borderRadius:14,backgroundColor:colors.primary,alignItems:'center'},sendText:{color:'#fff',fontSize:16,fontWeight:'700'}});
+const s=StyleSheet.create({root:{flex:1,backgroundColor:'#fff'},header:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',padding:18,borderBottomWidth:1,borderColor:colors.ink100},title:{fontSize:17,fontWeight:'700',color:colors.ink},content:{padding:22,gap:16},note:{fontSize:14,color:colors.ink500,lineHeight:22},input:{borderWidth:1,borderColor:colors.ink200,borderRadius:12,padding:13,fontSize:16,color:colors.ink,minHeight:50,textAlign:'auto'},secondary:{padding:15,borderRadius:12,backgroundColor:colors.primaryLight,alignItems:'center'},actionText:{color:colors.primary,fontWeight:'700'},send:{marginHorizontal:20,padding:16,borderRadius:14,backgroundColor:colors.primary,alignItems:'center'},sendText:{color:'#fff',fontSize:16,fontWeight:'700'}});
