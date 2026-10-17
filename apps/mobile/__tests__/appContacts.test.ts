@@ -3,7 +3,7 @@ const mocks=vi.hoisted(()=>({call:vi.fn()}));
 vi.mock('firebase/functions',()=>({getFunctions:vi.fn(),httpsCallable:()=>mocks.call}));
 vi.mock('../src/lib/firebase',()=>({app:{}}));
 import {loadAppContacts,contactSearchErrorKey,mergeAppContacts} from '../src/lib/appContacts';
-beforeEach(()=>vi.clearAllMocks());
+beforeEach(()=>{vi.clearAllMocks();});
 describe('app contact client',()=>{
   const contact={uid:'target',name:'Raed',username:'raed',phones:[],emails:[]};
   it('preserves the entered substring, forwards continuation and only accepts public account cards',async()=>{
