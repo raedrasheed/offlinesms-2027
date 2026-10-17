@@ -11,15 +11,18 @@ export function checkAndroidBackManifestDump(dump) {
   for (const line of dump.split(/\r?\n/)) {
     const tag = line.match(/^\s*E: ([\w-]+)/);
     if (tag) { element = { tag: tag[1], attrs: {} }; elements.push(element); }
-    const attr = line.match(/^\s*A: android:(\w+)(?:\([^)]*\))?=(.*)$/);
+    // AAPT2 uses the namespace URI; legacy AAPT uses the android alias.
+    const attr = line.match(/^\s*A: (?:android|http:\/\/schemas\.android\.com\/apk\/res\/android):(\w+)(?:\([^)]*\))?=(.*)$/);
     if (element && attr) element.attrs[attr[1]] = attr[2].trim();
   }
-  const isFalse = value => /^\(type 0x12\)\s*0x0+$/i.test(value ?? '');
+  // AAPT2 PrettyPrint emits unquoted false; legacy dumps expose TYPE_INT_BOOLEAN.
+  // Only the compiled value counts, never the optional raw-source annotation.
+  const isFalse = value => /^(?:false|\(type 0x12\)\s*0x0+)$/i.test((value ?? '').replace(/\s+\(Raw: ".*"\)$/, ''));
   const applications = elements.filter(e => e.tag === 'application');
   if (applications.length !== 1 || !isFalse(applications[0].attrs.enableOnBackInvokedCallback)) {
-    throw Error('Android Back: application must explicitly set enableOnBackInvokedCallback=false for RN 0.79');
+    throw Error(`Android Back: application must explicitly set enableOnBackInvokedCallback=false for RN 0.79 (found ${applications[0]?.attrs.enableOnBackInvokedCallback ?? 'missing'})`);
   }
-  const main = elements.find(e => e.tag === 'activity' && /"(?:[\w.]*\.)?MainActivity"/.test(e.attrs.name ?? ''));
+  const main = elements.find(e => e.tag === 'activity' && /^(?:[\w.]*\.)?MainActivity$/.test(e.attrs.name?.match(/^"([^"]+)"/)?.[1] ?? ''));
   if (!main) throw Error('Android Back: MainActivity is missing from the APK');
   const override = main.attrs.enableOnBackInvokedCallback;
   if (override !== undefined && !isFalse(override)) throw Error('Android Back: MainActivity overrides the compatibility setting');
