@@ -1,7 +1,6 @@
 import { StyleSheet } from 'react-native';
 
 export const ATTACHMENT_SENT = '#D9FDD3';
-export const ATTACHMENT_READ = '#34B7F1';
 export function attachmentCardWidth(windowWidth: number, map = false): number {
   return Math.max(120, Math.min(map ? 274 : 336, (windowWidth - 24) * 0.86, windowWidth - 70));
 }

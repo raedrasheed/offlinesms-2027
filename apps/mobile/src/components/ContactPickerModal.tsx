@@ -1,3 +1,4 @@
+import {CheckmarkIcon} from './CheckmarkIcon';
 // ContactPickerModal — pick a phone number from the device's address book.
 //
 // Permission-gated via `request('contacts')`. Only the rows the user actually
@@ -164,7 +165,7 @@ export function ContactPickerModal({ visible, defaultCountry, onClose, onPick, m
                     </View>
                     {multi ? (
                       <View style={[s.check, isSelected && s.checkOn]}>
-                        {isSelected ? <Text style={s.checkMark}>✓</Text> : null}
+                        {isSelected ? <CheckmarkIcon color="#FFFFFF" size={15}/> : null}
                       </View>
                     ) : null}
                   </Pressable>
@@ -195,7 +196,6 @@ const s = StyleSheet.create({
   phone:   { fontSize: 12, color: colors.ink500, marginTop: 2 },
   check:   { width: 22, height: 22, borderRadius: 11, borderWidth: 1.5, borderColor: colors.ink200, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff' },
   checkOn: { backgroundColor: colors.primary, borderColor: colors.primary },
-  checkMark: { color: '#fff', fontWeight: '900', fontSize: 13, lineHeight: 13 },
   doneBtn: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: radius.pill, backgroundColor: colors.primary },
   doneText: { color: '#fff', fontWeight: '800', fontSize: 13 },
 });

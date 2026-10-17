@@ -1,3 +1,4 @@
+import {CheckmarkIcon} from '../components/CheckmarkIcon';
 // OfflineSMS escalation flow.
 //
 // One screen with five internal steps:
@@ -427,7 +428,7 @@ function ConfirmStep({
       ) : null}
 
       <Pressable style={s.confirmRow} onPress={() => setConfirmed(!confirmed)}>
-        <View style={[s.checkbox, confirmed && s.checkboxOn]}>{confirmed ? <Text style={s.checkmark}>✓</Text> : null}</View>
+        <View style={[s.checkbox, confirmed && s.checkboxOn]}>{confirmed ? <CheckmarkIcon color="#FFFFFF" size={15}/> : null}</View>
         <Text style={s.confirmText}>I confirm these recipients may be contacted by SMS.</Text>
       </Pressable>
 
@@ -595,6 +596,5 @@ const s = StyleSheet.create({
   confirmRow:   { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10 },
   checkbox:     { width: 22, height: 22, borderRadius: 5, borderWidth: 2, borderColor: colors.ink300, alignItems: 'center', justifyContent: 'center' },
   checkboxOn:   { backgroundColor: colors.primary, borderColor: colors.primary },
-  checkmark:    { color: '#fff', fontWeight: '700' },
   confirmText:  { flex: 1, fontSize: 13, color: colors.ink },
 });

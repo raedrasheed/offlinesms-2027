@@ -64,7 +64,7 @@ If your Google Cloud API key has *Application restrictions* set to Android apps,
 | versionCode / name | 900000 / `2.3.18-test-baseline-2a61167` | 900000 + commits since 2a61167 (e.g. 900021) / `<app.json version>-test-<sha>` — a newer updated build upgrades in place over an older one (the 9034f31 build is 900001) |
 | Local DB schema | v5 (as production 2.3.18) | v7 |
 
-The baseline instrumentation patch also installs the same three attachment modules introduced in 2.4.2 (DocumentPicker, Location and Sharing), without adding the new attachment UI or delivery code to the baseline. This keeps the existing shipped-dependency equality check active and prevents library differences from confounding the comparison.
+The baseline instrumentation patch also installs the same three attachment modules introduced in 2.4.2 (DocumentPicker, Location and Sharing), without adding the new attachment UI or delivery code to the baseline. The patch also includes the pinned JavaScript vector-map dependencies added in 2.4.7. This keeps the existing shipped-dependency equality check active; the baseline retains its original application code.
 
 **Performance:** on one phone, on the same network and account:
 1. Install `baseline` and sign in. Run `scripts/device/perf-capture.sh coldstart baseline 10` and `… session baseline`.
