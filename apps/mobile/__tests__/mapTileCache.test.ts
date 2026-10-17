@@ -1,49 +1,53 @@
 import {afterEach,beforeEach,describe,it,expect,vi} from 'vitest';
-const fs=vi.hoisted(()=>({files:new Map<string,{text:string;mtime:number}>(),download:vi.fn()}));
+import {mapFixture} from './helpers/mapFixture';
+const mocks=vi.hoisted(()=>({files:new Map<string,string>(),fetch:vi.fn()}));
+vi.mock('react-native',()=>({Platform:{OS:'android'}}));
 vi.mock('expo-file-system',()=>({
-  documentDirectory:'file:///documents/',cacheDirectory:'file:///cache/',FileSystemSessionType:{FOREGROUND:1},
-  makeDirectoryAsync:async()=>{},
-  getInfoAsync:async(path:string)=>({exists:fs.files.has(path),isDirectory:false,size:fs.files.has(path)?10:0,modificationTime:fs.files.get(path)?.mtime ?? 0}),
-  readAsStringAsync:async(path:string)=>{const file=fs.files.get(path);if(!file)throw Error('missing');return file.text;},
-  writeAsStringAsync:async(path:string,text:string)=>{fs.files.set(path,{text,mtime:Date.now()/1000});},
-  moveAsync:async({from,to}:any)=>{fs.files.set(to,fs.files.get(from)!);fs.files.delete(from);},
-  deleteAsync:async(path:string)=>{fs.files.delete(path);},downloadAsync:fs.download,
+  cacheDirectory:'file:///cache/',EncodingType:{Base64:'base64'},makeDirectoryAsync:async()=>{},
+  getInfoAsync:async(path:string)=>({exists:mocks.files.has(path),isDirectory:false,size:mocks.files.has(path)?100:0}),
+  readAsStringAsync:async(path:string)=>{if(!mocks.files.has(path))throw Error('missing');return mocks.files.get(path);},
+  writeAsStringAsync:async(path:string,data:string)=>{mocks.files.set(path,data);},
+  moveAsync:async({from,to}:any)=>{mocks.files.set(to,mocks.files.get(from)!);mocks.files.delete(from);},
+  deleteAsync:async(path:string)=>{mocks.files.delete(path);},
 }));
-import {cachedMapTile,tileMetadata} from '../src/media/mapTileCache';
-const tile=(x:number)=>({key:`16-${x}-0`,z:16,x,y:0,left:0,top:0});
-const path=(x:number)=>`file:///cache/OfflineSMS/MapTiles/16-${x}-0.png`;
-beforeEach(()=>{
-  fs.files.clear();vi.clearAllMocks();vi.spyOn(Date,'now').mockReturnValue(1800000000000);
-  fs.download.mockImplementation(async(_url:string,p:string)=>{fs.files.set(p,{text:'PNG',mtime:Date.now()/1000});return {status:200,mimeType:'image/png',headers:{ETag:'"map-v1"','Cache-Control':'max-age=604800'}};});
+const tile=(x:number)=>({key:`14-${x}-0`,z:14,x,y:0,left:0,top:0});
+const source={tiles:['https://tiles.openfreemap.org/planet/test_v1/{z}/{x}/{y}.pbf'],maxzoom:14};
+let cachedMapTile:typeof import('../src/media/mapTileCache').cachedMapTile;
+beforeEach(async()=>{
+  vi.resetModules();vi.clearAllMocks();mocks.files.clear();vi.stubGlobal('fetch',mocks.fetch);
+  mocks.fetch.mockImplementation(async(url:string)=>url.endsWith('/planet')?new Response(JSON.stringify(source)):new Response(mapFixture(),{headers:{'Content-Type':'application/vnd.mapbox-vector-tile'}}));
+  cachedMapTile=(await import('../src/media/mapTileCache')).cachedMapTile;
 });
-afterEach(()=>{vi.restoreAllMocks();});
-describe('map tile cache',()=>{
-  it('never fetches an offscreen tile and coalesces requests for a visible tile',async()=>{
-    expect(await cachedMapTile(tile(1),()=>false)).toBeNull();expect(fs.download).not.toHaveBeenCalled();
-    const results=await Promise.all([cachedMapTile(tile(2),()=>true),cachedMapTile(tile(2),()=>true)]);
-    expect(results).toEqual([path(2),path(2)]);expect(fs.download).toHaveBeenCalledOnce();
-    expect(fs.download.mock.calls[0][2].headers['User-Agent']).toContain('OfflineSMS/');
-    expect(await cachedMapTile(tile(2),()=>true)).toBe(path(2));expect(fs.download).toHaveBeenCalledOnce();
+afterEach(()=>{vi.unstubAllGlobals();vi.useRealTimers();});
+describe('visible vector map cache',()=>{
+  it('does not fetch offscreen and coalesces a visible tile with an identifying native header',async()=>{
+    expect(await cachedMapTile(tile(1),()=>false)).toBeNull();expect(mocks.fetch).not.toHaveBeenCalled();
+    const [a,b]=await Promise.all([cachedMapTile(tile(1),()=>true),cachedMapTile(tile(1),()=>true)]);
+    expect(a?.layers.water).toBeDefined();expect(b).toBe(a);
+    expect(mocks.fetch.mock.calls.filter(([url])=>url.endsWith('.pbf'))).toHaveLength(1);
+    expect(mocks.fetch.mock.calls[0][1].headers['User-Agent']).toContain('OfflineSMS/2.4.7');
   });
-  it('revalidates an expired tile and preserves it on 304 or a connection error',async()=>{
-    await cachedMapTile(tile(3),()=>true);
-    fs.files.set(`${path(3)}.json`,{text:JSON.stringify({expiresAt:0,etag:'"map-v1"'}),mtime:0});
-    fs.download.mockResolvedValueOnce({status:304,mimeType:null,headers:{'Cache-Control':'max-age=604800'}});
-    expect(await cachedMapTile(tile(3),()=>true)).toBe(path(3));
-    expect(fs.download.mock.calls[1][2].headers['If-None-Match']).toBe('"map-v1"');
-    fs.files.set(`${path(3)}.json`,{text:JSON.stringify({expiresAt:0}),mtime:0});fs.download.mockRejectedValueOnce(Error('offline'));
-    expect(await cachedMapTile(tile(3),()=>true)).toBe(path(3));
+  it('reuses cached data offline, including after module restart',async()=>{
+    await cachedMapTile(tile(2),()=>true);mocks.fetch.mockRejectedValue(Error('offline'));mocks.fetch.mockClear();
+    vi.resetModules();cachedMapTile=(await import('../src/media/mapTileCache')).cachedMapTile;
+    expect((await cachedMapTile(tile(2),()=>true))?.layers.water).toBeDefined();
+    expect(mocks.fetch).not.toHaveBeenCalled();
+    expect([...mocks.files.keys()]).toContain('file:///cache/OfflineSMS/MapVectors/test_v1-14-2-0.pbf');
   });
-  it('does not treat HTML errors as map images',async()=>{
-    fs.download.mockResolvedValueOnce({status:200,mimeType:'text/html',headers:{}});
-    expect(await cachedMapTile(tile(4),()=>true)).toBeNull();expect(fs.files.has(path(4))).toBe(false);
+  it('rejects HTML, blocked responses and invalid provider URLs without caching them',async()=>{
+    mocks.fetch.mockImplementation(async(url:string)=>url.endsWith('/planet')?new Response(JSON.stringify(source)):new Response('<html>denied</html>'));
+    expect(await cachedMapTile(tile(3),()=>true)).toBeNull();expect([...mocks.files.keys()].some(p=>p.endsWith('.pbf'))).toBe(false);
+    mocks.fetch.mockResolvedValue(new Response(mapFixture(),{headers:{'X-Blocked':'denied'}}));
+    expect(await cachedMapTile(tile(4),()=>true)).toBeNull();
+    vi.resetModules();mocks.files.clear();cachedMapTile=(await import('../src/media/mapTileCache')).cachedMapTile;
+    mocks.fetch.mockResolvedValue(new Response(JSON.stringify({tiles:['https://example.org/{z}/{x}/{y}.pbf'],maxzoom:14})));
+    expect(await cachedMapTile(tile(5),()=>true)).toBeNull();
   });
-  it('rejects an access-denied PNG even when a gateway reports HTTP 200',async()=>{
-    fs.download.mockResolvedValueOnce({status:200,mimeType:'image/png',headers:{'X-Blocked':'Access denied'}});
-    expect(await cachedMapTile(tile(5),()=>true)).toBeNull();expect(fs.files.has(path(5))).toBe(false);
-  });
-  it('honors cache headers or keeps tiles for seven days when headers are absent',()=>{
-    expect(tileMetadata({},0).expiresAt).toBe(604800000);
-    expect(tileMetadata({'Cache-Control':'public, max-age=86400',Age:'60',ETag:'x'},0)).toEqual({expiresAt:86340000,etag:'x'});
+  it('times out stalled requests and permits a subsequent retry',async()=>{
+    vi.useFakeTimers();
+    mocks.fetch.mockImplementation((_url:string,options:any)=>new Promise((_resolve,reject)=>options.signal.addEventListener('abort',()=>reject(Error('aborted')))));
+    const attempt=cachedMapTile(tile(6),()=>true);await vi.advanceTimersByTimeAsync(15001);expect(await attempt).toBeNull();
+    mocks.fetch.mockImplementation(async(url:string)=>url.endsWith('/planet')?new Response(JSON.stringify(source)):new Response(mapFixture()));
+    expect((await cachedMapTile(tile(6),()=>true))?.layers.water).toBeDefined();
   });
 });

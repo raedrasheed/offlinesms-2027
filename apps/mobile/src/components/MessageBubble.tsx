@@ -29,7 +29,8 @@ import { EmojiReactionPicker } from './chat/EmojiReactionPicker';
 import { ImageMessageBubble } from './chat/ImageMessageBubble';
 import { VideoMessageBubble } from './chat/VideoMessageBubble';
 import { AttachmentMessageBubble } from './chat/AttachmentMessageBubble';
-import { ATTACHMENT_SENT, ATTACHMENT_READ } from './chat/attachmentCardStyles';
+import { ATTACHMENT_SENT } from './chat/attachmentCardStyles';
+import {MessageReceipt} from './chat/MessageReceipt';
 import { VoiceMessageBubble } from './chat/VoiceMessageBubble';
 import { AnimatedEmoji3D } from './chat/AnimatedEmoji3D';
 import { StickerBubble } from './chat/StickerBubble';
@@ -55,7 +56,6 @@ import {
 } from '../localdb';
 
 const EDIT_WINDOW_MS = 15 * 60 * 1000;
-const SMALL_GROUP_MAX = 20;
 // Telegram light-theme accents for the sent (green) bubble.
 const TG_GREEN      = '#5FA84E';
 const TG_GREEN_DARK = '#3E7B33';
@@ -175,7 +175,6 @@ function MessageBubbleImpl({
     : mediaMessage
       ? { color: colors.ink500 }
       : (mine ? { color: TG_GREEN } : undefined);
-  const receiptTone: ReceiptTone = transparentBubble ? 'white' : mediaMessage ? 'ink' : 'green';
 
   if (pending && !attachmentCard) {
     // Same row/column wrappers as a normal sent bubble so it hugs its content,
@@ -322,7 +321,7 @@ function MessageBubbleImpl({
       onPress={pending==='failed'?event=>{event.stopPropagation();onRetry?.(m);}:undefined} hitSlop={8}>
       <Ionicons name={pending==='failed'?'alert-circle':pending==='syncing'?'sync-outline':'time-outline'} size={13}
         color={pending==='failed'?colors.err:locationCard?'#fff':'#86988D'}/>
-    </Pressable>:mine?<ReceiptIndicator message={m} isGroup={context.isGroup} memberCount={context.memberCount} tone={locationCard?'map':'reference'}/>:null}
+    </Pressable>:mine?<MessageReceipt message={m} isGroup={context.isGroup} memberCount={context.memberCount} overlay={locationCard}/>:null}
   </>:null;
   const sheetActions: SheetAction[] = deleted
     ? [
@@ -413,7 +412,7 @@ function MessageBubbleImpl({
             footer={mediaOverlayFooter ? (
               <>
                 <Text style={s.imgFootTime}>{timeText}</Text>
-                {mine ? <ReceiptIndicator message={m} isGroup={context.isGroup} memberCount={context.memberCount} tone="white" /> : null}
+                {mine ? <MessageReceipt message={m} isGroup={context.isGroup} memberCount={context.memberCount} overlay/> : null}
               </>
             ) : null}
           />
@@ -422,7 +421,7 @@ function MessageBubbleImpl({
             onRetry={() => onRetryMedia?.(m)} onLongPress={() => setSheetOpen(true)}
             footer={mediaOverlayFooter ? <>
               <Text style={s.imgFootTime}>{timeText}</Text>
-              {mine ? <ReceiptIndicator message={m} isGroup={context.isGroup} memberCount={context.memberCount} tone="white"/> : null}
+              {mine ? <MessageReceipt message={m} isGroup={context.isGroup} memberCount={context.memberCount} overlay/> : null}
             </> : null}/>
         ) : !deleted && m.type === 'voice' ? (
           <VoiceMessageBubble
@@ -486,7 +485,7 @@ function MessageBubbleImpl({
             {context.isStarred ? <Text style={s.star}>★</Text> : null}
             {context.isPinned ? <Text style={s.foot}>📌</Text> : null}
             {mine && !deleted ? (
-              <ReceiptIndicator message={m} isGroup={context.isGroup} memberCount={context.memberCount} tone={receiptTone} />
+              <MessageReceipt message={m} isGroup={context.isGroup} memberCount={context.memberCount} overlay={transparentBubble}/>
             ) : null}
             <Text style={[s.foot, footColor]}>{timeText}</Text>
           </View>
@@ -536,51 +535,6 @@ function MessageBubbleImpl({
   );
 }
 
-/**
- * Receipt indicator on the caller's own messages.
- *
- * Direct chats:  ✓ sent · ✓✓ delivered · ✓✓ blue read
- * Small groups (< 20): eye + "Seen by N"
- * Larger groups: ✓✓ delivered count · eye read count
- */
-type ReceiptTone = 'green' | 'ink' | 'white' | 'reference' | 'map';
-
-function ReceiptIndicator({ message, isGroup, memberCount, tone = 'green' }: { message: Message; isGroup: boolean; memberCount?: number; tone?: ReceiptTone }) {
-  const delivered = message.deliveredCount ?? 0;
-  const read      = message.readCount ?? 0;
-  // green → Telegram-style on the light-green sent bubble; ink → on the gray
-  // media card; white → inside the translucent pill over the wallpaper.
-  const reference=tone==='reference' || tone==='map';
-  const fg = reference ? ATTACHMENT_READ : tone === 'green' ? TG_GREEN : tone === 'ink' ? colors.ink500 : 'rgba(255,255,255,.95)';
-  // Read vs delivered: read keeps the strong accent, delivered drops to a
-  // muted tint of the same tone (both bubbles are light now, so color — not
-  // glyph count — still carries the distinction at a glance).
-  const fgMuted = tone==='reference'?'#8A9C92':tone==='map'?'rgba(255,255,255,.8)':tone === 'green' ? '#9CC78F' : tone === 'ink' ? colors.ink400 : 'rgba(255,255,255,.6)';
-
-  if (isGroup) {
-    if (memberCount && memberCount < SMALL_GROUP_MAX) {
-      return (
-        <View style={s.receiptRow}>
-          <Ionicons name="eye-outline" size={12} color={fg} />
-          <Text style={[s.foot, { color: fg }]}>Seen by {read}</Text>
-        </View>
-      );
-    }
-    return (
-      <View style={s.receiptRow}>
-        <Ionicons name="checkmark-done" size={13} color={fg} />
-        <Text style={[s.foot, { color: fg }]}>{delivered}</Text>
-        <Ionicons name="eye-outline" size={12} color={fg} />
-        <Text style={[s.foot, { color: fg }]}>{read}</Text>
-      </View>
-    );
-  }
-  if(reference)return <Ionicons name={read>0 || delivered>0?'checkmark-done':'checkmark'} size={15} color={read>0?fg:fgMuted}/>;
-  if (read > 0)      return <Text style={[s.tick, { color: fg }]}>✓✓</Text>;
-  if (delivered > 0) return <Text style={[s.tick, { color: fgMuted }]}>✓✓</Text>;
-  return <Text style={[s.tick, { color: fgMuted }]}>✓</Text>;
-}
-
 const s = StyleSheet.create({
   row:            { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 2 },
   rowMine:        { justifyContent: 'flex-end' },
@@ -623,9 +577,7 @@ const s = StyleSheet.create({
   bubbleFooter:   { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 6, marginTop: 4 },
   foot:           { fontSize: 10, color: colors.ink500 },
   imgFootTime:    { fontSize: 11, color: '#fff', fontWeight: '600' },
-  receiptRow:     { flexDirection: 'row', alignItems: 'center', gap: 3 },
   star:           { fontSize: 10, color: '#F59E0B' },
-  tick:           { fontSize: 11, fontWeight: '700', letterSpacing: -1 },
   reactionPill:   { flexDirection: 'row', alignItems: 'center', gap: 2, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, backgroundColor: '#fff', marginTop: -11, marginHorizontal: 12, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 2.5, shadowOffset: { width: 0, height: 1 }, elevation: 3 },
   reactionPillMine:{ backgroundColor: colors.primaryLight },
   reactionEmoji:  { fontSize: 13 },

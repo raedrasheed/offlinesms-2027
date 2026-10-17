@@ -1,3 +1,4 @@
+import {CheckmarkIcon} from '../components/CheckmarkIcon';
 // ForwardPicker — pick target conversations and forward the selected
 // messages from the source conversation. Phase 6 is text-only.
 
@@ -139,7 +140,7 @@ export default function ForwardPicker({ route, navigation }: any) {
                   <Text style={s.preview} numberOfLines={1}>{item.lastMessageText ?? ''}</Text>
                 </View>
                 <View style={[s.checkbox, on && s.checkboxOn]}>
-                  {on ? <Text style={s.checkmark}>✓</Text> : null}
+                  {on ? <CheckmarkIcon color="#FFFFFF" size={15}/> : null}
                 </View>
               </Pressable>
             );
@@ -166,5 +167,4 @@ const s = StyleSheet.create({
   preview: { fontSize: 12, color: colors.ink500, marginTop: 2 },
   checkbox:{ width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: colors.ink300, alignItems: 'center', justifyContent: 'center' },
   checkboxOn: { backgroundColor: colors.primary, borderColor: colors.primary },
-  checkmark: { color: '#fff', fontWeight: '700', fontSize: 12 },
 });

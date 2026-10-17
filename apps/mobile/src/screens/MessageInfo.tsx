@@ -22,6 +22,7 @@ import { colors, radius } from '../theme';
 import { avatarColor, initials } from '../lib/avatar';
 import { useDisplayNames } from '../lib/userProfiles';
 import { LoadingState, ErrorState, PermissionState } from '../components/state';
+import {MessageStatusIcon,RECEIPT_MUTED,RECEIPT_READ,type MessageCheckState} from '../components/CheckmarkIcon';
 
 type TabKey = 'all' | 'read' | 'delivered' | 'pending' | 'failed';
 
@@ -46,6 +47,7 @@ function StatusPill({ status }: { status: ReceiptStatus }) {
   const tone = PILL[status] ?? { bg: colors.ink100, fg: colors.ink700, label: status };
   return (
     <View style={[s.pill, { backgroundColor: tone.bg }]}>
+      {['delivered','read','viewed','played'].includes(status)?<MessageStatusIcon state={status==='delivered'?'delivered':'read'}/>:null}
       <Text style={[s.pillText, { color: tone.fg }]}>{tone.label}</Text>
     </View>
   );
@@ -147,8 +149,8 @@ export default function MessageInfo({ route, navigation }: any) {
         ) : null}
 
         <View style={s.statsGrid}>
-          <Stat icon="checkmark-done" tint="#1D4ED8" value={a.deliveredCount} label="Delivered" />
-          <Stat icon="eye-outline"    tint="#166534" value={readTotal}        label="Read" />
+          <Stat receipt="delivered" tint={RECEIPT_MUTED} value={a.deliveredCount} label="Delivered" />
+          <Stat receipt="read" tint={RECEIPT_READ} value={readTotal} label="Read" />
           <Stat icon="time-outline"   tint="#92400E" value={a.pendingCount}   label="Pending" />
           <Stat icon="alert-circle-outline" tint="#991B1B" value={a.failedCount} label="Failed" />
         </View>
@@ -239,11 +241,11 @@ export default function MessageInfo({ route, navigation }: any) {
   );
 }
 
-function Stat({ icon, tint, value, label }: { icon: keyof typeof Ionicons.glyphMap; tint: string; value: number; label: string }) {
+function Stat({ icon, receipt, tint, value, label }: { icon?: keyof typeof Ionicons.glyphMap; receipt?:MessageCheckState;tint: string; value: number; label: string }) {
   return (
     <View style={s.statCard}>
       <View style={s.statTop}>
-        <Ionicons name={icon} size={15} color={tint} />
+        {receipt?<MessageStatusIcon state={receipt}/>:<Ionicons name={icon} size={15} color={tint}/>}
         <Text style={[s.statValue, { color: tint }]}>{value}</Text>
       </View>
       <Text style={s.statLabel}>{label}</Text>
@@ -328,6 +330,6 @@ const s = StyleSheet.create({
   roleBadge: { fontSize: 9, fontWeight: '800', color: colors.primaryDark, letterSpacing: 0.6 },
   recipientMeta: { fontSize: 11, color: colors.ink500, marginTop: 3 },
   recipientFail: { fontSize: 11, color: colors.err, marginTop: 2 },
-  pill:    { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
+  pill:    { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999,flexDirection:'row',alignItems:'center',gap:4 },
   pillText: { fontSize: 11, fontWeight: '700' },
 });
