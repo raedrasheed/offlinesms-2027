@@ -43,6 +43,12 @@ retention paths with `media.presentation: "sticker"`. Older clients can display
 the PNG as an ordinary image. Updated clients render it without bubble chrome
 and keep the unified message checks, progress and retry controls.
 
+Sending personal stickers requires the local durable outbox. If local storage
+is unavailable, or the local-first conversation flag is disabled, the picker
+explains that sending is unavailable and disables its send button. Creation,
+editing, deletion and bundled-sticker sends remain available. Personal sending
+becomes available again when the conversation returns to its local source.
+
 The presentation survives SQLite payload serialization, remote reconciliation,
 history reads and forwarding. The server only accepts this presentation on a
 512×512 PNG up to 2 MiB, and finalization checks the actual uploaded PNG header
@@ -56,8 +62,8 @@ Storage-rule update or backfill is required.
 
 ## Validation
 
-- Mobile TypeScript and Functions build; EN/AR parity (722 keys).
-- 1,227 unit tests in 122 suites, including recipe bounds, library rollback and
+- Mobile TypeScript and Functions build; EN/AR parity (723 keys).
+- 1,228 unit tests in 122 suites, including recipe bounds, library rollback and
   account separation, non-destructive editing, editor lifecycle, explicit send,
   SQLite reconciliation and idempotent upload retry.
 - Three emulator-backed tests exercise the real create/finalize/forward/delete

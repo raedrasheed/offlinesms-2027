@@ -624,7 +624,8 @@
     "largerText": "Larger text",
     "name": "Sticker name (optional)",
     "retryImage": "Retry",
-    "mobileOnly": "Create and edit personal stickers in the Android or iOS app."
+    "mobileOnly": "Create and edit personal stickers in the Android or iOS app.",
+    "sendingUnavailable": "Sending personal stickers is currently unavailable. You can still create, edit and save them."
   },
   "poll": {
     "create": "New poll",

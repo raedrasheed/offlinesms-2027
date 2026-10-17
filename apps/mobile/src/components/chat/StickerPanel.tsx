@@ -28,7 +28,7 @@ export type PickedSticker = { packId: string; stickerId: string; alt: string }
 
 type Row = { key: string; header?: string; cells?: Array<StickerDef & { packId: string }>; custom?: CustomSticker[] };
 
-export function StickerPanel({ uid, onSend }: { uid: string; onSend: (s: PickedSticker) => void }) {
+export function StickerPanel({ uid, onSend, customSendingAvailable = true }: { uid: string; onSend: (s: PickedSticker) => void; customSendingAvailable?: boolean }) {
   const { t, i18n } = useTranslation();
   const { colors } = useTheme();
   const s = useMemo(() => styles(colors), [colors]);
@@ -71,7 +71,10 @@ export function StickerPanel({ uid, onSend }: { uid: string; onSend: (s: PickedS
       }},
     ]);
   }
-  function sendCustom(sticker:CustomSticker){setCustomPreview(null);onSend({custom:sticker,uri:customStickerUri(uid,sticker)});}
+  function sendCustom(sticker:CustomSticker){
+    if(!customSendingAvailable){setCustomPreview(sticker);return;}
+    setCustomPreview(null);onSend({custom:sticker,uri:customStickerUri(uid,sticker)});
+  }
 
   const rows = useMemo(() => {
     const out: Row[] = [];
@@ -105,6 +108,7 @@ export function StickerPanel({ uid, onSend }: { uid: string; onSend: (s: PickedS
         style={[s.createBtn,{opacity:busy || libraryError?0.5:1}]}>
         {busy?<ActivityIndicator color={colors.action.primary}/>:<Text style={{color:colors.action.primary,fontWeight:'700'}}>＋ {t('stickers.create')}</Text>}
       </Pressable>:<Text style={s.localHint}>{t('stickers.mobileOnly')}</Text>}
+      {customSupported && !customSendingAvailable?<Text style={s.localHint}>{t('stickers.sendingUnavailable')}</Text>:null}
       {libraryError?<Pressable accessibilityRole="button" onPress={()=>{
         void loadCustomStickers(uid).then(value=>{setCustom(value);setLibraryError(false);}).catch(()=>Alert.alert(t('stickers.loadError')));
       }}><Text style={s.header}>{t('stickers.loadError')} · {t('stickers.retryImage')}</Text></Pressable>:null}
@@ -135,7 +139,8 @@ export function StickerPanel({ uid, onSend }: { uid: string; onSend: (s: PickedS
             <Pressable onPress={()=>editCustom(customPreview)} accessibilityRole="button"><Text style={s.actionText}>{t('stickers.edit')}</Text></Pressable>
             <Pressable onPress={()=>removeCustom(customPreview)} accessibilityRole="button"><Text style={[s.actionText,{color:'#D84343'}]}>{t('common.delete')}</Text></Pressable>
           </View>
-          <Pressable style={s.sendBtn} onPress={()=>sendCustom(customPreview)} accessibilityRole="button"><Text style={s.sendText}>{t('common.send')}</Text></Pressable>
+          <Pressable style={[s.sendBtn,{opacity:customSendingAvailable?1:0.4}]} disabled={!customSendingAvailable}
+            onPress={()=>sendCustom(customPreview)} accessibilityRole="button" accessibilityState={{disabled:!customSendingAvailable}}><Text style={s.sendText}>{t('common.send')}</Text></Pressable>
         </Pressable>:null}</Pressable>}
       </Modal>
       <Modal visible={!!preview} transparent animationType="fade" onRequestClose={() => setPreview(null)}>

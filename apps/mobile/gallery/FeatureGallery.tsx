@@ -112,7 +112,7 @@ function Panel({ tab, query }: { tab: 'emoji' | 'stickers'; query?: string }) {
       <Header />
       <View style={[s.wall, { flex: 1 }]} />
       <FakeComposer panel />
-      <ComposerPanel uid={ME} height={360} bottomInset={0} initialTab={tab} initialQuery={query} onEmoji={() => {}} onSticker={() => {}} />
+      <ComposerPanel uid={ME} height={360} bottomInset={0} initialTab={tab} initialQuery={query} onEmoji={() => {}} onSticker={() => {}} customSendingAvailable />
     </View>
   );
 }

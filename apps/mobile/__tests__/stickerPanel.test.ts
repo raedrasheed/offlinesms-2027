@@ -40,6 +40,25 @@ describe('personal sticker picker',()=>{
     mock.pick.mockResolvedValue(null);const send=vi.fn();await act(async()=>{renderer=create(createElement(StickerPanel,{uid:'me',onSend:send}));});
     await act(async()=>createButton().props.onPress());expect(nodes('Editor')).toHaveLength(0);expect(send).not.toHaveBeenCalled();
   });
+  it('keeps editing and bundled sends available while personal sending is unavailable',async()=>{
+    mock.load.mockResolvedValue([saved]);const send=vi.fn();
+    await act(async()=>{renderer=create(createElement(StickerPanel,{uid:'me',onSend:send,customSendingAvailable:false}));});
+    expect(nodes('Text').some(n=>n.children.join('')==='stickers.sendingUnavailable')).toBe(true);
+    await act(async()=>nodes('Pressable').find(n=>n.props.accessibilityLabel==='My photo')!.props.onPress());
+    expect(send).not.toHaveBeenCalled();
+    const sendButton=nodes('Text').find(n=>n.children.join('')==='common.send')!.parent!;
+    expect(sendButton.props.disabled).toBe(true);
+    await act(async()=>sendButton.props.onPress());expect(send).not.toHaveBeenCalled();
+    await act(async()=>nodes('Text').find(n=>n.children.join('')==='stickers.edit')!.parent!.props.onPress());
+    expect(nodes('Editor')[0].props.previous).toEqual(saved);
+    await act(async()=>nodes('Editor')[0].props.onClose());
+    await act(async()=>nodes('Pressable').find(n=>n.props.accessibilityLabel==='مرحبا')!.props.onPress());
+    expect(send).toHaveBeenCalledWith({packId:'simsim',stickerId:'hi',alt:'👋'});
+    send.mockClear();
+    await act(async()=>renderer!.update(createElement(StickerPanel,{uid:'me',onSend:send,customSendingAvailable:true})));
+    await act(async()=>nodes('Pressable').find(n=>n.props.accessibilityLabel==='My photo')!.props.onPress());
+    expect(send).toHaveBeenCalledWith({custom:saved,uri:'file:///me/own-one.png'});
+  });
   it('coalesces repeated import presses and cleans a late import when the account panel unmounts',async()=>{
     let resolve!:(v:any)=>void;mock.pick.mockImplementation(()=>new Promise(r=>{resolve=r;}));
     await act(async()=>{renderer=create(createElement(StickerPanel,{uid:'me',onSend:vi.fn()}));});

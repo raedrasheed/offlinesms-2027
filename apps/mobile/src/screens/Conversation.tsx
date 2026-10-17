@@ -805,6 +805,9 @@ export default function Conversation({ route, navigation }: any) {
   const sendSticker = useCallback((st: PickedSticker) => {
     if (!('custom' in st)) { void sendRich({ kind: 'sticker', sticker: st }); return; }
     if (gate.kind !== 'allowed') return;
+    // Custom media needs the durable outbox. Keep library editing available
+    // in Firestore fallback, but never queue into an unavailable local store.
+    if (!useLocal) { Alert.alert(t('stickers.sendError'), t('stickers.sendingUnavailable')); return; }
     void (async()=>{
       try {
         await openLocalDb(me);
@@ -1487,6 +1490,7 @@ export default function Conversation({ route, navigation }: any) {
               bottomInset={insets.bottom}
               onEmoji={insertEmoji}
               onSticker={sendSticker}
+              customSendingAvailable={useLocal}
             />
           ) : null}
         </View>
