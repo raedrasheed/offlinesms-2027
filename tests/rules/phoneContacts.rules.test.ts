@@ -12,6 +12,14 @@ afterAll(async () => { await teardownEnv(); });
 beforeEach(async () => { await clearAll(); });
 
 describe('phoneContacts/{contactId}', () => {
+  it('clients cannot read or forge the server-owned contact search index or readiness marker',async()=>{
+    await seed(async db=>{await setDoc(doc(db,'appContactSearch','target'),{name:'Public Name',terms:['pub']});await setDoc(doc(db,'appContactSearchMeta','state'),{ready:true,version:1});});
+    const db=await asUser('u-a');
+    for(const [collection,id] of [['appContactSearch','target'],['appContactSearchMeta','state']]){
+      await assertFails(getDoc(doc(db,collection,id)));
+      await assertFails(setDoc(doc(db,collection,id),{ready:true,name:'Forged'}));
+    }
+  });
   it('owner can read their own phone contact', async () => {
     await seed(async db => {
       await setDoc(doc(db, 'phoneContacts', 'c1'), { ownerUid: 'u-a', phoneE164: '+972591234567' });

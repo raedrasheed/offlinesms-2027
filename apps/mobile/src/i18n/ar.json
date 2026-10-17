@@ -747,8 +747,8 @@
     "waitingUpload": "بانتظار اكتمال الرفع",
     "pickerError": "جرّب ملفًا آخر. الصور وGIF: حتى 10 ميجابايت. المستندات والصوت والفيديو: حتى 25 ميجابايت.",
     "appContacts": "جهات اتصال OfflineSMS",
-    "chooseAppContact": "اختر مستخدمًا من OfflineSMS لمشاركة بطاقته.",
-    "searchAppContacts": "ابحث ببداية الاسم أو @اسم المستخدم",
+    "chooseAppContact": "اختر من جهات اتصالك، أو ابحث عن حساب في OfflineSMS لمشاركته.",
+    "searchAppContacts": "ابحث بأي جزء من الاسم أو @اسم_المستخدم",
     "noAppContacts": "لا يوجد مستخدمون مطابقون في OfflineSMS.",
     "contactSearchError": "تعذّر تحميل المستخدمين. تحقق من الاتصال وحاول مجددًا.",
     "moreContacts": "تحميل المزيد من المستخدمين",
@@ -757,6 +757,16 @@
     "yourContact": "هذه بطاقتك",
     "contactOpenError": "تعذّر فتح المحادثة",
     "contactUnavailable": "هذا الحساب لم يعد متاحًا.",
-    "contactOpenRetry": "تحقق من الاتصال وحاول مجددًا."
+    "contactOpenRetry": "تحقق من الاتصال وحاول مجددًا.",
+    "myAppContacts": "جهات اتصالي في OfflineSMS",
+    "contactSearchResults": "حسابات OfflineSMS المطابقة",
+    "noAccountContacts": "لا توجد جهات اتصال محفوظة بعد. ابحث عن حساب لبدء محادثة.",
+    "chooseChatContact": "اختر من جهات اتصالك، أو ابحث بالاسم أو @اسم_المستخدم.",
+    "contactServiceUnavailable": "خدمة جهات الاتصال غير متاحة مؤقتًا. يُرجى المحاولة لاحقًا.",
+    "newContact": "جهة اتصال جديدة",
+    "newChat": "محادثة جديدة",
+    "newGroup": "مجموعة جديدة",
+    "newCommunity": "مجتمع جديد",
+    "comingSoon": "قريبًا."
   }
 }
