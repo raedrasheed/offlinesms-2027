@@ -28,8 +28,8 @@ const MIB = 1024 * 1024;
 const session = 'https://firebasestorage.googleapis.com/v0/b/test.firebasestorage.app/o?upload_id=secret';
 const source = 'file:///documents/clip.mp4';
 const defaults = { uid: 'owner', localUri: source, storagePath: 'clipUploads/owner/clip1/source', contentType: 'video/mp4', maxUploadBytes: 80 * MIB };
-function response(status = 200, headers: Record<string, string> = {}) {
-  return { status, headers: new Headers(headers) };
+function response(status = 200, headers: Record<string, string> = {}, body = '') {
+  return { status, headers: new Headers(headers), text: vi.fn(async () => body) };
 }
 function nativeReply(status = 'final', http = 200) {
   return { status: http, headers: { 'x-goog-upload-status': status }, body: '{"downloadTokens":"never-expose"}' };
@@ -40,12 +40,13 @@ const spin = async (until: () => boolean) => { for (let i = 0; i < 100 && !until
 
 beforeEach(() => {
   vi.clearAllMocks(); state.files.clear(); state.files.set(source, 2 * MIB + 7); state.reads = []; state.uploaded = [];
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
   state.auth.currentUser = { uid: 'owner', getIdToken: state.getToken }; state.getToken.mockResolvedValue('id-token');
   state.cancel.mockResolvedValue(undefined);
   vi.stubGlobal('fetch', vi.fn(async () => begin()));
   state.upload.mockImplementation(async ({ options }) => nativeReply(options.headers['X-Goog-Upload-Command'].includes('finalize') ? 'final' : 'active'));
 });
-afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('native resumable clip source transfer', () => {
   it('streams bounded native chunks and finalizes before resolving; keeps source and removes temporary chunks', async () => {
@@ -218,5 +219,99 @@ describe('native resumable clip source transfer', () => {
     const handle = startClipSourceUpload(defaults);
     await vi.runAllTimersAsync(); await handle.done;
     expect(state.cancel).toHaveBeenCalledOnce(); expect(state.uploaded).toHaveLength(1);
+  });
+});
+
+describe('safe clip upload HTTP diagnostics', () => {
+  const deniedBody = JSON.stringify({ error: { code: 403, message: 'Permission denied.' },
+    token: 'secret-id-token', sessionUrl: session, localUri: source, downloadTokens: 'secret-download-token' });
+  const denied = () => response(403, { 'Content-Type': 'application/json' }, deniedBody);
+  const logged = () => vi.mocked(console.warn).mock.calls.map(args => args.join(' '));
+  const diagnostic = (operation: string, responseCategory = 'permission-denied') =>
+    `[clips-upload-http] operation=${operation} httpStatus=403 code=storage/unauthorized responseCategory=${responseCategory}`;
+
+  it('does not read response bodies or log HTTP diagnostics on success', async () => {
+    const started = begin(); started.text.mockRejectedValue(new Error('success body must not be read'));
+    vi.mocked(fetch).mockResolvedValueOnce(started as any);
+    await startClipSourceUpload(defaults).done;
+    expect(started.text).not.toHaveBeenCalled(); expect(console.warn).not.toHaveBeenCalled();
+  });
+
+  it('records a denied session start without exposing response fields or changing the failure', async () => {
+    const started = denied(); vi.mocked(fetch).mockResolvedValueOnce(started as any);
+    await expect(startClipSourceUpload(defaults).done).rejects.toMatchObject({ code: 'storage/unauthorized' });
+    expect(logged()).toEqual([diagnostic('start')]);
+    expect(fetch).toHaveBeenCalledTimes(1); expect(state.uploaded).toHaveLength(0);
+  });
+
+  it.each([['chunk', 2 * MIB], ['finalize', 20]])('records native %s rejection and keeps authorization failure terminal', async (operation, size) => {
+    state.files.set(source, size as number);
+    state.upload.mockResolvedValueOnce({ ...nativeReply('active', 403), body: deniedBody });
+    await expect(startClipSourceUpload(defaults).done).rejects.toMatchObject({ code: 'storage/unauthorized' });
+    expect(logged()).toEqual([diagnostic(operation as string)]);
+    expect(fetch).toHaveBeenCalledTimes(1); expect(state.uploaded).toHaveLength(1);
+  });
+
+  it('records query rejection after an interrupted transfer without retrying the denial', async () => {
+    vi.useFakeTimers(); vi.mocked(fetch).mockResolvedValueOnce(begin() as any).mockResolvedValueOnce(denied() as any);
+    state.upload.mockRejectedValueOnce(new Error('connection dropped'));
+    const rejected = expect(startClipSourceUpload(defaults).done).rejects.toMatchObject({ code: 'storage/unauthorized' });
+    await vi.runAllTimersAsync(); await rejected;
+    expect(logged()).toEqual([diagnostic('query')]); expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('records a bodyless finalize command separately from a successful final data request', async () => {
+    state.files.set(source, 20);
+    vi.mocked(fetch).mockResolvedValueOnce(begin() as any).mockResolvedValueOnce(denied() as any);
+    state.upload.mockResolvedValueOnce(nativeReply('active'));
+    await expect(startClipSourceUpload(defaults).done).rejects.toMatchObject({ code: 'storage/unauthorized' });
+    expect(logged()).toEqual([diagnostic('finalize')]);
+    expect(vi.mocked(fetch).mock.calls[1][1]?.headers).toMatchObject({ 'X-Goog-Upload-Command': 'finalize' });
+  });
+
+  it('does not read an oversized declared control error body', async () => {
+    const started = response(403, { 'Content-Length': String(16 * 1024 + 1) }, deniedBody);
+    vi.mocked(fetch).mockResolvedValueOnce(started as any);
+    await expect(startClipSourceUpload(defaults).done).rejects.toMatchObject({ code: 'storage/unauthorized' });
+    expect(started.text).not.toHaveBeenCalled(); expect(logged()).toEqual([diagnostic('start', 'unavailable')]);
+  });
+
+  it('preserves the HTTP code when reading its diagnostic body fails', async () => {
+    const started = denied(); started.text.mockRejectedValue(new Error(`failed at ${session}`));
+    vi.mocked(fetch).mockResolvedValueOnce(started as any);
+    await expect(startClipSourceUpload(defaults).done).rejects.toMatchObject({ code: 'storage/unauthorized' });
+    expect(logged()).toEqual([diagnostic('start', 'unavailable')]); expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('bounds diagnostic reading to two seconds without turning a 403 into a retryable timeout', async () => {
+    vi.useFakeTimers(); const started = denied(); started.text.mockImplementation(() => new Promise(() => {}));
+    vi.mocked(fetch).mockResolvedValueOnce(started as any);
+    const rejected = expect(startClipSourceUpload(defaults).done).rejects.toMatchObject({ code: 'storage/unauthorized' });
+    await vi.advanceTimersByTimeAsync(2000); await rejected;
+    expect(logged()).toEqual([diagnostic('start', 'unavailable')]); expect(fetch).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('still honors user cancellation during diagnostic reading', async () => {
+    const started = denied(); started.text.mockImplementation(() => new Promise(() => {}));
+    vi.mocked(fetch).mockResolvedValueOnce(started as any);
+    const handle = startClipSourceUpload(defaults);
+    const rejected = expect(handle.done).rejects.toMatchObject({ code: 'clip-upload-cancelled' });
+    await spin(() => started.text.mock.calls.length === 1); handle.cancel(); await rejected;
+    expect(logged()).toEqual([diagnostic('start', 'unavailable')]); expect(state.uploaded).toHaveLength(0);
+  });
+
+  it('cannot replace the HTTP error if the logger itself throws', async () => {
+    vi.mocked(console.warn).mockImplementation(() => { throw new Error('logger unavailable'); });
+    vi.mocked(fetch).mockResolvedValueOnce(denied() as any);
+    await expect(startClipSourceUpload(defaults).done).rejects.toMatchObject({ code: 'storage/unauthorized' });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('never prints an oversized native server body, token, or URL', async () => {
+    state.files.set(source, 20);
+    state.upload.mockResolvedValueOnce({ ...nativeReply('final', 403), body: 'x'.repeat(16 * 1024 + 1) + deniedBody });
+    await expect(startClipSourceUpload(defaults).done).rejects.toMatchObject({ code: 'storage/unauthorized' });
+    expect(logged()).toEqual([diagnostic('finalize', 'unknown')]);
   });
 });
