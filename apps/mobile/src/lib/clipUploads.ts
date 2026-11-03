@@ -1,9 +1,10 @@
 import { getFunctions, httpsCallable } from 'firebase/functions';
-import { ref, uploadBytesResumable, type UploadTask } from 'firebase/storage';
 import { onAuthStateChanged } from 'firebase/auth';
 import NetInfo from '@react-native-community/netinfo';
-import { app, auth, storage } from './firebase';
+import { app, auth } from './firebase';
 import { saveClipDraft, type ClipDraft } from './clipDrafts';
+import { startClipSourceUpload } from './clipSourceUpload';
+import { sanitizeClipUploadError, type ClipUploadStage } from './clipUploadErrors';
 
 export interface ClipUploadProgress {
   transferredBytes: number; totalBytes: number; progress: number; state: 'running' | 'paused' | 'processing';
@@ -16,7 +17,7 @@ function callable<T, R>(name: string, data: T): Promise<R> {
   return httpsCallable<T, R>(getFunctions(app, 'us-central1'), name)(data).then(r => r.data);
 }
 
-/** SDK resumable uploads pause/retry across temporary network loss. A killed
+/** Native resumable uploads pause/retry across temporary network loss. A killed
  * process restarts upload from the durable local draft to the same initialized
  * object; it never publishes duplicate clips or pretends bytes survived a kill. */
 export async function startClipUpload(input: ClipDraft, callbacks: {
@@ -25,14 +26,19 @@ export async function startClipUpload(input: ClipDraft, callbacks: {
   const uid = auth.currentUser?.uid;
   if (!uid || input.uid !== uid) throw new Error('clip-draft-owner-mismatch');
   if (!input.audience) throw new Error('audience-invalid');
-  let draft = await saveClipDraft({ ...input, errorCode: undefined }), task: UploadTask | null = null;
-  let cancelled = false, manualPause = false, networkPause = false;
-  const check = () => { if (cancelled || auth.currentUser?.uid !== uid) throw new Error(cancelled ? 'clip-upload-cancelled' : 'clip-session-changed'); };
-  const progress = (state: ClipUploadProgress['state']) => callbacks.onProgress?.({
-    transferredBytes: task?.snapshot.bytesTransferred ?? 0, totalBytes: task?.snapshot.totalBytes ?? draft.sizeBytes,
-    progress: task ? task.snapshot.bytesTransferred / Math.max(1, task.snapshot.totalBytes) : 0, state,
-  });
-  const stopAuth = onAuthStateChanged(auth, user => { if (user?.uid !== uid) { cancelled = true; task?.cancel(); } });
+  let draft = await saveClipDraft({ ...input, errorCode: undefined });
+  let task: ReturnType<typeof startClipSourceUpload> | null = null;
+  let cancelled = false, sessionChanged = false, manualPause = false, networkPause = false;
+  let stage: ClipUploadStage = 'initialize';
+  let snapshot: ClipUploadProgress = { transferredBytes: 0, totalBytes: draft.sizeBytes, progress: 0, state: 'running' };
+  const check = () => {
+    if (sessionChanged || auth.currentUser?.uid !== uid) throw new Error('clip-session-changed');
+    if (cancelled) throw new Error('clip-upload-cancelled');
+  };
+  const progress = (state: ClipUploadProgress['state']) => {
+    snapshot = { ...snapshot, state }; callbacks.onProgress?.(snapshot);
+  };
+  const stopAuth = onAuthStateChanged(auth, user => { if (user?.uid !== uid) { sessionChanged = true; task?.cancel(); } });
   const stopNetwork = NetInfo.addEventListener(state => {
     if (state.isConnected === false || state.isInternetReachable === false) { networkPause = true; task?.pause(); }
     else if (state.isConnected === true) { networkPause = false; if (!manualPause) task?.resume(); }
@@ -43,17 +49,19 @@ export async function startClipUpload(input: ClipDraft, callbacks: {
       const initialized = await callable<{ draftId: string }, { clipId: string; storagePath: string; maxUploadBytes: number; status: string }>('initClipUpload', { draftId: draft.id });
       check();
       draft = await saveClipDraft({ ...draft, clipId: initialized.clipId });
+      check();
       if (!['processing', 'pending_review', 'published'].includes(initialized.status)) {
-        const response = await fetch(draft.localUri); const blob = await response.blob(); check();
-        if (blob.size <= 0 || blob.size > initialized.maxUploadBytes) throw new Error('clip-file-too-large');
+        stage = 'upload';
         draft = await saveClipDraft({ ...draft, status: 'uploading' });
-        task = uploadBytesResumable(ref(storage, initialized.storagePath), blob, { contentType: draft.mimeType });
+        check();
+        task = startClipSourceUpload({ uid, localUri: draft.localUri, storagePath: initialized.storagePath,
+          contentType: draft.mimeType, maxUploadBytes: initialized.maxUploadBytes,
+          onProgress: event => { snapshot = event; callbacks.onProgress?.(snapshot); },
+        });
         if (manualPause || networkPause) task.pause();
-        await new Promise<void>((resolve, reject) => task!.on('state_changed', snapshot => {
-          callbacks.onProgress?.({ transferredBytes: snapshot.bytesTransferred, totalBytes: snapshot.totalBytes,
-            progress: snapshot.bytesTransferred / Math.max(1, snapshot.totalBytes), state: snapshot.state === 'paused' ? 'paused' : 'running' });
-        }, reject, resolve));
+        await task.done;
         check(); draft = await saveClipDraft({ ...draft, status: 'uploaded' });
+        check(); stage = 'publish';
         progress('processing');
         await callable('publishClip', {
           clipId: initialized.clipId, caption: draft.caption, audience: draft.audience, groupId: draft.groupId,
@@ -65,9 +73,12 @@ export async function startClipUpload(input: ClipDraft, callbacks: {
       check(); await saveClipDraft({ ...draft, status: 'processing', errorCode: undefined });
       return { clipId: initialized.clipId, status: 'processing' };
     } catch (error) {
+      const safe = sanitizeClipUploadError(sessionChanged ? new Error('clip-session-changed') : error);
       if (auth.currentUser?.uid === uid) await saveClipDraft({ ...draft, status: cancelled ? 'draft' : 'failed',
-        errorCode: cancelled ? undefined : (error instanceof Error ? error.message : 'clip-upload-failed') }).catch(() => {});
-      throw error;
+        errorCode: cancelled ? undefined : safe.code }).catch(() => {});
+      // Never log native responses, session URLs, tokens, or local file paths.
+      if (!cancelled && !sessionChanged) console.warn(`[clips-upload] stage=${stage} code=${safe.code}`);
+      throw Object.assign(new Error(safe.code), { code: safe.code, clipUploadStage: stage });
     } finally { stopAuth(); stopNetwork(); }
   })();
   return { done,

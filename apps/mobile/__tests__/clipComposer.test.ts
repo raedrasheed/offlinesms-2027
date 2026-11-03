@@ -82,4 +82,37 @@ describe('Clip composer durable uploads', () => {
     await act(async () => { resolve(null); });
     expect(button('Publish')).toBeUndefined(); expect(mock.start).not.toHaveBeenCalled();
   });
+  it('shows the actual permission category and keeps the draft available to retry', async () => {
+    mock.start.mockRejectedValue(Object.assign(new Error('sensitive raw URL must not be shown'), { code: 'storage/unauthorized', clipUploadStage: 'upload' }));
+    await mount(); await tap('Publish');
+    expect(nodes('Text').some(node => node.children.includes('The upload was denied. Your draft is kept; contact support if this continues.'))).toBe(true);
+    expect(JSON.stringify(renderer.toJSON())).not.toContain('sensitive raw URL');
+    expect(button('Publish').props.disabled).toBe(false);
+  });
+  it('reloads changed terms and requires fresh consent before retrying', async () => {
+    mock.start.mockRejectedValue(Object.assign(new Error('clips-terms-required'), { code: 'functions/failed-precondition' }));
+    await mount();
+    mock.config.mockResolvedValue({ config: { enabled: true, maxDurationSeconds: 60, maxUploadMB: 80, termsVersion: 'v2' }, termsAccepted: false });
+    await tap('Publish');
+    expect(mock.config).toHaveBeenCalledTimes(2);
+    expect(nodes('Text').some(node => node.children.includes('The community terms changed. Read and accept the updated terms before publishing.'))).toBe(true);
+    expect(button('Publish').props.disabled).toBe(true);
+    const checkbox = nodes('Pressable').find(node => node.props.accessibilityRole === 'checkbox')!;
+    expect(checkbox.props.accessibilityState.checked).toBe(false);
+    await act(async () => { checkbox.props.onPress(); });
+    mock.start.mockRejectedValue(new Error('clip-upload-cancelled'));
+    await tap('Publish');
+    expect(mock.accept).toHaveBeenCalledWith('v2');
+  });
+  it('reports unconfirmed publication without incorrectly claiming upload failed', async () => {
+    mock.start.mockImplementation(async (_draft, callbacks) => {
+      callbacks.onProgress({ progress: 1, state: 'processing' });
+      return { pause: mock.pause, resume: mock.resume, cancel: mock.cancel,
+        done: Promise.reject(Object.assign(new Error('deadline'), { code: 'functions/deadline-exceeded', clipUploadStage: 'publish' })) };
+    });
+    await mount(); await tap('Publish');
+    expect(nodes('Text').some(node => node.children.includes('Video upload completed, but publication was not confirmed. Retry this draft to check its status.'))).toBe(true);
+    expect(button('Publish').props.disabled).toBe(false);
+    expect(mock.alert).not.toHaveBeenCalled();
+  });
 });
