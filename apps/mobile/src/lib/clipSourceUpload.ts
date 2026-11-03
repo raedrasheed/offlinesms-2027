@@ -1,6 +1,7 @@
 import * as FileSystem from 'expo-file-system';
 import * as Crypto from 'expo-crypto';
 import { app, auth } from './firebase';
+import { classifyClipUploadHttpFailure } from './clipStorageHttpDiagnostics';
 
 export interface ClipSourceProgress {
   transferredBytes: number; totalBytes: number; progress: number; state: 'running' | 'paused';
@@ -15,7 +16,9 @@ interface Input {
 class UploadError extends Error {
   constructor(readonly code: string, readonly retryable = false) { super(code); }
 }
-type Reply = { status: number; headers: Record<string, string>; body: string };
+type Reply = { status: number; headers: Record<string, string>; body?: string };
+type HttpOperation = 'start' | 'chunk' | 'finalize' | 'query';
+const MAX_DIAGNOSTIC_BODY_BYTES = 16 * 1024;
 const CHUNK_BYTES = 1024 * 1024; // A multiple of Firebase's 256 KiB upload granularity.
 const MAX_RETRIES = 4;
 const INTERRUPTED = Symbol('clip-source-interrupted');
@@ -26,13 +29,21 @@ function failure(code: string, retryable = false): UploadError {
 function header(reply: Reply, name: string): string | undefined {
   return Object.entries(reply.headers).find(([key]) => key.toLowerCase() === name.toLowerCase())?.[1];
 }
-function requireSuccess(reply: Reply): void {
+function requireSuccess(reply: Reply, operation: HttpOperation): void {
   if (reply.status >= 200 && reply.status < 300) return;
-  if (reply.status === 401) throw failure('storage/unauthenticated');
-  if (reply.status === 403) throw failure('storage/unauthorized');
-  if (reply.status === 404 || reply.status === 410) throw failure('storage/object-not-found');
-  if ([408, 409, 429].includes(reply.status) || reply.status >= 500) throw failure('storage/retry-limit-exceeded', true);
-  throw failure('storage/invalid-argument');
+  let error: UploadError;
+  if (reply.status === 401) error = failure('storage/unauthenticated');
+  else if (reply.status === 403) error = failure('storage/unauthorized');
+  else if (reply.status === 404 || reply.status === 410) error = failure('storage/object-not-found');
+  else if ([408, 409, 429].includes(reply.status) || reply.status >= 500) error = failure('storage/retry-limit-exceeded', true);
+  else error = failure('storage/invalid-argument');
+  // Diagnostics must never change authorization, retry decisions, or failures.
+  // The classifier returns fixed categories, never server-provided text.
+  try {
+    const responseCategory = classifyClipUploadHttpFailure(reply.body, header(reply, 'Content-Type'));
+    console.warn(`[clips-upload-http] operation=${operation} httpStatus=${reply.status} code=${error.code} responseCategory=${responseCategory}`);
+  } catch { /* Keep the original HTTP failure even if diagnostics fail. */ }
+  throw error;
 }
 
 /** Firebase's resumable wire protocol, using native file uploads instead of the
@@ -85,7 +96,7 @@ export function startClipSourceUpload(input: Input): ClipSourceUpload {
     try { return await Promise.race([run(), stopped]); }
     finally { if (timer) clearTimeout(timer); if (interrupt === stop) interrupt = undefined; }
   }
-  async function control(url: string, command: string, extra: Record<string, string> = {}, body?: string): Promise<Reply> {
+  async function control(url: string, command: Exclude<HttpOperation, 'chunk'>, extra: Record<string, string> = {}, body?: string): Promise<Reply> {
     const credential = await token(); await ready();
     const controller = new AbortController();
     let response: Response;
@@ -99,9 +110,21 @@ export function startClipSourceUpload(input: Input): ClipSourceUpload {
     }
     const headers: Record<string, string> = {};
     response.headers.forEach((value, key) => { headers[key] = value; });
-    // Control responses are small. Upload response bodies remain native strings.
-    const reply = { status: response.status, headers, body: '' };
-    requireSuccess(reply); check(); return reply;
+    const reply: Reply = { status: response.status, headers };
+    if (response.status < 200 || response.status >= 300) {
+      const declaredLength = header(reply, 'Content-Length');
+      const length = declaredLength === undefined ? undefined : Number(declaredLength);
+      // React Native fetch has no dependable streaming reader. Skip declared
+      // oversized bodies, bound the wait, and let the classifier cap parsing.
+      // A failed body read is diagnostic-only; it must not turn a 403 into a
+      // retryable timeout or conceal the original HTTP status.
+      if (length === undefined || (Number.isFinite(length) && length >= 0 && length <= MAX_DIAGNOSTIC_BODY_BYTES)) {
+        try {
+          reply.body = await cancellable(() => response.text(), () => controller.abort(), 2_000);
+        } catch { /* An unavailable body is itself a fixed diagnostic category. */ }
+      }
+    }
+    requireSuccess(reply, command); check(); return reply;
   }
   async function query(): Promise<boolean> {
     const reply = await control(session!, 'query');
@@ -166,7 +189,7 @@ export function startClipSourceUpload(input: Input): ClipSourceUpload {
     }
     check();
     if (!result) throw failure('storage/retry-limit-exceeded', true);
-    requireSuccess(result);
+    requireSuccess(result, final ? 'finalize' : 'chunk');
     const status = header(result, 'X-Goog-Upload-Status');
     if (status !== 'active' && status !== 'final') throw failure('storage/retry-limit-exceeded', true);
     if (status === 'final' && !final) throw failure('storage/invalid-checksum');
