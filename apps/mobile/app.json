@@ -2,7 +2,7 @@
   "expo": {
     "name": "OfflineSMS",
     "slug": "offlinesms",
-    "version": "2.5.0",
+    "version": "2.5.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "offlinesms",
@@ -17,7 +17,7 @@
       "supportsTablet": false,
       "requireFullScreen": true,
       "bundleIdentifier": "app.offlinesms.mobile",
-      "buildNumber": "31",
+      "buildNumber": "32",
       "entitlements": {
         "aps-environment": "production"
       },
@@ -40,7 +40,7 @@
     },
     "android": {
       "package": "app.offlinesms.mobile",
-      "versionCode": 31,
+      "versionCode": 32,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",

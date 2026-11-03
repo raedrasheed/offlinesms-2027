@@ -12,6 +12,7 @@ import { acceptClipsTerms, getClipsConfig, type ClipAudience, type ClipsConfig }
 import { useClipsCopy } from '../../lib/clipsCopy';
 import { createClipDraft, getClipDraft, saveClipDraft, type ClipDraft } from '../../lib/clipDrafts';
 import { startClipUpload, type ClipUploadHandle } from '../../lib/clipUploads';
+import { clipUploadErrorMessage, sanitizeClipUploadError, type ClipUploadStage } from '../../lib/clipUploadErrors';
 import { trimDraftRange } from '../../lib/clipSocialModel';
 import { CLIPS_COMMUNITY_TERMS, isClipTermsCancellation } from '../../lib/clipTerms';
 import { useClipDestinations } from '../../hooks/useClipDestinations';
@@ -146,12 +147,18 @@ export default function ClipComposer({ route, navigation }: any) {
     if (!config?.enabled) { setError(c('Publishing is not available right now. Refresh settings or keep your draft.', 'النشر غير متاح الآن. حدّث الإعدادات أو احتفظ بمسودتك.')); void loadConfig(); return; }
     if (!termsChecked) { setError(c('Read and accept the community terms.', 'اقرأ شروط مجتمع المقاطع ووافق عليها.')); return; }
     uploadGuard.current = true; cancelRequested.current = false; setUploading(true); setProgress(0); setPaused(false); setPlaying(false); setError(''); setNotice('');
+    let failureStage: ClipUploadStage = termsAccepted ? 'draft' : 'terms';
     try {
       if (!termsAccepted) { await acceptClipsTerms(config.termsVersion); setTermsAccepted(true); }
       if (!mounted.current || cancelRequested.current) throw new Error('clip-upload-cancelled');
+      failureStage = 'draft';
       await saveClipDraft(value);
       if (!mounted.current || cancelRequested.current) throw new Error('clip-upload-cancelled');
-      const upload = await startClipUpload(value, { onProgress: event => { if (mounted.current) { setProgress(event.progress); setPaused(event.state === 'paused'); } } });
+      failureStage = 'initialize';
+      const upload = await startClipUpload(value, { onProgress: event => {
+        failureStage = event.state === 'processing' ? 'publish' : 'upload';
+        if (mounted.current) { setProgress(event.progress); setPaused(event.state === 'paused'); }
+      } });
       handle.current = upload;
       if (!mounted.current || cancelRequested.current) upload.cancel();
       const result = await upload.done;
@@ -167,8 +174,13 @@ export default function ClipComposer({ route, navigation }: any) {
       if (!mounted.current) return;
       if (latest) installDraft(latest);
       if (isClipTermsCancellation(failure)) return;
-      const reason = failure instanceof Error ? failure.message : '';
-      setError(reason.includes('cancel') ? c('Upload stopped. The draft is kept for retry.', 'توقف الرفع. المسودة محفوظة لإعادة المحاولة.') : c('Upload was not confirmed. Your draft is kept; reconnect and retry.', 'لم يتأكد رفع المقطع. المسودة محفوظة؛ أعد الاتصال وحاول مجددًا.'));
+      const { code } = sanitizeClipUploadError(failure);
+      setError(clipUploadErrorMessage(failure, c, failureStage));
+      if (code === 'clips-terms-required' || code === 'clips-terms-version-changed') {
+        setTermsAccepted(false); setTermsChecked(false); void loadConfig();
+      } else if (code === 'clips-disabled') {
+        setConfig(current => current ? { ...current, enabled: false } : current); void loadConfig();
+      }
     } finally { if (mounted.current) { uploadGuard.current = false; setUploading(false); setPaused(false); handle.current = null; } }
   }
   function onPlayback(status: AVPlaybackStatus) {
