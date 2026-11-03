@@ -74,6 +74,10 @@ service firebase.storage {
     match /clipMedia/{path=**} {
       allow read, write: if false;
     }
+    // Sanitized post images are server-written and leased after audience checks.
+    match /postMedia/{path=**} {
+      allow read, write: if false;
+    }
 
     // Avatars
     match /avatars/{uid}/{file} {

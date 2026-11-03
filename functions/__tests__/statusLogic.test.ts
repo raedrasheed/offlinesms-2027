@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  isStatusAudienceMember, validateTextStatusInput, validateMediaStatusInput,
+  isStatusAudienceMember, validateTextStatusInput, validateMediaStatusInput, parseStatusMentionUids,
   STATUS_BODY_MAX, STATUS_TTL_MS, STATUS_MEDIA_MAX_BYTES, STATUS_VIDEO_MAX_MS,
 } from '../src/statuses/statusLogic';
 
@@ -141,5 +141,18 @@ describe('validateMediaStatusInput', () => {
 describe('constants', () => {
   it('statuses live for 24 hours', () => {
     expect(STATUS_TTL_MS).toBe(86_400_000);
+  });
+});
+
+
+describe('status mention input', () => {
+  it('deduplicates bounded user ids without trusting client name snapshots', () => {
+    expect(parseStatusMentionUids(['a', 'a', 'b'])).toEqual(['a', 'b']);
+    expect(parseStatusMentionUids(undefined)).toEqual([]);
+  });
+  it('rejects paths, non-string ids and oversized lists', () => {
+    for (const value of [['a/b'], [null], [''], Array.from({ length: 11 }, (_, i) => String(i)), 'a']) {
+      expect(parseStatusMentionUids(value)).toBe('mentions-invalid');
+    }
   });
 });

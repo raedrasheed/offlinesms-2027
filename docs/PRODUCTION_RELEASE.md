@@ -1,5 +1,9 @@
 # Production release: phone and email sign-in, display names, chat features
 
+For the incremental mobile **2.6.0 (34)** release, use
+[MOBILE_SOCIAL_RELIABILITY_2_6_0.md](MOBILE_SOCIAL_RELIABILITY_2_6_0.md).
+The historical 2.4.0 rollout below is retained as a record of its deployment stages.
+
 Owner approval: Raed, 2026-10-11 09:04 UTC, to move to production with every change
 (user app, Relay, Dashboard). **Order:** Codex reviews this package first; only stages that
 pass review are executed. Verification SMS stays suspended in production until stage 7.

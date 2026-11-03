@@ -1,5 +1,5 @@
 {
-  "_comment": "Production deploy groups, in deploy order (docs/PRODUCTION_RELEASE.md \u00a74). Every function exported by functions/src/index.ts is in exactly one group (functions/__tests__/releaseFunctionGroups.test.ts). Print a group's --only list with: node scripts/release/deploy-only.mjs <group>",
+  "_comment": "Production deploy groups, in deploy order (docs/PRODUCTION_RELEASE.md §4). Every function exported by functions/src/index.ts is in exactly one group (functions/__tests__/releaseFunctionGroups.test.ts). Print a group's --only list with: node scripts/release/deploy-only.mjs <group>",
   "email-guards": [
     "guardEmailSignIn",
     "guardEmailSent",
@@ -68,7 +68,11 @@
     "matchContacts",
     "markStatusViewed",
     "createStatus",
-    "getStatusFeed"
+    "getStatusFeed",
+    "getStatus",
+    "setStatusLike",
+    "listStatusViewers",
+    "replyToStatus"
   ],
   "business-sms-points": [
     "escalateOrgBatches",
@@ -175,5 +179,19 @@
     "retryClipAccountErasure",
     "onClipUserDeleted",
     "onClipAuthUserDeleted"
+  ],
+  "social": [
+    "listSocialActivity",
+    "markSocialActivityRead",
+    "createPost",
+    "getPost",
+    "listPosts",
+    "deletePost",
+    "setPostLike",
+    "listPostComments",
+    "addPostComment",
+    "deletePostComment",
+    "reportPost",
+    "onPostRemoved"
   ]
 }

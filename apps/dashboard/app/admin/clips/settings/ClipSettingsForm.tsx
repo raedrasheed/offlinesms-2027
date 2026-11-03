@@ -18,9 +18,9 @@ export default function ClipSettingsForm({ config, version }: { config: ClipAdmi
     {state?.error && <p role="alert" className="rounded-lg p-3 text-red-700 bg-red-50">{state.error}</p>}
     {state?.success && <p role="status" className="rounded-lg p-3 text-green-700 bg-green-50">Settings saved.</p>}
     <input type="hidden" name="enabled" value={String(enabled)} />
-    <label className="flex gap-3 items-start"><input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} className="mt-1" /><span><strong>Enable Clips</strong><span className="block text-sm mt-1" style={{ color: 'var(--c-text-3)' }}>Allow users to browse and publish clips. Moderation remains available while the feature is disabled.</span></span></label>
+    <label className="flex gap-3 items-start"><input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} className="mt-1" /><span><strong>Enable Clips and posts</strong><span className="block text-sm mt-1" style={{ color: 'var(--c-text-3)' }}>Allow users to browse and publish clips and posts. Moderation remains available while the feature is disabled.</span></span></label>
     <input type="hidden" name="moderationRequired" value={String(review)} />
-    <label className="flex gap-3 items-start"><input type="checkbox" checked={review} onChange={e => setReview(e.target.checked)} className="mt-1" /><span><strong>Review before publication</strong><span className="block text-sm mt-1" style={{ color: 'var(--c-text-3)' }}>New videos and content changes wait for administrator approval. Turning this off allows processed submissions to publish automatically.</span></span></label>
+    <label className="flex gap-3 items-start"><input type="checkbox" checked={review} onChange={e => setReview(e.target.checked)} className="mt-1" /><span><strong>Review before publication</strong><span className="block text-sm mt-1" style={{ color: 'var(--c-text-3)' }}>New videos, posts and content changes wait for administrator approval. Turning this off allows processed submissions to publish automatically.</span></span></label>
     <div className="grid sm:grid-cols-3 gap-4">{[
       ['maxDurationSeconds', 'Maximum duration (seconds)', config.maxDurationSeconds, 1, 180],
       ['maxUploadMB', 'Maximum upload (MB)', config.maxUploadMB, 1, 200],

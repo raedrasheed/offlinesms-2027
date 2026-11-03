@@ -380,15 +380,17 @@ export async function retryMediaMessage(localMessageId: string): Promise<void> {
  * and records a "cleared" watermark so the realtime feeder / catch-up pull don't
  * resurrect older messages; messages sent after this point still appear.
  */
-export async function clearChat(conversationId: string): Promise<number> {
+export async function clearChat(conversationId: string, throughMessageAt?: number): Promise<number> {
   if (!getCurrentUid()) return 0;
   // Watermark on the SAME clock as the messages (server time), not Date.now() —
   // otherwise device/server clock skew can hide genuinely new incoming messages.
-  const watermark = await messagesRepo.getMaxMessageTime(conversationId);
+  const watermark = Math.max(await getCursor(`chat_cleared:${conversationId}`),
+    throughMessageAt ?? await messagesRepo.getMaxMessageTime(conversationId));
   await setCursor(`chat_cleared:${conversationId}`, watermark);
   // Keep the pull cursor at the watermark so it resumes correctly.
   await setCursor(`msg_cursor:${conversationId}`, watermark);
-  await messagesRepo.deleteConversationMessages(conversationId);
+  await messagesRepo.deleteConversationMessages(conversationId, throughMessageAt === undefined ? undefined : watermark);
+  emitLocalMessagesChanged(conversationId);
   return watermark;
 }
 

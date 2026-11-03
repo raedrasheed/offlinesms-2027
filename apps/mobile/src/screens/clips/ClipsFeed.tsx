@@ -1,3 +1,4 @@
+import { listSocialActivity } from '../../lib/socialActivity';
 import { isClipTermsCancellation } from '../../lib/clipTerms';
 import ClipFeedHeader, {feedStyles as s} from '../../components/clips/ClipFeedHeader';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -21,6 +22,7 @@ import ClipActionsSheet from '../../components/clips/ClipActionsSheet';
 export default function ClipsFeed({navigation}:any){
   const {c}=useClipsCopy();const insets=useSafeAreaInsets();const dimensions=useWindowDimensions();
   const visible=useClipVisibility();const network=useNetInfo();const {settings,update}=useClipPreferences();
+  const [unreadActivity,setUnreadActivity]=useState(false);
   const [enabled,setEnabled]=useState<boolean|null>(null);const [configError,setConfigError]=useState(false);
   const [mode,setMode]=useState<'forYou'|'following'>('forYou');const [searchOpen,setSearchOpen]=useState(false);
   const [search,setSearch]=useState('');const [query,setQuery]=useState('');const [height,setHeight]=useState(dimensions.height);
@@ -30,6 +32,7 @@ export default function ClipsFeed({navigation}:any){
   const quality=clipQuality(settings.dataSaving,network.type);
   const loadConfig=useCallback(()=>{let live=true;setConfigError(false);void getClipsConfig().then(result=>{if(live)setEnabled(result.config.enabled);}).catch(()=>{if(live){setConfigError(true);setEnabled(null);}});return()=>{live=false;};},[]);
   useFocusEffect(loadConfig);
+  useFocusEffect(useCallback(()=>{let live=true;const uid=auth.currentUser?.uid;void listSocialActivity({limit:30}).then(page=>{if(live&&uid===auth.currentUser?.uid)setUnreadActivity(page.items.some(item=>item.unread));}).catch(()=>{});return()=>{live=false;};},[]));
   useEffect(()=>{const timer=setTimeout(()=>setQuery(search.trim()),300);return()=>clearTimeout(timer);},[search]);
   useEffect(()=>{if(!feed.items.some(item=>item.id===activeId))setActiveId(feed.items[0]?.id??null);},[feed.items,activeId]);
   useEffect(()=>{if(!visible){setPanel(null);setSelected(null);}},[visible]);
@@ -67,7 +70,7 @@ export default function ClipsFeed({navigation}:any){
     />:<View style={[s.empty,{height}]}><Ionicons name="play-circle-outline" size={64} color="#7CABC7"/>
       {enabled===null&&!configError?<ActivityIndicator color="#fff"/>:<><Text style={s.emptyTitle}>{configError?c('Could not load clips','تعذر تحميل المقاطع'):c('Clips are not available yet','المقاطع غير متاحة حاليًا')}</Text><Text style={s.emptyBody}>{configError?c('Check your connection and try again.','تحقق من الاتصال وحاول مجددًا.'):c('You can keep using chats and statuses.','يمكنك متابعة استخدام المحادثات والحالات.')}</Text>{configError?<Pressable style={s.primary} onPress={loadConfig}><Text style={s.primaryText}>{c('Try again','إعادة المحاولة')}</Text></Pressable>:null}</>}
     </View>}
-    <ClipFeedHeader top={insets.top+8} mode={mode} enabled={enabled}
+    <ClipFeedHeader top={insets.top+8} mode={mode} enabled={enabled} searchOpen={searchOpen} unreadActivity={unreadActivity} onActivity={()=>navigation.navigate('SocialActivity')} onPosts={()=>navigation.navigate('PostsFeed')}
       onSearch={()=>{setSearchOpen(value=>!value);setSearch('');}} onMode={value=>{setMode(value);setActiveId(null);}}
       onCreate={()=>navigation.navigate('ClipComposer')} onProfile={()=>navigation.navigate('ClipProfile',{uid:auth.currentUser?.uid})}/>
     {searchOpen?<View style={[s.search,{top:insets.top+65}]}><Ionicons name="search-outline" size={19} color="#A8BECF"/><TextInput autoFocus value={search} onChangeText={setSearch} placeholder={c('Caption, hashtag or creator','الوصف أو الوسم أو الناشر')} placeholderTextColor="#A8BECF" style={s.input} maxLength={80} returnKeyType="search" onSubmitEditing={()=>setQuery(search.trim())}/></View>:null}

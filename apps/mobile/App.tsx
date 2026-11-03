@@ -8,7 +8,7 @@ import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { Ionicons } from '@expo/vector-icons';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { auth } from './src/lib/firebase';
-import { ThemeProvider } from './src/context/ThemeContext';
+import { ThemeProvider, useTheme } from './src/context/ThemeContext';
 import { OfflineProvider } from './src/context/OfflineContext';
 import { useAccountProfile } from './src/hooks/useAccountProfile';
 import './src/i18n';
@@ -60,6 +60,10 @@ import ClipPreferences from './src/screens/clips/ClipPreferences';
 import ClipComposer from './src/screens/clips/ClipComposer';
 import ClipDrafts from './src/screens/clips/ClipDrafts';
 import ClipFollowRequests from './src/screens/clips/ClipFollowRequests';
+import PostsFeed from './src/screens/posts/PostsFeed';
+import PostComposer from './src/screens/posts/PostComposer';
+import PostViewer from './src/screens/posts/PostViewer';
+import SocialActivity from './src/screens/SocialActivity';
 import { useClipsCopy } from './src/lib/clipsCopy';
 import Settings from './src/screens/Settings';
 import Points from './src/screens/Points';
@@ -75,8 +79,10 @@ import NotificationSettings from './src/screens/NotificationSettings';
 import { inviteCodeFromUrl, setPendingInvite, takePendingInvite, setPendingClip, takePendingClip } from './src/lib/deepLinks';
 import { clipIdFromUrl } from './src/lib/clipReference';
 import { createPendingClipNavigation } from './src/lib/pendingClipNavigation';
+import { createPendingInviteNavigation } from './src/lib/pendingInviteNavigation';
+import { createPushTapQueue } from './src/lib/pushTapQueue';
 import * as Notifications from 'expo-notifications';
-import { installForegroundHandler, registerForPush, routeFromNotification } from './src/lib/notifications';
+import { installForegroundHandler, registerForPush, routeFromNotification, dismissNotificationById } from './src/lib/notifications';
 import { initAppCheck } from './src/lib/appCheck';
 import { dispatchForRoute, pushTarget } from './src/lib/pushRouting';
 import { perfMark, perfBegin, perfNow } from './src/lib/perf';
@@ -182,6 +188,7 @@ const TAB_ICONS: Record<string, { active: keyof typeof Ionicons.glyphMap; inacti
 
 function MainTabs() {
   const { c } = useClipsCopy();
+  const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const unread = useUnreadTotal();
   return (
@@ -199,9 +206,9 @@ function MainTabs() {
       // fully rounded, with a soft-blue pill behind the active tab.
       screenOptions={({ route }) => ({
         headerShown: false,
-        tabBarActiveTintColor:   '#1F7BA8',
-        tabBarInactiveTintColor: '#3A4452',
-        tabBarActiveBackgroundColor: '#E3F1FA',
+        tabBarActiveTintColor:   colors.action.subtleFg,
+        tabBarInactiveTintColor: colors.text.secondary,
+        tabBarActiveBackgroundColor: colors.action.subtle,
         tabBarStyle: {
           position: 'absolute',
           left: 12,
@@ -209,7 +216,7 @@ function MainTabs() {
           bottom: insets.bottom + 10,
           height: 72,
           borderRadius: 999,
-          backgroundColor: '#FFFFFF',
+          backgroundColor: colors.background.surface,
           borderTopWidth: 0,
           paddingHorizontal: 6,
           shadowColor: '#000',
@@ -286,6 +293,12 @@ export default function App() {
     account: () => authedRef.current && accountRef.current === auth.currentUser?.uid ? accountRef.current : null,
     ready: () => navRef.isReady(), open: clipId => (navRef as any).navigate('ClipViewer', { clipId }),
   });
+  const inviteLinks = useRef<ReturnType<typeof createPendingInviteNavigation> | null>(null);
+  if (!inviteLinks.current) inviteLinks.current = createPendingInviteNavigation({
+    take: takePendingInvite, save: setPendingInvite,
+    account: () => authedRef.current && accountRef.current === auth.currentUser?.uid ? accountRef.current : null,
+    ready: () => navRef.isReady(), open: code => (navRef as any).navigate('JoinGroup', { code }),
+  });
   useEffect(() => {
     function handle(url: string | null) {
       const clipId = clipIdFromUrl(url);
@@ -295,8 +308,7 @@ export default function App() {
       }
       const code = inviteCodeFromUrl(url);
       if (!code) return;
-      if (authedRef.current && navRef.isReady()) (navRef as any).navigate('JoinGroup', { code });
-      else void setPendingInvite(code);
+      void inviteLinks.current?.receive(code).catch(() => {});
     }
     Linking.getInitialURL().then(handle);
     const sub = Linking.addEventListener('url', e => handle(e.url));
@@ -310,41 +322,44 @@ export default function App() {
 
   // A tapped-notification destination we couldn't navigate to yet (cold start:
   // navigator not mounted / auth not resolved). Drained once both are ready.
-  const pendingPushRef = useRef<unknown>(null);
-  const drainPush = useCallback(() => {
-    if (pendingPushRef.current == null) return;
-    if (tryDispatchPush(pendingPushRef.current, authedRef.current)) pendingPushRef.current = null;
-  }, []);
+  const pushTaps = useRef<ReturnType<typeof createPushTapQueue> | null>(null);
+  if (!pushTaps.current) pushTaps.current = createPushTapQueue({
+    dispatch: data => tryDispatchPush(data, authedRef.current),
+    received: (id, data) => {
+      void dismissNotificationById(id);
+      const tappedId = (data as { messageId?: unknown } | undefined)?.messageId;
+      perfMark('push:tap');
+      perfBegin('push_to_visible', { id: typeof tappedId === 'string' ? tappedId : null });
+      perfBegin('push_to_viewable', { id: typeof tappedId === 'string' ? tappedId : null, phase: 'viewable' });
+      prefetchFromData(data);
+    },
+    consumed: id => {
+      // Clear only the response just routed. A newer tap may already be native's
+      // last response, and must remain available if the app restarts.
+      try {
+        if (Notifications.getLastNotificationResponse()?.notification.request.identifier === id) {
+          Notifications.clearLastNotificationResponse();
+        }
+      } catch { /* Unavailable on web; routing already succeeded. */ }
+    },
+  });
+  const drainPush = useCallback(() => { pushTaps.current?.drain(); }, []);
 
   // Route notification taps (cold start + warm) and pre-sync on arrival/tap.
   // Cold-start tap is delivered via getLastNotificationResponseAsync; the
   // listener can ALSO fire for that same response, so dedupe by notification
   // identifier to avoid double navigation.
   useEffect(() => {
-    const handled = new Set<string>();
     const handleTap = (resp: Notifications.NotificationResponse | null) => {
       if (!resp) return;
-      const id = resp.notification.request.identifier;
-      if (id && handled.has(id)) return;
-      if (id) handled.add(id);
-      const data = resp.notification.request.content.data;
-      // Timing (test builds): tap → this message rendered in its conversation.
-      const tappedId = (data as { messageId?: unknown } | undefined)?.messageId;
-      perfMark('push:tap');
-      perfBegin('push_to_visible', { id: typeof tappedId === 'string' ? tappedId : null });
-      perfBegin('push_to_viewable', { id: typeof tappedId === 'string' ? tappedId : null, phase: 'viewable' });
-      // Kick a targeted pull immediately so the chat is loaded by the time it
-      // opens, then navigate (stashing + retrying if we're not ready yet).
-      prefetchFromData(data);
-      pendingPushRef.current = data;
-      drainPush();
+      pushTaps.current?.receive(resp.notification.request.identifier, resp.notification.request.content.data);
     };
     // Sync while JS is running in the foreground. A system-displayed push does
     // not itself run this listener when the app is terminated.
     const subRecv = Notifications.addNotificationReceivedListener(n => {
       prefetchFromData(n.request.content.data);
     });
-    Notifications.getLastNotificationResponseAsync().then(handleTap);
+    Notifications.getLastNotificationResponseAsync().then(handleTap).catch(() => {});
     const subTap = Notifications.addNotificationResponseReceivedListener(handleTap);
     return () => { subRecv.remove(); subTap.remove(); };
   }, [drainPush]);
@@ -356,29 +371,19 @@ export default function App() {
     if (!(user && profileCompleted === true)) return;
     let cancelled = false;
     const tryDrain = () => {
-      if (cancelled || pendingPushRef.current == null) return;
-      if (tryDispatchPush(pendingPushRef.current, true)) { pendingPushRef.current = null; return; }
+      if (cancelled || !pushTaps.current?.hasPending()) return;
+      drainPush();
+      if (!pushTaps.current?.hasPending()) return;
       setTimeout(tryDrain, 150);
     };
     tryDrain();
     return () => { cancelled = true; };
-  }, [user, profileCompleted]);
+  }, [user, profileCompleted, drainPush]);
 
   // Replay a stashed invite once the user is authenticated + onboarded.
   useEffect(() => {
     if (!(user && profileCompleted === true)) return;
-    let cancelled = false;
-    (async () => {
-      const code = await takePendingInvite();
-      if (!code || cancelled) return;
-      const tryNav = () => {
-        if (cancelled) return;
-        if (navRef.isReady()) (navRef as any).navigate('JoinGroup', { code });
-        else setTimeout(tryNav, 150);
-      };
-      tryNav();
-    })();
-    return () => { cancelled = true; };
+    void inviteLinks.current?.drain().catch(() => {});
   }, [user, profileCompleted]);
 
   // A protected clip link is replayed after sign-in; the viewer asks the
@@ -403,11 +408,13 @@ export default function App() {
     <KeyboardProvider>
       <ErrorBoundary>
       <ShareIntentHandler authed={!!user && profileCompleted === true} />
-      <NavigationContainer ref={navRef} onReady={() => { drainPush(); void clipLinks.current?.drain().catch(() => {}); }}>
+      <NavigationContainer ref={navRef} onReady={() => { drainPush(); void clipLinks.current?.drain().catch(() => {}); void inviteLinks.current?.drain().catch(() => {}); }}>
         {!user ? (
           <AuthFlow />
         ) : profileCompleted === null ? (
           null /* waiting for users/{uid} snapshot */
+        ) : profileCompleted === false ? (
+          <OnboardingFlow />
         ) : (
           <RootStack.Navigator key={user.uid} screenOptions={{ headerShown: false }}>
             <RootStack.Screen name="Tabs" component={MainTabs} />
@@ -426,6 +433,10 @@ export default function App() {
             <RootStack.Screen name="ClipComposer" component={ClipComposer} options={{ presentation: 'fullScreenModal' }} />
             <RootStack.Screen name="ClipDrafts" component={ClipDrafts} />
             <RootStack.Screen name="ClipFollowRequests" component={ClipFollowRequests} />
+            <RootStack.Screen name="PostsFeed" component={PostsFeed} />
+            <RootStack.Screen name="PostComposer" component={PostComposer} options={{ presentation: 'fullScreenModal' }} />
+            <RootStack.Screen name="PostViewer" component={PostViewer} />
+            <RootStack.Screen name="SocialActivity" component={SocialActivity} />
             <RootStack.Screen name="GroupInvitations" component={GroupInvitations} />
             <RootStack.Screen name="GroupInfo" component={GroupInfo} />
             <RootStack.Screen name="EditGroup" component={EditGroup} />

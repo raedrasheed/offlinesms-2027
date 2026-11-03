@@ -8,7 +8,7 @@ const JOBS = 'clipAccountErasureJobs';
 const PAGE_SIZE = 25;
 const LEASE_MS = 150_000;
 const PHASES = ['clips', 'followers', 'following', 'likes', 'saves', 'views', 'comments', 'shares', 'reports',
-  'saved', 'hidden', 'rateLimits', 'uploadQuota', 'done'] as const;
+  'saved', 'hidden', 'activity', 'rateLimits', 'uploadQuota', 'posts', 'postLikes', 'postComments', 'postReports', 'socialActivityActor', 'done'] as const;
 type Phase = typeof PHASES[number];
 function erasureUid(uid: string): void {
   // Account deletion also serves legacy/custom Firebase identities that never
@@ -81,6 +81,10 @@ async function eraseComment(db: Firestore, uid: string, row: DocumentSnapshot) {
 async function erasePage(db: Firestore, uid: string, phase: Phase, cursor: string | null) {
   let query: FirebaseFirestore.Query;
   if (phase === 'clips') query = db.collection('clips').where('ownerUid', '==', uid);
+  else if (phase === 'posts') query = db.collection('posts').where('ownerUid', '==', uid);
+  else if (phase === 'socialActivityActor') query = db.collectionGroup('activity').where('actorUid', '==', uid);
+  else if (phase === 'postReports') query = db.collection('postReports').where('reporterUid', '==', uid);
+  else if (phase === 'postLikes' || phase === 'postComments') query = db.collectionGroup(phase).where(phase === 'postLikes' ? 'uid' : 'authorUid', '==', uid);
   else if (phase === 'reports') query = db.collection('clipReports').where('reporterUid', '==', uid);
   else if (['likes', 'saves', 'views', 'comments', 'shares'].includes(phase)) {
     const field = phase === 'comments' ? 'authorUid' : phase === 'shares' ? 'senderUid' : 'uid';
@@ -95,7 +99,25 @@ async function erasePage(db: Firestore, uid: string, phase: Phase, cursor: strin
         ownerUsername: null, caption: '', hashtags: [], groupId: null, audience: 'private',
         moderationReason: null, edits: FieldValue.delete(), updatedAt: FieldValue.serverTimestamp(), deletedAt: FieldValue.serverTimestamp() });
       // onClipRemoved purges source/output paths using the retained internal uid.
-    } else if (phase === 'followers' || phase === 'following') await removeFollow(db, uid, row, phase);
+    } else if (phase === 'posts') {
+      await row.ref.update({ status: 'removed', body: '', audience: 'private', moderationReason: null, updatedAt: FieldValue.serverTimestamp(), deletedAt: FieldValue.serverTimestamp() });
+    } else if (phase === 'postLikes' || phase === 'postComments') {
+      const parts = row.ref.path.split('/');
+      if (parts.length !== 4 || parts[0] !== 'posts' || parts[2] !== phase) continue;
+      await db.runTransaction(async tx => {
+        const postRef = row.ref.parent.parent!, [live, post] = await tx.getAll(row.ref, postRef);
+        if (!live.exists || live.get(phase === 'postLikes' ? 'uid' : 'authorUid') !== uid) return;
+        if (post.exists && (phase === 'postLikes' || live.get('deleted') !== true)) {
+          const field = phase === 'postLikes' ? 'likeCount' : 'commentCount';
+          tx.update(postRef, { [field]: Math.max(0, (Number(post.get(field)) || 0) - 1) });
+        }
+        tx.delete(row.ref);
+      });
+    } else if (phase === 'socialActivityActor') {
+      const parts = row.ref.path.split('/');
+      if (parts.length === 4 && parts[0] === 'clipProfiles' && parts[2] === 'activity') await row.ref.delete();
+    } else if (phase === 'postReports') await row.ref.update({ reporterUid: null, details: '', reporterErased: true, updatedAt: FieldValue.serverTimestamp() });
+    else if (phase === 'followers' || phase === 'following') await removeFollow(db, uid, row, phase);
     else if (phase === 'likes' || phase === 'saves' || phase === 'views') await removeInteraction(db, uid, row, phase);
     else if (phase === 'comments') await eraseComment(db, uid, row);
     else if (phase === 'shares') { if (isClipChild(row, 'shares')) await row.ref.delete(); }

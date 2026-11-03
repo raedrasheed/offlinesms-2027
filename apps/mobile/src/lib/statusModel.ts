@@ -2,6 +2,7 @@
 // cleanly under vitest (the wrappers in `statuses.ts` pull in firebase).
 
 export type StatusType = 'text' | 'image' | 'video';
+export type StatusMention = { uid: string; name: string; username: string | null };
 
 export type StatusFeedItem = {
   statusId:        string;
@@ -16,6 +17,9 @@ export type StatusFeedItem = {
   createdAtMs:     number;
   expiresAtMs:     number;
   viewedByMe:      boolean;
+  likedByMe?:      boolean;
+  likeCount?:      number;
+  mentions?:      StatusMention[];
 };
 
 export type AuthorStatusGroup = {

@@ -7,7 +7,7 @@ import { signOut } from 'firebase/auth';
 import {
   LogOut, ChevronDown, Search, LayoutGrid, LineChart,
   Users, Building2, MessageCircle, Globe,
-  Inbox, Phone, Send, Clapperboard,
+  Inbox, Phone, Send, Clapperboard, FileText,
   Coins, ArrowLeftRight,
   LifeBuoy, Flag, Radio, Smartphone,
   Shield, ScrollText, Bell, Settings,
@@ -59,6 +59,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Messaging',
     items: [
       { href: '/admin/clips', label: 'Clips', icon: Clapperboard, capability: 'view:clips' },
+      { href: '/admin/posts', label: 'Posts', icon: FileText, capability: 'manage:clips' },
       { href: '/admin/chats', label: 'Conversations', icon: Inbox,  capability: 'view:groups' },
       { href: '/admin/calls', label: 'Messages',      icon: Phone,  capability: 'view:calls' },
       { href: '/admin/sms',   label: 'SMS escalation', icon: Send,  capability: 'view:sms', badge: 'NEW' },

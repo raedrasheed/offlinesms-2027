@@ -24,7 +24,19 @@ import { db } from './firebase';
 import { request } from './permissions';
 import { getActiveConversationId } from '../localdb/sync/syncScheduler';
 import { providerForPlatform, usesExpoToken, buildDeviceRecord } from './pushTokens';
+import { createNotificationDismissal } from './notificationDismissal';
 export { routeFromNotification, type PushRoute } from './pushRouting';
+
+export const dismissConversationNotifications = createNotificationDismissal({
+  list: () => Notifications.getPresentedNotificationsAsync(),
+  dismiss: id => Notifications.dismissNotificationAsync(id),
+});
+
+/** A tap acknowledges this individual notice even if its destination is still loading. */
+export async function dismissNotificationById(identifier: string): Promise<void> {
+  if (!identifier) return;
+  try { await Notifications.dismissNotificationAsync(identifier); } catch { /* best-effort */ }
+}
 
 const DEVICE_ID_KEY = 'pushDeviceId.v1';
 let tokenSub: { remove: () => void } | null = null;

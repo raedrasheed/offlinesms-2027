@@ -24,6 +24,7 @@
 // onMessageCreate trigger.
 
 import { onCall, HttpsError, type CallableRequest } from 'firebase-functions/v2/https';
+import { createHash } from 'node:crypto';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { writeAuditLog } from '../lib/auditLog';
 import { cleanNameSnapshot, publicNameFrom } from '../lib/displayName';
@@ -199,12 +200,14 @@ async function sendMessage(request: CallableRequest, allowAnonymous = false) {
   }
 
   // Idempotency: if a message with this clientLocalId already exists in the
-  // conversation, return it rather than creating a duplicate. clientLocalId is
-  // globally unique per device, so a single-field index is sufficient.
+  // conversation for this sender, return it rather than creating a duplicate.
+  // Another participant choosing the same local id must not claim this send.
   if (clientLocalId) {
     const dupSnap = await convoRef.collection('messages')
-      .where('clientLocalId', '==', clientLocalId).limit(1).get();
+      .where('clientLocalId', '==', clientLocalId).where('senderUid', '==', uid).limit(1).get();
     if (!dupSnap.empty) {
+      const previous = dupSnap.docs[0].data();
+      if ((previous.senderUid ?? previous.senderId) !== uid) throw new HttpsError('permission-denied', 'local-id-owner-mismatch');
       return { messageId: dupSnap.docs[0].id, idempotent: true };
     }
   }
@@ -226,35 +229,48 @@ async function sendMessage(request: CallableRequest, allowAnonymous = false) {
     text = attachmentFallback({kind:'contact',contact});
   }
 
-  const msgRef = convoRef.collection('messages').doc();
+  const msgRef = clientLocalId
+    ? convoRef.collection('messages').doc('text_' + createHash('sha256').update(JSON.stringify([uid, clientLocalId])).digest('hex'))
+    : convoRef.collection('messages').doc();
   const now = FieldValue.serverTimestamp();
-  await msgRef.set({
-    conversationId:     convoRef.id,
-    senderUid:          uid,
-    senderId:           uid,           // back-compat alias
-    type:               kind,
-    text,
-    ...(sticker ? { sticker } : {}),
-    ...(poll ? { poll } : {}),
-    ...(location ? { location } : {}),
-    ...(contact ? { contact } : {}),
-    status:             'sent',
-    deletedForEveryone: false,
-    editedAt:           null,
-    replyTo,
-    mentions:           mentions.length > 0 ? mentions : null,
-    forwarded:          false,
-    forwardedFrom:      null,
-    reactions:          null,
-    pinnedAt:           null,
-    pinnedBy:           null,
-    expiresAt:          null,
-    createdAt:          now,
-    updatedAt:          now,
-    clientLocalId,
-    idempotencyKey:     clientIdempotencyKey,
-    ...(isGroup ? { senderDisplayName, senderPhotoURL } : {}),
+  const duplicate = await db.runTransaction(async tx => {
+    const previous = await tx.get(msgRef);
+    if (previous.exists) {
+      if ((previous.get('senderUid') ?? previous.get('senderId')) !== uid || previous.get('clientLocalId') !== clientLocalId) {
+        throw new HttpsError('permission-denied', 'local-id-owner-mismatch');
+      }
+      return true;
+    }
+    tx.create(msgRef, {
+      conversationId:     convoRef.id,
+      senderUid:          uid,
+      senderId:           uid,           // back-compat alias
+      type:               kind,
+      text,
+      ...(sticker ? { sticker } : {}),
+      ...(poll ? { poll } : {}),
+      ...(location ? { location } : {}),
+      ...(contact ? { contact } : {}),
+      status:             'sent',
+      deletedForEveryone: false,
+      editedAt:           null,
+      replyTo,
+      mentions:           mentions.length > 0 ? mentions : null,
+      forwarded:          false,
+      forwardedFrom:      null,
+      reactions:          null,
+      pinnedAt:           null,
+      pinnedBy:           null,
+      expiresAt:          null,
+      createdAt:          now,
+      updatedAt:          now,
+      clientLocalId,
+      idempotencyKey:     clientIdempotencyKey,
+      ...(isGroup ? { senderDisplayName, senderPhotoURL } : {}),
+    });
+    return false;
   });
+  if (duplicate) return { messageId: msgRef.id, idempotent: true };
 
   // Fire-and-forget — writeAuditLog already soft-fails internally, and on the
   // send hot path we don't want to add a Firestore round-trip to the client

@@ -98,10 +98,12 @@ export async function getMinMessageTime(conversationId: string): Promise<number>
 }
 
 /** Phase 23 — delete all local messages for a conversation ("clear chat"). */
-export async function deleteConversationMessages(conversationId: string): Promise<number> {
+export async function deleteConversationMessages(conversationId: string, throughMessageAt?: number): Promise<number> {
+  const boundary = throughMessageAt === undefined ? '' : ' AND COALESCE(remote_created_at, created_at) <= ?';
+  const params = throughMessageAt === undefined ? [conversationId] : [conversationId, throughMessageAt];
   const before = await getDb().first<{ n: number }>(
-    `SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ?`, [conversationId]);
-  await getDb().run(`DELETE FROM messages WHERE conversation_id = ?`, [conversationId]);
+    `SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ?${boundary}`, params);
+  await getDb().run(`DELETE FROM messages WHERE conversation_id = ?${boundary}`, params);
   return before?.n ?? 0;
 }
 

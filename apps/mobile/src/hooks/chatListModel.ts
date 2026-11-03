@@ -24,6 +24,7 @@ export interface ChatListItem {
   participantKey?: string | null;
   someoneTyping: boolean;
   lastMessageText: string | null;
+  lastMessageId?: string | null;
   lastMessageAt: TsLike | null;
   state: {
     unreadCount: number;
@@ -55,6 +56,7 @@ export function mapConversationRow(row: ConversationRow, labels: ChatListLabels 
     participantKey: row.participant_key,
     someoneTyping: false,
     lastMessageText: row.last_message_preview,
+    lastMessageId: row.last_message_id,
     lastMessageAt: at,
     state: {
       unreadCount: row.unread_count ?? 0,
@@ -74,7 +76,7 @@ export type ChatFilter = 'all' | 'unread' | 'favorites' | 'groups';
 // invalidate the list, but names, avatars, filters and presence keys must.
 const CHAT_ITEM_FIELDS = [
   'type', 'title', 'avatar_url', 'member_count', 'participant_key',
-  'last_message_preview', 'last_message_at', 'unread_count',
+  'last_message_id', 'last_message_preview', 'last_message_at', 'unread_count',
   'pinned', 'muted', 'favorite', 'archived',
 ] as const satisfies readonly (keyof ConversationRow)[];
 

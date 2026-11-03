@@ -12,6 +12,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import { useColorScheme } from 'react-native';
@@ -46,25 +47,31 @@ export function ThemeProvider({
 }) {
   const systemScheme = useColorScheme(); // 'light' | 'dark' | null
   const [localPref, setLocalPref] = useState<ThemePreference>('system');
+  const preferenceRevision = useRef(0);
 
   // Load last-saved preference from AsyncStorage on mount (avoid flash).
   useEffect(() => {
+    const revision = preferenceRevision.current;
+    let active = true;
     AsyncStorage.getItem(STORAGE_KEY)
       .then(v => {
-        if (v === 'light' || v === 'dark' || v === 'system') setLocalPref(v);
+        if (active && revision === preferenceRevision.current && (v === 'light' || v === 'dark' || v === 'system')) setLocalPref(v);
       })
       .catch(() => {});
+    return () => { active = false; };
   }, []);
 
   // When Firestore user preference arrives, adopt it.
   useEffect(() => {
     if (userPreference != null) {
+      preferenceRevision.current++;
       setLocalPref(userPreference);
       AsyncStorage.setItem(STORAGE_KEY, userPreference).catch(() => {});
     }
   }, [userPreference]);
 
   const setPreference = useCallback((p: ThemePreference) => {
+    preferenceRevision.current++;
     setLocalPref(p);
     AsyncStorage.setItem(STORAGE_KEY, p).catch(() => {});
   }, []);

@@ -9,6 +9,12 @@ export const STATUS_TTL_MS    = 24 * 60 * 60 * 1000; // statuses expire after 24
 export const STATUS_BODY_MAX  = 700;                  // text status / caption length cap
 export const AUDIENCE_LIST_MAX = 256;                 // allowed/excluded list cap
 
+export function parseStatusMentionUids(value: unknown): string[] | 'mentions-invalid' {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 10 || value.some(uid => typeof uid !== 'string' || !uid || uid.length > 128 || uid.includes('/'))) return 'mentions-invalid';
+  return [...new Set(value)] as string[];
+}
+
 // Media statuses — caps mirror storage.rules (statuses/{uid}/** ≤ 15MB).
 export const STATUS_MEDIA_MAX_BYTES = 15 * 1024 * 1024;
 export const STATUS_VIDEO_MAX_MS    = 30_000;

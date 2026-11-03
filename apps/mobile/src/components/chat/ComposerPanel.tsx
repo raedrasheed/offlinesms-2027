@@ -39,6 +39,7 @@ export function ComposerPanel({
             style={[s.tab, tab === k && s.tabActive]}
             onPress={() => select(k)}
             accessibilityRole="tab"
+            accessibilityLabel={t(`composer.${k}`)}
             accessibilityState={{ selected: tab === k }}
           >
             <Text style={[s.tabText, tab === k && s.tabTextActive]}>{t(`composer.${k}`)}</Text>

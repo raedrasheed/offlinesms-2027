@@ -13,6 +13,7 @@ import { openLocalDb, conversationsRepo } from '../localdb';
 import { startChatListFeeder } from '../localdb/sync/chatListFeeder';
 import { createChatListMapper, ChatListItem } from './chatListModel';
 import { startForegroundMessagePreload } from '../localdb/sync/foregroundMessagePreload';
+import { onLocalMessagesChanged } from '../localdb/messageChanges';
 
 export type ChatListSource = 'disabled' | 'local' | 'firestoreFallback';
 
@@ -61,6 +62,8 @@ export function useLocalChatList(uid: string | undefined): LocalChatList {
     });
   }, [enabled, uid, groupLabel, directLabel, lifecycle]);
   const refresh = useCallback(async () => { await runner?.(); }, [runner]);
+
+  useEffect(() => enabled ? onLocalMessagesChanged(() => { void refresh(); }) : undefined, [enabled, refresh]);
 
   useEffect(() => {
     if (!enabled || !uid) { setItems([]); setLoading(false); setSource('disabled'); return; }

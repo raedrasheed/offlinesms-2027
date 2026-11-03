@@ -1,5 +1,5 @@
 import { useGroupInvitations } from '../hooks/useGroupInvitations';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList, View, Text, Pressable, StyleSheet, TextInput, Alert, Platform, ScrollView,
 } from 'react-native';
@@ -19,6 +19,9 @@ import { normalizeProfile, profileName } from '../lib/displayNames.pure';
 import { perfMark } from '../lib/perf';
 import { useTheme } from '../context/ThemeContext';
 import { useLocalChatList } from '../hooks/useLocalChatList';
+import { useChatVisibility } from '../hooks/useChatVisibility';
+import { useStatusRings } from '../hooks/useStatusRings';
+import { isConversationVisible, conversationRevision } from '../lib/chatVisibility';
 import { isRTL } from '../i18n';
 import { radius } from '../theme';
 import { setUnreadTotal } from '../lib/unreadStore';
@@ -65,6 +68,8 @@ export default function ChatsList({ navigation }: any) {
   // the flag is on AND the local DB initialised; otherwise the Firestore path
   // below runs unchanged (including as a fallback).
   const local = useLocalChatList(me);
+  const visibility = useChatVisibility(me);
+  const { groups: statusGroups } = useStatusRings();
   const useLocal = local.source === 'local';
   const refreshChats = local.refresh;
 
@@ -144,7 +149,8 @@ export default function ChatsList({ navigation }: any) {
     const fromList = (item as any).participantUids as string[] | undefined;
     if (fromList?.length) return fromList.find(u => u !== me) ?? null;
     const key = (item as any).participantKey as string | null | undefined;
-    if (key) return key.split('_').find(u => u !== me) ?? null;
+    if (key?.startsWith(`${me}_`)) return key.slice(me.length + 1);
+    if (key?.endsWith(`_${me}`)) return key.slice(0, -(me.length + 1));
     return null;
   };
 
@@ -169,7 +175,10 @@ export default function ChatsList({ navigation }: any) {
   useEffect(() => () => presenceSubs?.clear(), [presenceSubs]);
 
   // Archived chats are always hidden from every filter now (no archive tab).
-  const visible = useMemo(() => enriched.filter(c => c.state?.archived !== true), [enriched]);
+  const visible = useMemo(() => enriched.filter(c => c.state?.archived !== true
+    && isConversationVisible(c, visibility.hidden[c.id])), [enriched, visibility.hidden]);
+  const rowById = useRef(new Map<string, Row>());
+  rowById.current = new Map(enriched.map(row => [row.id, row]));
   // Timing (test builds, src/lib/perf.ts): first time the chat list has rows.
   useEffect(() => { if (visible.length > 0) perfMark('chatList:shown', { rows: visible.length }, true); }, [visible]);
 
@@ -206,10 +215,47 @@ export default function ChatsList({ navigation }: any) {
       name ? `${t('chats.clearChatMessage')}\n\n${name}` : t('chats.clearChatMessage'),
       [
         { text: t('common.cancel'), style: 'cancel' },
-        { text: t('chats.clearChat'), style: 'destructive', onPress: () => { void clearChat(cid).then(() => refreshChats()); } },
+        { text: t('chats.clearChat'), style: 'destructive', onPress: () => {
+          void clearChat(cid).then(() => refreshChats()).catch(() => Alert.alert(t('chats.actionFailed')));
+        } },
       ],
     );
   }, [t, refreshChats]);
+
+  const hideChat = visibility.hide;
+  const confirmDeleteChat = useCallback((cid: string) => {
+    const row = rowById.current.get(cid);
+    if (!row) return;
+    Alert.alert(t('chats.deleteChatTitle'), t('chats.deleteChatMessage'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      { text: t('chats.deleteChat'), style: 'destructive', onPress: () => {
+        void (async () => {
+          await hideChat(cid, row);
+          await clearChat(cid, conversationRevision(row).messageAt);
+          refreshChats();
+        })().catch(() => Alert.alert(t('chats.actionFailed')));
+      } },
+    ]);
+  }, [hideChat, refreshChats, t]);
+
+  const showChatActions = useCallback((cid: string, name: string) => {
+    Alert.alert(name, undefined, [
+      { text: t('chats.clearChat'), onPress: () => confirmClearChat(cid, name) },
+      { text: t('chats.deleteChat'), style: 'destructive', onPress: () => confirmDeleteChat(cid) },
+      { text: t('common.cancel'), style: 'cancel' },
+    ]);
+  }, [confirmClearChat, confirmDeleteChat, t]);
+
+  const openStatus = useCallback((cid: string) => {
+    const row = rowById.current.get(cid);
+    if (!row) return;
+    const peerUid = peerUidOf(row);
+    const group = peerUid ? statusGroups[peerUid] : undefined;
+    if (group) navigation.navigate('StatusViewer', {
+      title: group.authorName, authorId: group.authorId, authorPhotoURL: group.authorPhotoURL,
+      items: group.items, startIndex: group.startIndex,
+    });
+  }, [statusGroups, navigation, me]);
 
   // Stable handlers passed to every ChatRow so the row's memo comparator
   // sees identical references across parent renders.
@@ -227,6 +273,7 @@ export default function ChatsList({ navigation }: any) {
   const s = buildStyles(colors, isRTL);
   const firstName = (auth.currentUser?.displayName ?? '').trim().split(/\s+/)[0] || '';
 
+  if (!visibility.loaded) return <LoadingState fullPage title={t('chats.loading')} />;
   if (useLocal) {
     if (local.loading && local.items.length === 0) return <LoadingState fullPage title="Loading chats…" />;
   } else if (rows === null) {
@@ -339,7 +386,14 @@ export default function ChatsList({ navigation }: any) {
               typingLabel={typingLabel}
               recordingLabel={recordingLabel}
               onOpen={openConversation}
-              onLongPress={confirmClearChat}
+              onLongPress={showChatActions}
+              statusRing={(() => {
+                const peer = peerUidOf(item);
+                const group = peer ? statusGroups[peer] : undefined;
+                return group ? (group.unviewedCount > 0 ? 'unseen' : 'seen') : undefined;
+              })()}
+              onOpenStatus={openStatus}
+              statusLabel={t('chats.viewStatus')}
               formatTime={formatTime}
               colors={colors}
             />

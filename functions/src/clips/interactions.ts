@@ -1,3 +1,4 @@
+import { writeSocialActivity } from '../social/activityModel';
 import { createHash } from 'node:crypto';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
@@ -23,6 +24,7 @@ export const setClipInteraction = onCall({ region: 'us-central1' }, async reques
     const now = FieldValue.serverTimestamp();
     if (active) tx.create(rowRef, { clipId: id, uid, createdAt: now }); else tx.delete(rowRef);
     if (type === 'like') {
+      writeSocialActivity(db, tx, clip.get('ownerUid'), { kind: 'like', actorUid: uid, clipId: id }, active);
       likeCount = Math.max(0, likeCount + (active ? 1 : -1));
       tx.update(ref, { likeCount, updatedAt: now });
     }

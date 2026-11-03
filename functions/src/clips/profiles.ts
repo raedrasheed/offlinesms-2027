@@ -1,3 +1,4 @@
+import { writeSocialActivity } from '../social/activityModel';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore, FieldValue, FieldPath, Timestamp, AggregateField, type Firestore } from 'firebase-admin/firestore';
 import { publicNameFrom } from '../lib/displayName';
@@ -76,6 +77,12 @@ async function changeFollow(db: Firestore, ownerUid: string, followerUid: string
     }
     if (status === before) return status;
     const diff = (status === 'accepted' ? 1 : 0) - (before === 'accepted' ? 1 : 0);
+    if (command === 'follow') writeSocialActivity(db, tx, ownerUid, { kind: 'follow', actorUid: followerUid });
+    if (command === 'accept') writeSocialActivity(db, tx, followerUid, { kind: 'followAccepted', actorUid: ownerUid });
+    if (status === 'none') {
+      writeSocialActivity(db, tx, ownerUid, { kind: 'follow', actorUid: followerUid }, false);
+      writeSocialActivity(db, tx, followerUid, { kind: 'followAccepted', actorUid: ownerUid }, false);
+    }
     if (status === 'none') { tx.delete(relationRef); tx.delete(mirrorRef); }
     else {
       const value = { status, createdAt: relation.get('createdAt') ?? FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() };

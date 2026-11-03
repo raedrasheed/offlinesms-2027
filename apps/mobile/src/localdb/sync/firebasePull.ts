@@ -51,6 +51,7 @@ export async function pullConversations(): Promise<void> {
       const c = d.data() as any;
       await upsertRemoteConversation({
         id: d.id, remote_id: d.id, type: c.type === 'group' ? 'group' : 'direct',
+        participant_key: c.participantKey ?? null,
         title: c.name ?? null, avatar_url: c.photoURL ?? null,
         owner_uid: c.ownerUid ?? null, status: c.status ?? 'active', member_count: c.memberCount ?? 0,
         pinned_message_id: c.pinnedMessage?.messageId ?? null, last_message_id: c.lastMessage?.messageId ?? null,

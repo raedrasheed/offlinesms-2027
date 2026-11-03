@@ -1,8 +1,8 @@
 /** Shared by the explicit first-interaction prompt and the publishing checkbox.
  * A server terms-version change always requires a fresh, explicit decision. */
 export const CLIPS_COMMUNITY_TERMS = {
-  en: 'Publish only videos you own or have permission to share. Keep videos and comments respectful. Do not post harassment, sexual content, graphic violence, illegal material, or other people’s private information. Reports are reviewed and violating content or accounts may be removed. Private videos keep their audience restrictions when shared.',
-  ar: 'انشر فيديوهات تملكها أو لديك إذن بمشاركتها. حافظ على الاحترام في الفيديوهات والتعليقات. يُمنع نشر الإساءة أو المحتوى الجنسي أو العنف الصادم أو المحتوى غير القانوني أو معلومات الآخرين الخاصة. تُراجع البلاغات وقد يُحذف المحتوى أو تُقيّد الحسابات المخالفة. تبقى صلاحيات الفيديو الخاص محفوظة عند المشاركة.',
+  en: 'Publish only videos, images and text you own or have permission to share. Keep posts, videos and comments respectful. Do not post harassment, sexual content, graphic violence, illegal material, or other people’s private information. Reports are reviewed and violating content or accounts may be removed. Private content keeps its audience restrictions when shared.',
+  ar: 'انشر فيديوهات وصورًا ونصوصًا تملكها أو لديك إذن بمشاركتها. حافظ على الاحترام في المنشورات والفيديوهات والتعليقات. يُمنع نشر الإساءة أو المحتوى الجنسي أو العنف الصادم أو المحتوى غير القانوني أو معلومات الآخرين الخاصة. تُراجع البلاغات وقد يُحذف المحتوى أو تُقيّد الحسابات المخالفة. تبقى صلاحيات المحتوى الخاص محفوظة عند المشاركة.',
 };
 
 type TermsState = {config: {enabled: boolean; termsVersion: string}; termsAccepted: boolean};
