@@ -224,8 +224,9 @@ appeared on 55 functions and left one callable (`NODE22_UPGRADE.md` §2).
 
 ## 5. Stage 3: Dashboard
 
-**URL:** `https://dash.offlinesms.com`. It is a Next.js 14 server app on DigitalOcean, not
-Firebase Hosting.
+**URL:** `https://dash.offlinesms.com`. It is a Next.js 15.5.28 server app on DigitalOcean, not
+Firebase Hosting. See [the dashboard security upgrade notes](DASHBOARD_NEXT15_SECURITY_UPGRADE.md)
+for dependency versions, compatibility changes, validation and remaining audit findings.
 
 **Build:** from the repository root, `npm ci && npm --prefix apps/dashboard run build`;
 start with `npm --prefix apps/dashboard start`. Use the build and run commands the

@@ -7,7 +7,7 @@ const state = vi.hoisted(() => ({
   failAudit: false,
   signed: [] as Array<{ path: string; options: any }>,
 }));
-vi.mock('next/headers', () => ({ cookies: () => ({ get: () => ({ value: 'verified-cookie' }) }) }));
+vi.mock('next/headers', () => ({ cookies: async () => ({ get: () => ({ value: 'verified-cookie' }) }) }));
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
 vi.mock('../lib/session', () => ({ verifySession: async () => state.session }));
 vi.mock('firebase-admin/storage', () => ({ getStorage: () => ({ bucket: () => ({ file: (path: string) => ({

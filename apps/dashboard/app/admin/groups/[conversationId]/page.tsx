@@ -23,13 +23,15 @@ export const runtime = 'nodejs';
 type Tab = 'overview' | 'members' | 'settings' | 'sms';
 
 export default async function GroupDetailPage({
-  params,
-  searchParams,
+  params: paramsPromise,
+  searchParams: searchParamsPromise,
 }: {
-  params: { conversationId: string };
-  searchParams?: { tab?: string };
+  params: Promise<{ conversationId: string }>;
+  searchParams?: Promise<{ tab?: string }>;
 }) {
-  const cookie = cookies().get('__session')?.value;
+  const params = await paramsPromise;
+  const searchParams = await searchParamsPromise;
+  const cookie = (await cookies()).get('__session')?.value;
   const session = await verifySession(cookie);
   if (session.state !== 'authorized') redirect('/login?next=/admin/groups');
   if (!canDo(session.role, 'view:groups')) {

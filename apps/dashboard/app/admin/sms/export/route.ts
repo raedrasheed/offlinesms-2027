@@ -14,7 +14,7 @@ import { checkRateLimit, rateLimitResponse, LIMITS } from '@/lib/rateLimit';
 export const runtime = 'nodejs';
 
 export async function GET(request: Request) {
-  const sessionCookie = cookies().get('__session')?.value;
+  const sessionCookie = (await cookies()).get('__session')?.value;
   const session = await verifySession(sessionCookie);
   if (session.state !== 'authorized') return new NextResponse('Unauthorized', { status: 401 });
   if (!canDo(session.role, 'export:sms')) return new NextResponse('Forbidden', { status: 403 });

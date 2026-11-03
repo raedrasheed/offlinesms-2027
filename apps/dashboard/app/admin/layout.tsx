@@ -14,7 +14,7 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
-  const sessionCookie = cookies().get('__session')?.value;
+  const sessionCookie = (await cookies()).get('__session')?.value;
   const session = await verifySession(sessionCookie);
 
   if (session.state === 'unauthenticated') {

@@ -21,11 +21,12 @@ const CARD   = 'var(--c-card)';
 const BORDER = 'var(--c-border)';
 
 export default async function TransactionsPage({
-  searchParams,
+  searchParams: searchParamsPromise,
 }: {
-  searchParams?: { cursor?: string; type?: string };
+  searchParams?: Promise<{ cursor?: string; type?: string }>;
 }) {
-  const cookie = cookies().get('__session')?.value;
+  const searchParams = await searchParamsPromise;
+  const cookie = (await cookies()).get('__session')?.value;
   const session = await verifySession(cookie);
   if (session.state !== 'authorized') redirect('/login?next=/admin/points/transactions');
   if (!canDo(session.role, 'view:points')) {

@@ -23,7 +23,7 @@ export async function reviewPointsRequestAction(
   outcome: 'approved' | 'rejected',
   reviewNote?: string,
 ): Promise<PointsRequestActionState> {
-  const cookie = cookies().get('__session')?.value;
+  const cookie = (await cookies()).get('__session')?.value;
   const session = await verifySession(cookie);
   if (session.state !== 'authorized' || !canDo(session.role, 'manage:wallets')) {
     return { error: 'Permission denied.' };

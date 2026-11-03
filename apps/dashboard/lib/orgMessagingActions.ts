@@ -31,7 +31,7 @@ export async function createOrganizationAccount(
   _prev: OrgAccountActionState,
   data: FormData,
 ): Promise<OrgAccountActionState> {
-  const cookie = cookies().get('__session')?.value;
+  const cookie = (await cookies()).get('__session')?.value;
   const session = await verifySession(cookie);
   if (session.state !== 'authorized'
       || !canDo(session.role, 'manage:organization_messaging')
@@ -176,7 +176,7 @@ export async function sendOrganizationMessage(
   _prev: OrgSendActionState,
   data: FormData,
 ): Promise<OrgSendActionState> {
-  const cookie = cookies().get('__session')?.value;
+  const cookie = (await cookies()).get('__session')?.value;
   const session = await verifySession(cookie);
   if (session.state !== 'authorized' || !canDo(session.role, 'manage:organization_messaging')) {
     return { error: 'Permission denied.' };
@@ -232,7 +232,7 @@ export async function updateOrgEscalationSettings(
   _prev: OrgEscalationActionState,
   data: FormData,
 ): Promise<OrgEscalationActionState> {
-  const cookie = cookies().get('__session')?.value;
+  const cookie = (await cookies()).get('__session')?.value;
   const session = await verifySession(cookie);
   if (session.state !== 'authorized' || !canDo(session.role, 'manage:organization_messaging')) {
     return { error: 'Permission denied.' };
@@ -287,7 +287,7 @@ type OrgMessagingGate =
   | { error?: undefined; session: Awaited<ReturnType<typeof verifySession>> & { state: 'authorized' } };
 
 async function requireOrgMessagingManager(organizationId: string): Promise<OrgMessagingGate> {
-  const cookie = cookies().get('__session')?.value;
+  const cookie = (await cookies()).get('__session')?.value;
   const session = await verifySession(cookie);
   if (session.state !== 'authorized' || !canDo(session.role, 'manage:organization_messaging')) {
     return { error: 'Permission denied.' };

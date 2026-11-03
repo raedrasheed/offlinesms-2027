@@ -66,7 +66,7 @@ export async function createPointsPackage(
   _prev: PackageActionState,
   data: FormData,
 ): Promise<PackageActionState> {
-  const cookie = cookies().get('__session')?.value;
+  const cookie = (await cookies()).get('__session')?.value;
   const session = await verifySession(cookie);
   if (session.state !== 'authorized' || !canDo(session.role, 'manage:packages')) {
     return { error: 'Permission denied.' };
@@ -102,7 +102,7 @@ export async function updatePointsPackage(
   _prev: PackageActionState,
   data: FormData,
 ): Promise<PackageActionState> {
-  const cookie = cookies().get('__session')?.value;
+  const cookie = (await cookies()).get('__session')?.value;
   const session = await verifySession(cookie);
   if (session.state !== 'authorized' || !canDo(session.role, 'manage:packages')) {
     return { error: 'Permission denied.' };

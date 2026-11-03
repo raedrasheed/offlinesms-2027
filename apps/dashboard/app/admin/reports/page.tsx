@@ -130,11 +130,12 @@ function TrendTable({ rows, title }: { rows: DayCount[]; title: string }) {
 }
 
 export default async function ReportsPage({
-  searchParams,
+  searchParams: searchParamsPromise,
 }: {
-  searchParams?: { range?: string };
+  searchParams?: Promise<{ range?: string }>;
 }) {
-  const cookie = cookies().get('__session')?.value;
+  const searchParams = await searchParamsPromise;
+  const cookie = (await cookies()).get('__session')?.value;
   const session = await verifySession(cookie);
   if (session.state !== 'authorized') redirect('/login?next=/admin/reports');
   if (!canDo(session.role, 'view:reports')) {

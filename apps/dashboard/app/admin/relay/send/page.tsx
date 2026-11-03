@@ -25,8 +25,9 @@ const STATUS_COLOR: Record<string, string> = {
   queued: '#92400E', failed: '#991B1B', expired: '#991B1B',
 };
 
-export default async function SendSmsPage({ searchParams }: { searchParams?: { org?: string } }) {
-  const cookie = cookies().get('__session')?.value;
+export default async function SendSmsPage({ searchParams: searchParamsPromise }: { searchParams?: Promise<{ org?: string }> }) {
+  const searchParams = await searchParamsPromise;
+  const cookie = (await cookies()).get('__session')?.value;
   const session = await verifySession(cookie);
   if (session.state !== 'authorized') redirect('/login?next=/admin/relay/send');
   if (!canDo(session.role, 'manage:relay')) {

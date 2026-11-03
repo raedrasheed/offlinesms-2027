@@ -28,11 +28,12 @@ const STATUS_TABS = [
 ];
 
 export default async function SupportPage({
-  searchParams,
+  searchParams: searchParamsPromise,
 }: {
-  searchParams?: { status?: string; category?: string; assignedTo?: string; cursor?: string };
+  searchParams?: Promise<{ status?: string; category?: string; assignedTo?: string; cursor?: string }>;
 }) {
-  const cookie = cookies().get('__session')?.value;
+  const searchParams = await searchParamsPromise;
+  const cookie = (await cookies()).get('__session')?.value;
   const session = await verifySession(cookie);
   if (session.state !== 'authorized') redirect('/login?next=/admin/support');
   if (!canDo(session.role, 'view:support')) {

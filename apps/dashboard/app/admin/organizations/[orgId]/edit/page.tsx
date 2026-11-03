@@ -11,8 +11,9 @@ import OrgForm from '@/components/admin/OrgForm';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-export default async function EditOrgPage({ params }: { params: { orgId: string } }) {
-  const cookie = cookies().get('__session')?.value;
+export default async function EditOrgPage({ params: paramsPromise }: { params: Promise<{ orgId: string }> }) {
+  const params = await paramsPromise;
+  const cookie = (await cookies()).get('__session')?.value;
   const session = await verifySession(cookie);
   if (session.state !== 'authorized') redirect(`/login?next=/admin/organizations/${params.orgId}/edit`);
   if (!canDo(session.role, 'manage:organizations')) {

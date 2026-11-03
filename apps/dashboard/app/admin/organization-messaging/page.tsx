@@ -33,11 +33,12 @@ function fmt(iso: string): string {
 }
 
 export default async function OrgMessagingPage({
-  searchParams,
+  searchParams: searchParamsPromise,
 }: {
-  searchParams?: { org?: string };
+  searchParams?: Promise<{ org?: string }>;
 }) {
-  const cookie = cookies().get('__session')?.value;
+  const searchParams = await searchParamsPromise;
+  const cookie = (await cookies()).get('__session')?.value;
   const session = await verifySession(cookie);
   if (session.state !== 'authorized') redirect('/login?next=/admin/organization-messaging');
   if (!canDo(session.role, 'view:organization_messaging')) {

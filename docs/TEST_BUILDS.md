@@ -64,9 +64,9 @@ If your Google Cloud API key has *Application restrictions* set to Android apps,
 | versionCode / name | 900000 / `2.3.18-test-baseline-2a61167` | 900000 + commits since 2a61167 (e.g. 900021) / `<app.json version>-test-<sha>` — a newer updated build upgrades in place over an older one (the 9034f31 build is 900001) |
 | Local DB schema | v5 (as production 2.3.18) | v7 |
 
-The baseline instrumentation patch also installs the same three attachment modules introduced in 2.4.2 (DocumentPicker, Location and Sharing), without adding the new attachment UI or delivery code to the baseline. The patch also includes the pinned JavaScript vector-map dependencies added in 2.4.7 and the image-editor/capture modules added in 2.4.8. This keeps the existing shipped-dependency equality check active; the baseline retains its original application code.
+The baseline instrumentation patch also installs the same three attachment modules introduced in 2.4.2 (DocumentPicker, Location and Sharing), without adding the new attachment UI or delivery code to the baseline. The patch also includes the pinned JavaScript vector-map dependencies added in 2.4.7, the image-editor/capture modules added in 2.4.8, `@six33/react-native-bg-removal` 1.3.4 from 2.4.12, and `@expo/metro-runtime` 5.0.5 from 2.5.0. Dependency declarations and locked package metadata match the updated app. This keeps the existing shipped-dependency equality check active; the baseline retains its original application code.
 
-Both APKs also carry the Android 16 system-Back compatibility setting from 2.4.9. CI checks the packaged manifest in each APK, so navigation buttons remain usable in both comparison builds.
+Both APKs also carry the Android 16 system-Back compatibility setting from 2.4.9. CI checks the packaged manifest in each APK, so navigation buttons remain usable in both comparison builds. The baseline manifest declares both ML Kit models (`subject_segment,barcode_ui`) with a targeted `tools:replace="android:value"`, combining the background-removal and camera libraries' otherwise conflicting metadata.
 
 **Performance:** on one phone, on the same network and account:
 1. Install `baseline` and sign in. Run `scripts/device/perf-capture.sh coldstart baseline 10` and `… session baseline`.

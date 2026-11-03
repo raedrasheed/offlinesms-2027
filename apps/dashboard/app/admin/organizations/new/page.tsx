@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export default async function NewOrgPage() {
-  const cookie = cookies().get('__session')?.value;
+  const cookie = (await cookies()).get('__session')?.value;
   const session = await verifySession(cookie);
   if (session.state !== 'authorized') redirect('/login?next=/admin/organizations/new');
   if (!canDo(session.role, 'manage:organizations')) {

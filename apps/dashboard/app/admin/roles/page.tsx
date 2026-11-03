@@ -15,7 +15,7 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export default async function RolesAdminPage() {
-  const cookie = cookies().get('__session')?.value;
+  const cookie = (await cookies()).get('__session')?.value;
   const session = await verifySession(cookie);
   if (session.state !== 'authorized') redirect('/login?next=/admin/roles');
   if (!canDo(session.role, 'view:roles')) {

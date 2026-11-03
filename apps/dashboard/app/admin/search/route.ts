@@ -227,7 +227,7 @@ async function searchAuditLogs(q: string): Promise<SearchResult[]> {
 }
 
 export async function GET(request: Request) {
-  const sessionCookie = cookies().get('__session')?.value;
+  const sessionCookie = (await cookies()).get('__session')?.value;
   const session = await verifySession(sessionCookie);
   if (session.state !== 'authorized') {
     return NextResponse.json({ groups: [] }, { status: 401 });

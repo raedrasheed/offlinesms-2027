@@ -1,7 +1,8 @@
 import Link from 'next/link';
 import { listAdminClipReports } from '@/lib/clipAdminData';
 import ClipReportReview from './ClipReportReview';
-export default async function ClipReportsPage({ searchParams = {} }: { searchParams?: { status?: string; cursor?: string } }) {
+export default async function ClipReportsPage({ searchParams: searchParamsPromise }: { searchParams?: Promise<{ status?: string; cursor?: string }> }) {
+  const searchParams = (await searchParamsPromise) ?? {};
   const status = searchParams.status ?? 'open';
   const page = await listAdminClipReports({ status, cursor: searchParams.cursor });
   return <>

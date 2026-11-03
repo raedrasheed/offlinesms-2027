@@ -3,7 +3,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const session = vi.hoisted(() => ({ current: { state: 'unauthenticated' } as Record<string, unknown> }));
-vi.mock('next/headers', () => ({ cookies: () => ({ get: () => ({ value: 'cookie' }) }) }));
+vi.mock('next/headers', () => ({ cookies: async () => ({ get: () => ({ value: 'cookie' }) }) }));
 vi.mock('../lib/firebase-admin', () => ({ adminAuth: {}, adminDb: {} }));
 vi.mock('../lib/session', () => ({ verifySession: async () => session.current }));
 
