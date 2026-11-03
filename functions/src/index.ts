@@ -150,3 +150,5 @@ export { guardEmailSignIn, guardEmailSent } from './emailChange/emailSignInBlock
 
 // Cloud-only retention (default 14 days; activated in the platform dashboard).
 export { purgeRetainedMessages } from './chats/messageRetention';
+
+export { respondToGroupInvitation, notifyGroupInvitation } from './chats/memberInvitations';

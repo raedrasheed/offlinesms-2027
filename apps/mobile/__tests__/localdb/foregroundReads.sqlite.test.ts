@@ -81,4 +81,17 @@ describe('foreground message priority', () => {
     expect(await pullMessageById('c', 'new')).toBe(true);
     expect((await listMessages('c'))[0]).toMatchObject({ media_upload_status: 'uploaded', media_download_url: 'https://example.invalid/ready' });
   });
+  it.each(['image', 'video'] as const)('reopening completes cached %s without overwriting live text or reverting to pending', async type => {
+    await applyRemoteMessages([{ ...message, type, text: 'live edit', media: { uploadStatus: 'pending' } }]);
+    mock.recent.mockResolvedValue([{ ...message, type, media: { uploadStatus: 'uploaded', downloadURL: 'https://example.invalid/ready' } }]);
+    await pullRecentMessages('c');
+    expect((await listMessages('c'))[0]).toMatchObject({ text: 'live edit', media_upload_status: 'uploaded', media_download_url: 'https://example.invalid/ready' });
+    // A delayed reservation snapshot from history must not disable the video.
+    await applyRemoteMessages([{ ...message, type, media: { uploadStatus: 'pending', downloadURL: null } }]);
+    expect((await listMessages('c'))[0]).toMatchObject({ media_upload_status: 'uploaded', media_download_url: 'https://example.invalid/ready' });
+    await applyRemoteMessages([{ ...message, type, deletedForEveryone: true }]);
+    await pullRecentMessages('c');
+    expect((await listMessages('c'))[0]).toMatchObject({ deleted_for_everyone: 1, media_download_url: null });
+  });
+
 });

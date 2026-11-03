@@ -625,7 +625,10 @@
     "name": "Sticker name (optional)",
     "retryImage": "Retry",
     "mobileOnly": "Create and edit personal stickers in the Android or iOS app.",
-    "sendingUnavailable": "Sending personal stickers is currently unavailable. You can still create, edit and save them."
+    "sendingUnavailable": "Sending personal stickers is currently unavailable. You can still create, edit and save them.",
+    "keepOriginal": "Use original",
+    "removeBackground": "Remove background",
+    "cutoutError": "Could not remove the background. Tap to retry, or choose Use original. Requires iOS 17+ or Android with Google Play services."
   },
   "poll": {
     "create": "New poll",
@@ -816,5 +819,26 @@
     "queued": "Queued — sends when online",
     "sending": "Sending…",
     "retryMap": "Retry map"
+  },
+  "phoneChat": {
+    "hint": "Enter a phone number to send SMS, even if they do not use the app. Joining the group in the app requires their approval.",
+    "name": "Contact name",
+    "number": "Phone number",
+    "pick": "Choose a contact",
+    "add": "Continue",
+    "start": "Use a phone number",
+    "registered": "Choose an app user"
+  },
+  "groupConsent": {
+    "title": "Group invitations",
+    "explanation": "Members join only after accepting their invitation.",
+    "accept": "Accept",
+    "decline": "Decline",
+    "empty": "No pending invitations.",
+    "error": "Could not complete the request. Check your connection or try again.",
+    "invite": "Invite",
+    "sent": "Invitations sent. Membership starts after acceptance.",
+    "noNew": "No new invitations were sent. A pending or declined invitation is not sent again.",
+    "from": "Invited by {{name}}"
   }
 }

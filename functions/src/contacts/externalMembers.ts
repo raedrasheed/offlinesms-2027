@@ -13,6 +13,7 @@ import { writeAuditLog } from '../lib/auditLog';
 import { normalizePhoneToE164 } from '../lib/phone';
 import { externalMemberId, newExternalMemberDoc, cleanDisplayName } from './contactLogic';
 import { findRegisteredUidByPhone } from './createPhoneContact';
+import { inviteGroupMembers } from '../chats/memberInvitations';
 import { MAX_GROUP_MEMBERS } from '../chats/createGroup';
 
 async function requireGroupAdmin(uid: string, conversationId: string) {
@@ -91,21 +92,23 @@ export const addExternalContactToGroup = onCall(async (request) => {
     return { added: 0, alreadyMember: true, contactId: externalMemberId(e164) };
   }
 
+  if (linkedUid) await inviteGroupMembers(convoRef.id, uid, [linkedUid]);
+
   const emId = externalMemberId(e164);
   const emRef = convoRef.collection('externalMembers').doc(emId);
-  const alreadyExternal = (await emRef.get()).exists;
-  if (alreadyExternal) return { added: 0, alreadyExternal: true, contactId: emId };
-
-  // Cap: count external members against the same group ceiling as registered.
-  const total = (convo.memberCount ?? (convo.participantUids ?? []).length) + (convo.externalMemberCount ?? 0);
-  if (total + 1 > MAX_GROUP_MEMBERS) throw new HttpsError('failed-precondition', 'too-many-members');
-
   const now = FieldValue.serverTimestamp();
   const docData = newExternalMemberDoc({ contactId: ownerContactId, displayName, e164, addedByUid: uid, linkedUid });
-  const batch = db.batch();
-  batch.set(emRef, { ...docData, addedAt: now, updatedAt: now });
-  batch.update(convoRef, { externalMemberCount: FieldValue.increment(1), updatedAt: now });
-  await batch.commit();
+  const added = await db.runTransaction(async tx => {
+    const group = await tx.get(convoRef), member = await tx.get(convoRef.collection('members').doc(uid)), external = await tx.get(emRef);
+    const live = group.data();
+    if (!live || !(live.participantUids ?? []).includes(uid) || (member.data()?.status ?? 'active') !== 'active' || !['owner', 'admin'].includes(member.data()?.role)) throw new HttpsError('permission-denied', 'admins-only');
+    if (linkedUid && (live.participantUids ?? []).includes(linkedUid)) return 0;
+    if (external.exists) return 0;
+    if ((live.participantUids ?? []).length + (live.externalMemberCount ?? 0) >= MAX_GROUP_MEMBERS) throw new HttpsError('failed-precondition', 'too-many-members');
+    tx.set(emRef, { ...docData, addedAt: now, updatedAt: now });
+    tx.update(convoRef, { externalMemberCount: FieldValue.increment(1), updatedAt: now });
+    return 1;
+  });
 
   void writeAuditLog({
     action: 'group.external.added',
@@ -115,7 +118,7 @@ export const addExternalContactToGroup = onCall(async (request) => {
     metadata: { conversationId: convoRef.id, contactId: emId, isRegistered: docData.isRegistered },
   }).catch(() => {});
 
-  return { added: 1, contactId: emId, isRegistered: docData.isRegistered };
+  return { added, contactId: emId, isRegistered: docData.isRegistered };
 });
 
 export const removeExternalContactFromGroup = onCall(async (request) => {

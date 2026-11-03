@@ -435,6 +435,7 @@ export async function createGroup(args: {
   name: string;
   memberUids: string[];
   avatarUrl?: string | null;
+  externalContacts?: Array<{ displayName: string; phoneNumber: string }>;
 }): Promise<{ conversationId: string; memberCount: number }> {
   const res = await fn<typeof args, { conversationId: string; memberCount: number }>(
     'createGroup',
@@ -443,10 +444,10 @@ export async function createGroup(args: {
 }
 
 export async function addGroupMembers(conversationId: string, memberUids: string[]): Promise<number> {
-  const res = await fn<{ conversationId: string; memberUids: string[] }, { added: number }>(
+  const res = await fn<{ conversationId: string; memberUids: string[] }, { added: number; invited?: number }>(
     'addMembers',
   )({ conversationId, memberUids });
-  return res.data.added;
+  return res.data.invited ?? res.data.added;
 }
 
 // ── External phone contacts (Phase 25) ──────────────────────────────────────
@@ -855,4 +856,8 @@ export function resetReceiptCache() {
 
 export async function markStatusViewed(statusId: string): Promise<void> {
   await fn<{ statusId: string }, { ok: true }>('markStatusViewed')({ statusId });
+}
+
+export async function respondToGroupInvitation(conversationId: string, accept: boolean) {
+  return (await fn<{ conversationId: string; accept: boolean }, { status: string }>('respondToGroupInvitation')({ conversationId, accept })).data;
 }

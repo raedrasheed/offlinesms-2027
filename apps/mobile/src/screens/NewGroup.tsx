@@ -5,6 +5,8 @@
 // carries the selection to the Group info screen (Step 3) which performs the
 // actual createGroup call.
 
+import { useTranslation } from 'react-i18next';
+import { PhoneRecipientForm, type PhoneRecipient } from '../components/PhoneRecipientForm';
 import { useEffect, useMemo, useState } from 'react';
 import {
   View, Text, TextInput, FlatList, Pressable, StyleSheet,
@@ -23,9 +25,12 @@ import { avatarColor, initials } from '../lib/avatar';
 import { LoadingState, EmptyState, ErrorState } from '../components/state';
 
 type UserRow = { uid: string; displayName?: string; username?: string };
-const HARD_CAP = 256;
+const HARD_CAP = 240;
 
 export default function NewGroup({ navigation }: any) {
+  const { t } = useTranslation();
+  const [externalContacts, setExternalContacts] = useState<PhoneRecipient[]>([]);
+  const [phoneMode, setPhoneMode] = useState(false);
   const insets = useSafeAreaInsets();
   const me = auth.currentUser?.uid;
   const label = useProfileLabel();
@@ -68,7 +73,7 @@ export default function NewGroup({ navigation }: any) {
     setSelected(prev =>
       prev.some(p => p.uid === u.uid)
         ? prev.filter(p => p.uid !== u.uid)
-        : (prev.length >= HARD_CAP ? prev : [...prev, u]),
+        : (prev.length + externalContacts.length >= HARD_CAP ? prev : [...prev, u]),
     );
   }
 
@@ -80,7 +85,7 @@ export default function NewGroup({ navigation }: any) {
     return [...map.values()];
   }, [selected, rows]);
 
-  const canNext = selected.length >= 1;
+  const canNext = selected.length + externalContacts.length >= 1;
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.root}>
@@ -90,7 +95,7 @@ export default function NewGroup({ navigation }: any) {
         </Pressable>
         <Text style={s.title}>Add members</Text>
         <Pressable
-          onPress={() => canNext && navigation.navigate('GroupCreateInfo', { members: selected })}
+          onPress={() => canNext && navigation.navigate('GroupCreateInfo', { members: selected, externalContacts })}
           disabled={!canNext}
           hitSlop={10}
         >
@@ -115,6 +120,12 @@ export default function NewGroup({ navigation }: any) {
         </View>
       ) : null}
 
+      <Text style={[s.handle, { padding: 14 }]}>{t('groupConsent.explanation')}</Text>
+      <Pressable style={{ paddingHorizontal: 14 }} onPress={() => setPhoneMode(v => !v)}><Text style={s.next}>{t(phoneMode ? 'phoneChat.registered' : 'phoneChat.start')}</Text></Pressable>
+      {phoneMode ? <PhoneRecipientForm onAdd={contact => setExternalContacts(prev => prev.some(c => c.phoneNumber === contact.phoneNumber) || prev.length + selected.length >= HARD_CAP ? prev : [...prev, contact])}/> : null}
+      {externalContacts.map(contact => <Pressable key={contact.phoneNumber} style={s.chip} onPress={() => setExternalContacts(prev => prev.filter(c => c.phoneNumber !== contact.phoneNumber))}>
+        <Text style={s.chipText}>{contact.displayName} · {contact.phoneNumber} ×</Text>
+      </Pressable>)}
       <TextInput
         style={s.search}
         value={term}

@@ -1,3 +1,4 @@
+import { useGroupInvitations } from '../hooks/useGroupInvitations';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   FlatList, View, Text, Pressable, StyleSheet, TextInput, Alert, Platform, ScrollView,
@@ -52,6 +53,7 @@ function formatTime(ts?: any): string {
 export default function ChatsList({ navigation }: any) {
   const { t } = useTranslation();
   const { colors } = useTheme();
+  const { items: invitations } = useGroupInvitations();
   const me = auth.currentUser?.uid;
   const insets = useSafeAreaInsets();
   const { isOffline, isSyncing, queuedCount } = useOffline();
@@ -261,6 +263,9 @@ export default function ChatsList({ navigation }: any) {
         </View>
       </View>
 
+      {invitations.length > 0 ? <Pressable accessibilityRole="button" onPress={() => navigation.navigate('GroupInvitations')} style={{ padding: 16 }}>
+        <Text style={{ color: colors.action.primary, fontWeight: '700' }}>{t('groupConsent.title')} ({invitations.length})</Text>
+      </Pressable> : null}
       {/* Telegram-style folder strip: a rounded card holding scrollable filter
           chips; the active chip gets a soft blue pill, inactive are plain text. */}
       <View style={s.chipsCard}>

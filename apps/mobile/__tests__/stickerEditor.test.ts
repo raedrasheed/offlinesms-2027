@@ -1,7 +1,7 @@
 import {afterEach,beforeEach,describe,it,expect,vi} from 'vitest';
 import {createElement} from 'react';
 import {act,create,type ReactTestRenderer} from 'react-test-renderer';
-const mock=vi.hoisted(()=>({capture:vi.fn(),release:vi.fn(),save:vi.fn(),orient:vi.fn(),remove:vi.fn(),alert:vi.fn()}));
+const mock=vi.hoisted(()=>({capture:vi.fn(),release:vi.fn(),save:vi.fn(),orient:vi.fn(),cutout:vi.fn(),remove:vi.fn(),alert:vi.fn()}));
 vi.mock('react-native',()=>({View:'View',Text:'Text',TextInput:'TextInput',Image:'Image',Pressable:'Pressable',Modal:'Modal',ActivityIndicator:'ActivityIndicator',ScrollView:'ScrollView',KeyboardAvoidingView:'KeyboardAvoidingView',
   Keyboard:{dismiss:vi.fn()},Alert:{alert:mock.alert},Platform:{OS:'android'},PanResponder:{create:(handlers:any)=>({panHandlers:handlers})},StyleSheet:{create:(v:any)=>v,absoluteFill:{}},useWindowDimensions:()=>({width:400,height:800})}));
 vi.mock('@expo/vector-icons',()=>({Ionicons:'Icon'}));
@@ -10,7 +10,7 @@ vi.mock('react-i18next',()=>({useTranslation:()=>({t:(k:string)=>k})}));
 vi.mock('../src/context/ThemeContext',()=>({useTheme:()=>({colors:{action:{primary:'#00897B',primaryFg:'#FFFFFF'},text:{primary:'#111',muted:'#777'},background:{surface:'#FFF',subtle:'#EEE'},border:{subtle:'#DDD'}}})}));
 vi.mock('react-native-view-shot',()=>({captureRef:mock.capture,releaseCapture:mock.release}));
 vi.mock('../src/lib/customStickers',()=>({saveCustomSticker:mock.save}));
-vi.mock('../src/media/stickerImage',()=>({orientStickerImage:mock.orient,removeStickerTemp:mock.remove}));
+vi.mock('../src/media/stickerImage',()=>({orientStickerImage:mock.orient,cutoutStickerImage:mock.cutout,removeStickerTemp:mock.remove}));
 import {StickerEditor} from '../src/components/chat/StickerEditor';
 let renderer:ReactTestRenderer|undefined;
 const source={uri:'file:///original.png',width:800,height:400};
@@ -18,6 +18,7 @@ const nodes=(type:string)=>renderer!.root.findAll(n=>String(n.type)===type);
 const button=(label:string)=>nodes('Pressable').find(n=>n.props.accessibilityLabel===label)!;
 async function loaded(){await act(async()=>{nodes('View').find(n=>n.props.testID==='sticker-capture')!.props.onLayout();nodes('Image')[0].props.onLoad();});}
 beforeEach(()=>{vi.clearAllMocks();vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);vi.stubGlobal('requestAnimationFrame',(f:()=>void)=>{f();return 0;});
+  mock.cutout.mockImplementation(async(s:any)=>({...s,uri:'file:///cutout.png'}));
   mock.capture.mockResolvedValue('file:///captured.png');mock.save.mockResolvedValue([{id:'saved'}]);mock.orient.mockImplementation(async(s:any)=>s);mock.remove.mockResolvedValue(undefined);
 });
 afterEach(async()=>{if(renderer)await act(async()=>renderer!.unmount());renderer=undefined;vi.unstubAllGlobals();});
@@ -52,4 +53,15 @@ describe('sticker editor',()=>{
     expect(close).not.toHaveBeenCalled();expect(mock.save).not.toHaveBeenCalled();
     await act(async()=>mock.alert.mock.calls.at(-1)![2][1].onPress());expect(close).toHaveBeenCalledOnce();
   });
+  it('does not save a failed cutout as if it were transparent; original is an explicit choice', async()=>{
+    mock.cutout.mockRejectedValueOnce(Error('unsupported'));
+    await act(async()=>{renderer=create(createElement(StickerEditor,{uid:'me',source,onClose:vi.fn(),onSaved:vi.fn()}));});
+    expect(button('common.save').props.disabled).toBe(true);
+    expect(mock.capture).not.toHaveBeenCalled();
+    await act(async()=>button('stickers.keepOriginal').props.onPress()); await loaded();
+    expect(nodes('Image')[0].props.source.uri).toBe(source.uri);
+    await act(async()=>button('common.save').props.onPress());
+    expect(mock.save.mock.calls[0][1].edits.removeBackground).toBe(false);
+  });
+
 });

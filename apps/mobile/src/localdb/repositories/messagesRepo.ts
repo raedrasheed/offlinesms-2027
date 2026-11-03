@@ -379,7 +379,19 @@ export async function upsertRemoteMessage(r: RemoteMessageInput, database: Local
   let existing = await find();
   // A bootstrap read may finish after a newer live edit/delete.
   // Fill missing rows atomically, but let the ordered live feed own updates.
-  if (existing && insertOnly) return;
+  if (existing && insertOnly) {
+    // The fast open read must also finish cached upload placeholders. Busy
+    // groups can move a placeholder outside the live window before finalize.
+    // Touch media only: never overwrite live edits, receipts or tombstones.
+    if (!existing.deleted_for_everyone && !r.deletedForEveryone && r.media?.uploadStatus === 'uploaded' && r.media.downloadURL
+      && (existing.media_upload_status !== 'uploaded' || !existing.media_download_url)) {
+      await database.run(`UPDATE messages SET media_download_url = ?, media_thumb_url = COALESCE(?, media_thumb_url),
+        media_upload_status = 'uploaded', media_storage_path = COALESCE(?, media_storage_path), updated_at = ?
+        WHERE remote_id = ? AND deleted_for_everyone = 0`,
+      [r.media.downloadURL, r.media.thumbnailURL ?? null, r.media.storagePath ?? null, Date.now(), r.remoteId]);
+    }
+    return;
+  }
   if (!existing && r.clientLocalId) {
     // Our own message, delivered by the realtime feed before the send call
     // returned: adopt the optimistic row instead of inserting a second copy
@@ -432,7 +444,7 @@ export async function upsertRemoteMessage(r: RemoteMessageInput, database: Local
         'media_mime = ?', 'media_size = ?', 'media_width = ?', 'media_height = ?',
         'media_duration_ms = ?', 'media_waveform = ?', 'media_storage_path = ?',
         `media_download_url = ${keep || '?'}`, 'media_thumb_path = ?',
-        `media_thumb_url = ${keepThumb || '?'}`, 'media_upload_status = ?',
+        `media_thumb_url = ${keepThumb || '?'}`, r.deletedForEveryone ? 'media_upload_status = ?' : "media_upload_status = CASE WHEN media_upload_status = 'uploaded' AND media_download_url IS NOT NULL THEN 'uploaded' ELSE ? END",
       );
       params.push(
         md?.mimeType ?? null, md?.sizeBytes ?? null, md?.width ?? null, md?.height ?? null,

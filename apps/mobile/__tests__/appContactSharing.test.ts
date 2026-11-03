@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 
-const mocks = vi.hoisted(() => ({ load: vi.fn(), alert: vi.fn(), nativePicker: vi.fn(), permission: vi.fn(), openChat:vi.fn(),profiles:{} as Record<string,any> }));
+const mocks = vi.hoisted(() => ({ load: vi.fn(), alert: vi.fn(), nativePicker: vi.fn(), permission: vi.fn(), openChat:vi.fn(),phoneChat:vi.fn(),profiles:{} as Record<string,any> }));
 vi.mock('react-native', () => ({
   Modal:'Modal',View:'View',Text:'Text',TextInput:'TextInput',Pressable:'Pressable',FlatList:'FlatList',
   ScrollView:'ScrollView',KeyboardAvoidingView:'KeyboardAvoidingView',Image:'Image',ActivityIndicator:'ActivityIndicator',
@@ -18,7 +18,8 @@ vi.mock('expo-contacts', () => ({presentContactPickerAsync:mocks.nativePicker,re
 vi.mock('react-i18next', () => ({useTranslation:()=>({t:(key:string)=>key})}));
 vi.mock('react-native-safe-area-context', () => ({useSafeAreaInsets:()=>({top:24,bottom:20})}));
 vi.mock('../src/lib/appContacts', () => ({loadAppContacts:mocks.load,mergeAppContacts:(_:unknown,rows:unknown)=>rows,contactSearchErrorKey:()=> 'attachments.contactServiceUnavailable'}));
-vi.mock('../src/lib/conversations',()=>({getOrCreateDirectConversation:mocks.openChat}));
+vi.mock('../src/components/PhoneRecipientForm',()=>({PhoneRecipientForm:'PhoneRecipientForm'}));
+vi.mock('../src/lib/conversations',()=>({getOrCreateDirectConversation:mocks.openChat,createGroup:mocks.phoneChat}));
 vi.mock('../src/lib/userProfiles',()=>({useUserProfiles:()=>mocks.profiles}));
 
 import { AttachmentComposer } from '../src/components/chat/AttachmentComposer';
@@ -36,7 +37,7 @@ const sendButton=()=>nodes('Pressable').find(node=>node.props.children?.props?.c
 beforeEach(()=>{
   vi.clearAllMocks();vi.useFakeTimers();vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);
   mocks.load.mockResolvedValue({contacts:[contact],page});
-  mocks.openChat.mockResolvedValue('direct-chat');
+  mocks.openChat.mockResolvedValue('direct-chat');mocks.phoneChat.mockResolvedValue({conversationId:'phone-chat'});
   mocks.profiles={};
 });
 afterEach(async()=>{
@@ -143,4 +144,14 @@ describe('in-app contact sharing',()=>{
     expect(onOpen).not.toHaveBeenCalled();
     expect(JSON.stringify(renderer.toJSON())).toContain('attachments.yourContact');
   });
+});
+
+it('opens a phone-only SMS chat without choosing any registered member', async()=>{
+  const navigation={replace:vi.fn(),goBack:vi.fn()};
+  await act(async()=>{renderer=create(createElement(NewChat,{navigation}));});
+  const phone=nodes('Pressable').find(n=>n.props.children?.props?.children==='phoneChat.start')!;
+  await act(async()=>phone.props.onPress());
+  await act(async()=>nodes('PhoneRecipientForm')[0].props.onAdd({displayName:'External',phoneNumber:'+970599123456'}));
+  expect(mocks.phoneChat).toHaveBeenCalledWith({name:'External',memberUids:[],externalContacts:[{displayName:'External',phoneNumber:'+970599123456'}]});
+  expect(navigation.replace).toHaveBeenCalledWith('Conversation',{id:'phone-chat'});
 });

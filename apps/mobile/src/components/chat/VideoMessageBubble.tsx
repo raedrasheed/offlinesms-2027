@@ -53,7 +53,7 @@ export function VideoMessageBubble({ message, mine, footer, onRetry, onLongPress
     const request = generation.current;
     setBusy(true); setFailed(false);
     try {
-      const uri = await ensureCached(message);
+      const uri = await ensureCached(message).catch(() => null) || media?.downloadURL || media?.localUri;
       if (request !== generation.current) return;
       if (!uri) throw new Error('download-failed');
       setViewerUri(uri);
@@ -69,7 +69,9 @@ export function VideoMessageBubble({ message, mine, footer, onRetry, onLongPress
     shareInFlight.current = true; setSharing(true);
     try {
       if (!(await Sharing.isAvailableAsync())) throw new Error('sharing-unavailable');
-      await Sharing.shareAsync(viewerUri, { mimeType: media?.mimeType, dialogTitle: t('attachments.shareSave') });
+      const localFile = viewerUri.startsWith('file:') ? viewerUri : await ensureCached(message);
+      if (!localFile) throw new Error('download-failed');
+      await Sharing.shareAsync(localFile, { mimeType: media?.mimeType, dialogTitle: t('attachments.shareSave') });
     } catch { Alert.alert(t('attachments.openError'), t('attachments.retryHint')); }
     finally { shareInFlight.current = false; setSharing(false); }
   }

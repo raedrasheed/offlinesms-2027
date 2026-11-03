@@ -238,6 +238,11 @@ service cloud.firestore {
         allow delete: if isAdmin();
       }
 
+      match /groupInvitations/{conversationId} {
+        allow read: if isSelf(uid);
+        allow write: if false;
+      }
+
       // Push device tokens (Phase 27) — a user manages only their own devices;
       // the backend (Admin SDK) sends to them + purges dead ones.
       match /devices/{deviceId} {

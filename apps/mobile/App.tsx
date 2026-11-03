@@ -38,6 +38,7 @@ import NewChat from './src/screens/NewChat';
 import NewChatMenu from './src/screens/NewChatMenu';
 import NewGroup from './src/screens/NewGroup';
 import GroupCreateInfo from './src/screens/GroupCreateInfo';
+import GroupInvitations from './src/screens/GroupInvitations';
 import GroupInfo from './src/screens/GroupInfo';
 import EditGroup from './src/screens/EditGroup';
 import AddMembers from './src/screens/AddMembers';
@@ -400,6 +401,7 @@ export default function App() {
             <RootStack.Screen name="ImageViewer" component={ImageViewerScreen} options={{ presentation: 'fullScreenModal' }} />
             <RootStack.Screen name="StatusComposer" component={StatusComposer} options={{ presentation: 'fullScreenModal' }} />
             <RootStack.Screen name="StatusViewer" component={StatusViewer} options={{ presentation: 'fullScreenModal' }} />
+            <RootStack.Screen name="GroupInvitations" component={GroupInvitations} />
             <RootStack.Screen name="GroupInfo" component={GroupInfo} />
             <RootStack.Screen name="EditGroup" component={EditGroup} />
             <RootStack.Screen name="AddMembers" component={AddMembers} />

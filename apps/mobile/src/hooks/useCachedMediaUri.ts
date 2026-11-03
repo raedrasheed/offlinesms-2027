@@ -20,7 +20,7 @@ export function useCachedMediaUri(message: Message): string | null {
       .catch(() => {});
     return () => { active = false; stop(); };
     // Re-run when the message or its remote URL changes (e.g. after finalize).
-  }, [message.id, remote, localUri]);
+  }, [message.id, message.conversationId, remote, localUri]);
 
-  return cached || localUri || (message.type === 'image' ? message.media?.thumbnailURL || null : remote);
+  return cached || localUri || (message.type === 'image' ? message.media?.thumbnailURL || remote : remote);
 }

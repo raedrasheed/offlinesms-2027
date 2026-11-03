@@ -23,18 +23,19 @@ const DESC_MAX = 280;
 export default function GroupCreateInfo({ route, navigation }: any) {
   const insets = useSafeAreaInsets();
   const members = (route.params?.members ?? []) as Array<{ uid: string }>;
+  const externalContacts = route.params?.externalContacts ?? [];
   const [name, setName] = useState('');
   const [desc, setDesc] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const canCreate = name.trim().length > 0 && members.length >= 1 && !busy;
+  const canCreate = name.trim().length > 0 && members.length + externalContacts.length >= 1 && !busy;
 
   async function create() {
     if (!canCreate) return;
     setBusy(true); setErr(null);
     try {
-      const res = await createGroup({ name: name.trim(), memberUids: members.map(m => m.uid) });
+      const res = await createGroup({ name: name.trim(), memberUids: members.map(m => m.uid), externalContacts });
       navigation.replace('Conversation', { id: res.conversationId });
     } catch (e: any) { setErr(groupErrorCopy(e?.code ?? 'internal')); }
     finally { setBusy(false); }

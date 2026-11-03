@@ -28,7 +28,10 @@ export function ImageMessageBubble({
 }) {
   const { t } = useTranslation();
   const media = message.media;
-  const uri = useCachedMediaUri(message);
+  const resolvedUri = useCachedMediaUri(message);
+  const [failedUris, setFailedUris] = useState<string[]>([]);
+  const uri = !!resolvedUri && failedUris.includes(resolvedUri) && media?.downloadURL && !failedUris.includes(media.downloadURL) ? media.downloadURL : resolvedUri;
+  const imageFailed = !!uri && failedUris.includes(uri);
   const transfer = useTransfer(message.id);
 
   const [loaded, setLoaded] = useState<{ uri: string; size: MediaDimensions } | null>(null);
@@ -41,7 +44,7 @@ export function ImageMessageBubble({
   const uploadPct = transfer?.kind === 'upload' ? transfer.progress : (media?.uploadProgress ?? 0);
   // Download progress/retry applies to a received image being cached.
   const downloading = !mine && transfer?.kind === 'download' && !transfer.failed;
-  const downloadFailed = !mine && transfer?.kind === 'download' && transfer.failed;
+  const downloadFailed = imageFailed || (!mine && transfer?.kind === 'download' && transfer.failed);
   const busy = uploading || uploadFailed || downloadFailed;
 
   return (
@@ -60,12 +63,12 @@ export function ImageMessageBubble({
           <MediaUploadProgress progress={transfer?.progress ?? 0} mode="download" />
         ) : null}
         {downloadFailed ? (
-          <MediaUploadProgress progress={0} failed mode="download" onRetry={() => { void retryDownload(message); }} />
+          <MediaUploadProgress progress={0} failed mode="download" onRetry={() => { setFailedUris([]); void retryDownload(message); }} />
         ) : null}
         </> : null}
       >
         {uri ? (
-          <Image source={{ uri }} style={s.content} resizeMode="contain" onLoad={event => {
+          <Image source={{ uri }} style={s.content} resizeMode="contain" onError={() => setFailedUris(prev => prev.includes(uri) ? prev : [...prev, uri])} onLoad={event => {
             const size = validMediaDimensions(event.nativeEvent.source.width, event.nativeEvent.source.height);
             if (size) setLoaded({ uri, size });
           }} />

@@ -29,3 +29,12 @@ export async function orientStickerImage(source: StickerSource, edits: StickerEd
   finally { image?.release(); context.release(); }
 }
 export const removeStickerTemp = (uri: string) => FS.deleteAsync(uri, { idempotent: true }).catch(() => {});
+
+/** Native subject segmentation. Keep PNG alpha throughout the edit/export path. */
+export async function cutoutStickerImage(source: StickerSource): Promise<StickerSource> {
+  // Load lazily so an old binary can still open the editor and choose Original.
+  const { removeBackground } = require('@six33/react-native-bg-removal') as typeof import('@six33/react-native-bg-removal');
+  const uri = await removeBackground(source.uri, { trim: false });
+  if (!uri || uri === source.uri) throw Error('background-removal-unavailable');
+  return { ...source, uri };
+}

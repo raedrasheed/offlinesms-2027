@@ -19,7 +19,7 @@ export type PushRoute = {
 export function routeFromNotification(data: unknown): PushRoute | null {
   if (!data || typeof data !== 'object') return null;
   const d = data as Record<string, unknown>;
-  const hasTarget =
+  const hasTarget = d.type === 'group_invitation' ||
     typeof d.conversationId === 'string' ||
     typeof d.requestId === 'string' ||
     typeof d.broadcastId === 'string' ||
@@ -41,6 +41,7 @@ export function routeFromNotification(data: unknown): PushRoute | null {
 
 export type PushDispatch =
   | { kind: 'screen'; name: 'Conversation'; params: { id: string; messageId?: string } }
+  | { kind: 'screen'; name: 'GroupInvitations'; params: undefined }
   | { kind: 'screen'; name: 'JoinRequests'; params: { id: string } }
   | { kind: 'screen'; name: 'Tabs' }
   | { kind: 'url';    href: string }
@@ -59,6 +60,7 @@ export type PushDispatch =
 /** The (conversation, message) a push wants on screen, for prefetching. */
 export function pushTarget(route: PushRoute | null): { conversationId: string; messageId?: string } | null {
   if (!route) return null;
+  if (route.type === 'group_invitation') return null;
   if (route.conversationId) return { conversationId: route.conversationId, messageId: route.messageId };
   if (route.actionType === 'open_chat' || route.actionType === 'open_group') {
     return route.actionTarget ? { conversationId: route.actionTarget } : null;
@@ -69,6 +71,7 @@ export function pushTarget(route: PushRoute | null): { conversationId: string; m
 export function dispatchForRoute(route: PushRoute | null): PushDispatch {
   if (!route) return { kind: 'none' };
 
+  if (route.type === 'group_invitation') return { kind: 'screen', name: 'GroupInvitations', params: undefined };
   if (route.type === 'group_join_request' && route.conversationId) {
     return { kind: 'screen', name: 'JoinRequests', params: { id: route.conversationId } };
   }

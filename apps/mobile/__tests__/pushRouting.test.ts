@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { routeFromNotification, dispatchForRoute } from '../src/lib/pushRouting';
+import { routeFromNotification, pushTarget, dispatchForRoute } from '../src/lib/pushRouting';
 
 describe('routeFromNotification', () => {
   it('routes a chat message to its conversation', () => {
@@ -58,4 +58,11 @@ describe('dispatchForRoute (tap-dispatch)', () => {
     expect(dispatchForRoute(routeFromNotification({ type: 'admin_broadcast', broadcastId: 'b', actionType: 'none' })))
       .toEqual({ kind: 'screen', name: 'Tabs' });
   });
+});
+
+it('routes a recipient invitation to approval without prefetching private group content', () => {
+  const route = routeFromNotification({ type: 'group_invitation', conversationId: 'private' });
+  expect(dispatchForRoute(route)).toEqual({ kind: 'screen', name: 'GroupInvitations', params: undefined });
+  expect(pushTarget(route)).toBeNull();
+  expect(dispatchForRoute(routeFromNotification({ type: 'group_invitation' })).kind).toBe('screen');
 });

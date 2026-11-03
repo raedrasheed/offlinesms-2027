@@ -1,5 +1,6 @@
 // AddMembers — pick users and add them to an existing group.
 
+import { useTranslation } from 'react-i18next';
 import { useEffect, useMemo, useState } from 'react';
 import {
   View, Text, TextInput, FlatList, Pressable, StyleSheet,
@@ -27,6 +28,7 @@ type UserRow = {
 };
 
 export default function AddMembers({ route, navigation }: any) {
+  const { t } = useTranslation();
   const label = useProfileLabel();
   const me = auth.currentUser?.uid;
   const { id } = route.params as { id: string };
@@ -175,7 +177,8 @@ export default function AddMembers({ route, navigation }: any) {
     if (!canSubmit) return;
     setBusy(true); setErr(null);
     try {
-      await addGroupMembers(id, selected.map(u => u.uid));
+      const invited = await addGroupMembers(id, selected.map(u => u.uid));
+      Alert.alert(t('groupConsent.title'), t(invited ? 'groupConsent.sent' : 'groupConsent.noNew'));
       navigation.goBack();
     } catch (e: any) {
       const copy = groupErrorCopy(e?.code ?? 'internal');
@@ -188,9 +191,9 @@ export default function AddMembers({ route, navigation }: any) {
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.root}>
       <View style={s.header}>
         <Pressable onPress={() => navigation.goBack()}><Text style={s.back}>‹</Text></Pressable>
-        <Text style={s.title}>Add members</Text>
+        <Text style={s.title}>{t('groupConsent.invite')}</Text>
         <Pressable style={[s.createBtn, !canSubmit && { opacity: 0.4 }]} onPress={submit} disabled={!canSubmit}>
-          <Text style={s.createText}>{busy ? '…' : 'Add'}</Text>
+          <Text style={s.createText}>{busy ? '…' : t('groupConsent.invite')}</Text>
         </Pressable>
       </View>
 
@@ -206,7 +209,7 @@ export default function AddMembers({ route, navigation }: any) {
 
         {phoneMode ? (
           <View style={s.phonePanel}>
-            <Text style={s.phoneHint}>Add someone by phone number. They’ll receive group messages by SMS, and become a full member automatically if they sign up with that number.</Text>
+            <Text style={s.phoneHint}>{t('phoneChat.hint')}</Text>
             <View style={s.pickRow}>
               <Pressable style={[s.pickBtn, { flex: 1 }]} onPress={() => setPickerOpen(true)} disabled={busy}>
                 <Ionicons name="person-outline" size={18} color={colors.primary} />
@@ -224,7 +227,8 @@ export default function AddMembers({ route, navigation }: any) {
               style={s.input}
               value={contactName}
               onChangeText={setContactName}
-              placeholder="Name"
+              placeholder={t('phoneChat.name')}
+              placeholderTextColor={colors.ink500}
               autoFocus
             />
             <TextInput
@@ -232,6 +236,7 @@ export default function AddMembers({ route, navigation }: any) {
               value={contactPhone}
               onChangeText={setContactPhone}
               placeholder="+972591234567"
+              placeholderTextColor={colors.ink500}
               keyboardType="phone-pad"
               autoCapitalize="none"
               autoCorrect={false}
@@ -316,7 +321,7 @@ const s = StyleSheet.create({
   title:  { fontSize: 14, fontWeight: '700', color: colors.ink, flex: 1 },
   createBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: radius.pill, backgroundColor: colors.primary },
   createText: { color: '#fff', fontWeight: '700', fontSize: 13 },
-  input:  { marginHorizontal: 14, marginTop: 14, padding: 12, backgroundColor: '#fff', borderRadius: radius.md, fontSize: 15, borderWidth: 1, borderColor: colors.ink200 },
+  input:  { color: colors.ink, marginHorizontal: 14, marginTop: 14, padding: 12, backgroundColor: '#fff', borderRadius: radius.md, fontSize: 15, borderWidth: 1, borderColor: colors.ink200 },
   chips:  { flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingHorizontal: 14, paddingTop: 14 },
   chip:   { paddingHorizontal: 10, paddingVertical: 6, borderRadius: radius.pill, backgroundColor: colors.primaryLight },
   chipText: { fontSize: 12, fontWeight: '600', color: colors.primaryDark },

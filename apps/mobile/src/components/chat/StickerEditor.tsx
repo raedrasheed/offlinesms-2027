@@ -8,7 +8,7 @@ import { useTranslation } from 'react-i18next';
 import { useTheme } from '../../context/ThemeContext';
 import { cleanStickerEdits, DEFAULT_STICKER_EDITS, STICKER_COLORS, STICKER_EDGE, stickerImageLayout, type StickerEdits } from '../../lib/stickerEditorModel';
 import { saveCustomSticker, type CustomSticker } from '../../lib/customStickers';
-import { orientStickerImage, removeStickerTemp, type StickerSource } from '../../media/stickerImage';
+import { orientStickerImage, cutoutStickerImage, removeStickerTemp, type StickerSource } from '../../media/stickerImage';
 
 type StickerEditorProps = {
   uid: string; source: StickerSource; previous?: CustomSticker;
@@ -20,11 +20,14 @@ export const StickerEditor = forwardRef<StickerEditorHandle, StickerEditorProps>
   const { t } = useTranslation(), { colors } = useTheme(), insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const side = Math.max(180, Math.min(width - 48, height * 0.38, 320));
-  const [edits, setEdits] = useState<StickerEdits>(() => cleanStickerEdits(previous?.edits));
+  const [edits, setEdits] = useState<StickerEdits>(() => cleanStickerEdits(previous ? previous.edits : DEFAULT_STICKER_EDITS));
   const [history, setHistory] = useState<StickerEdits[]>([]);
   const [name, setName] = useState(previous?.name ?? '');
   const [oriented, setOriented] = useState<StickerSource | null>(null);
-  const orientationKey = `${source.uri}/${edits.rotation}/${edits.flipX}/${edits.flipY}`;
+  const [cutout, setCutout] = useState<StickerSource | null>(null);
+  const [cutoutError, setCutoutError] = useState(false);
+  const preparedSource = edits.removeBackground ? cutout : source;
+  const orientationKey = `${preparedSource?.uri}/${edits.rotation}/${edits.flipX}/${edits.flipY}`;
   const [preparedKey, setPreparedKey] = useState('');
   const [loadedUri, setLoadedUri] = useState('');
   const [saving, setSaving] = useState(false), [imageError, setImageError] = useState(false);
@@ -32,14 +35,25 @@ export const StickerEditor = forwardRef<StickerEditorHandle, StickerEditorProps>
   const capture = useRef<View>(null), alive = useRef(true), savingRef = useRef(false);
   const scroll = useRef<ScrollView>(null);
   const current = useRef({ edits, oriented, side, blocked: true });
-  const ready = !!oriented && preparedKey === orientationKey && loadedUri === oriented.uri && laidOut && !imageError;
+  const ready = (!edits.removeBackground || !!cutout) && !!oriented && preparedKey === orientationKey && loadedUri === oriented.uri && laidOut && !imageError;
   current.current = { edits, oriented, side, blocked: saving || !ready };
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useEffect(() => {
     let active = true, temporary: string | undefined;
+    setCutout(null); setCutoutError(false);
+    if (!edits.removeBackground) return;
+    void cutoutStickerImage(source).then(image => {
+      temporary = image.uri;
+      if (active) setCutout(image); else void removeStickerTemp(image.uri);
+    }).catch(() => { if (active) setCutoutError(true); });
+    return () => { active = false; if (temporary) void removeStickerTemp(temporary); };
+  }, [source.uri, edits.removeBackground, imageAttempt]);
+  useEffect(() => {
+    let active = true, temporary: string | undefined;
     setOriented(null); setPreparedKey(''); setLoadedUri(''); setImageError(false);
-    void orientStickerImage(source, edits).then(image => {
-      if (image.uri !== source.uri) temporary = image.uri;
+    if (!preparedSource) return;
+    void orientStickerImage(preparedSource, edits).then(image => {
+      if (image.uri !== preparedSource.uri) temporary = image.uri;
       if (active) { setOriented(image); setPreparedKey(orientationKey); } else if (temporary) void removeStickerTemp(temporary);
     }).catch(() => { if (active) setImageError(true); });
     return () => { active = false; if (temporary) void removeStickerTemp(temporary); };
@@ -138,11 +152,12 @@ export const StickerEditor = forwardRef<StickerEditorHandle, StickerEditorProps>
             </View> : null}
           </View>
           {!ready ? <View style={[StyleSheet.absoluteFill, s.center, { backgroundColor: '#FFFFFF99' }]}>
-            {imageError ? <Pressable onPress={() => setImageAttempt(n => n + 1)} accessibilityRole="button"><Text>{t('stickers.retryImage')}</Text></Pressable> : <ActivityIndicator color={colors.action.primary} />}
+            {imageError || cutoutError ? <Pressable onPress={() => setImageAttempt(n => n + 1)} accessibilityRole="button"><Text style={{ color: colors.text.primary }}>{t(cutoutError ? 'stickers.cutoutError' : 'stickers.retryImage')}</Text></Pressable> : <ActivityIndicator color={colors.action.primary} />}
           </View> : null}
         </View>
         <Text style={[s.hint, { color: colors.text.muted }]}>{t('stickers.dragHint')}</Text>
         <View style={s.tools}>
+          {tool(t(edits.removeBackground ? 'stickers.keepOriginal' : 'stickers.removeBackground'), 'cut-outline', () => update({ removeBackground: !edits.removeBackground }), edits.removeBackground)}
           {tool(t('stickers.zoomOut'), 'remove', () => update({ zoom: edits.zoom - 0.25 }), false, edits.zoom <= 1)}
           {tool(t('stickers.zoomIn'), 'add', () => update({ zoom: edits.zoom + 0.25 }), false, edits.zoom >= 4)}
           {tool(t('stickers.rotate'), 'refresh', () => update({ rotation: (edits.rotation + 90) % 360, x: 0, y: 0 }))}

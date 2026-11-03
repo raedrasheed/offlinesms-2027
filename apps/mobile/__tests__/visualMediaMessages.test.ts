@@ -61,10 +61,10 @@ const message = (type:'image'|'video',extra:Partial<Message>={}):Message=>({
 async function mountVideo(m=message('video'),props:Record<string,unknown>={}) {
   await act(async()=>{renderer=create(createElement(VideoMessageBubble,{message:m,mine:true,...props}));});
 }
-async function mountBubble(m:Message,mine=true) {
+async function mountBubble(m:Message,mine=true,isGroup=false) {
   await act(async()=>{renderer=create(createElement(MessageBubble,{
-    message:m,context:{conversationId:'chat',isGroup:false,isMyMessage:mine,myRoleIsAdmin:false,isStarred:false,isPinned:false,myUid:'me'},
-    showSender:false,onReply:vi.fn(),onEditStart:vi.fn(),onForward:vi.fn(),onJumpTo:vi.fn(),onInfo:vi.fn(),
+    message:m,context:{conversationId:'chat',isGroup,isMyMessage:mine,myRoleIsAdmin:false,isStarred:false,isPinned:false,myUid:'me'},
+    showSender:isGroup&&!mine,onReply:vi.fn(),onEditStart:vi.fn(),onForward:vi.fn(),onJumpTo:vi.fn(),onInfo:vi.fn(),
   }));});
 }
 beforeEach(()=>{
@@ -75,6 +75,16 @@ beforeEach(()=>{
 afterEach(async()=>{if(renderer)await act(async()=>renderer.unmount());vi.unstubAllGlobals();});
 
 describe('proportional photo and video messages',()=>{
+  it.each(['image','video'] as const)('renders received group %s and opens it without sender-local files', async type => {
+    const m = message(type, { senderUid: 'peer' }); m.media = { ...m.media!, localUri: undefined, thumbnailURL: 'https://example.test/thumb' };
+    await mountBubble(m, false, true);
+    expect(nodes('Text').some(n => n.props.children === 'Sender')).toBe(true);
+    expect(style(mediaBox()).width).toBeGreaterThan(0);
+    if (type === 'video') {
+      await act(async () => frame().props.onPress());
+      expect(nodes('Video')[0].props.source.uri).toBe('file:///cached.mp4');
+    } else expect(nodes('Image').some(n => n.props.source?.uri === m.media!.thumbnailURL)).toBe(true);
+  });
   it.each([[1920,1080],[1080,1920],[800,800],[4000,500],[500,4000]])('preserves %s × %s in identical image/video frames',async(width,height)=>{
     const frames=[];
     for(const type of ['image','video'] as const){
@@ -175,9 +185,11 @@ describe('explicit video playback',()=>{
     await act(async()=>button('names.close').props.onPress());
     expect(nodes('Video')).toHaveLength(0);expect(frame()).toBeTruthy();
   });
-  it('offers a retry after download failure and keeps share/save available in the viewer',async()=>{
+  it('streams when caching fails, retries playback errors and keeps share/save available',async()=>{
     mocks.cache.mockResolvedValueOnce(null);await mountVideo();
     await act(async()=>frame().props.onPress());
+    expect(nodes('Video')[0].props.source.uri).toBe('https://example.test/media');
+    await act(async()=>nodes('Video')[0].props.onError('network'));
     expect(nodes('Video')).toHaveLength(0);
     await act(async()=>button('media.retryDownload').props.onPress());
     expect(nodes('Video')).toHaveLength(1);
