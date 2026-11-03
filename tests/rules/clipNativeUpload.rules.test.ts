@@ -1,10 +1,10 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { initializeTestEnvironment, type RulesTestEnvironment } from '@firebase/rules-unit-testing';
+import { assertFails, assertSucceeds, initializeTestEnvironment, type RulesTestEnvironment } from '@firebase/rules-unit-testing';
 import { createMockUserToken } from '@firebase/util';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { deleteDoc, doc, setDoc, Timestamp, updateDoc } from 'firebase/firestore';
-import { deleteObject, getBytes, ref } from 'firebase/storage';
+import { deleteObject, getBytes, ref, uploadBytes } from 'firebase/storage';
 
 const hasStorage = !!process.env.FIREBASE_STORAGE_EMULATOR_HOST;
 const projectId = 'demo-offlinesms';
@@ -110,6 +110,48 @@ describe.skipIf(!hasStorage)('native clip resumable upload protocol with product
     await env.withSecurityRulesDisabled(async context => {
       await expect(getBytes(ref(context.storage(bucket), sourcePath))).rejects.toMatchObject({ code: 'storage/object-not-found' });
     });
+  });
+
+  it.each([
+    ['omitted', {}],
+    ['empty map', { metadata: {} }],
+    ['null', { metadata: null }],
+  ] as const)('accepts native upload metadata represented as %s', async (_label, metadata) => {
+    const bytes = new Uint8Array([1, 2, 3]);
+    const sessionUrl = await start(owner, bytes.length, metadata);
+    const completed = await send(sessionUrl, owner, bytes, 0, true);
+    expect(completed.status).toBe(200);
+    expect(completed.headers.get('x-goog-upload-status')).toBe('final');
+    await env.withSecurityRulesDisabled(async context => {
+      expect(new Uint8Array(await getBytes(ref(context.storage(bucket), sourcePath)))).toEqual(bytes);
+    });
+    expect((await fetch(`${objectUrl}?alt=media`, { headers: { Authorization: authorization(owner) } })).status).toBe(403);
+  });
+
+  it('checks raw optional metadata shapes before Storage normalizes the wire request', async () => {
+    // The Storage emulator normalizes absent/null metadata to {}. Feed raw
+    // shapes to the production helper through test-only claims to cover the
+    // missing/null branches independently of the emulator's wire normalization.
+    const productionRules = readFileSync(resolve('storage.rules'), 'utf8');
+    const call = 'hasNoCustomMetadata(request.resource)';
+    expect(productionRules.split(call)).toHaveLength(2);
+    const probeRules = productionRules.replace(call, 'hasNoCustomMetadata(request.auth.token.clipProbeResource)');
+    const storageOptions = { host: '127.0.0.1', port: 9199 };
+    const probe = await initializeTestEnvironment({ projectId, storage: { ...storageOptions, rules: probeRules } });
+    const uploadProbe = (shape: Record<string, unknown>, uid = owner) => uploadBytes(
+      ref(probe.authenticatedContext(uid, { clipProbeResource: shape }).storage(bucket), sourcePath),
+      new Uint8Array([1, 2, 3]), { contentType: 'video/mp4' },
+    );
+    try {
+      for (const shape of [{}, { metadata: null }, { metadata: {} }]) await assertSucceeds(uploadProbe(shape));
+      for (const metadata of [{ access: 'public' }, { firebaseStorageDownloadTokens: 'forged' },
+        [], ['public'], '', 'public', false, 0]) await assertFails(uploadProbe({ metadata }));
+      for (const shape of [{}, { metadata: null }, { metadata: {} }]) await assertFails(uploadProbe(shape, 'native-upload-peer'));
+    } finally {
+      await probe.cleanup();
+      const restored = await initializeTestEnvironment({ projectId, storage: { ...storageOptions, rules: productionRules } });
+      await restored.cleanup();
+    }
   });
 
   it('permits a reserved upload when an existing publisher profile omits optional flags', async () => {
