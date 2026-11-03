@@ -3,6 +3,6 @@
 // single-page export: static rendering needs expo-router, which the app
 // doesn't use. Normal builds get app.json unchanged.
 module.exports = ({ config }) =>
-  process.env.EXPO_PUBLIC_FEATURE_GALLERY === '1'
+  process.env.EXPO_PUBLIC_FEATURE_GALLERY === '1' || process.env.EXPO_PUBLIC_CLIPS_GALLERY === '1'
     ? { ...config, web: { ...config.web, output: 'single' } }
     : config;

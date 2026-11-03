@@ -1,3 +1,5 @@
+import { validClipId } from './clipReference';
+
 // Sticker + poll message payloads on the client — pure, unit-tested.
 // The server is authoritative (functions/src/chats/pollLogic.ts); the client
 // mirrors its rules so the UI can enforce them before sending and show an
@@ -29,6 +31,7 @@ export const POLL_OPTIONS_MAX = 12;
 
 /** Payload stored in messages.payload_json for a given message type. */
 export function payloadFromRemote(type: string | undefined, m: Record<string, any>): string | null {
+  if (type === 'clip') return validClipId(m.clipId) ? JSON.stringify({clipId: m.clipId}) : null;
   if (type === 'location' && m.location) return JSON.stringify(m.location);
   if (type === 'contact' && m.contact) return JSON.stringify(m.contact);
   if (type === 'image' && m.media?.presentation === 'sticker') return JSON.stringify({ fileName: m.media.fileName ?? '', presentation: 'sticker' });

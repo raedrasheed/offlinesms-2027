@@ -7,11 +7,10 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { Ionicons } from '@expo/vector-icons';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { doc, onSnapshot } from 'firebase/firestore';
-import { auth, db } from './src/lib/firebase';
+import { auth } from './src/lib/firebase';
 import { ThemeProvider } from './src/context/ThemeContext';
 import { OfflineProvider } from './src/context/OfflineContext';
-import type { ThemePreference } from './src/lib/user';
+import { useAccountProfile } from './src/hooks/useAccountProfile';
 import './src/i18n';
 
 import Splash from './src/screens/Splash';
@@ -54,7 +53,14 @@ import SmsBatchReport from './src/screens/SmsBatchReport';
 import Status from './src/screens/Status';
 import StatusComposer from './src/screens/StatusComposer';
 import StatusViewer from './src/screens/StatusViewer';
-import Calls from './src/screens/Calls';
+import ClipsFeed from './src/screens/clips/ClipsFeed';
+import ClipViewer from './src/screens/clips/ClipViewer';
+import ClipProfile from './src/screens/clips/ClipProfile';
+import ClipPreferences from './src/screens/clips/ClipPreferences';
+import ClipComposer from './src/screens/clips/ClipComposer';
+import ClipDrafts from './src/screens/clips/ClipDrafts';
+import ClipFollowRequests from './src/screens/clips/ClipFollowRequests';
+import { useClipsCopy } from './src/lib/clipsCopy';
 import Settings from './src/screens/Settings';
 import Points from './src/screens/Points';
 import Privacy from './src/screens/Privacy';
@@ -66,13 +72,14 @@ import ImagePreviewScreen from './src/screens/ImagePreviewScreen';
 import ImageViewerScreen from './src/screens/ImageViewerScreen';
 import JoinGroup from './src/screens/JoinGroup';
 import NotificationSettings from './src/screens/NotificationSettings';
-import { inviteCodeFromUrl, setPendingInvite, takePendingInvite } from './src/lib/deepLinks';
+import { inviteCodeFromUrl, setPendingInvite, takePendingInvite, setPendingClip, takePendingClip } from './src/lib/deepLinks';
+import { clipIdFromUrl } from './src/lib/clipReference';
+import { createPendingClipNavigation } from './src/lib/pendingClipNavigation';
 import * as Notifications from 'expo-notifications';
 import { installForegroundHandler, registerForPush, routeFromNotification } from './src/lib/notifications';
 import { initAppCheck } from './src/lib/appCheck';
 import { dispatchForRoute, pushTarget } from './src/lib/pushRouting';
 import { perfMark, perfBegin, perfNow } from './src/lib/perf';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { notificationTargets, pullConversationNow, openLocalDb } from './src/localdb';
 import { ShareIntentProvider, useShareIntentContext } from 'expo-share-intent';
 import ShareToChat from './src/screens/ShareToChat';
@@ -169,11 +176,12 @@ function OnboardingFlow() {
 const TAB_ICONS: Record<string, { active: keyof typeof Ionicons.glyphMap; inactive: keyof typeof Ionicons.glyphMap }> = {
   Chats:    { active: 'chatbubbles',       inactive: 'chatbubbles-outline' },
   Status:   { active: 'radio',             inactive: 'radio-outline' },
-  Calls:    { active: 'call',              inactive: 'call-outline' },
+  Clips:    { active: 'play-circle',       inactive: 'play-circle-outline' },
   Settings: { active: 'settings',          inactive: 'settings-outline' },
 };
 
 function MainTabs() {
+  const { c } = useClipsCopy();
   const insets = useSafeAreaInsets();
   const unread = useUnreadTotal();
   return (
@@ -229,11 +237,11 @@ function MainTabs() {
       <Tabs.Screen
         name="Chats"
         component={ChatsList}
-        options={{ tabBarBadge: unread > 0 ? (unread > 99 ? '99+' : unread) : undefined }}
+        options={{ title: c('Chats', 'المحادثات'), tabBarBadge: unread > 0 ? (unread > 99 ? '99+' : unread) : undefined }}
       />
-      <Tabs.Screen name="Status" component={Status} />
-      <Tabs.Screen name="Calls" component={Calls} />
-      <Tabs.Screen name="Settings" component={Settings} />
+      <Tabs.Screen name="Status" component={Status} options={{ title: c('Status', 'الحالات') }} />
+      <Tabs.Screen name="Clips" component={ClipsFeed} options={{ title: c('Clips', 'مقاطع') }} />
+      <Tabs.Screen name="Settings" component={Settings} options={{ title: c('Settings', 'الإعدادات') }} />
     </Tabs.Navigator>
   );
 }
@@ -241,9 +249,7 @@ function MainTabs() {
 export default function App() {
   const [ready, setReady] = useState(false);
   const [user, setUser] = useState<User | null>(null);
-  // null  = not loaded yet, false = needs onboarding, true = complete.
-  const [profileCompleted, setProfileCompleted] = useState<boolean | null>(null);
-  const [userTheme, setUserTheme] = useState<ThemePreference | null>(null);
+  const { profileCompleted, userTheme } = useAccountProfile(user?.uid ?? null);
 
   useEffect(() => onAuthStateChanged(auth, u => {
     perfMark('auth:resolved', { signedIn: !!u }, true);
@@ -264,30 +270,7 @@ export default function App() {
     }
     setUser(u);
     setReady(true);
-    if (!u) { setProfileCompleted(null); setUserTheme(null); }
   }), []);
-
-  // Startup: the main UI used to wait for the users/{uid} snapshot — a network
-  // round-trip on every launch (React Native has no persistent Firestore cache)
-  // and a blank screen when starting offline. A user who completed onboarding
-  // before goes straight to the (locally cached) chat list; the live snapshot
-  // still runs and corrects the state if it changed.
-  useEffect(() => {
-    if (!user) return;
-    const key = `profileCompleted.v1:${user.uid}`;
-    let live = false;
-    AsyncStorage.getItem(key).then(v => {
-      if (!live && v === '1') setProfileCompleted(prev => (prev === null ? true : prev));
-    }).catch(() => {});
-    return onSnapshot(doc(db, 'users', user.uid), snap => {
-      live = true;
-      const done = snap.exists() ? snap.data()?.profileCompleted === true : false;
-      setProfileCompleted(done);
-      void AsyncStorage.setItem(key, done ? '1' : '0').catch(() => {});
-      const pref = snap.data()?.preferredTheme as ThemePreference | undefined;
-      if (pref) setUserTheme(pref);
-    });
-  }, [user]);
 
   // Invite deep links (offlinesms://join/{code} | https://links.offlinesms.com
   // /join/{code}, plus legacy offlinesms.com links). If logged in + onboarded,
@@ -295,8 +278,21 @@ export default function App() {
   // (effect below).
   const authedRef = useRef(false);
   authedRef.current = !!user && profileCompleted === true;
+  const accountRef = useRef<string | null>(null);
+  accountRef.current = user?.uid ?? null;
+  const clipLinks = useRef<ReturnType<typeof createPendingClipNavigation> | null>(null);
+  if (!clipLinks.current) clipLinks.current = createPendingClipNavigation({
+    take: takePendingClip, save: setPendingClip,
+    account: () => authedRef.current && accountRef.current === auth.currentUser?.uid ? accountRef.current : null,
+    ready: () => navRef.isReady(), open: clipId => (navRef as any).navigate('ClipViewer', { clipId }),
+  });
   useEffect(() => {
     function handle(url: string | null) {
+      const clipId = clipIdFromUrl(url);
+      if (clipId) {
+        void clipLinks.current?.receive(clipId).catch(() => {});
+        return;
+      }
       const code = inviteCodeFromUrl(url);
       if (!code) return;
       if (authedRef.current && navRef.isReady()) (navRef as any).navigate('JoinGroup', { code });
@@ -376,12 +372,20 @@ export default function App() {
       const code = await takePendingInvite();
       if (!code || cancelled) return;
       const tryNav = () => {
+        if (cancelled) return;
         if (navRef.isReady()) (navRef as any).navigate('JoinGroup', { code });
         else setTimeout(tryNav, 150);
       };
       tryNav();
     })();
     return () => { cancelled = true; };
+  }, [user, profileCompleted]);
+
+  // A protected clip link is replayed after sign-in; the viewer asks the
+  // server for current access before showing metadata or obtaining media.
+  useEffect(() => {
+    if (!(user && profileCompleted === true)) return;
+    void clipLinks.current?.drain().catch(() => {});
   }, [user, profileCompleted]);
 
   // Mirror the user's chats into the local SQLite DB for the whole session.
@@ -399,13 +403,13 @@ export default function App() {
     <KeyboardProvider>
       <ErrorBoundary>
       <ShareIntentHandler authed={!!user && profileCompleted === true} />
-      <NavigationContainer ref={navRef}>
+      <NavigationContainer ref={navRef} onReady={() => { drainPush(); void clipLinks.current?.drain().catch(() => {}); }}>
         {!user ? (
           <AuthFlow />
         ) : profileCompleted === null ? (
           null /* waiting for users/{uid} snapshot */
         ) : (
-          <RootStack.Navigator screenOptions={{ headerShown: false }}>
+          <RootStack.Navigator key={user.uid} screenOptions={{ headerShown: false }}>
             <RootStack.Screen name="Tabs" component={MainTabs} />
             <RootStack.Screen name="NewChatMenu" component={NewChatMenu} />
             <RootStack.Screen name="NewChat" component={NewChat} />
@@ -416,6 +420,12 @@ export default function App() {
             <RootStack.Screen name="ImageViewer" component={ImageViewerScreen} options={{ presentation: 'fullScreenModal' }} />
             <RootStack.Screen name="StatusComposer" component={StatusComposer} options={{ presentation: 'fullScreenModal' }} />
             <RootStack.Screen name="StatusViewer" component={StatusViewer} options={{ presentation: 'fullScreenModal' }} />
+            <RootStack.Screen name="ClipViewer" component={ClipViewer} options={{ presentation: 'fullScreenModal' }} />
+            <RootStack.Screen name="ClipProfile" component={ClipProfile} />
+            <RootStack.Screen name="ClipPreferences" component={ClipPreferences} />
+            <RootStack.Screen name="ClipComposer" component={ClipComposer} options={{ presentation: 'fullScreenModal' }} />
+            <RootStack.Screen name="ClipDrafts" component={ClipDrafts} />
+            <RootStack.Screen name="ClipFollowRequests" component={ClipFollowRequests} />
             <RootStack.Screen name="GroupInvitations" component={GroupInvitations} />
             <RootStack.Screen name="GroupInfo" component={GroupInfo} />
             <RootStack.Screen name="EditGroup" component={EditGroup} />

@@ -107,7 +107,7 @@ export type PinnedMessage = {
   pinnedBy:           string;
 } | null;
 
-export type MessageType = 'text' | 'image' | 'voice' | 'sticker' | 'poll' | 'file' | 'video' | 'audio' | 'location' | 'contact';
+export type MessageType = 'text' | 'image' | 'voice' | 'sticker' | 'poll' | 'file' | 'video' | 'audio' | 'location' | 'contact' | 'clip';
 
 export type MediaUploadStatus = 'pending' | 'uploading' | 'uploaded' | 'failed';
 
@@ -169,6 +169,7 @@ export type Message = {
   errorCode?:          string | null;
   errorMessage?:       string | null;
   // Stickers / polls (type 'sticker' | 'poll'); `text` holds a short fallback.
+  clipId?:             string | null;
   sticker?:            StickerRef | null;
   poll?:               PollData | null;
   location?:           LocationAttachment | null;

@@ -23,6 +23,7 @@ function buildPreview(msg: { type?: string; text?: string; media?: {presentation
   if (msg.type === 'image') return msg.media?.presentation === 'sticker' ? 'Sticker' : 'Photo';
   if (msg.type === 'voice') return 'Voice message';
   if (msg.type === 'file') return 'File';
+  if (msg.type === 'clip') return 'Video clip';
   if (msg.type === 'video') return 'Video';
   if (msg.type === 'audio') return 'Audio';
   if (msg.type === 'location') return 'Location';

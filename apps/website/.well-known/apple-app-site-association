@@ -2,9 +2,18 @@
   "applinks": {
     "details": [
       {
-        "appIDs": ["TEAMID.app.offlinesms.mobile"],
+        "appIDs": [
+          "TEAMID.app.offlinesms.mobile"
+        ],
         "components": [
-          { "/": "/join/*", "comment": "Group invite links" }
+          {
+            "/": "/join/*",
+            "comment": "Group invite links"
+          },
+          {
+            "/": "/clips/*",
+            "comment": "Protected video clip links"
+          }
         ]
       }
     ]

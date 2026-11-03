@@ -483,7 +483,9 @@ export default function Conversation({ route, navigation }: any) {
     setEditing(null);
     setDraft('');
   }
+  const openClip = useCallback((clipId: string) => navigation.navigate('ClipViewer', { clipId }), [navigation]);
   const startForward = useCallback((m: Message) => {
+    if (m.type === 'clip' && m.clipId) { navigation.navigate('ClipViewer', { clipId: m.clipId, share: true }); return; }
     navigation.navigate('ForwardPicker', {
       sourceConversationId: id,
       messageIds: [m.id],
@@ -932,7 +934,7 @@ export default function Conversation({ route, navigation }: any) {
   const onViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: Array<{ item: any; isViewable: boolean }> }) => {
     const ctx = viewContext.current;
     const visible = viewableItems.filter(v => v.isViewable).map(v => v.item);
-    const locations=new Set<string>(visible.filter(m=>m.type==='location' && !m.deletedForEveryone).map(m=>m.id));
+    const locations=new Set<string>(visible.filter(m=>(m.type==='location' || m.type==='clip') && !m.deletedForEveryone).map(m=>m.id));
     setVisibleLocationIds(previous=>previous.size===locations.size && [...locations].every(id=>previous.has(id))?previous:locations);
     visibleMediaIdsRef.current = new Set(visible.map(m => m.id));
     perfObserve(visible.map(m => m.id), 'viewable');
@@ -1155,6 +1157,7 @@ export default function Conversation({ route, navigation }: any) {
               onReply={startReply}
               onEditStart={startEdit}
               onForward={startForward}
+              onOpenClip={openClip}
               onJumpTo={jumpTo}
               onInfo={openInfo}
               onOpenImage={openImage}
@@ -1180,7 +1183,7 @@ export default function Conversation({ route, navigation }: any) {
         }}
       />
     );
-  }, [invData, visibleMsgs, queuedItems, me, isGroup, id, myRoleIsAdmin, starred, convo?.pinnedMessage, convo?.memberCount, reactorNames, useLocal, startReply, startEdit, startForward, jumpTo, openInfo, openImage, retryMedia, onPlayedVoice, onSendViaSms, onAvatarPress, onListScroll, onReachOlder, t, isOffline, retrySend, highlightId, screenFocused, visibleLocationIds]);
+  }, [invData, visibleMsgs, queuedItems, me, isGroup, id, myRoleIsAdmin, starred, convo?.pinnedMessage, convo?.memberCount, reactorNames, useLocal, startReply, startEdit, startForward, openClip, jumpTo, openInfo, openImage, retryMedia, onPlayedVoice, onSendViaSms, onAvatarPress, onListScroll, onReachOlder, t, isOffline, retrySend, highlightId, screenFocused, visibleLocationIds]);
 
   return (
     <KeyboardAvoidingView behavior="padding" style={s.root}>

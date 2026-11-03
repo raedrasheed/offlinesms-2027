@@ -27,6 +27,7 @@ import { ChatActionSheet, SheetAction } from './ChatActionSheet';
 import { ReactionsSheet, ReactorInfo } from './ReactionsSheet';
 import { EmojiReactionPicker } from './chat/EmojiReactionPicker';
 import { ImageMessageBubble } from './chat/ImageMessageBubble';
+import { ClipMessageBubble } from './chat/ClipMessageBubble';
 import { VideoMessageBubble } from './chat/VideoMessageBubble';
 import { AttachmentMessageBubble } from './chat/AttachmentMessageBubble';
 import { ATTACHMENT_SENT } from './chat/attachmentCardStyles';
@@ -88,6 +89,7 @@ export type MessageBubbleProps = {
   onJumpTo:   (messageId: string) => void;
   onInfo:     (msg: Message) => void;
   onSendViaSms?: (msg: Message) => void;
+  onOpenClip?: (clipId: string) => void;
   onOpenImage?:   (uri: string) => void;
   onRetryMedia?:  (msg: Message) => void;
   onPlayedVoice?: (msg: Message) => void;
@@ -99,7 +101,7 @@ export type MessageBubbleProps = {
   // Offline-first: locally queued outgoing message not yet on the server.
   pending?:   'queued' | 'syncing' | 'failed';
   onRetry?:   (message: Message) => void;
-  /** Only visible map cards may request map tiles. */
+  /** Only visible rich cards may request map tiles or protected clip metadata. */
   locationVisible?: boolean;
 };
 
@@ -117,7 +119,7 @@ function formatTime(value: any): string {
 
 function MessageBubbleImpl({
   message: m, context, showSender, onReply, onEditStart, onForward, onJumpTo, onInfo, onSendViaSms,
-  onOpenImage, onRetryMedia, onPlayedVoice, onAvatarPress, onMentionPress, onOpenContact, pending, onRetry, locationVisible=false,
+  onOpenClip, onOpenImage, onRetryMedia, onPlayedVoice, onAvatarPress, onMentionPress, onOpenContact, pending, onRetry, locationVisible=false,
 }: MessageBubbleProps) {
   const { t } = useTranslation();
   const mine    = context.isMyMessage;
@@ -418,6 +420,9 @@ function MessageBubbleImpl({
               </>
             ) : null}
           />
+        ) : !deleted && m.type === 'clip' ? (
+          <ClipMessageBubble clipId={m.clipId} uid={context.myUid} visible={locationVisible}
+            onOpen={onOpenClip} onLongPress={() => setSheetOpen(true)} />
         ) : !deleted && m.type === 'video' ? (
           <VideoMessageBubble key={m.id} message={m} mine={mine}
             onRetry={() => onRetryMedia?.(m)} onLongPress={() => setSheetOpen(true)}
@@ -605,6 +610,7 @@ function areBubblePropsEqual(prev: MessageBubbleProps, next: MessageBubbleProps)
   if (prev.onJumpTo      !== next.onJumpTo)      return false;
   if (prev.onInfo        !== next.onInfo)        return false;
   if (prev.onSendViaSms  !== next.onSendViaSms)  return false;
+  if (prev.onOpenClip !== next.onOpenClip) return false;
   if (prev.onOpenImage   !== next.onOpenImage)   return false;
   if (prev.onRetryMedia  !== next.onRetryMedia)  return false;
   if (prev.onPlayedVoice !== next.onPlayedVoice) return false;
@@ -618,6 +624,7 @@ function areBubblePropsEqual(prev: MessageBubbleProps, next: MessageBubbleProps)
     if (a.id !== b.id) return false;
     if ((a as any).text !== (b as any).text) return false;
     if ((a as any).caption !== (b as any).caption) return false;
+    if (a.clipId !== b.clipId) return false;
     if (a.type !== b.type) return false;
     if (a.deletedForEveryone !== b.deletedForEveryone) return false;
     if (a.deliveredCount !== b.deliveredCount || a.readCount !== b.readCount) return false;

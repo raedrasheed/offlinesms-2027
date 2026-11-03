@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow"><meta name="referrer" content="no-referrer">
+  <meta name="description" content="افتح مقطع الفيديو في تطبيق OfflineSMS. يتم التحقق من صلاحية المشاهدة داخل التطبيق.">
+  <title>مقطع فيديو — OfflineSMS</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#e3f1fa;color:#102838;font-family:system-ui,sans-serif;padding:24px}.card{max-width:430px;width:100%;background:white;border-radius:28px;padding:38px 28px;text-align:center;box-shadow:0 20px 80px #17354818}.logo{color:#1f7ba8;font-weight:800;font-size:22px}.play{width:80px;height:80px;background:#e3f1fa;color:#1f7ba8;display:grid;place-items:center;font-size:32px;border-radius:24px;margin:28px auto}h1{font-size:26px;margin:12px 0}p{line-height:1.9;color:#526774}a{display:block;text-decoration:none;border-radius:14px;padding:15px;margin-top:12px;background:#1f7ba8;color:white;font-weight:700}.secondary{background:#edf5fa;color:#1f7ba8}.small{font-size:12px;margin-top:24px}a[hidden]{display:none}
+  </style>
+</head>
+<body>
+<main class="card"><div class="logo" dir="ltr">OfflineSMS</div><div class="play" aria-hidden="true">▶</div>
+  <h1 id="title">مقطع فيديو</h1>
+  <p id="description">افتح المقطع في التطبيق للمشاهدة والتعليق والمشاركة. قد تحتاج إلى تسجيل الدخول أو إذن من صاحب المقطع.</p>
+  <a id="open" hidden>فتح في OfflineSMS</a>
+  <a class="secondary" href="https://play.google.com/store/apps/details?id=app.offlinesms.mobile" rel="noopener noreferrer">تنزيل التطبيق على Android</a>
+  <p class="small">لا تعرض هذه الصفحة محتوى المقاطع الخاصة أو بيانات أصحابها.</p>
+</main>
+<script>
+  // A public landing page never resolves metadata or embeds protected media.
+  const match = /^\/clips\/([A-Za-z0-9_-]{1,128})\/?$/.exec(location.pathname);
+  if (match) { const button = document.getElementById('open'); button.href = 'offlinesms://clips/' + match[1]; button.hidden = false; }
+  else { document.getElementById('title').textContent = 'الرابط غير صالح'; document.getElementById('description').textContent = 'تحقق من رابط المقطع وأعد المحاولة.'; }
+</script>
+</body>
+</html>

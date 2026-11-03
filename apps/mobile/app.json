@@ -2,7 +2,7 @@
   "expo": {
     "name": "OfflineSMS",
     "slug": "offlinesms",
-    "version": "2.4.13",
+    "version": "2.5.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "offlinesms",
@@ -17,7 +17,7 @@
       "supportsTablet": false,
       "requireFullScreen": true,
       "bundleIdentifier": "app.offlinesms.mobile",
-      "buildNumber": "30",
+      "buildNumber": "31",
       "entitlements": {
         "aps-environment": "production"
       },
@@ -26,9 +26,9 @@
         "UIBackgroundModes": [
           "remote-notification"
         ],
-        "NSCameraUsageDescription": "OfflineSMS uses your camera to capture and share photos in conversations.",
-        "NSMicrophoneUsageDescription": "OfflineSMS uses your microphone to record and send voice messages.",
-        "NSPhotoLibraryUsageDescription": "OfflineSMS accesses your photo library to share images in conversations.",
+        "NSCameraUsageDescription": "OfflineSMS uses your camera to capture photos and record videos for conversations and Clips.",
+        "NSMicrophoneUsageDescription": "OfflineSMS uses your microphone to record voice messages and video sound.",
+        "NSPhotoLibraryUsageDescription": "OfflineSMS accesses your photo library to share images and videos in conversations and Clips.",
         "NSPhotoLibraryAddUsageDescription": "OfflineSMS saves received media to your photo library.",
         "NSContactsUsageDescription": "OfflineSMS uses your contacts to help you find and message people.",
         "NSLocationWhenInUseUsageDescription": "OfflineSMS uses your location only when you choose to share a location in a conversation."
@@ -40,7 +40,7 @@
     },
     "android": {
       "package": "app.offlinesms.mobile",
-      "versionCode": 30,
+      "versionCode": 31,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
@@ -70,6 +70,16 @@
               "scheme": "https",
               "host": "offlinesms.com",
               "pathPrefix": "/join"
+            },
+            {
+              "scheme": "https",
+              "host": "links.offlinesms.com",
+              "pathPrefix": "/clips/"
+            },
+            {
+              "scheme": "https",
+              "host": "offlinesms.com",
+              "pathPrefix": "/clips/"
             }
           ],
           "category": [

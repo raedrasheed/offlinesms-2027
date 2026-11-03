@@ -36,6 +36,36 @@ service firebase.storage {
         && request.resource.size <= (message().type in ['image', 'voice'] ? 10 : 25) * 1024 * 1024;
     }
 
+    // Short-video originals may be uploaded only into a server reservation.
+    // Restarting an interrupted upload may replace the original while it is
+    // still uploading/failed, but publishing freezes that path. Originals and
+    // processed outputs deny direct SDK reads. The playback callable checks
+    // current permissions before issuing a short signed URL, and processing
+    // strips automatically created download tokens. Storage rules can read at
+    // most two Firestore documents: the reservation and publisher profile.
+    // Account/master-policy checks happen at reservation, publish and processing;
+    // already issued private source leases last until uploadExpiresAt.
+    match /clipUploads/{uid}/{clipId}/source {
+      function clip() { return firestore.get(/databases/(default)/documents/clips/$(clipId)).data; }
+      function profile() { return firestore.get(/databases/(default)/documents/clipProfiles/$(uid)).data; }
+      allow read: if false;
+      allow write: if isSelf(uid) && request.resource != null
+        && profile().get('suspended', false) != true
+        && profile().get('deleting', false) != true
+        && clip().ownerUid == uid
+        && clip().status in ['uploading', 'failed']
+        && clip().sourcePath == 'clipUploads/' + uid + '/' + clipId + '/source'
+        && clip().uploadExpiresAt > request.time
+        && request.resource.size > 0
+        && request.resource.size <= clip().maxUploadBytes
+        && request.resource.size <= 200 * 1024 * 1024
+        && request.resource.contentType in ['video/mp4', 'video/quicktime', 'video/webm']
+        && request.resource.metadata.keys().hasOnly([]);
+    }
+    match /clipMedia/{path=**} {
+      allow read, write: if false;
+    }
+
     // Avatars
     match /avatars/{uid}/{file} {
       allow read: if isAuthed();

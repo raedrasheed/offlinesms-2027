@@ -15,7 +15,7 @@ export function notifLang(value: unknown): NotifLang {
 const STRINGS: Record<NotifLang, {
   someone: string; group: string; photo: string; voice: string; sticker: string; message: string;
   newMessage: string; newGroupMessage: string; openToRead: string;
-  file: string; video: string; audio: string; location: string; contact: string;
+  clip: string; file: string; video: string; audio: string; location: string; contact: string;
   reactedDirect: (emoji: string) => string;
   reactedGroup: (actor: string, emoji: string) => string;
 }> = {
@@ -23,7 +23,7 @@ const STRINGS: Record<NotifLang, {
     someone: 'Someone',
     group: 'Group',
     photo: '📷 Photo',
-    file:'📎 File',video:'🎬 Video',audio:'🎵 Audio',location:'📍 Location',contact:'👤 Contact',
+    clip:'▶ Video clip',file:'📎 File',video:'🎬 Video',audio:'🎵 Audio',location:'📍 Location',contact:'👤 Contact',
     voice: '🎤 Voice message',
     sticker: 'Sticker',
     message: 'Message',
@@ -37,7 +37,7 @@ const STRINGS: Record<NotifLang, {
     someone: 'شخص ما',
     group: 'مجموعة',
     photo: '📷 صورة',
-    file:'📎 ملف',video:'🎬 فيديو',audio:'🎵 ملف صوتي',location:'📍 موقع',contact:'👤 جهة اتصال',
+    clip:'▶ مقطع فيديو',file:'📎 ملف',video:'🎬 فيديو',audio:'🎵 ملف صوتي',location:'📍 موقع',contact:'👤 جهة اتصال',
     voice: '🎤 رسالة صوتية',
     sticker: 'ملصق',
     message: 'رسالة',
@@ -75,6 +75,7 @@ const PREVIEW_MAX = 120;
 /** Human-readable, content-light preview of a message. */
 export function messagePreview(msg: MsgLike, lang: NotifLang = 'en'): string {
   const L = STRINGS[lang];
+  if (msg.type === 'clip') return L.clip;
   if (msg.type === 'file' || msg.type === 'video' || msg.type === 'audio' || msg.type === 'location' || msg.type === 'contact') return L[msg.type];
   if (msg.type === 'image') return msg.media?.presentation === 'sticker' ? L.sticker : L.photo;
   if (msg.type === 'voice') return L.voice;

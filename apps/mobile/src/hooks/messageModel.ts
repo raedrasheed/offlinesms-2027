@@ -7,6 +7,7 @@
 // replyTo sender snapshot, so those map to undefined/null in local mode.
 
 import { isBinaryAttachment, parsePayload, parseLocation, parseContact } from '../media/attachmentModel';
+import { parseClipReference } from '../lib/clipReference';
 import { parseSticker, parsePoll } from '../lib/pollModel';
 import type { MessageRow } from '../localdb/types';
 import type { Message } from '../lib/conversations';
@@ -114,6 +115,7 @@ export function mapMessageRow(row: MessageRow): Message {
     errorMessage: row.error_message ?? null,
     location: row.type === 'location' ? parseLocation(parsePayload(row.payload_json)) : null,
     contact: row.type === 'contact' ? parseContact(parsePayload(row.payload_json)) : null,
+    clipId: row.type === 'clip' ? parseClipReference(row.payload_json) : null,
     sticker: row.type === 'sticker' ? parseSticker(row.payload_json) : null,
     poll: poll && row.poll_close_status ? { ...poll,
       closingPending: !poll.closed && (row.poll_close_status === 'pending' || row.poll_close_status === 'processing'),

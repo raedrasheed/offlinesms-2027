@@ -85,7 +85,7 @@ export interface MessageRow {
   conversation_id: string;
   sender_uid: string;
   sender_display_name: string | null;
-  type: 'text' | 'image' | 'voice' | 'sticker' | 'poll' | 'file' | 'video' | 'audio' | 'location' | 'contact';
+  type: 'text' | 'image' | 'voice' | 'sticker' | 'poll' | 'file' | 'video' | 'audio' | 'location' | 'contact' | 'clip';
   text: string | null;
   preview: string | null;
   /** v7 — sticker reference / poll (JSON), see lib/pollModel. */

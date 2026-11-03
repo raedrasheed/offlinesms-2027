@@ -45,6 +45,8 @@
         <action android:name="android.intent.action.VIEW"/>
         <data android:scheme="https" android:host="${appLinkHost}" android:pathPrefix="/join"/>
         <data android:scheme="https" android:host="${appLinkHostLegacy}" android:pathPrefix="/join"/>
+        <data android:scheme="https" android:host="${appLinkHost}" android:pathPrefix="/clips/"/>
+        <data android:scheme="https" android:host="${appLinkHostLegacy}" android:pathPrefix="/clips/"/>
         <category android:name="android.intent.category.BROWSABLE"/>
         <category android:name="android.intent.category.DEFAULT"/>
       </intent-filter>

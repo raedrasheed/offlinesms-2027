@@ -1,0 +1,14 @@
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useClipsCopy } from '../../lib/clipsCopy';
+type Props = { top: number; mode: 'forYou' | 'following'; enabled: boolean | null; onSearch: () => void; onMode: (mode: 'forYou' | 'following') => void; onCreate: () => void; onProfile: () => void };
+export default function ClipFeedHeader({top,mode,enabled,onSearch,onMode,onCreate,onProfile}: Props) {
+  const {c}=useClipsCopy(); const s=feedStyles;
+  return <View style={[s.header,{top:top}]}>
+      <Pressable style={s.headerButton} onPress={onSearch} accessibilityLabel={c('Search clips','البحث في المقاطع')}><Ionicons name="search-outline" size={25} color="#fff"/></Pressable>
+      <View style={s.tabs}>{(['following','forYou'] as const).map(value=><Pressable key={value} onPress={()=>onMode(value)} style={s.tab} accessibilityRole="tab" accessibilityState={{selected:mode===value}}><Text style={[s.tabText,mode===value&&s.selectedText]}>{value==='forYou'?c('For you','لك'):c('Following','أتابعهم')}</Text><View style={[s.tabLine,mode===value&&s.tabLineActive]}/></Pressable>)}</View>
+      <Pressable style={s.create} disabled={enabled!==true} onPress={onCreate} accessibilityLabel={c('Create clip','إنشاء مقطع')}><Ionicons name="add" size={27} color="#fff"/></Pressable>
+      <Pressable style={s.headerButton} onPress={onProfile} accessibilityLabel={c('My clips profile','ملفي في المقاطع')}><Ionicons name="person-circle-outline" size={28} color="#fff"/></Pressable>
+    </View>;
+}
+export const feedStyles=StyleSheet.create({root:{flex:1,backgroundColor:'#0C141C'},header:{position:'absolute',left:12,right:12,flexDirection:'row',alignItems:'center',gap:8},headerButton:{width:38,height:42,alignItems:'center',justifyContent:'center'},tabs:{flex:1,flexDirection:'row',justifyContent:'center',gap:18},tab:{alignItems:'center',paddingTop:8,paddingBottom:2},tabText:{color:'#E6EEF3',fontWeight:'600',fontSize:17},selectedText:{fontWeight:'800',color:'#fff'},tabLine:{height:3,width:26,borderRadius:2,marginTop:7,backgroundColor:'transparent'},tabLineActive:{backgroundColor:'#fff'},create:{width:36,height:36,backgroundColor:'#1F9CD0',borderRadius:19,justifyContent:'center',alignItems:'center'},search:{position:'absolute',left:18,right:18,backgroundColor:'#152532EE',borderRadius:16,paddingHorizontal:13,flexDirection:'row',alignItems:'center',gap:10},input:{height:48,color:'#fff',fontSize:15,flex:1},empty:{padding:36,paddingBottom:145,justifyContent:'center',alignItems:'center',gap:17},emptyTitle:{color:'#fff',fontSize:23,fontWeight:'800',textAlign:'center'},emptyBody:{color:'#B4C5D4',textAlign:'center',fontSize:15,lineHeight:24},primary:{backgroundColor:'#1F7BA8',borderRadius:25,paddingHorizontal:26,paddingVertical:14,marginTop:5},primaryText:{color:'#fff',fontWeight:'700'},footer:{height:80,alignItems:'center',justifyContent:'center'}});

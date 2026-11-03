@@ -339,7 +339,7 @@ export interface RemoteMediaInput {
 
 export interface RemoteMessageInput {
   remoteId: string; conversationId: string; senderUid: string; senderDisplayName?: string | null;
-  type?: 'text' | 'image' | 'voice' | 'sticker' | 'poll' | 'file' | 'video' | 'audio' | 'location' | 'contact'; caption?: string | null;
+  type?: 'text' | 'image' | 'voice' | 'sticker' | 'poll' | 'file' | 'video' | 'audio' | 'location' | 'contact' | 'clip'; caption?: string | null;
   /** Sticker / poll payload JSON; undefined = leave as is. */
   payload?: string | null;
   text: string | null; remoteCreatedAt: number | null; editedAt?: number | null;

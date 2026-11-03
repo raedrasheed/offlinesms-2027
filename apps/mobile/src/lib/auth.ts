@@ -110,10 +110,17 @@ export function emailOtpErrorCopy(reason?: string): string {
  */
 export async function deleteMyAccount(): Promise<void> {
   const uid = auth.currentUser?.uid;
+  if (!uid) throw new Error('sign-in-required');
   try { await setOffline(); } catch { /* best-effort */ }
   try { if (uid) await unregisterForPush(uid); } catch { /* best-effort */ }
-  await httpsCallable<Record<string, never>, { ok: boolean }>(fns(), 'deleteMyAccount')({});
-  try { await auth.signOut(); } catch { /* the server already deleted the user */ }
+  if (auth.currentUser?.uid !== uid) throw new Error('account-changed');
+  await httpsCallable<{ expectedUid: string }, { ok: boolean }>(fns(), 'deleteMyAccount')({ expectedUid: uid });
+  // Durable video drafts contain local private media. Clear only the deleted
+  // account's files; a different account may have signed in during the request.
+  try { await (await import('./clipDrafts')).clearClipDraftsForAccount(uid); } catch { /* best-effort local erasure */ }
+  if (auth.currentUser?.uid === uid) {
+    try { await auth.signOut(); } catch { /* the server already deleted the user */ }
+  }
 }
 
 export async function signOut() {

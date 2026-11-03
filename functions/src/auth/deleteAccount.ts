@@ -19,6 +19,7 @@ import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { getAuth } from 'firebase-admin/auth';
 import { writeAuditLog } from '../lib/auditLog';
+import { queueClipAccountErasure } from '../clips/accountCleanup';
 
 const REGION = 'us-central1';
 const MAX_CONVERSATIONS = 500;
@@ -44,6 +45,10 @@ async function deleteAllDocs(
 export const deleteMyAccount = onCall({ region: REGION }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'sign-in-required');
+  // New clients bind the confirmation to their displayed account; preserve
+  // compatibility with older clients that do not send this optional field.
+  if (request.data?.expectedUid !== undefined && request.data.expectedUid !== uid)
+    throw new HttpsError('failed-precondition', 'account-changed');
 
   const db = getFirestore();
   const userRef = db.collection('users').doc(uid);
@@ -51,6 +56,12 @@ export const deleteMyAccount = onCall({ region: REGION }, async (request) => {
   // Read the profile up front (need usernameLower to free the handle).
   const userSnap = await userRef.get();
   const usernameLower = (userSnap.data()?.usernameLower as string | undefined) ?? null;
+
+  // Fence Clips access and durably queue erasure before deleting any identity.
+  // Unlike the legacy best-effort cleanup below, this must not be skipped: a
+  // deleted Auth account cannot return to retry its private video cleanup.
+  try { await queueClipAccountErasure(db, uid); }
+  catch { throw new HttpsError('unavailable', 'account-erasure-queue-unavailable'); }
 
   // 1. Free the username (only if the reverse index still points at us).
   if (usernameLower) {

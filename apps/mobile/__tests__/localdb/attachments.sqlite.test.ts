@@ -20,6 +20,21 @@ import {mapMessageRow} from '../../src/hooks/messageModel';
 import {enqueue,claimDue,markProcessing,markFailed,retryByEntityId,requeueStaleProcessing,getById} from '../../src/localdb/repositories/outboxRepo';
 beforeEach(async()=>{db=await createSqlJsDb();});afterEach(()=>db.close());
 describe('attachments survive SQLite and remote reconciliation',()=>{
+  it('retains protected clip references through realtime and history reconciliation',async()=>{
+    await applyRemoteMessages([remoteMessageInput('clip-message','c',{
+      type:'clip',clipId:'clip123',senderUid:'peer',text:'Video clip',createdAt:1000,
+    })]);
+    let rows=await listMessages('c');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].payload_json).toBe('{"clipId":"clip123"}');
+    expect(mapMessageRow(rows[0])).toMatchObject({id:'clip-message',type:'clip',clipId:'clip123',media:null});
+    await applyRemoteMessages([remoteMessageInput('clip-message','c',{
+      type:'clip',clipId:'clip123',senderUid:'peer',text:'Video clip',createdAt:1000,deletedForEveryone:true,
+    })]);
+    rows=await listMessages('c');
+    expect(rows).toHaveLength(1);
+    expect(mapMessageRow(rows[0]).deletedForEveryone).toBe(true);
+  });
   it('keeps a custom sticker through offline queueing, remote echo and history',async()=>{
     const row=await queueSendAttachment({conversationId:'c',senderUid:'me',mediaType:'image',presentation:'sticker',fileName:'sticker-1.png',
       localUri:'file:///stickers/1.png',mimeType:'image/png',sizeBytes:100,width:512,height:512});

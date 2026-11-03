@@ -152,3 +152,20 @@ export { guardEmailSignIn, guardEmailSent } from './emailChange/emailSignInBlock
 export { purgeRetainedMessages } from './chats/messageRetention';
 
 export { respondToGroupInvitation, notifyGroupInvitation } from './chats/memberInvitations';
+
+// Clips: callable-only discovery/social data and short-lived media access.
+export {
+  getClipsConfig, acceptClipsTerms, updateClip, deleteClip, getClipsFeed, getClip,
+  getClipProfile, updateClipProfile, followClipCreator, listClipFollowRequests, listClipFollowers,
+  respondClipFollowRequest, removeClipFollower, setClipInteraction, recordClipView,
+  reportClip, listClipComments, addClipComment, deleteClipComment, setClipCommentLike,
+  shareClip,
+} from './clips/core';
+export { initClipUpload, publishClip, getClipPlayback, getClipThumbnails } from './clips/media';
+export {
+  onClipProcessing, onClipRemoved, cleanupClipMedia,
+  onClipSourceFinalized, onClipSourceMetadataUpdated,
+} from './clips/mediaProcessing';
+export {
+  onClipAccountErasure, retryClipAccountErasure, onClipUserDeleted, onClipAuthUserDeleted,
+} from './clips/accountCleanup';

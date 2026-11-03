@@ -31,6 +31,7 @@
     }
   },
   "dependencies": {
+    "@expo/metro-runtime": "~5.0.5",
     "@expo/vector-icons": "^14.1.0",
     "@mapbox/vector-tile": "2.0.4",
     "@offlinesms/design-tokens": "file:../../packages/design-tokens",

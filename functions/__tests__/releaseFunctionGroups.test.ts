@@ -19,7 +19,7 @@ function exportsOf(src: string): Map<string, string> {
   return out;
 }
 
-const DEPLOY_ORDER = ['email-guards', 'chat', 'groups', 'accounts-admin', 'business-sms-points', 'relay', 'phone', 'email-change'];
+const DEPLOY_ORDER = ['email-guards', 'chat', 'groups', 'accounts-admin', 'business-sms-points', 'relay', 'phone', 'email-change', 'clips'];
 
 describe('production deploy groups', () => {
   const exported = exportsOf(index);

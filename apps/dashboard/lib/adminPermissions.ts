@@ -9,6 +9,8 @@ export type AdminCapability =
   | 'view:groups'
   | 'manage:groups'
   | 'view:calls'
+  | 'view:clips'
+  | 'manage:clips'
   | 'view:sms'
   | 'manage:sms'
   | 'view:points'
@@ -67,6 +69,7 @@ const ROLE_CAPABILITIES: Record<RoleKey, readonly AdminCapability[]> = {
     'view:relay', 'manage:relay',
     'view:broadcast_notifications', 'manage:broadcast_notifications',
     'view:organization_messaging', 'manage:organization_messaging',
+    'view:clips', 'manage:clips',
   ],
   organization_admin: [
     'view:overview', 'view:users',
@@ -113,6 +116,7 @@ const ROLE_CAPABILITIES: Record<RoleKey, readonly AdminCapability[]> = {
     'view:relay', 'manage:relay',
     'view:broadcast_notifications', 'manage:broadcast_notifications',
     'view:organization_messaging', 'manage:organization_messaging',
+    'view:clips', 'manage:clips',
   ],
   bootstrap_admin: [
     'view:overview', 'view:users', 'manage:users',

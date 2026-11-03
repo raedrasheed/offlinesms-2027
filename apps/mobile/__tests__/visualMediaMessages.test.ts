@@ -33,6 +33,7 @@ vi.mock('../src/components/MentionText',()=>({MentionText:'MentionText'}));
 vi.mock('../src/components/ChatActionSheet',()=>({ChatActionSheet:'ChatActionSheet'}));
 vi.mock('../src/components/ReactionsSheet',()=>({ReactionsSheet:'ReactionsSheet'}));
 vi.mock('../src/components/chat/EmojiReactionPicker',()=>({EmojiReactionPicker:'EmojiReactionPicker'}));
+vi.mock('../src/components/chat/ClipMessageBubble',()=>({ClipMessageBubble:'ClipMessageBubble'}));
 vi.mock('../src/components/chat/AttachmentMessageBubble',()=>({AttachmentMessageBubble:'AttachmentMessageBubble'}));
 vi.mock('../src/components/chat/VoiceMessageBubble',()=>({VoiceMessageBubble:'VoiceMessageBubble'}));
 vi.mock('../src/components/chat/AnimatedEmoji3D',()=>({AnimatedEmoji3D:'AnimatedEmoji3D'}));

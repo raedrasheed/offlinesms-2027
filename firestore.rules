@@ -623,8 +623,29 @@ service cloud.firestore {
     // actions bypass rules). Mobile reads them for display (e.g. the App
     // version row in Settings), so reads are open to any signed-in user.
     match /systemSettings/{doc} {
-      allow read:  if isAuthed();
-      allow write: if isAdmin();
+      // Clips settings are exposed through a sanitized callable and changed
+      // only by the platform dashboard's audited server actions. An org admin
+      // carrying the legacy admin claim cannot change the global UGC policy.
+      allow read:  if doc != 'clips' && isAuthed();
+      allow write: if doc != 'clips' && isAdmin();
+    }
+
+    // Clips are callable-only: every request rechecks live audience, accepted
+    // followers, group membership, blocks and moderation. Do not expose raw
+    // storage paths, moderation details, private saves/follows or counters via
+    // direct Firestore reads, even to admin-claim clients. The dashboard uses
+    // its independently authorized Admin SDK server actions.
+    match /clips/{document=**} {
+      allow read, write: if false;
+    }
+    match /clipProfiles/{document=**} {
+      allow read, write: if false;
+    }
+    match /clipReports/{document=**} {
+      allow read, write: if false;
+    }
+    match /clipAccountErasureJobs/{document=**} {
+      allow read, write: if false;
     }
 
     // ════════════════════════════════════════════════════════════
