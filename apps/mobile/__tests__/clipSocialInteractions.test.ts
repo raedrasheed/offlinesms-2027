@@ -8,7 +8,7 @@ vi.mock('@expo/vector-icons', () => ({ Ionicons: 'Icon' }));
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
 vi.mock('../src/lib/firebase', () => ({ auth: { currentUser: { uid: 'me' } } }));
 vi.mock('../src/lib/clipsCopy', () => ({ useClipsCopy: () => ({ c: (en: string) => en, rtl: false }) }));
-vi.mock('../src/lib/clips', () => ({ listClipComments: api.list, addClipComment: api.add, setClipCommentLike: api.like, deleteClipComment: api.remove, shareClip: api.share, reportClip: api.report, clipLink: (id: string) => `https://offlinesms.com/clips/${id}` }));
+vi.mock('../src/lib/clips', () => ({ listClipComments: api.list, addClipComment: api.add, setClipCommentLike: api.like, deleteClipComment: api.remove, shareClip: api.share, reportClip: api.report, clipLink: (id: string) => `https://links.offlinesms.com/clips/${id}` }));
 vi.mock('../src/hooks/useClipDestinations', () => ({ useClipDestinations: () => ({ rows: [{ id: 'chatA', label: 'A', type: 'direct' }, { id: 'chatB', label: 'B', type: 'group' }], loading: false }) }));
 import ClipCommentsSheet from '../src/components/clips/ClipCommentsSheet';
 import ClipShareSheet from '../src/components/clips/ClipShareSheet';
@@ -81,7 +81,7 @@ describe('Clip sharing', () => {
     expect(api.share.mock.calls[1][0].clientId).toBe(api.share.mock.calls[2][0].clientId);
   });
   it.each([{ ...clip, audience: 'followers' as const }, { ...clip, author: { ...clip.author, privateAccount: true } }])('offers no external share for restricted clips', async input => { await mountShare(input); expect(button('Copy link')).toBeUndefined(); expect(button('Share externally')).toBeUndefined(); });
-  it('copies only the app reference, never a playback URL', async () => { await mountShare(); await tap(button('Copy link')); expect(api.copy).toHaveBeenCalledWith('https://offlinesms.com/clips/clip1'); });
+  it('copies only the app reference, never a playback URL', async () => { await mountShare(); await tap(button('Copy link')); expect(api.copy).toHaveBeenCalledWith('https://links.offlinesms.com/clips/clip1'); });
 });
 describe('Draft edit bounds', () => {
   it('rejects out-of-source and too-long segments', () => { expect(trimDraftRange(90_000, '20', '90', 60)).toBeNull(); expect(trimDraftRange(30_000, '0', '31', 60)).toBeNull(); expect(trimDraftRange(30_000, '10', '10', 60)).toBeNull(); expect(trimDraftRange(90_000, '30.25', '89.25', 60)).toEqual({ trimStartMs: 30250, trimEndMs: 89250 }); });

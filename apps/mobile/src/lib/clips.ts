@@ -85,4 +85,4 @@ export const getClipPlayback = (args: {clipId: string; quality?: 'standard' | 'd
 export const getClipThumbnails = (clipIds: string[]) => clipCall<{items: Array<{clipId: string; thumbnailUrl: string; expiresAtMs: number}>}>('getClipThumbnails', {clipIds});
 
 /** Stable public app links never contain a signed media lease. */
-export function clipLink(id: string): string { return `https://offlinesms.com/clips/${encodeURIComponent(id)}`; }
+export function clipLink(id: string): string { return `https://links.offlinesms.com/clips/${encodeURIComponent(id)}`; }
