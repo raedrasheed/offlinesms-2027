@@ -7,6 +7,9 @@
 
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore } from 'firebase-admin/firestore';
+import { prepareSmsContent, smsQuoteToken } from './messageContent';
+import { partitionRecipientsByCoverage } from './countryRouting';
+import { resolveDefaultRelayBusiness } from './provider';
 import {
   AudienceInput, canonicalAudience, classifyRecipients, filterByAudience, findAlreadySentUids,
   loadExternalEligibles,
@@ -21,6 +24,7 @@ export const previewSmsEscalation = onCall({ region: 'us-central1' }, async (req
     conversationId?: unknown;
     messageId?:      unknown;
     audience?:       unknown;
+    smsBody?:        unknown;
   };
   if (typeof data.conversationId !== 'string' || !data.conversationId)
     throw new HttpsError('invalid-argument', 'conversationId-required');
@@ -28,6 +32,11 @@ export const previewSmsEscalation = onCall({ region: 'us-central1' }, async (req
     throw new HttpsError('invalid-argument', 'messageId-required');
   if (typeof data.audience !== 'string')
     throw new HttpsError('invalid-argument', 'audience-required');
+
+  if (data.smsBody !== undefined && typeof data.smsBody !== 'string')
+    throw new HttpsError('invalid-argument', 'smsBody-invalid');
+  if (typeof data.smsBody === 'string' && data.smsBody.trim().length > 320)
+    throw new HttpsError('invalid-argument', 'smsBody-too-long');
 
   const valid = ['everyone', 'unread_only', 'undelivered_only', 'unread', 'undelivered'];
   if (!valid.includes(data.audience)) {
@@ -43,13 +52,13 @@ export const previewSmsEscalation = onCall({ region: 'us-central1' }, async (req
   if (!convoSnap.exists) throw new HttpsError('not-found', 'conversation-not-found');
   if (!msgSnap.exists)   throw new HttpsError('not-found', 'message-not-found');
 
-  const convo = convoSnap.data() as { participantUids?: string[]; memberIds?: string[]; type?: string };
+  const convo = convoSnap.data() as { participantUids?: string[]; memberIds?: string[]; type?: string; name?: string };
   const participants = convo.participantUids ?? convo.memberIds ?? [];
   if (!participants.includes(uid)) {
     throw new HttpsError('permission-denied', 'not-a-participant');
   }
 
-  const msg = msgSnap.data() as { senderUid?: string; senderId?: string; deletedForEveryone?: boolean };
+  const msg = msgSnap.data() as { senderUid?: string; senderId?: string; deletedForEveryone?: boolean; text?: string };
   const senderUid = msg.senderUid ?? msg.senderId;
   if (senderUid !== uid && convo.type !== 'group') {
     throw new HttpsError('permission-denied', 'not-message-sender');
@@ -83,14 +92,39 @@ export const previewSmsEscalation = onCall({ region: 'us-central1' }, async (req
   {
     const existingPhones = new Set(eligible.map(e => e.phone));
     const externalEligible = await loadExternalEligibles(db, data.conversationId, participants, existingPhones);
-    for (const e of externalEligible) eligible.push(e);
+    for (const e of externalEligible) {
+      if (alreadySent.has(e.uid)) excluded.push({ uid: e.uid, displayName: e.displayName,
+        appReceiptStatus: e.appReceiptStatus, skipReason: 'already-sent-for-message' });
+      else eligible.push(e);
+    }
   }
+
+  // Match the actual send's country policy so the confirmed price covers
+  // exactly the recipients that can be dispatched.
+  const orgId = (request.auth?.token?.organizationId as string | undefined)
+    ?? (await resolveDefaultRelayBusiness());
+  const recipientPhones = eligible.map(e => ({ id: e.uid, phoneE164: e.phone }));
+  const { uncovered } = orgId
+    ? await partitionRecipientsByCoverage(orgId, recipientPhones)
+    : { uncovered: recipientPhones.map(r => ({ id: r.id, reason: 'no_relay_for_country' as const })) };
+  const uncoveredIds = new Set(uncovered.map(r => r.id));
+  for (let i = eligible.length - 1; i >= 0; i--) {
+    if (!uncoveredIds.has(eligible[i].uid)) continue;
+    const [e] = eligible.splice(i, 1);
+    excluded.push({ uid: e.uid, displayName: e.displayName, appReceiptStatus: e.appReceiptStatus, skipReason: 'no_relay_for_country' });
+  }
+  const inputBody = typeof data.smsBody === 'string' ? data.smsBody.trim() : (msg.text ?? '').trim().slice(0, 320);
+  const content = await prepareSmsContent(db, {
+    body: inputBody, senderUid, groupName: convo.type === 'group' ? convo.name : null,
+  });
+  const quoteToken = smsQuoteToken({ uid, conversationId: data.conversationId,
+    messageId: data.messageId, audience, ...content, recipients: eligible });
 
   const wallet = await db.collection('wallets').doc(uid).get();
   const balance  = (wallet.data()?.balance  as number) ?? 0;
   const reserved = (wallet.data()?.reserved as number) ?? 0;
 
-  const pointsCost = eligible.length * COST_PER_SMS;
+  const pointsCost = eligible.length * content.pointsPerRecipient;
 
   return {
     audience,
@@ -109,6 +143,8 @@ export const previewSmsEscalation = onCall({ region: 'us-central1' }, async (req
     eligibleCount: eligible.length,
     excludedCount: excluded.length,
     pointsCost,
+    ...content,
+    quoteToken,
     costPerSms:    COST_PER_SMS,
     walletBalance: balance,
     walletReserved: reserved,

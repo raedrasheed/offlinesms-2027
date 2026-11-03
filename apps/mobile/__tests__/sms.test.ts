@@ -23,6 +23,14 @@ describe('smsPreviewErrorCopy', () => {
     expect(smsPreviewErrorCopy({ code: 'internal', message: '' }))
       .toMatch(/try again/i);
   });
+
+  it('asks for a fresh confirmation when the server quote changes or is missing', () => {
+    expect(smsPreviewErrorCopy({ code: 'functions/failed-precondition', message: 'sms-quote-changed' }))
+      .toMatch(/confirm again/);
+    expect(smsPreviewErrorCopy({ code: 'functions/failed-precondition', message: 'sms-preview-required' }))
+      .toMatch(/full text and cost/);
+    expect(smsPreviewErrorCopy(new Error('sms-preview-outdated'))).toMatch(/needs an update/);
+  });
 });
 
 describe('buildDefaultSmsBody', () => {
@@ -56,7 +64,7 @@ describe('buildDefaultSmsBody', () => {
 
 describe('smsSkipReasonCopy', () => {
   it('returns a non-empty copy for every known skip reason', () => {
-    const reasons = ['no-phone', 'unverified-phone', 'opt-out', 'duplicate-phone', 'already-sent-for-message', 'rate-limited', 'policy-blocked'] as const;
+    const reasons = ['no-phone', 'unverified-phone', 'opt-out', 'duplicate-phone', 'already-sent-for-message', 'rate-limited', 'policy-blocked', 'no_relay_for_country'] as const;
     for (const r of reasons) {
       const copy = smsSkipReasonCopy(r as any);
       expect(typeof copy).toBe('string');

@@ -5,7 +5,9 @@ import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { publicNameFrom } from '../lib/displayName';
 import { sendPushToUser } from '../notifications/send';
 
-export const GROUP_CAP = 256;
+// Bounds work in one callable/transaction, not the group's total membership.
+// Additional requests can invite more people to an existing group.
+export const MAX_GROUP_INVITE_BATCH = 240;
 export const invitationRef = (uid: string, cid: string) =>
   getFirestore().collection('users').doc(uid).collection('groupInvitations').doc(cid);
 export function invitationData(cid: string, inviterUid: string, group: FirebaseFirestore.DocumentData) {
@@ -15,6 +17,7 @@ export function invitationData(cid: string, inviterUid: string, group: FirebaseF
 
 /** Used for explicit invitations and for contacts who register later. */
 export async function inviteGroupMembers(cid: string, inviterUid: string, targets: string[]) {
+  if (targets.length > MAX_GROUP_INVITE_BATCH) throw new HttpsError('invalid-argument', 'too-many-recipients-in-request');
   const db = getFirestore(), ref = db.collection('conversations').doc(cid);
   return db.runTransaction(async tx => {
     const group = await tx.get(ref), admin = await tx.get(ref.collection('members').doc(inviterUid));
@@ -22,7 +25,6 @@ export async function inviteGroupMembers(cid: string, inviterUid: string, target
     if (!g || g.type !== 'group' || g.status === 'deleted' || g.status === 'archived' || g.status === 'disabled') throw new HttpsError('failed-precondition', 'group-unavailable');
     if (!(g.participantUids ?? []).includes(inviterUid) || (admin.data()?.status ?? 'active') !== 'active' || !['owner', 'admin'].includes(admin.data()?.role)) throw new HttpsError('permission-denied', 'admins-only');
     const uids = [...new Set(targets)].filter(u => u !== inviterUid && !(g.participantUids ?? []).includes(u));
-    if (uids.length > GROUP_CAP - 1) throw new HttpsError('invalid-argument', 'too-many-members');
     const rows = await Promise.all(uids.map(async u => ({ uid: u,
       user: await tx.get(db.collection('users').doc(u)), invite: await tx.get(invitationRef(u, cid)),
       blocked: await tx.get(db.doc(`users/${u}/blockedUsers/${inviterUid}`)),
@@ -65,7 +67,6 @@ export const respondToGroupInvitation = onCall(async request => {
     const participants: string[] = g.participantUids ?? [];
     if (!participants.includes(uid)) {
       const externalCount = Math.max(0, (g.externalMemberCount ?? 0) - externals.size);
-      if (participants.length + externalCount >= GROUP_CAP) throw new HttpsError('failed-precondition', 'too-many-members');
       const next = [...participants, uid];
       tx.update(ref, { participantUids: next, memberIds: next, memberCount: next.length, externalMemberCount: externalCount, updatedAt: now });
       // Retire external entries once the recipient explicitly joins, avoiding double SMS/counts.

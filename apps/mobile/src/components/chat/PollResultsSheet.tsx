@@ -7,14 +7,19 @@ import { useTheme } from '../../context/ThemeContext';
 import { useDisplayNames } from '../../lib/userProfiles';
 import { pollView, type PollData } from '../../lib/pollModel';
 import { isRTL } from '../../i18n';
+import { usePollResults } from '../../hooks/usePollResults';
 
 /** Mounted only while open. Anonymous mode never requests voter profiles. */
-export function PollResultsSheet({ poll, onClose }: { poll: PollData; onClose: () => void }) {
+export function PollResultsSheet({ poll: cached, conversationId, messageId, uid, onClose }: {
+  poll: PollData; conversationId?: string; messageId?: string; uid?: string; onClose: () => void;
+}) {
   const { t } = useTranslation();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const s = useMemo(() => styles(colors), [colors]);
-  const voters = poll.anonymous ? [] : Object.keys(poll.votes).filter(uid => poll.votes[uid]?.length);
+  const results = usePollResults(cached, conversationId, messageId, uid);
+  const poll = results.poll ?? cached;
+  const voters = poll.anonymous || !results.poll ? [] : Object.keys(poll.votes).filter(uid => poll.votes[uid]?.length);
   const nameFor = useDisplayNames(voters);
   const rows = voters.map(uid => ({ uid, name: nameFor(uid, { selfAsYou: true }),
     choices: poll.options.filter(o => poll.votes[uid].includes(o.id)).map(o => o.text).join(' • '),
@@ -30,7 +35,7 @@ export function PollResultsSheet({ poll, onClose }: { poll: PollData; onClose: (
           </Pressable>
         </View>
         <FlatList data={rows} keyExtractor={row => row.uid} style={s.list} contentContainerStyle={s.content}
-          ListHeaderComponent={<View style={s.summary}>
+          ListHeaderComponent={results.poll ? <View style={s.summary}>
             <Text style={s.question}>{poll.question}</Text>
             <Text style={s.hint}>{t(poll.anonymous ? 'poll.anonymousHint' : 'poll.publicHint')}</Text>
             {view.options.map(option => <View key={option.id} style={s.result}>
@@ -41,8 +46,15 @@ export function PollResultsSheet({ poll, onClose }: { poll: PollData; onClose: (
               <View style={s.track}><View style={[s.bar, { width: `${option.percent}%` }]} /></View>
             </View>)}
             <Text style={s.total}>{t('poll.voters', { count: view.voterCount })}</Text>
-          </View>}
-          ListEmptyComponent={<Text style={s.hint}>{t(poll.anonymous ? 'poll.identitiesHidden' : 'poll.noVoters')}</Text>}
+            {results.status === 'loading' ? <Text style={s.hint} accessibilityLiveRegion="polite">{t('poll.refreshingResults')}</Text> : null}
+            {results.status === 'error' ? <View style={s.summary}>
+              <Text style={s.hint}>{t('poll.resultsError')}</Text>
+              <Pressable accessibilityRole="button" onPress={results.retry}><Text style={s.retry}>{t('common.retry')}</Text></Pressable>
+            </View> : null}
+          </View> : null}
+          ListEmptyComponent={<Text style={s.hint}>{t(!results.poll ? 'poll.resultsUnavailable' : poll.anonymous ? 'poll.identitiesHidden'
+            : results.status === 'ready' ? 'poll.noVoters' : 'poll.refreshingResults')}</Text>}
+          initialNumToRender={20} maxToRenderPerBatch={20} removeClippedSubviews={false}
           renderItem={({ item }) => <View style={s.voter}>
             <View style={s.avatar}><Ionicons name="person-outline" size={22} color={colors.action.primary} /></View>
             <View style={s.person}>
@@ -59,10 +71,11 @@ function styles(c: any) {
   const align = isRTL ? 'right' as const : 'left' as const;
   return StyleSheet.create({
     backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(15,18,32,0.55)' },
-    sheet: { maxHeight: '94%', backgroundColor: c.background.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 16 },
+    sheet: { height: '94%', backgroundColor: c.background.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 16 },
     heading: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingBottom: 12 },
     title: { flex: 1, fontSize: 19, fontWeight: '700', color: c.text.primary, textAlign: align },
-    close: { padding: 10 }, list: { flexGrow: 0 }, content: { paddingBottom: 16 },
+    close: { padding: 10 }, list: { flex: 1 }, content: { paddingBottom: 16 },
+    retry: { color: c.action.primary, fontWeight: '600', paddingVertical: 10 },
     summary: { gap: 12, paddingBottom: 16 },
     question: { fontSize: 18, fontWeight: '700', color: c.text.primary, textAlign: align },
     hint: { fontSize: 14, lineHeight: 22, color: c.text.muted, textAlign: align },

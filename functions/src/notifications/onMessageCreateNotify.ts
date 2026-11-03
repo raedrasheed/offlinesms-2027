@@ -22,6 +22,9 @@ import {
 } from './notifyLogic';
 import { cleanNameSnapshot, publicNameFrom } from '../lib/displayName';
 import { sendPushToUser } from './send';
+import { mapConcurrent } from '../lib/mapConcurrent';
+
+export const NOTIFICATION_CONCURRENCY = 8;
 
 /** Media is announced only when opening the notification can fetch its file. */
 export function notificationReady(msg: Record<string, any> | undefined): boolean {
@@ -62,22 +65,19 @@ async function notifyMessage(convoId: string, msgId: string, msg: Record<string,
     // public profile (direct messages carry no name snapshot, so every direct
     // push used to say "Someone"). The message/member snapshot is only a
     // fallback; a uid is never shown. With no name at all, buildNotification
-    // uses the recipient-language "Someone". Recipient docs are read in the
-    // same batched getAll to pick each person's preferredLanguage.
-    const userRefs = [senderUid, ...recipients].map(u => db.collection('users').doc(u));
-    const userSnaps = await db.getAll(...userRefs).catch(() => [] as FirebaseFirestore.DocumentSnapshot[]);
-    const senderDoc = userSnaps[0]?.data();
+    // uses the recipient-language "Someone". Read recipients with the bounded
+    // workers below, avoiding a group-sized getAll or thousands of sends at once.
+    const senderDoc = (await db.collection('users').doc(senderUid).get()).data();
     const senderName: string | null =
       publicNameFrom(senderDoc, senderUid) ?? cleanNameSnapshot(msg.senderDisplayName, senderUid);
-    const langOf = new Map<string, unknown>();
-    userSnaps.slice(1).forEach((s, i) => langOf.set(recipients[i], s?.get('preferredLanguage')));
     const groupName = convo.name ?? null;
 
     // Resolve per-recipient: mute (userState) + settings, then send.
-    const counts = await Promise.all(recipients.map(async (uid) => {
-      const [stateSnap, settingsSnap] = await Promise.all([
+    const counts = await mapConcurrent(recipients, NOTIFICATION_CONCURRENCY, async (uid) => {
+      const [stateSnap, settingsSnap, profileSnap] = await Promise.all([
         convoRef.collection('userState').doc(uid).get(),
         db.collection('users').doc(uid).collection('notificationSettings').doc('current').get(),
+        db.collection('users').doc(uid).get(),
       ]);
       const muted = stateSnap.get('muted') === true;
       const settings = (settingsSnap.data() ?? {}) as NotifSettings;
@@ -87,7 +87,7 @@ async function notifyMessage(convoId: string, msgId: string, msg: Record<string,
 
       const { title, body } = buildNotification({
         chatType, groupName, senderName, msg: msg as any, showPreview: settings.showPreview !== false,
-        lang: notifLang(langOf.get(uid)),
+        lang: notifLang(profileSnap.get('preferredLanguage')),
       });
 
       // Per-recipient completion survives duplicate trigger deliveries. A lease
@@ -95,7 +95,7 @@ async function notifyMessage(convoId: string, msgId: string, msg: Record<string,
       const messageRef = convoRef.collection('messages').doc(msgId);
       const dispatchRef = messageRef.collection('notificationDeliveries').doc(uid);
       const claimed = await db.runTransaction(async tx => {
-        const [live, prior] = await Promise.all([tx.get(messageRef), tx.get(dispatchRef)]);
+        const [live, prior] = await tx.getAll(messageRef, dispatchRef);
         if (!live.exists || !notificationReady(live.data()) || prior.get('complete') === true) return false;
         if ((prior.get('leaseUntil') ?? 0) > Date.now()) throw new Error('notification-dispatch-in-progress');
         tx.set(dispatchRef, { leaseUntil: Date.now() + 120_000 }, { merge: true });
@@ -116,7 +116,7 @@ async function notifyMessage(convoId: string, msgId: string, msg: Record<string,
         tx.set(dispatchRef, { complete: true, leaseUntil: 0, completedAt: FieldValue.serverTimestamp() }, { merge: true });
       });
       return sent;
-    }));
+    });
 
     const sent = counts.reduce((a, b) => a + b, 0);
     // Lightweight delivery log (best-effort).

@@ -1,7 +1,7 @@
 // OfflineSMS escalation client.
 //
-// Thin wrappers over the Phase 8 callables. Phone numbers stay masked at
-// the boundary — the unmasked phone never leaves the server. Every
+// Thin wrappers over the Phase 8 callables. Recipient phones stay masked;
+// the final SMS preview may include the sender's verified phone when enabled. Every
 // callable surfaces a friendly error code via smsErrorCopy().
 
 import { getFunctions, httpsCallable } from 'firebase/functions';
@@ -56,6 +56,12 @@ export type EscalationPreview = {
   walletReserved:      number;
   audienceCap:         number;
   exceedsCap:          boolean;
+  finalSmsBody:        string;
+  smsSegments:         number;
+  smsEncoding:         'GSM-7' | 'UCS-2';
+  smsUnits:            number;
+  pointsPerRecipient:  number;
+  quoteToken:          string;
 };
 
 export type EscalationResult = {
@@ -76,6 +82,7 @@ export async function previewSmsEscalation(args: {
   conversationId: string;
   messageId:      string;
   audience:       EscalationAudience;
+  smsBody?:       string;
 }): Promise<EscalationPreview> {
   const res = await fn<typeof args, EscalationPreview>('previewSmsEscalation')(args);
   return res.data;
@@ -86,6 +93,7 @@ export async function escalateSms(args: {
   messageId:      string;
   audience:       EscalationAudience;
   smsBody:        string;
+  quoteToken:     string;
 }): Promise<EscalationResult> {
   const res = await fn<typeof args, EscalationResult>('escalateSms')(args);
   return res.data;

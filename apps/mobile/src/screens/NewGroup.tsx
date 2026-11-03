@@ -1,7 +1,7 @@
 // Create-group flow · Step 2 — "Add members".
 //
 // Multi-select people via username search. Selected people appear as chips
-// with a running N/256 counter; tapping a row toggles selection. "Next"
+// with a running selection counter; tapping a row toggles selection. "Next"
 // carries the selection to the Group info screen (Step 3) which performs the
 // actual createGroup call.
 
@@ -23,9 +23,9 @@ import { useProfileLabel } from '../lib/userProfiles';
 import { colors, radius } from '../theme';
 import { avatarColor, initials } from '../lib/avatar';
 import { LoadingState, EmptyState, ErrorState } from '../components/state';
+import { GROUP_INVITATION_BATCH_SIZE } from '../lib/groupInvitationBatches';
 
 type UserRow = { uid: string; displayName?: string; username?: string };
-const HARD_CAP = 240;
 
 export default function NewGroup({ navigation }: any) {
   const { t } = useTranslation();
@@ -39,6 +39,7 @@ export default function NewGroup({ navigation }: any) {
   const [selected, setSelected] = useState<UserRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [selectionError, setSelectionError] = useState<string | null>(null);
 
   const selectedIds = useMemo(() => new Set(selected.map(s => s.uid)), [selected]);
 
@@ -70,10 +71,14 @@ export default function NewGroup({ navigation }: any) {
   }, [term, me]);
 
   function toggle(u: UserRow) {
+    if (!selectedIds.has(u.uid) && selected.length + externalContacts.length >= GROUP_INVITATION_BATCH_SIZE) {
+      setSelectionError(t('groupConsent.initialBatchFull')); return;
+    }
+    setSelectionError(null);
     setSelected(prev =>
       prev.some(p => p.uid === u.uid)
         ? prev.filter(p => p.uid !== u.uid)
-        : (prev.length + externalContacts.length >= HARD_CAP ? prev : [...prev, u]),
+        : [...prev, u],
     );
   }
 
@@ -115,14 +120,20 @@ export default function NewGroup({ navigation }: any) {
                 <Ionicons name="close" size={14} color={colors.primaryDark} />
               </Pressable>
             ))}
-            <Text style={s.counter}>{selected.length} / {HARD_CAP}</Text>
+            <Text style={s.counter}>{selected.length + externalContacts.length}</Text>
           </View>
         </View>
       ) : null}
 
       <Text style={[s.handle, { padding: 14 }]}>{t('groupConsent.explanation')}</Text>
+      <Text style={[s.handle, { paddingHorizontal: 14, paddingBottom: 14 }]}>{t('groupConsent.initialBatchLimit', { count: GROUP_INVITATION_BATCH_SIZE })}</Text>
+      {selectionError ? <Text style={[s.handle, { color: colors.err, paddingHorizontal: 14, paddingBottom: 14 }]}>{selectionError}</Text> : null}
       <Pressable style={{ paddingHorizontal: 14 }} onPress={() => setPhoneMode(v => !v)}><Text style={s.next}>{t(phoneMode ? 'phoneChat.registered' : 'phoneChat.start')}</Text></Pressable>
-      {phoneMode ? <PhoneRecipientForm onAdd={contact => setExternalContacts(prev => prev.some(c => c.phoneNumber === contact.phoneNumber) || prev.length + selected.length >= HARD_CAP ? prev : [...prev, contact])}/> : null}
+      {phoneMode ? <PhoneRecipientForm onAdd={contact => {
+        if (externalContacts.some(c => c.phoneNumber === contact.phoneNumber)) return;
+        if (externalContacts.length + selected.length >= GROUP_INVITATION_BATCH_SIZE) { setSelectionError(t('groupConsent.initialBatchFull')); return; }
+        setSelectionError(null); setExternalContacts(prev => [...prev, contact]);
+      }}/> : null}
       {externalContacts.map(contact => <Pressable key={contact.phoneNumber} style={s.chip} onPress={() => setExternalContacts(prev => prev.filter(c => c.phoneNumber !== contact.phoneNumber))}>
         <Text style={s.chipText}>{contact.displayName} · {contact.phoneNumber} ×</Text>
       </Pressable>)}

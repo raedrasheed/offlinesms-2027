@@ -15,7 +15,6 @@ import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { writeAuditLog } from '../lib/auditLog';
 import { publicNameFrom } from '../lib/displayName';
-import { MAX_GROUP_MEMBERS } from './createGroup';
 import {
   generateInviteCode, isValidInviteCode, joinDecision, inviteUsable,
   buildInvitePreview, inviteUrl, type InviteJoinMode,
@@ -219,7 +218,6 @@ export const joinGroupByInviteLink = onCall(async (request) => {
 
     // join_open — add to the roster.
     const participants = convo.participantUids ?? [];
-    if (participants.length + 1 > MAX_GROUP_MEMBERS) throw new HttpsError('failed-precondition', 'too-many-members');
     const next = [...participants, uid];
     tx.update(convoRef, { participantUids: next, memberIds: next, memberCount: next.length, updatedAt: now });
     tx.set(convoRef.collection('members').doc(uid), {
@@ -254,7 +252,6 @@ async function addMemberFromRequest(convoRef: FirebaseFirestore.DocumentReferenc
     const participants = convo.participantUids ?? [];
     const now = FieldValue.serverTimestamp();
     if (!participants.includes(requesterUid)) {
-      if (participants.length + 1 > MAX_GROUP_MEMBERS) throw new HttpsError('failed-precondition', 'too-many-members');
       const next = [...participants, requesterUid];
       tx.update(convoRef, { participantUids: next, memberIds: next, memberCount: next.length, updatedAt: now });
       tx.set(convoRef.collection('members').doc(requesterUid), {

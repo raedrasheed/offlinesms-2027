@@ -85,7 +85,8 @@ export const PollBubble = memo(function PollBubble({
       {interactive ? <Pressable onPress={() => setResultsOpen(true)} accessibilityRole="button" style={s.results}>
         <Text style={[s.close, { color: accent }]}>{t(poll.anonymous ? 'poll.results' : 'poll.viewVoters')}</Text>
       </Pressable> : null}
-      {resultsOpen ? <PollResultsSheet poll={poll} onClose={() => setResultsOpen(false)} /> : null}
+      {resultsOpen ? <PollResultsSheet poll={poll} conversationId={conversationId} messageId={messageId} uid={me}
+        onClose={() => setResultsOpen(false)} /> : null}
     </View>
   );
 });

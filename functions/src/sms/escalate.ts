@@ -13,7 +13,7 @@ import {
   canonicalAudience, classifyRecipients, filterByAudience, findAlreadySentUids,
   loadExternalEligibles, isExternalRecipientId,
   AudienceInput,
-  COOLDOWN_MS, COST_PER_SMS, MAX_BATCHES_PER_DAY, MAX_RECIPIENTS_PER_BATCH,
+  COOLDOWN_MS, MAX_BATCHES_PER_DAY, MAX_RECIPIENTS_PER_BATCH,
   todayKey,
 } from './recipients';
 import { resolveProvider, resolveDefaultRelayBusiness } from './provider';
@@ -22,6 +22,8 @@ import { partitionRecipientsByCoverage } from './countryRouting';
 import { dispatchBatchToRelay } from './relayDispatcher';
 import { maybeFinalizeRelayBatch } from './relaySettlement';
 import { writeAuditLog } from '../lib/auditLog';
+import { prepareSmsContent, smsQuoteToken } from './messageContent';
+import { reserveSmsBatch } from './reserveBatch';
 
 const SMS_BODY_MAX = 320;
 
@@ -34,6 +36,7 @@ export const escalateSms = onCall({ region: 'us-central1' }, async (request) => 
     conversationId?: unknown;
     audience?:       unknown;
     smsBody?:        unknown;
+    quoteToken?:     unknown;
   };
   if (typeof data.messageId      !== 'string' || !data.messageId)      throw new HttpsError('invalid-argument', 'messageId-required');
   if (typeof data.conversationId !== 'string' || !data.conversationId) throw new HttpsError('invalid-argument', 'conversationId-required');
@@ -46,9 +49,9 @@ export const escalateSms = onCall({ region: 'us-central1' }, async (request) => 
   }
   const audience = canonicalAudience(data.audience as AudienceInput);
 
-  const smsBody = data.smsBody.trim();
-  if (smsBody.length === 0)          throw new HttpsError('invalid-argument', 'smsBody-empty');
-  if (smsBody.length > SMS_BODY_MAX) throw new HttpsError('invalid-argument', 'smsBody-too-long');
+  const inputBody = data.smsBody.trim();
+  if (inputBody.length === 0)          throw new HttpsError('invalid-argument', 'smsBody-empty');
+  if (inputBody.length > SMS_BODY_MAX) throw new HttpsError('invalid-argument', 'smsBody-too-long');
 
   const db = getFirestore();
   const convoRef = db.collection('conversations').doc(data.conversationId);
@@ -58,7 +61,7 @@ export const escalateSms = onCall({ region: 'us-central1' }, async (request) => 
   if (!convoSnap.exists) throw new HttpsError('not-found', 'conversation-not-found');
   if (!msgSnap.exists)   throw new HttpsError('not-found', 'message-not-found');
 
-  const convo = convoSnap.data() as { participantUids?: string[]; memberIds?: string[]; type?: string };
+  const convo = convoSnap.data() as { participantUids?: string[]; memberIds?: string[]; type?: string; name?: string };
   const participants = convo.participantUids ?? convo.memberIds ?? [];
   if (!participants.includes(uid)) {
     throw new HttpsError('permission-denied', 'not-a-participant');
@@ -80,6 +83,12 @@ export const escalateSms = onCall({ region: 'us-central1' }, async (request) => 
   if (msg.deletedForEveryone) {
     throw new HttpsError('failed-precondition', 'message-deleted');
   }
+
+  const content = await prepareSmsContent(db, {
+    body: inputBody, senderUid,
+    groupName: convo.type === 'group' ? convo.name : null,
+  });
+  const { finalSmsBody: smsBody, ...pricing } = content;
 
   // Daily-cap check.
   const day = todayKey();
@@ -138,7 +147,11 @@ export const escalateSms = onCall({ region: 'us-central1' }, async (request) => 
   {
     const existingPhones = new Set(eligible.map(e => e.phone));
     const externalEligible = await loadExternalEligibles(db, data.conversationId, participants, existingPhones);
-    for (const e of externalEligible) eligible.push(e);
+    for (const e of externalEligible) {
+      if (alreadySent.has(e.uid)) excluded.push({ uid: e.uid, displayName: e.displayName,
+        appReceiptStatus: e.appReceiptStatus, skipReason: 'already-sent-for-message' });
+      else eligible.push(e);
+    }
   }
 
   if (eligible.length === 0) throw new HttpsError('failed-precondition', 'no-eligible-recipients');
@@ -180,29 +193,32 @@ export const escalateSms = onCall({ region: 'us-central1' }, async (request) => 
     throw new HttpsError('failed-precondition', 'audience-too-large');
   }
 
-  // Reserve points.
-  const cost = eligible.length * COST_PER_SMS;
-  const walletRef = db.collection('wallets').doc(uid);
-  await db.runTransaction(async tx => {
-    const w = await tx.get(walletRef);
-    const balance = w.exists ? ((w.get('balance') as number) ?? 0) : 0;
-    if (balance < cost) throw new HttpsError('failed-precondition', 'not-enough-points');
-    tx.set(walletRef, {
-      balance:  balance - cost,
-      reserved: FieldValue.increment(cost),
-    }, { merge: true });
-  });
+  if (data.quoteToken === undefined && (smsBody !== inputBody || content.smsSegments > 1))
+    throw new HttpsError('failed-precondition', 'sms-preview-required');
 
+  // New clients confirm the exact server-rendered text and price. A changed
+  // policy, sender phone, group title or recipient roster requires a new quote.
+  if (data.quoteToken !== undefined && data.quoteToken !== smsQuoteToken({
+    uid, conversationId: data.conversationId, messageId: data.messageId,
+    audience, finalSmsBody: smsBody, pointsPerRecipient: content.pointsPerRecipient,
+    recipients: eligible,
+  })) throw new HttpsError('failed-precondition', 'sms-quote-changed');
+
+  // Reserve the complete multipart cost, including all prefix characters.
+  const cost = eligible.length * content.pointsPerRecipient;
   // Create batch doc.
   const batchRef = db.collection('smsBatches').doc();
   const now = FieldValue.serverTimestamp();
-  await batchRef.set({
+  await reserveSmsBatch(db, uid, batchRef, cost, {
     messageId:         data.messageId,
     conversationId:    data.conversationId,
     senderId:          uid,
+    organizationId:    orgId,
+    provider:          providerMode,
     audience:          data.audience,
     audienceCanonical: audience,
     smsBody,
+    ...pricing,
     recipientCount:    eligible.length,
     eligibleCount:     eligible.length,
     excludedCount:     excluded.length + uncoveredCountry.length,
@@ -225,20 +241,6 @@ export const escalateSms = onCall({ region: 'us-central1' }, async (request) => 
     updatedAt:         now,
   });
 
-  // Phase 10: emit a canonical 'reservation' transaction so the wallet
-  // UI shows the hold event. The matching reservation_release is
-  // emitted by onSmsBatchAccepted on settlement.
-  await db.collection('transactions').add({
-    userId:            uid,
-    type:              'reservation',
-    direction:         'debit',
-    amount:            cost,
-    status:             'completed',
-    relatedSmsBatchId:  batchRef.id,
-    createdAt:          FieldValue.serverTimestamp(),
-    completedAt:        FieldValue.serverTimestamp(),
-  });
-
   await writeAuditLog({
     action: 'sms.escalation.created',
     actor:  { uid },
@@ -255,9 +257,9 @@ export const escalateSms = onCall({ region: 'us-central1' }, async (request) => 
   });
 
   // Write excluded-recipient rows so the UI can render them.
-  if (excluded.length > 0) {
+  for (let start = 0; start < excluded.length; start += 400) {
     const skipBatch = db.batch();
-    for (const e of excluded) {
+    for (const e of excluded.slice(start, start + 400)) {
       skipBatch.set(batchRef.collection('recipients').doc(e.uid), {
         userId:           e.uid,
         maskedPhone:      null,
@@ -273,9 +275,9 @@ export const escalateSms = onCall({ region: 'us-central1' }, async (request) => 
 
   // Write country-uncovered recipients as skipped (no_relay_for_country) so the
   // UI and summary show exactly who wasn't sent and why.
-  if (uncoveredCountry.length > 0) {
+  for (let start = 0; start < uncoveredCountry.length; start += 400) {
     const noRelayBatch = db.batch();
-    for (const u of uncoveredCountry) {
+    for (const u of uncoveredCountry.slice(start, start + 400)) {
       noRelayBatch.set(batchRef.collection('recipients').doc(u.uid), {
         userId:     u.uid,
         maskedPhone: null,

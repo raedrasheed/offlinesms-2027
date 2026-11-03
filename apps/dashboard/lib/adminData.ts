@@ -844,6 +844,9 @@ export type SystemSettings = {
   defaultLanguage: string;
   defaultTimezone: string;
   smsEscalationEnabled: boolean;
+  smsShowAppName: boolean;
+  smsShowGroupName: boolean;
+  smsShowSenderPhone: boolean;
   pointsEnabled: boolean;
   emailSignInEnabled: boolean;
   maintenanceMode: boolean;
@@ -855,6 +858,9 @@ const SETTINGS_DEFAULTS: SystemSettings = {
   defaultLanguage:      'en',
   defaultTimezone:      'UTC',
   smsEscalationEnabled: true,
+  smsShowAppName:       false,
+  smsShowGroupName:     false,
+  smsShowSenderPhone:   false,
   pointsEnabled:        true,
   emailSignInEnabled:   false,
   maintenanceMode:      false,
@@ -870,6 +876,9 @@ export async function getSystemSettings(): Promise<SystemSettings> {
     defaultLanguage:      (d.defaultLanguage      as string  | undefined) ?? SETTINGS_DEFAULTS.defaultLanguage,
     defaultTimezone:      (d.defaultTimezone      as string  | undefined) ?? SETTINGS_DEFAULTS.defaultTimezone,
     smsEscalationEnabled: (d.smsEscalationEnabled as boolean | undefined) ?? SETTINGS_DEFAULTS.smsEscalationEnabled,
+    smsShowAppName:       d.smsShowAppName === true,
+    smsShowGroupName:     d.smsShowGroupName === true,
+    smsShowSenderPhone:   d.smsShowSenderPhone === true,
     pointsEnabled:        (d.pointsEnabled        as boolean | undefined) ?? SETTINGS_DEFAULTS.pointsEnabled,
     emailSignInEnabled:   (d.emailSignInEnabled   as boolean | undefined) ?? SETTINGS_DEFAULTS.emailSignInEnabled,
     maintenanceMode:      (d.maintenanceMode      as boolean | undefined) ?? SETTINGS_DEFAULTS.maintenanceMode,

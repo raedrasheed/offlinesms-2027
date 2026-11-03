@@ -670,6 +670,9 @@
     "results": "View results",
     "identitiesHidden": "Voter identities are hidden in this poll.",
     "noVoters": "No one has voted yet.",
+    "refreshingResults": "Updating results… Saved results may not include the latest votes.",
+    "resultsError": "Could not update results. The saved list may be incomplete.",
+    "resultsUnavailable": "This poll is no longer available or you no longer have access.",
     "loadOwnVote": "Connect to load your private vote before choosing.",
     "votePending": "Your vote is saved on this device and waiting to sync.",
     "voteFailed": "Your latest change was not accepted. Your last confirmed vote is shown; tap an option to try again.",
@@ -830,6 +833,8 @@
     "registered": "Choose an app user"
   },
   "groupConsent": {
+    "initialBatchLimit": "Select up to {{count}} recipients when creating the group. You can invite more members afterward.",
+    "initialBatchFull": "This creation batch is full. Create the group, then invite more members.",
     "title": "Group invitations",
     "explanation": "Members join only after accepting their invitation.",
     "accept": "Accept",

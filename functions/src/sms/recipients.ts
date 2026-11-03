@@ -23,7 +23,8 @@ export type SkipReason =
   | 'duplicate-phone'
   | 'already-sent-for-message'
   | 'rate-limited'
-  | 'policy-blocked';
+  | 'policy-blocked'
+  | 'no_relay_for_country';
 
 export type Eligible = {
   uid:              string;

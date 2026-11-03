@@ -69,6 +69,9 @@ export default function SendMessageForm({
           Body <span style={{ color: '#EF4444' }}>*</span>
         </label>
         <textarea name="body" required maxLength={500} rows={4} className={inputCls} style={inputStyle} placeholder="Message body (max 500 characters)" />
+        <p className="text-[11px] mt-1" style={{ color: 'var(--c-text-3)' }}>
+          If auto SMS escalation is enabled, the title and body are shortened to 320 characters before sender information is added. The complete SMS, including enabled sender information, is billed per segment; longer or Unicode text may cost more.
+        </p>
       </div>
 
       <div>

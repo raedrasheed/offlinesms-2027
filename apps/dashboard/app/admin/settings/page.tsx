@@ -31,7 +31,7 @@ export default async function SettingsPage() {
     return <div className="p-8"><PermissionState title="Settings access required" /></div>;
   }
 
-  const canManage = canDo(session.role, 'manage:settings');
+  const canManage = canDo(session.role, 'manage:settings') && isPlatformRole(session);
   // The default OTP sender is a platform-global setting — only unrestricted
   // (super/legacy/bootstrap) admins may view or change it.
   const isPlatformAdmin = canManage && isPlatformRole(session);
@@ -66,18 +66,9 @@ export default async function SettingsPage() {
     } catch { /* soft-fail: the component shows "unknown" */ }
   }
 
-  let settings = await getSystemSettings().catch(() => null);
+  const settings = await getSystemSettings().catch(() => null);
   if (!settings) {
-    settings = {
-      appName: 'OfflineSMS',
-      supportEmail: '',
-      defaultLanguage: 'en',
-      defaultTimezone: 'UTC',
-      smsEscalationEnabled: true,
-      pointsEnabled: true,
-      emailSignInEnabled: false,
-      maintenanceMode: false,
-    };
+    return <div className="p-8"><p role="alert">Could not load system settings. Reload the page before making changes.</p></div>;
   }
 
   return (
@@ -107,6 +98,9 @@ export default async function SettingsPage() {
           <Row label="Default language"  value={settings.defaultLanguage} />
           <Row label="Default timezone"  value={settings.defaultTimezone} />
           <Row label="SMS escalation"    value={settings.smsEscalationEnabled ? 'Enabled' : 'Disabled'} />
+          <Row label="Show app name in SMS" value={settings.smsShowAppName ? 'Enabled' : 'Disabled'} />
+          <Row label="Show group name in SMS" value={settings.smsShowGroupName ? 'Enabled' : 'Disabled'} />
+          <Row label="Show sender phone in SMS" value={settings.smsShowSenderPhone ? 'Enabled' : 'Disabled'} />
           <Row label="Points system"     value={settings.pointsEnabled ? 'Enabled' : 'Disabled'} />
           <Row label="Maintenance mode"  value={settings.maintenanceMode ? 'On' : 'Off'} />
         </div>

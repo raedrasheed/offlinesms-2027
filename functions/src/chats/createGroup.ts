@@ -9,12 +9,11 @@ import { getFirestore, FieldValue, type WriteBatch } from 'firebase-admin/firest
 import { writeAuditLog } from '../lib/auditLog';
 import { publicNameFrom } from '../lib/displayName';
 
-import { GROUP_CAP, invitationRef, invitationData } from './memberInvitations';
+import { MAX_GROUP_INVITE_BATCH, invitationRef, invitationData } from './memberInvitations';
 import { assertDirectNotBlocked } from './blockGuard';
 import { normalizePhoneToE164 } from '../lib/phone';
 import { newExternalMemberDoc, newPhoneContactDoc } from '../contacts/contactLogic';
 import { findRegisteredUidByPhone } from '../contacts/createPhoneContact';
-export const MAX_GROUP_MEMBERS = GROUP_CAP;
 const NAME_MAX = 80;
 
 type CreateGroupRequest = {
@@ -39,15 +38,19 @@ export const createGroup = onCall(async (request) => {
   if (!Array.isArray(data.memberUids)) {
     throw new HttpsError('invalid-argument', 'memberUids-required');
   }
-  if (data.memberUids.length > MAX_GROUP_MEMBERS - 1) throw new HttpsError('invalid-argument', 'too-many-members');
+  if (data.externalContacts !== undefined && !Array.isArray(data.externalContacts)) throw new HttpsError('invalid-argument', 'invalid-contacts');
+  // Bound the work before any contact/profile reads. This is a creation-request
+  // limit only; existing groups may grow through additional invitations.
+  if (data.memberUids.length + ((data.externalContacts as unknown[] | undefined)?.length ?? 0) > MAX_GROUP_INVITE_BATCH) {
+    throw new HttpsError('invalid-argument', 'too-many-recipients-in-request');
+  }
   const rawMembers = (data.memberUids as unknown[]).filter(x => typeof x === 'string') as string[];
 
   // Owner always included; de-dup; exclude self from the "others" list.
   const others = Array.from(new Set(rawMembers.filter(u => u && u !== uid)));
-  if (data.externalContacts !== undefined && !Array.isArray(data.externalContacts)) throw new HttpsError('invalid-argument', 'invalid-contacts');
   const external = new Map<string, { displayName: string; e164: string; linkedUid: string | null }>();
-  // Keep the atomic create below 500 writes (group, owner and invitations/phone rows).
-  if (((data.externalContacts as unknown[] | undefined)?.length ?? 0) > 240) throw new HttpsError('invalid-argument', 'too-many-members');
+  // One selected phone may write both an invitation and an external row.
+  // The request bound above keeps the atomic create at <= 483 writes.
   for (const item of (data.externalContacts ?? []) as any[]) {
     const e164 = typeof item?.phoneNumber === 'string' ? normalizePhoneToE164(item.phoneNumber, 'PS') : null;
     const displayName = typeof item?.displayName === 'string' ? item.displayName.trim() : '';
@@ -58,7 +61,6 @@ export const createGroup = onCall(async (request) => {
     if (linkedUid && !others.includes(linkedUid)) others.push(linkedUid);
   }
   if (!others.length && !external.size) throw new HttpsError('invalid-argument', 'at-least-one-recipient-required');
-  if (others.length + external.size > 480 || 1 + others.length + [...external.values()].filter(c => !c.linkedUid).length > MAX_GROUP_MEMBERS) throw new HttpsError('invalid-argument', 'too-many-members');
   for (const target of others) {
     if (target.includes('/')) throw new HttpsError('invalid-argument', 'invalid-member');
     await assertDirectNotBlocked(getFirestore(), { type: 'direct', participantUids: [uid, target] }, uid);

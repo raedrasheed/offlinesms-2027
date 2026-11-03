@@ -13,6 +13,7 @@ import {
 } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { app, db, auth } from './firebase';
+import { inviteInBatches } from './groupInvitationBatches';
 
 // ─────────────────────────────────────────────────────────────────
 // Types
@@ -444,10 +445,14 @@ export async function createGroup(args: {
 }
 
 export async function addGroupMembers(conversationId: string, memberUids: string[]): Promise<number> {
-  const res = await fn<{ conversationId: string; memberUids: string[] }, { added: number; invited?: number }>(
-    'addMembers',
-  )({ conversationId, memberUids });
-  return res.data.invited ?? res.data.added;
+  const uid = auth.currentUser?.uid;
+  return inviteInBatches(memberUids, async batch => {
+    if (!uid || auth.currentUser?.uid !== uid) throw new Error('auth-session-changed');
+    const res = await fn<{ conversationId: string; memberUids: string[] }, { added: number; invited?: number }>(
+      'addMembers',
+    )({ conversationId, memberUids: batch });
+    return res.data.invited ?? res.data.added;
+  });
 }
 
 // ── External phone contacts (Phase 25) ──────────────────────────────────────

@@ -9,17 +9,15 @@ import {CheckmarkIcon} from '../components/CheckmarkIcon';
 // screen calls escalateSms; the result step renders the OfflineSMS
 // Delivery Report directly from the callable's response.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
-  View, Text, TextInput, Pressable, ScrollView, StyleSheet, Switch, Alert,
+  View, Text, TextInput, Pressable, ScrollView, StyleSheet, Alert,
   KeyboardAvoidingView, Platform,
 } from 'react-native';
-import { doc, onSnapshot } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { useSmsEscalationPreview } from '../hooks/useSmsEscalationPreview';
 import {
   buildDefaultSmsBody,
   escalateSms,
-  previewSmsEscalation,
   retryFailedSmsRecipients,
   smsErrorCopy,
   smsErrorReason,
@@ -58,11 +56,7 @@ export default function SmsEscalation({ route, navigation }: any) {
   const messageId:      string = params.messageId;
   const messageText:    string | undefined = params.messageText;
 
-  const [conversationName, setConversationName] = useState<string>('OfflineSMS');
   const [audience, setAudience] = useState<EscalationAudience>('unread_only');
-  const [preview, setPreview]   = useState<EscalationPreview | null>(null);
-  const [previewBusy, setPreviewBusy] = useState(false);
-  const [previewErr, setPreviewErr]   = useState<string | null>(null);
 
   const [smsBody, setSmsBody]     = useState(buildDefaultSmsBody(messageText));
   const [confirmed, setConfirmed] = useState(false);
@@ -71,53 +65,31 @@ export default function SmsEscalation({ route, navigation }: any) {
   const [result, setResult]   = useState<EscalationResult | null>(null);
   const [resultErr, setResultErr] = useState<string | null>(null);
 
-  // Track the conversation name (groups) for display. The SMS body defaults to
-  // the original message and is owned by the user once editable, so it isn't
-  // re-set here.
-  useEffect(() => {
-    return onSnapshot(doc(db, 'conversations', conversationId), snap => {
-      const data = snap.data() as { name?: string; type?: string } | undefined;
-      if (data?.name) setConversationName(data.name);
-    });
-  }, [conversationId]);
+  const { preview, busy: previewBusy, error: previewErr, refresh: refreshPreview } = useSmsEscalationPreview({
+    conversationId, messageId, audience, smsBody,
+  });
 
-  // Re-run preview whenever audience changes (or the user taps Retry, which
-  // bumps previewAttempt).
-  const [previewAttempt, setPreviewAttempt] = useState(0);
-  useEffect(() => {
-    let cancelled = false;
-    setPreviewBusy(true); setPreviewErr(null);
-    previewSmsEscalation({ conversationId, messageId, audience })
-      .then(p => { if (!cancelled) setPreview(p); })
-      .catch(e => {
-        if (cancelled) return;
-        setPreview(null);
-        setPreviewErr(smsPreviewErrorCopy(e));
-      })
-      .finally(() => { if (!cancelled) setPreviewBusy(false); });
-    return () => { cancelled = true; };
-  }, [conversationId, messageId, audience, previewAttempt]);
+  // Confirmation belongs to one exact server quote. A refreshed price, edited
+  // text or changed audience always requires a new explicit confirmation.
+  useEffect(() => { setConfirmed(false); }, [preview?.quoteToken, audience, smsBody]);
 
-  const segments = useMemo(() => {
-    if (smsBody.length === 0) return 0;
-    // GSM-7 ~160 chars per segment; Unicode ~70. Use a conservative 70-cap.
-    const isUnicode = /[^ -~]/.test(smsBody);
-    return Math.ceil(smsBody.length / (isUnicode ? 70 : 160));
-  }, [smsBody]);
-
+  // Wallet balance already excludes reserved points on the server.
   const remaining = preview ? preview.walletBalance - preview.pointsCost : 0;
-  const enoughPoints = preview ? preview.walletBalance >= preview.pointsCost : true;
-  const canConfirm = !!preview && preview.eligibleCount > 0 && enoughPoints && confirmed && smsBody.trim().length > 0;
+  const enoughPoints = !!preview && preview.walletBalance >= preview.pointsCost;
+  const canConfirm = !!preview && !previewBusy && !preview.exceedsCap
+    && preview.eligibleCount > 0 && enoughPoints && confirmed && smsBody.trim().length > 0;
 
   async function submit() {
     if (!canConfirm || !preview) return;
     setStep('sending'); setResultErr(null);
     try {
-      const r = await escalateSms({ conversationId, messageId, audience, smsBody: smsBody.trim() });
+      const r = await escalateSms({ conversationId, messageId, audience, smsBody: smsBody.trim(), quoteToken: preview.quoteToken });
       setResult(r);
       setStep('result');
     } catch (e: any) {
       setResultErr(smsPreviewErrorCopy(e));
+      setConfirmed(false);
+      if (smsErrorReason(e) === 'sms-quote-changed') refreshPreview();
       setStep('confirm');
     }
   }
@@ -145,8 +117,8 @@ export default function SmsEscalation({ route, navigation }: any) {
             previewBusy={previewBusy}
             previewErr={previewErr}
             onPick={a => setAudience(a)}
-            onRetryPreview={() => setPreviewAttempt(n => n + 1)}
-            onContinue={() => preview && preview.eligibleCount > 0 ? setStep('recipients') : null}
+            onRetryPreview={refreshPreview}
+            onContinue={() => preview && !previewBusy && !preview.exceedsCap && preview.eligibleCount > 0 ? setStep('recipients') : null}
           />
         ) : null}
 
@@ -162,18 +134,21 @@ export default function SmsEscalation({ route, navigation }: any) {
           <TextStep
             smsBody={smsBody}
             setSmsBody={setSmsBody}
-            segments={segments}
-            recipientCount={preview?.eligibleCount ?? 0}
+            preview={preview}
+            previewBusy={previewBusy}
+            previewErr={previewErr}
+            onRetryPreview={refreshPreview}
             onBack={() => setStep('recipients')}
-            onContinue={() => setStep('confirm')}
+            onContinue={() => preview && !previewBusy && !preview.exceedsCap ? setStep('confirm') : null}
           />
         ) : null}
 
         {step === 'confirm' ? (
           <ConfirmStep
             preview={preview}
-            smsBody={smsBody}
-            segments={segments}
+            previewBusy={previewBusy}
+            previewErr={previewErr}
+            onRetryPreview={refreshPreview}
             remaining={remaining}
             enoughPoints={enoughPoints}
             confirmed={confirmed}
@@ -290,15 +265,16 @@ function AudienceStep({
       ) : null}
 
       <Pressable
-        style={[s.primaryBtn, (!preview || preview.eligibleCount === 0) && { opacity: 0.4 }]}
+        style={[s.primaryBtn, (!preview || previewBusy || preview.exceedsCap || preview.eligibleCount === 0) && { opacity: 0.4 }]}
         onPress={onContinue}
-        disabled={!preview || preview.eligibleCount === 0}
+        disabled={!preview || previewBusy || preview.exceedsCap || preview.eligibleCount === 0}
       >
         <Text style={s.primaryBtnText}>Continue</Text>
       </Pressable>
       {preview && preview.eligibleCount === 0 ? (
         <Text style={s.foot}>No eligible recipients for this audience.</Text>
       ) : null}
+      {preview?.exceedsCap ? <Text style={s.foot}>Choose an audience of at most {preview.audienceCap} SMS recipients.</Text> : null}
     </View>
   );
 }
@@ -341,18 +317,43 @@ function RecipientsStep({
   );
 }
 
+function SmsTextPreview({ preview }: { preview: EscalationPreview }) {
+  return (
+    <View style={s.card}>
+      <Text style={s.cardLabel}>Final SMS text</Text>
+      <Text style={s.cardBody} selectable>{preview.finalSmsBody}</Text>
+      <Text style={s.foot}>{preview.smsSegments} SMS segment{preview.smsSegments === 1 ? '' : 's'} per recipient · {preview.smsEncoding}</Text>
+      <Text style={s.foot}>{preview.smsUnits} encoding units · {preview.pointsPerRecipient} points per recipient</Text>
+      <Text style={s.foot}>Any added app name, group name, sender number, spaces and line breaks are included in this text and its cost.</Text>
+    </View>
+  );
+}
+
+function QuoteStatus({ busy, error, onRetry }: { busy: boolean; error: string | null; onRetry: () => void }) {
+  if (busy) return <LoadingState compact title="Updating SMS text and cost…" />;
+  if (!error) return null;
+  return (
+    <>
+      <ErrorState compact title="Preview failed" description={error} />
+      <Pressable style={s.secondaryBtn} onPress={onRetry}><Text style={s.secondaryBtnText}>Retry preview</Text></Pressable>
+    </>
+  );
+}
+
 function TextStep({
-  smsBody, setSmsBody, segments, recipientCount, onBack, onContinue,
+  smsBody, setSmsBody, preview, previewBusy, previewErr, onRetryPreview, onBack, onContinue,
 }: {
   smsBody: string;
   setSmsBody: (v: string) => void;
-  segments: number;
-  recipientCount: number;
+  preview: EscalationPreview | null;
+  previewBusy: boolean;
+  previewErr: string | null;
+  onRetryPreview: () => void;
   onBack: () => void;
   onContinue: () => void;
 }) {
-  const tooLong = smsBody.length > 320;
-  const isUnicode = /[^ -~]/.test(smsBody);
+  const canContinue = !!preview && !previewBusy && !preview.exceedsCap
+    && preview.eligibleCount > 0 && smsBody.length <= 320 && smsBody.trim().length > 0;
   return (
     <View>
       <Text style={s.sectionLabel}>SMS text</Text>
@@ -362,19 +363,20 @@ function TextStep({
         onChangeText={setSmsBody}
         multiline
         maxLength={320}
+        accessibilityLabel="SMS message text"
       />
-      <View style={s.metaRow}>
-        <Text style={s.foot}>{smsBody.length}/320 chars · {segments} segment{segments === 1 ? '' : 's'}</Text>
-        {isUnicode ? <Text style={s.foot}>Unicode / Arabic encoding</Text> : null}
-      </View>
-      <Text style={s.foot}>Sending to {recipientCount} recipient{recipientCount === 1 ? '' : 's'}.</Text>
+      <Text style={s.foot}>{smsBody.length}/320 text units before any added information.</Text>
+      <QuoteStatus busy={previewBusy} error={previewErr} onRetry={onRetryPreview} />
+      {preview ? <SmsTextPreview preview={preview} /> : null}
+      {preview ? <Text style={s.foot}>Sending to {preview.eligibleCount} recipient{preview.eligibleCount === 1 ? '' : 's'} for {preview.pointsCost} points.</Text> : null}
+      {preview?.exceedsCap ? <Text style={s.foot}>Choose an audience of at most {preview.audienceCap} SMS recipients.</Text> : null}
 
       <View style={s.row}>
         <Pressable style={s.secondaryBtn} onPress={onBack}><Text style={s.secondaryBtnText}>Back</Text></Pressable>
         <Pressable
-          style={[s.primaryBtn, { flex: 1 }, (tooLong || smsBody.trim().length === 0) && { opacity: 0.4 }]}
+          style={[s.primaryBtn, { flex: 1 }, !canContinue && { opacity: 0.4 }]}
           onPress={onContinue}
-          disabled={tooLong || smsBody.trim().length === 0}
+          disabled={!canContinue}
         >
           <Text style={s.primaryBtnText}>Continue</Text>
         </Pressable>
@@ -384,12 +386,13 @@ function TextStep({
 }
 
 function ConfirmStep({
-  preview, smsBody, segments, remaining, enoughPoints, confirmed, setConfirmed,
+  preview, previewBusy, previewErr, onRetryPreview, remaining, enoughPoints, confirmed, setConfirmed,
   resultErr, canSubmit, onBack, onSubmit,
 }: {
   preview: EscalationPreview | null;
-  smsBody: string;
-  segments: number;
+  previewBusy: boolean;
+  previewErr: string | null;
+  onRetryPreview: () => void;
   remaining: number;
   enoughPoints: boolean;
   confirmed: boolean;
@@ -399,41 +402,42 @@ function ConfirmStep({
   onBack: () => void;
   onSubmit: () => void;
 }) {
-  if (!preview) return null;
   return (
     <View>
       <Text style={s.sectionLabel}>Confirm</Text>
-
-      <View style={s.card}>
-        <Text style={s.cardLabel}>SMS preview</Text>
-        <Text style={s.cardBody} numberOfLines={6}>{smsBody}</Text>
-        <Text style={s.foot}>{segments} segment{segments === 1 ? '' : 's'}</Text>
-      </View>
-
-      <View style={s.statsGrid}>
-        <Stat label="Recipients" value={preview.eligibleCount} />
-        <Stat label="Cost"       value={preview.pointsCost} />
-      </View>
-      <View style={s.statsGrid}>
-        <Stat label="Balance"    value={preview.walletBalance} />
-        <Stat label="Reserved"   value={preview.walletReserved} />
-        <Stat label="Available"  value={Math.max(0, preview.walletBalance - preview.walletReserved)} />
-        <Stat label="Remaining"  value={remaining} />
-      </View>
-
-      {!enoughPoints ? (
-        <View style={[s.notice, { borderColor: colors.err, backgroundColor: '#FEF2F2' }]}>
-          <Text style={[s.noticeText, { color: colors.err }]}>Not enough OfflineSMS Points.</Text>
-        </View>
-      ) : null}
-
-      <Pressable style={s.confirmRow} onPress={() => setConfirmed(!confirmed)}>
-        <View style={[s.checkbox, confirmed && s.checkboxOn]}>{confirmed ? <CheckmarkIcon color="#FFFFFF" size={15}/> : null}</View>
-        <Text style={s.confirmText}>I confirm these recipients may be contacted by SMS.</Text>
-      </Pressable>
-
+      <QuoteStatus busy={previewBusy} error={previewErr} onRetry={onRetryPreview} />
       {resultErr ? <ErrorState compact title="Couldn’t send" description={resultErr} /> : null}
-
+      {preview ? (
+        <>
+          <SmsTextPreview preview={preview} />
+          <View style={s.statsGrid}>
+            <Stat label="Recipients" value={preview.eligibleCount} />
+            <Stat label="Cost" value={preview.pointsCost} />
+          </View>
+          <View style={s.statsGrid}>
+            <Stat label="Available" value={preview.walletBalance} />
+            <Stat label="Reserved" value={preview.walletReserved} />
+            <Stat label="Remaining" value={remaining} />
+          </View>
+          {!enoughPoints ? (
+            <View style={[s.notice, { borderColor: colors.err, backgroundColor: '#FEF2F2' }]}>
+              <Text style={[s.noticeText, { color: colors.err }]}>Not enough OfflineSMS Points.</Text>
+            </View>
+          ) : null}
+          {preview.exceedsCap ? <Text style={s.foot}>Choose an audience of at most {preview.audienceCap} SMS recipients.</Text> : null}
+          <Pressable
+            style={s.confirmRow}
+            role="checkbox"
+            accessibilityLabel="Confirm SMS recipients and cost"
+            accessibilityState={{ checked: confirmed, disabled: previewBusy }}
+            disabled={previewBusy}
+            onPress={() => setConfirmed(!confirmed)}
+          >
+            <View style={[s.checkbox, confirmed && s.checkboxOn]}>{confirmed ? <CheckmarkIcon color="#FFFFFF" size={15}/> : null}</View>
+            <Text style={s.confirmText}>I confirm these recipients may be contacted by SMS and agree to the displayed cost.</Text>
+          </Pressable>
+        </>
+      ) : null}
       <View style={s.row}>
         <Pressable style={s.secondaryBtn} onPress={onBack}><Text style={s.secondaryBtnText}>Back</Text></Pressable>
         <Pressable
@@ -441,7 +445,7 @@ function ConfirmStep({
           onPress={onSubmit}
           disabled={!canSubmit}
         >
-          <Text style={s.primaryBtnText}>Send SMS for {preview.pointsCost} points</Text>
+          <Text style={s.primaryBtnText}>{preview ? `Send SMS for ${preview.pointsCost} points` : 'Send SMS'}</Text>
         </Pressable>
       </View>
     </View>
@@ -580,7 +584,7 @@ const s = StyleSheet.create({
   recipientPhone:{ fontSize: 11, color: colors.ink500, marginTop: 2 },
   pill:         { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
   pillText:     { fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
-  textArea:     { padding: 12, backgroundColor: '#fff', borderRadius: radius.md, fontSize: 14, borderWidth: 1, borderColor: colors.ink200, minHeight: 110, textAlignVertical: 'top' },
+  textArea:     { padding: 12, backgroundColor: '#fff', color: colors.ink, borderRadius: radius.md, fontSize: 14, borderWidth: 1, borderColor: colors.ink200, minHeight: 110, textAlignVertical: 'top' },
   metaRow:      { flexDirection: 'row', justifyContent: 'space-between', marginTop: 6, marginBottom: 6 },
   foot:         { fontSize: 11, color: colors.ink500, marginTop: 6 },
   row:          { flexDirection: 'row', gap: 8, marginTop: 14 },

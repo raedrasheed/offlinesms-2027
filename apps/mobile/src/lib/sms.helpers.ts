@@ -4,7 +4,7 @@
 export type SmsSkipReason =
   | 'no-phone' | 'unverified-phone' | 'opt-out'
   | 'duplicate-phone' | 'already-sent-for-message'
-  | 'rate-limited' | 'policy-blocked';
+  | 'rate-limited' | 'policy-blocked' | 'no_relay_for_country';
 
 export function smsErrorCopy(code: string): string {
   switch (code) {
@@ -50,6 +50,15 @@ export function smsPreviewErrorCopy(err: unknown): string {
   if (reason === 'conversation-not-found') {
     return 'This conversation isn’t available on the server.';
   }
+  if (reason === 'sms-quote-changed') {
+    return 'The SMS text, recipients or cost changed. Review the updated preview and confirm again.';
+  }
+  if (reason === 'sms-preview-outdated') {
+    return 'The SMS service needs an update before it can show the final text and cost. Please try again later.';
+  }
+  if (reason === 'sms-preview-required') {
+    return 'Refresh the SMS preview and confirm its full text and cost. Update the app if this message continues.';
+  }
   if (code === 'functions/not-found' || code === 'not-found') {
     return 'The OfflineSMS service isn’t available right now. Please try again later.';
   }
@@ -65,6 +74,7 @@ export function smsSkipReasonCopy(reason: SmsSkipReason): string {
     case 'already-sent-for-message':  return 'Already received SMS for this message';
     case 'rate-limited':              return 'Rate limit reached';
     case 'policy-blocked':            return 'Blocked by policy';
+    case 'no_relay_for_country':      return 'SMS unavailable for this country';
   }
 }
 

@@ -14,7 +14,6 @@ import { normalizePhoneToE164 } from '../lib/phone';
 import { externalMemberId, newExternalMemberDoc, cleanDisplayName } from './contactLogic';
 import { findRegisteredUidByPhone } from './createPhoneContact';
 import { inviteGroupMembers } from '../chats/memberInvitations';
-import { MAX_GROUP_MEMBERS } from '../chats/createGroup';
 
 async function requireGroupAdmin(uid: string, conversationId: string) {
   const db = getFirestore();
@@ -104,7 +103,6 @@ export const addExternalContactToGroup = onCall(async (request) => {
     if (!live || !(live.participantUids ?? []).includes(uid) || (member.data()?.status ?? 'active') !== 'active' || !['owner', 'admin'].includes(member.data()?.role)) throw new HttpsError('permission-denied', 'admins-only');
     if (linkedUid && (live.participantUids ?? []).includes(linkedUid)) return 0;
     if (external.exists) return 0;
-    if ((live.participantUids ?? []).length + (live.externalMemberCount ?? 0) >= MAX_GROUP_MEMBERS) throw new HttpsError('failed-precondition', 'too-many-members');
     tx.set(emRef, { ...docData, addedAt: now, updatedAt: now });
     tx.update(convoRef, { externalMemberCount: FieldValue.increment(1), updatedAt: now });
     return 1;

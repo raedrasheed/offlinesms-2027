@@ -58,7 +58,7 @@ export default function EscalationSettings({
         <div>
           <p className="text-sm font-semibold" style={{ color: 'var(--c-text)' }}>Auto SMS escalation</p>
           <p className="text-xs mt-0.5" style={{ color: 'var(--c-text-3)' }}>
-            After the check period, recipients still matching the audience get the message by SMS (billed from the org points wallet).
+            After the check period, recipients still matching the audience get the message by SMS, billed from the org points wallet per SMS segment. The final text includes any enabled sender information; those characters and separators count toward the cost.
           </p>
         </div>
         <label className="relative inline-flex items-center cursor-pointer select-none">

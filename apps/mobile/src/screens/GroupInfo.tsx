@@ -7,7 +7,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
-  View, Text, FlatList, Pressable, StyleSheet, Alert, ScrollView, Share, Clipboard, Modal, Image,
+  View, Text, SectionList, Pressable, StyleSheet, Alert, Share, Clipboard, Modal, Image,
 } from 'react-native';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
@@ -36,7 +36,10 @@ import { LOCAL_FIRST_CONVERSATION_ENABLED } from '../config/features';
 import { queueRemoveExternalContactFromGroup, externalMembersRepo, getCurrentUid } from '../localdb';
 import { colors, radius } from '../theme';
 import { RegisteredBadge } from '../components/RegisteredBadge';
-import { LoadingState, EmptyState, PermissionState } from '../components/state';
+import { LoadingState, PermissionState } from '../components/state';
+
+type RosterRow = { kind: 'member'; member: GroupMember } | { kind: 'external'; contact: ExternalMember };
+type RosterSection = { title: string; data: RosterRow[] };
 
 function roleBadge(role: GroupMember['role']) {
   switch (role) {
@@ -117,6 +120,13 @@ export default function GroupInfo({ route, navigation }: any) {
   const externals = useMemo(() => [...remoteExternals, ...pendingExternals]
     .sort((a, b) => compareNames((a.displayName ?? '').trim(), (b.displayName ?? '').trim()) || a.contactId.localeCompare(b.contactId)),
   [remoteExternals, pendingExternals, compareNames]);
+
+  // Keep all roster rows inside one virtualized scroll surface. Nesting two
+  // non-scrolling FlatLists in a ScrollView mounted every member at once.
+  const rosterSections = useMemo<RosterSection[]>(() => [
+    { title: `Members (${sortedMembers.length})`, data: sortedMembers.map(member => ({ kind: 'member' as const, member })) },
+    ...(externals.length ? [{ title: `Phone contacts (${externals.length})`, data: externals.map(contact => ({ kind: 'external' as const, contact })) }] : []),
+  ], [sortedMembers, externals]);
 
   const myRole: GroupMember['role'] | null = useMemo(() => {
     const m = members?.find(x => x.uid === me);
@@ -253,7 +263,52 @@ export default function GroupInfo({ route, navigation }: any) {
         <Text style={s.title}>Group info</Text>
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingBottom: 32 }}>
+      <SectionList<RosterRow, RosterSection>
+        sections={rosterSections}
+        keyExtractor={row => row.kind === 'member' ? `member:${row.member.uid}` : `external:${row.contact.contactId}`}
+        stickySectionHeadersEnabled={false}
+        initialNumToRender={16}
+        maxToRenderPerBatch={16}
+        windowSize={7}
+        contentContainerStyle={{ paddingBottom: 32 }}
+        renderSectionHeader={({ section }) => <View style={s.section}><Text style={s.sectionLabel}>{section.title}</Text></View>}
+        renderItem={({ item }) => {
+          if (item.kind === 'external') {
+            const contact = item.contact;
+            return (
+              <Pressable style={s.memberRow} onPress={() => { if (isAdmin) confirmRemoveExternal(contact); }}>
+                <View style={s.memberAvatar}>
+                  <Text style={s.memberAvatarText}>{(contact.displayName ?? '?').slice(0, 1).toUpperCase()}</Text>
+                  <RegisteredBadge registered={contact.isRegistered} size={15} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.memberName}>{contact.displayName}</Text>
+                  <Text style={s.memberSub}>{maskPhone(contact.phoneE164)}{contact.isRegistered ? ' · on OfflineSMS' : ' · SMS only'}</Text>
+                </View>
+              </Pressable>
+            );
+          }
+          const member = item.member;
+          const badge = roleBadge(member.role);
+          const name = memberName(member);
+          return (
+            <Pressable style={s.memberRow} onPress={() => memberActions(member)}>
+              <View style={s.memberAvatar}>
+                <Text style={s.memberAvatarText}>{name.replace(/^@/, '').slice(0, 1).toUpperCase()}</Text>
+                <RegisteredBadge registered size={15} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.memberName}>{member.uid === me ? t('names.youSuffix', { name }) : name}</Text>
+              </View>
+              {badge ? (
+                <View style={[s.badge, { backgroundColor: badge.bg }]}>
+                  <Text style={[s.badgeText, { color: badge.color }]}>{badge.label}</Text>
+                </View>
+              ) : null}
+            </Pressable>
+          );
+        }}
+        ListHeaderComponent={<>
         <View style={s.hero}>
           {convo.avatarUrl
             ? <Image source={{ uri: convo.avatarUrl }} style={s.avatar} />
@@ -337,67 +392,8 @@ export default function GroupInfo({ route, navigation }: any) {
           </View>
         ) : null}
 
-        <View style={s.section}>
-          <Text style={s.sectionLabel}>Members ({members.length})</Text>
-          {members.length === 0 ? (
-            <EmptyState compact title="No members" />
-          ) : (
-            <FlatList
-              scrollEnabled={false}
-              data={sortedMembers}
-              keyExtractor={m => m.uid}
-              renderItem={({ item }) => {
-                const badge = roleBadge(item.role);
-                const isSelf = item.uid === me;
-                return (
-                  <Pressable style={s.memberRow} onPress={() => memberActions(item)}>
-                    <View style={s.memberAvatar}>
-                      <Text style={s.memberAvatarText}>{memberName(item).replace(/^@/, '').slice(0, 1).toUpperCase()}</Text>
-                      {/* Registered app users get the badge. */}
-                      <RegisteredBadge registered size={15} />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={s.memberName}>{isSelf ? t('names.youSuffix', { name: memberName(item) }) : memberName(item)}</Text>
-                    </View>
-                    {badge ? (
-                      <View style={[s.badge, { backgroundColor: badge.bg }]}>
-                        <Text style={[s.badgeText, { color: badge.color }]}>{badge.label}</Text>
-                      </View>
-                    ) : null}
-                  </Pressable>
-                );
-              }}
-            />
-          )}
-        </View>
-
-        {externals.length > 0 ? (
-          <View style={s.section}>
-            <Text style={s.sectionLabel}>Phone contacts ({externals.length})</Text>
-            <FlatList
-              scrollEnabled={false}
-              data={externals}
-              keyExtractor={e => e.contactId}
-              renderItem={({ item }) => (
-                <Pressable
-                  style={s.memberRow}
-                  onPress={() => { if (isAdmin) confirmRemoveExternal(item); }}
-                >
-                  <View style={s.memberAvatar}>
-                    <Text style={s.memberAvatarText}>{(item.displayName ?? '?').slice(0, 1).toUpperCase()}</Text>
-                    {/* Badge only once the contact has registered with this number. */}
-                    <RegisteredBadge registered={item.isRegistered} size={15} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.memberName}>{item.displayName}</Text>
-                    <Text style={s.memberSub}>{maskPhone(item.phoneE164)}{item.isRegistered ? ' · on OfflineSMS' : ' · SMS only'}</Text>
-                  </View>
-                </Pressable>
-              )}
-            />
-          </View>
-        ) : null}
-      </ScrollView>
+        </>}
+      />
 
       {/* Member action sheet — appears on tapping any other member. Always
           includes Message; promote/demote and remove are conditional on the
@@ -478,7 +474,7 @@ const s = StyleSheet.create({
   countBadge:{ minWidth: 22, paddingHorizontal: 6, height: 22, borderRadius: 11, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
   countBadgeText: { color: '#fff', fontSize: 12, fontWeight: '800' },
   dangerRow: {},
-  memberRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderTopWidth: 1, borderColor: colors.ink100 },
+  memberRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, backgroundColor: colors.surface, borderTopWidth: 1, borderColor: colors.ink100 },
   memberAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.primaryLight, alignItems: 'center', justifyContent: 'center' },
   memberAvatarText: { fontWeight: '700', color: colors.primaryDark },
   memberName: { fontSize: 14, color: colors.ink, fontWeight: '600' },

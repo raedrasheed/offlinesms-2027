@@ -14,7 +14,8 @@
 
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { getFirestore, FieldValue, Timestamp } from 'firebase-admin/firestore';
-import { classifyRecipients, COST_PER_SMS, MAX_RECIPIENTS_PER_BATCH } from '../sms/recipients';
+import { classifyRecipients, MAX_RECIPIENTS_PER_BATCH } from '../sms/recipients';
+import { loadSmsContentContext, prepareSmsContentWithContext } from '../sms/messageContent';
 import { sendBatch } from '../sms/gateway';
 import { partitionRecipientsByCoverage } from '../sms/countryRouting';
 import { resolveProvider } from '../sms/provider';
@@ -57,7 +58,7 @@ export const escalateOrgBatches = onSchedule(
       try {
         await db.runTransaction(async tx => {
           const fresh = await tx.get(batchDoc.ref);
-          if (fresh.data()?.escalationStatus !== 'scheduled') throw new Error('claimed');
+          if (fresh.data()?.escalationStatus !== 'scheduled' || fresh.get('smsReservationCommittedAt')) throw new Error('claimed');
           tx.update(batchDoc.ref, { escalationStatus: 'processing', updatedAt: FieldValue.serverTimestamp() });
         });
       } catch { continue; }
@@ -91,6 +92,8 @@ async function processBatch(
     ? escalation.audience : 'unread_only') as OrgEscalationAudience;
   const senderUid = `orgsender_${organizationId}`;
   const batchRef = db.collection('organizationMessageBatches').doc(batchId);
+  const currentBatch = await batchRef.get();
+  if (currentBatch.get('escalationStatus') !== 'processing' || currentBatch.get('smsReservationCommittedAt')) return;
 
   // 1 — Load the batch's delivered rows (those with a real in-app message).
   const rowsSnap = await db.collection('organizationMessages')
@@ -192,23 +195,87 @@ async function processBatch(
     return;
   }
 
-  // 5 — Reserve points from the org wallet (same transaction shape as
-  //     escalateSms; settlement/refund handled by onSmsBatchAccepted).
+  // 5 — Freeze one formatting/identity policy for the entire personalized
+  // batch. Compose the EXACT outgoing payload before pricing it: branding,
+  // separators and any verified sender number count toward its SMS segments.
+  // Organization messages are direct messages from the synthetic org sender;
+  // there is no group name or administrator phone to substitute here.
   const sendable = eligible.slice(0, MAX_RECIPIENTS_PER_BATCH);
-  const cost = sendable.length * COST_PER_SMS;
+  const contentContext = await loadSmsContentContext(db, { senderUid });
+  const contentByText = new Map<string, ReturnType<typeof prepareSmsContentWithContext>>();
+  const sendRows = sendable.map(e => {
+    const row = rowByUid.get(e.uid)!;
+    const content = prepareSmsContentWithContext(composeSmsText(row.title, row.body), contentContext);
+    row.smsText = content.finalSmsBody;
+    contentByText.set(row.smsText, content);
+    return row;
+  });
+  const groups = groupBySmsText(sendRows);
+  const cost = sendRows.reduce((total, row) => total + contentByText.get(row.smsText)!.pointsPerRecipient, 0);
+  const eligByUid = new Map(sendable.map(e => [e.uid, e]));
+  const providerMode = await resolveProvider(organizationId);
+  const plans = [...groups].map(([smsText, groupRows]) => {
+    const groupEligible = groupRows.map(r => eligByUid.get(r.uid)!);
+    const { finalSmsBody: _finalSmsBody, ...pricing } = contentByText.get(smsText)!;
+    return {
+      smsText, groupRows, groupEligible, pricing,
+      groupCost: groupEligible.length * pricing.pointsPerRecipient,
+      smsBatchRef: db.collection('smsBatches').doc(),
+    };
+  });
+  // The wallet hold, all recoverable child batches/recipients, parent guard and
+  // reservation ledger must commit together. At most 200 recipients means at
+  // most 200 child batches + 200 rows + 3 other writes, below the batch limit.
+  // A lost commit response cannot cause a second hold or duplicate dispatch.
   const walletRef = db.collection('wallets').doc(senderUid);
-  try {
-    await db.runTransaction(async tx => {
-      const w = await tx.get(walletRef);
-      const balance = w.exists ? ((w.get('balance') as number) ?? 0) : 0;
-      if (balance < cost) throw new Error('not-enough-points');
-      tx.set(walletRef, { balance: balance - cost, reserved: FieldValue.increment(cost) }, { merge: true });
+  const reservation = await db.runTransaction(async tx => {
+    const fresh = await tx.get(batchRef);
+    if (fresh.get('escalationStatus') !== 'processing' || fresh.get('smsReservationCommittedAt')
+        || fresh.get('organizationId') !== organizationId) return 'already-processed';
+    const w = await tx.get(walletRef);
+    const balance = w.exists ? ((w.get('balance') as number) ?? 0) : 0;
+    const now = FieldValue.serverTimestamp();
+    if (balance < cost) {
+      tx.update(batchRef, {
+        escalationStatus: 'insufficient_points', escalatedAt: now,
+        smsQueued: 0, smsFailed: 0, smsSkipped: excluded.length + noRelaySkipped, smsCostNeeded: cost,
+      });
+      return 'insufficient-points';
+    }
+    tx.set(walletRef, { balance: balance - cost, reserved: FieldValue.increment(cost) }, { merge: true });
+    tx.create(db.collection('transactions').doc(`org_sms_${batchId}_reservation`), {
+      userId: senderUid, type: 'reservation', direction: 'debit', amount: cost,
+      status: 'completed', relatedSmsBatchId: batchId,
+      note: 'org-messaging-escalation', createdAt: now, completedAt: now,
     });
-  } catch {
-    await batchRef.update({
-      escalationStatus: 'insufficient_points', escalatedAt: FieldValue.serverTimestamp(),
-      smsQueued: 0, smsFailed: 0, smsSkipped: excluded.length + noRelaySkipped, smsCostNeeded: cost,
+    tx.update(batchRef, {
+      smsReservationCommittedAt: now, smsPointsReserved: cost,
+      smsBatchIds: plans.map(plan => plan.smsBatchRef.id), updatedAt: now,
     });
+    for (const plan of plans) {
+      tx.create(plan.smsBatchRef, {
+        messageId: `orgbatch_${batchId}`, conversationId: null, orgBatchId: batchId,
+        organizationId, senderId: senderUid, audience, audienceCanonical: audience,
+        smsBody: plan.smsText, ...plan.pricing,
+        recipientCount: plan.groupEligible.length, eligibleCount: plan.groupEligible.length,
+        excludedCount: 0, totalCount: plan.groupEligible.length, queuedCount: plan.groupEligible.length,
+        sentCount: 0, deliveredCount: 0, failedCount: 0,
+        estimatedCost: plan.groupCost, pointsCost: plan.groupCost, pointsReserved: plan.groupCost,
+        pointsDeducted: null, pointsRefunded: null, status: 'sending', provider: providerMode,
+        gatewayBatchId: null, offlineSmsBatchId: null, retryOfBatchId: null,
+        createdAt: now, updatedAt: now,
+      });
+      for (const e of plan.groupEligible) {
+        tx.create(plan.smsBatchRef.collection('recipients').doc(e.uid), {
+          userId: e.uid, maskedPhone: e.maskedPhone, appReceiptStatus: e.appReceiptStatus,
+          smsStatus: 'queued', skipReason: null, reason: null, updatedAt: now,
+        });
+      }
+    }
+    return 'reserved';
+  });
+  if (reservation === 'already-processed') return;
+  if (reservation === 'insufficient-points') {
     await writeAuditLog({
       action: 'organization_message_batch_failed',
       actor:  { uid: `system:orgsender_${organizationId}` },
@@ -219,72 +286,15 @@ async function processBatch(
     return;
   }
 
-  await db.collection('transactions').add({
-    userId: senderUid, type: 'reservation', direction: 'debit', amount: cost,
-    status: 'completed', relatedSmsBatchId: batchId,
-    note: 'org-messaging-escalation',
-    createdAt: FieldValue.serverTimestamp(), completedAt: FieldValue.serverTimestamp(),
-  });
-
   // 6 — Send. One smsBatches doc per distinct SMS text (shape B may carry a
   //     different body per recipient), each settled by the existing trigger.
-  const eligByUid = new Map(sendable.map(e => [e.uid, e]));
-  const sendRows = sendable.map(e => {
-    const row = rowByUid.get(e.uid)!;
-    row.smsText = composeSmsText(row.title, row.body);
-    return row;
-  });
-  const groups = groupBySmsText(sendRows);
-  const providerMode = await resolveProvider(organizationId);
   let smsQueued = 0;
   let smsFailed = 0;
 
-  for (const [smsText, groupRows] of groups) {
-    const groupEligible = groupRows.map(r => eligByUid.get(r.uid)!);
-    const smsBatchRef = db.collection('smsBatches').doc();
-    const now = FieldValue.serverTimestamp();
-    const groupCost = groupEligible.length * COST_PER_SMS;
-    await smsBatchRef.set({
-      messageId:         `orgbatch_${batchId}`,
-      conversationId:    null,
-      orgBatchId:        batchId,
-      organizationId,
-      senderId:          senderUid,
-      audience:          audience,
-      audienceCanonical: audience,
-      smsBody:           smsText,
-      recipientCount:    groupEligible.length,
-      eligibleCount:     groupEligible.length,
-      excludedCount:     0,
-      totalCount:        groupEligible.length,
-      queuedCount:       groupEligible.length,
-      sentCount:         0,
-      deliveredCount:    0,
-      failedCount:       0,
-      estimatedCost:     groupCost,
-      pointsCost:        groupCost,
-      pointsReserved:    groupCost,
-      pointsDeducted:    null,
-      pointsRefunded:    null,
-      status:            'sending',
-      gatewayBatchId:    null,
-      offlineSmsBatchId: null,
-      retryOfBatchId:    null,
-      createdAt:         now,
-      updatedAt:         now,
-    });
-
+  for (const { smsText, groupRows, groupEligible, smsBatchRef } of plans) {
     if (relayModeEngaged(providerMode)) {
       // Relay path — recipients queued, dispatcher routes to org devices;
       // hybrid falls back to the HTTP gateway for unrouted recipients.
-      const recipWrites = db.batch();
-      for (const e of groupEligible) {
-        recipWrites.set(smsBatchRef.collection('recipients').doc(e.uid), {
-          userId: e.uid, maskedPhone: e.maskedPhone, appReceiptStatus: e.appReceiptStatus,
-          smsStatus: 'queued', skipReason: null, reason: null, updatedAt: FieldValue.serverTimestamp(),
-        });
-      }
-      await recipWrites.commit();
       const hybrid = isHybrid(providerMode);
       const dispatch = await dispatchBatchToRelay(smsBatchRef.id, organizationId, { allowUnassignedQueue: !hybrid });
       let groupFailed = 0;
@@ -342,7 +352,17 @@ async function processBatch(
       });
       await sends.commit();   // onSmsBatchAccepted settles points/refunds
     } catch {
-      await smsBatchRef.update({ status: 'failed', updatedAt: FieldValue.serverTimestamp() });
+      const failedWrites = db.batch();
+      for (const e of groupEligible) {
+        failedWrites.set(smsBatchRef.collection('recipients').doc(e.uid), {
+          smsStatus: 'failed', reason: 'gateway-error', updatedAt: FieldValue.serverTimestamp(),
+        }, { merge: true });
+      }
+      failedWrites.update(smsBatchRef, {
+        status: 'failed', queuedCount: 0, failedCount: groupEligible.length,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      await failedWrites.commit();
     }
 
     const rowWrites = db.batch();

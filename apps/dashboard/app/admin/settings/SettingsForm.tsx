@@ -54,6 +54,7 @@ function Toggle({
         <button
           type="button"
           role="switch"
+          aria-label={label}
           aria-checked={checked}
           onClick={() => setChecked(v => !v)}
           className="w-11 h-6 rounded-full transition-colors"
@@ -172,6 +173,34 @@ export default function SettingsForm({ action, initial }: Props) {
             Maintenance mode is currently <strong>on</strong>. Toggle is read-only here; change via server config.
           </div>
         )}
+      </div>
+
+      <div className="rounded-2xl p-6 space-y-5" style={{ background: CARD, border: `1px solid ${BORDER}` }}>
+        <div>
+          <h2 className="text-sm font-extrabold tracking-tight" style={{ color: 'var(--c-text)' }}>OfflineSMS message identification</h2>
+          <p className="text-xs mt-2" style={{ color: 'var(--c-text-3)' }}>
+            Add identifying information to outgoing SMS text. These characters, including separators and line breaks,
+            count towards the full message length and billed SMS segments. Enabling an option may increase the cost.
+          </p>
+        </div>
+        <Toggle
+          label="Show app name in OfflineSMS messages"
+          description="Include the app name configured above."
+          name="smsShowAppName"
+          initialValue={initial.smsShowAppName}
+        />
+        <Toggle
+          label="Show group name in OfflineSMS messages"
+          description="Include the group name for messages sent from a group. Direct messages have no group name."
+          name="smsShowGroupName"
+          initialValue={initial.smsShowGroupName}
+        />
+        <Toggle
+          label="Show sender phone number in OfflineSMS messages"
+          description="Include the original message sender’s verified phone number when available. Recipients will see this number."
+          name="smsShowSenderPhone"
+          initialValue={initial.smsShowSenderPhone}
+        />
       </div>
 
       <div className="flex items-center gap-3 pt-2">

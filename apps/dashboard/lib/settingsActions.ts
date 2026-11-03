@@ -5,6 +5,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { adminDb } from './firebase-admin';
 import { verifySession } from './session';
 import { canDo } from './adminPermissions';
+import { isPlatformAdmin } from './adminScope';
 
 export type SettingsActionState = { error?: string; success?: boolean } | null;
 
@@ -17,7 +18,7 @@ export async function updateSystemSettings(
 ): Promise<SettingsActionState> {
   const cookie = cookies().get('__session')?.value;
   const session = await verifySession(cookie);
-  if (session.state !== 'authorized' || !canDo(session.role, 'manage:settings')) {
+  if (session.state !== 'authorized' || !canDo(session.role, 'manage:settings') || !isPlatformAdmin(session)) {
     return { error: 'Permission denied.' };
   }
 
@@ -30,6 +31,16 @@ export async function updateSystemSettings(
   const smsEscalationEnabled = data.getAll('smsEscalationEnabled').includes('true');
   const pointsEnabled        = data.getAll('pointsEnabled').includes('true');
   const emailSignInEnabled   = data.getAll('emailSignInEnabled').includes('true');
+  // All three fields must be present. A stale form must not silently disable
+  // identification options that have been enabled since it was loaded.
+  const smsIdentification: Record<string, boolean> = {};
+  for (const key of ['smsShowAppName', 'smsShowGroupName', 'smsShowSenderPhone']) {
+    const value = data.get(key);
+    if (value !== 'true' && value !== 'false') {
+      return { error: 'Reload settings before saving the SMS identification options.' };
+    }
+    smsIdentification[key] = value === 'true';
+  }
 
   if (!appName)                                           return { error: 'App name is required.' };
   if (appName.length > 60)                               return { error: 'App name must be 60 characters or less.' };
@@ -48,6 +59,7 @@ export async function updateSystemSettings(
     smsEscalationEnabled,
     pointsEnabled,
     emailSignInEnabled,
+    ...smsIdentification,
     updatedAt: FieldValue.serverTimestamp(),
     updatedBy: session.user.uid,
   }, { merge: true });
@@ -67,6 +79,7 @@ export async function updateSystemSettings(
         smsEscalationEnabled,
         pointsEnabled,
         emailSignInEnabled,
+        ...smsIdentification,
       },
       createdAt: FieldValue.serverTimestamp(),
     });

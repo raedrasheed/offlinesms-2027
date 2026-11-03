@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
-import { getFirestore, Timestamp, FieldValue, type Firestore, type DocumentReference } from 'firebase-admin/firestore';
+import { getFirestore, Timestamp, FieldValue, FieldPath, type Firestore, type DocumentReference } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
 import { chatMessagePath, ownedMediaPrefix, retentionPolicy, retentionCutoff } from './messageRetentionPolicy';
 
@@ -17,34 +17,49 @@ async function finishJob(db: Firestore, jobRef: DocumentReference, deps: Retenti
   const job = (await jobRef.get()).data();
   if (!job || !chatMessagePath(job.messagePath)) return false;
   const ref = db.doc(job.messagePath);
+  // New paged fan-out may have stopped before reaching everyone. Its journal
+  // survives recursive deletion and retries of this retention job.
+  const fanoutRecipients = Array.isArray(job.fanoutRecipientUids)
+    ? new Set<string>(job.fanoutRecipientUids) : null;
   if (job.storagePrefix) await deps.deleteMedia(job.storagePrefix);
   // No deletedForEveryone flag: already-downloaded phone history remains intact.
   await db.recursiveDelete(ref);
   const convoRef = ref.parent.parent!;
-  await db.runTransaction(async tx => {
-    const convo = await tx.get(convoRef);
-    const [expiredStates, unreadStates] = await Promise.all([
-      tx.get(convoRef.collection('userState').where('lastMessageAt', '<=', Timestamp.fromMillis(job.cutoffMs))),
-      tx.get(convoRef.collection('userState').where('unreadCount', '>', 0)),
-    ]);
-    const states = new Map([...expiredStates.docs, ...unreadStates.docs].map(s => [s.id, s]));
+  // Advance a durable cursor in the same transaction as each bounded page of
+  // unread corrections. A failed/retried cleanup cannot decrement twice, and
+  // groups larger than one write batch still finish. New members after the
+  // cursor are safe: their lastReadAt is newer than this expired message.
+  let more = true;
+  while (more) more = await db.runTransaction(async tx => {
+    const current = await tx.get(jobRef);
+    if (!current.exists) return false;
+    let query = convoRef.collection('userState').orderBy(FieldPath.documentId()).limit(PAGE);
+    const cursor = current.get('lastStateId');
+    if (typeof cursor === 'string') query = query.startAfter(cursor);
+    const states = await tx.get(query);
+    const finalPage = states.size < PAGE;
+    const convo = finalPage ? await tx.get(convoRef) : null;
     const patch: Record<string, unknown> = {};
-    if (convo.get('lastMessage.messageId') === ref.id) {
+    if (convo?.get('lastMessage.messageId') === ref.id) {
       patch.lastMessage = null; patch.lastMessageText = ''; patch.lastSenderId = null;
     }
-    if (convo.get('pinnedMessage.messageId') === ref.id) patch.pinnedMessage = null;
-    if (convo.exists && Object.keys(patch).length) tx.update(convoRef, { ...patch, updatedAt: FieldValue.serverTimestamp() });
-    for (const state of states.values()) {
+    if (convo?.get('pinnedMessage.messageId') === ref.id) patch.pinnedMessage = null;
+    if (convo?.exists && Object.keys(patch).length) tx.update(convoRef, { ...patch, updatedAt: FieldValue.serverTimestamp() });
+    for (const state of states.docs) {
       const at = state.get('lastMessageAt')?.toMillis?.();
       if (typeof at === 'number' && at <= job.cutoffMs) {
         tx.update(state.ref, { lastMessagePreview: '', unreadCount: 0, updatedAt: FieldValue.serverTimestamp() });
-      } else if (job.senderUid && state.id !== job.senderUid && (state.get('lastReadAt')?.toMillis?.() ?? 0) < job.messageCreatedAtMs) {
-        // Journal removal and decrement commit together: retries cannot count
-        // the same expired unread twice, even alongside a newly arriving message.
+      } else if (job.senderUid && state.id !== job.senderUid
+        && (fanoutRecipients === null || fanoutRecipients.has(state.id))
+        && (state.get('lastReadAt')?.toMillis?.() ?? 0) < job.messageCreatedAtMs) {
+        // The cursor and decrement commit together, including when a newer
+        // message is received concurrently with this cleanup page.
         tx.update(state.ref, { unreadCount: Math.max(0, (state.get('unreadCount') ?? 0) - 1), updatedAt: FieldValue.serverTimestamp() });
       }
     }
-    tx.delete(jobRef);
+    if (finalPage) tx.delete(jobRef);
+    else tx.update(jobRef, { lastStateId: states.docs[states.size - 1].id });
+    return !finalPage;
   });
   return true;
 }
@@ -95,10 +110,17 @@ export async function runMessageRetention(db: Firestore, deps = productionDeps, 
             const current = retentionPolicy(settings.data());
             const at = msg.get('createdAt')?.toMillis?.();
             if (!current.enabled || !msg.exists || typeof at !== 'number' || at > retentionCutoff(deps.now(), current.days)) return false;
+            // Admission fences later fan-out pages by updating the message in
+            // this same transaction. Record only already-applied recipients
+            // before recursive deletion removes their completion documents.
+            const partialFanout = msg.get('fanoutSummaryApplied') === true && msg.get('fanoutApplied') !== true;
+            const applied = partialFanout
+              ? await tx.get(candidate.ref.collection('fanoutDeliveries').where('complete', '==', true)) : null;
             tx.create(jobRef, {
               messageCreatedAtMs: at, senderUid: msg.get('senderUid') ?? msg.get('senderId') ?? null,
               messagePath: candidate.ref.path, storagePrefix: ownedMediaPrefix(candidate.ref.path, msg.data()!),
               cutoffMs: retentionCutoff(deps.now(), current.days), createdAt: FieldValue.serverTimestamp(),
+              ...(applied ? { fanoutRecipientUids: applied.docs.map(row => row.id) } : {}),
             });
             tx.update(candidate.ref, { retentionDeleting: true });
             return true;

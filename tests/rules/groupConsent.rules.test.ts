@@ -13,6 +13,20 @@ beforeEach(async () => {
   });
 });
 describe('private recipient invitations', () => {
+  it('keeps per-recipient fanout journals server-only even for group owners', async () => {
+    await seed(async db => {
+      await setDoc(doc(db, 'conversations/g/messages/m/fanoutDeliveries/owner'), { complete: true });
+    });
+    const owner = await asUser('owner'), peer = await asUser('peer');
+    for (const db of [owner, peer]) {
+      await assertFails(getDoc(doc(db, 'conversations/g/messages/m/fanoutDeliveries/owner')));
+      await assertFails(setDoc(doc(db, 'conversations/g/messages/m/fanoutDeliveries/peer'), { complete: true }));
+      await assertFails(getDoc(doc(db, 'conversations/g/messages/m/fanoutPages/0')));
+      await assertFails(setDoc(doc(db, 'conversations/g/messages/m/fanoutPages/0'), { uids: ['peer'] }));
+      await assertFails(updateDoc(doc(db, 'conversations/g/messages/m'), { fanoutApplied: true, fanoutSummaryApplied: true }));
+    }
+  });
+
   it('allows only recipient to read/list pending invitations, nobody to forge responses', async () => {
     const peer = await asUser('peer'), other = await asUser('other'), owner = await asUser('owner');
     await assertSucceeds(getDoc(doc(peer, 'users/peer/groupInvitations/g')));
