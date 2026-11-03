@@ -24,6 +24,8 @@ vi.mock('react-i18next',()=>({useTranslation:()=>({t:(key:string)=>key})}));
 vi.mock('../src/hooks/useTransfer',()=>({useTransfer:()=>undefined}));
 vi.mock('../src/hooks/useCachedMediaUri',()=>({useCachedMediaUri:(m:Message)=>m.media?.localUri ?? m.media?.thumbnailURL ?? null}));
 vi.mock('../src/media/mediaCache',()=>({ensureCached:mocks.cache,retryDownload:vi.fn()}));
+vi.mock('../src/lib/saveMessageSticker',()=>({saveMessageSticker:vi.fn()}));
+vi.mock('../src/context/ThemeContext',()=>({useTheme:()=>({colors:{background:{surface:'#fff'},border:{subtle:'#ddd'},action:{primary:'#123'}}})}));
 vi.mock('../src/lib/userProfiles',()=>({useDisplayNames:()=>()=> 'Sender'}));
 vi.mock('../src/lib/conversations',()=>({REACTION_EMOJIS:[]}));
 vi.mock('../src/localdb',()=>({}));

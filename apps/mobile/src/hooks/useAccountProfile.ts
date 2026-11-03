@@ -18,11 +18,17 @@ export function useAccountProfile(uid: string | null) {
     void AsyncStorage.getItem(key).then(value => {
       if (current() && !live && value === '1') setState({ uid, profileCompleted: true, userTheme: null });
     }).catch(() => {});
-    const unsubscribe = onSnapshot(doc(db, 'users', uid), snapshot => {
+    const unsubscribe = onSnapshot(doc(db, 'users', uid), { includeMetadataChanges: true }, snapshot => {
       if (!current()) return;
-      live = true;
       const data = snapshot.data();
       const done = snapshot.exists() && data?.profileCompleted === true;
+      // An empty/incomplete local Firestore cache is not proof that this
+      // account needs onboarding. Keep the persisted completion result usable
+      // offline, including when its AsyncStorage read finishes after this event.
+      // Listen for metadata changes so an identical server-confirmed missing
+      // document still replaces that offline fallback when connectivity returns.
+      if (snapshot.metadata.fromCache && !done) return;
+      live = true;
       const theme = data?.preferredTheme;
       setState({ uid, profileCompleted: done, userTheme: theme === 'light' || theme === 'dark' || theme === 'system' ? theme : null });
       void AsyncStorage.setItem(key, done ? '1' : '0').catch(() => {});

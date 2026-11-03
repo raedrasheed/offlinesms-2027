@@ -7,14 +7,14 @@
 // pull-to-refresh.
 
 import { useCallback, useMemo, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, ScrollView, RefreshControl, Alert } from 'react-native';
+import { View, Text, Pressable, StyleSheet, ScrollView, RefreshControl, Alert, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { auth } from '../lib/firebase';
-import { useDisplayNames, useDisplayName } from '../lib/userProfiles';
+import { useDisplayNames, useDisplayName, useUserProfiles } from '../lib/userProfiles';
 import { useTheme } from '../context/ThemeContext';
 import { isRTL } from '../i18n';
 import {
@@ -47,6 +47,8 @@ export default function Status({ navigation }: any) {
   const insets = useSafeAreaInsets();
   // My own avatar initials: the live profile name (not the auth record).
   const myName = useDisplayName(auth.currentUser?.uid, { snapshot: auth.currentUser?.displayName });
+  const myProfiles = useUserProfiles(auth.currentUser?.uid ? [auth.currentUser.uid] : []);
+  const myPhoto = myProfiles[auth.currentUser?.uid ?? '']?.photoURL ?? auth.currentUser?.photoURL;
   const s = buildStyles(colors, isRTL);
 
   const [mine, setMine] = useState<MyStatus[]>([]);
@@ -55,8 +57,8 @@ export default function Status({ navigation }: any) {
 
   useFocusEffect(useCallback(() => subscribeMyStatuses(setMine), []));
 
-  const loadFeed = useCallback(async () => {
-    try { setFeed(await fetchStatusFeed()); }
+  const loadFeed = useCallback(async (force = false) => {
+    try { setFeed(await fetchStatusFeed(force)); }
     catch { setFeed(prev => prev ?? []); }
   }, []);
 
@@ -64,7 +66,7 @@ export default function Status({ navigation }: any) {
 
   async function onRefresh() {
     setRefreshing(true);
-    try { await loadFeed(); } finally { setRefreshing(false); }
+    try { await loadFeed(true); } finally { setRefreshing(false); }
   }
 
   const groups = useMemo(() => groupStatusFeed(feed ?? []), [feed]);
@@ -101,11 +103,7 @@ export default function Status({ navigation }: any) {
   }
 
   function toViewerItems(items: { statusId: string; type: string; body: string; mediaUrl: string | null; durationMs: number | null; backgroundColor: string | null; createdAtMs: number }[]) {
-    return items.map(m => ({
-      statusId: m.statusId, type: m.type, body: m.body,
-      mediaUrl: m.mediaUrl, durationMs: m.durationMs,
-      backgroundColor: m.backgroundColor, createdAtMs: m.createdAtMs,
-    }));
+    return items.map(m => ({ ...m }));
   }
 
   function openMine() {
@@ -113,6 +111,8 @@ export default function Status({ navigation }: any) {
     navigation.navigate('StatusViewer', {
       title: t('status.myStatus'),
       isMine: true,
+      authorId: auth.currentUser?.uid,
+      authorPhotoURL: myPhoto,
       startIndex: 0,
       items: toViewerItems(mine),
     });
@@ -122,6 +122,8 @@ export default function Status({ navigation }: any) {
     navigation.navigate('StatusViewer', {
       title: authorLabel(g),
       isMine: false,
+      authorId: g.authorId,
+      authorPhotoURL: g.authorPhotoURL,
       startIndex: g.startIndex,
       items: toViewerItems(g.items),
     });
@@ -131,7 +133,7 @@ export default function Status({ navigation }: any) {
     return (
       <Pressable key={g.authorId} style={s.row} onPress={() => openGroup(g)}>
         <View style={[s.ring, { borderColor: unviewed ? colors.action.primary : colors.border.default }]}>
-          <View style={s.av}><Text style={s.avText}>{initials(authorLabel(g))}</Text></View>
+          {g.authorPhotoURL ? <Image source={{ uri: g.authorPhotoURL }} style={s.av} /> : <View style={s.av}><Text style={s.avText}>{initials(authorLabel(g))}</Text></View>}
         </View>
         <View style={{ flex: 1 }}>
           <Text style={s.title} numberOfLines={1}>{authorLabel(g)}</Text>
@@ -147,6 +149,7 @@ export default function Status({ navigation }: any) {
     <View style={s.root}>
       <View style={s.header}>
         <Text style={s.h1}>{t('status.title')}</Text>
+        <Pressable onPress={() => navigation.navigate('SocialActivity')} accessibilityRole="button" accessibilityLabel={t('settings.notifications')} hitSlop={10}><Ionicons name="notifications-outline" size={25} color={colors.text.primary} /></Pressable>
       </View>
 
       <ScrollView
@@ -156,7 +159,7 @@ export default function Status({ navigation }: any) {
         <Pressable style={s.myRow} onPress={openMine}>
           <View style={s.myAvatarWrap}>
             <View style={[s.ring, latestMine ? { borderColor: colors.action.primary } : { borderColor: 'transparent' }]}>
-              <View style={s.av}><Text style={s.avText}>{initials(myName)}</Text></View>
+              {myPhoto ? <Image source={{ uri: myPhoto }} style={s.av} /> : <View style={s.av}><Text style={s.avText}>{initials(myName)}</Text></View>}
             </View>
             <Pressable style={s.plusBadge} onPress={openComposer} hitSlop={8}>
               <Ionicons name="add" size={14} color="#fff" />
@@ -211,7 +214,7 @@ export default function Status({ navigation }: any) {
 function buildStyles(colors: any, rtl: boolean) {
   return StyleSheet.create({
     root:   { flex: 1, backgroundColor: colors.background.app },
-    header: { paddingHorizontal: 16, paddingTop: 50, paddingBottom: 14, backgroundColor: colors.background.surface, borderBottomWidth: 1, borderColor: colors.border.subtle },
+    header: { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 50, paddingBottom: 14, backgroundColor: colors.background.surface, borderBottomWidth: 1, borderColor: colors.border.subtle },
     h1:     { fontSize: 24, fontWeight: '800', color: colors.text.primary, textAlign: rtl ? 'right' : 'left' },
 
     myRow:  { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 14, paddingHorizontal: 16, paddingVertical: 14, backgroundColor: colors.background.surface, marginTop: 8 },

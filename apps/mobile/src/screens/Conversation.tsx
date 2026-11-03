@@ -49,8 +49,12 @@ import { SyncStatusBanner } from '../components/chat/SyncStatusBanner';
 import { perfBegin, perfObserve, perfNow } from '../lib/perf';
 import { getDraft, setDraft as persistDraft, clearDraft } from '../lib/drafts';
 import { useLocalConversation } from '../hooks/useLocalConversation';
+import { useConversationVisibility } from '../hooks/useConversationVisibility';
+import { useConversationViewport } from '../hooks/useConversationViewport';
+import { useStatusRings } from '../hooks/useStatusRings';
+import { dismissConversationNotifications } from '../lib/notifications';
 import { useMessagePersistence } from '../hooks/useLocalPersistence';
-import { queueSendMessage, queueEditMessage, queueMarkReceipt, retryMediaMessage, queueSendVoiceMessage, queueSendAttachment, openLocalDb, kickSync, retryQueuedMessage } from '../localdb';
+import { queueSendMessage, queueEditMessage, queueMarkReceipt, retryMediaMessage, queueSendVoiceMessage, queueSendAttachment, openLocalDb, kickSync, retryQueuedMessage, notificationTargets } from '../localdb';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import { prefetchMedia } from '../media/mediaCache';
@@ -134,6 +138,7 @@ export default function Conversation({ route, navigation }: any) {
   const insets = useSafeAreaInsets();
   const { id, sharedText, messageId: focusMessageId } = route.params as { id: string; sharedText?: string; messageId?: string };
   const me = auth.currentUser?.uid ?? '';
+  const conversationVisible = useConversationVisibility(id, screenFocused);
   const { isOffline, enqueue, queuedFor, deliveredFor, deliveredNonce } = useOffline();
   const wallpaper = useWallpaper(id);
   const wallpaperUri = wallpaper.type === 'custom' ? wallpaper.uri : undefined;
@@ -151,12 +156,7 @@ export default function Conversation({ route, navigation }: any) {
   // image from the preview screen) so the optimistic bubble shows immediately.
   const refreshRef = useRef(local.refresh);
   useEffect(() => { refreshRef.current = local.refresh; });
-  useEffect(() => navigation.addListener('focus', () => {
-    refreshRef.current?.();
-    // Land on the latest message whenever the chat is opened/re-focused.
-    // The list is inverted, so the latest message is at offset 0 (the bottom).
-    requestAnimationFrame(() => listRef.current?.scrollToOffset?.({ offset: 0, animated: false }));
-  }), [navigation]);
+  useEffect(() => { if (conversationVisible) refreshRef.current?.(); }, [conversationVisible, id]);
 
   const [msgs, setMsgs] = useState<Message[] | null>(null);
   const [draft, setDraft] = useState('');
@@ -164,13 +164,26 @@ export default function Conversation({ route, navigation }: any) {
   const [err, setErr] = useState<string | null>(null);
 
   const [convo, setConvo] = useState<ConversationDoc | null | undefined>(undefined);
+  const serverNewestId = convo?.id === id ? convo.lastMessage?.messageId : undefined;
   const [peerName, setPeerName] = useState<string>(() => t('names.chat'));
   const [peerUsername, setPeerUsername] = useState<string | null>(null);
   const [peerUid, setPeerUid] = useState<string | null>(null);
+  const { groups: statusGroups } = useStatusRings();
+  const peerStories = peerUid ? statusGroups[peerUid] : undefined;
   const [iBlockedPeer, setIBlockedPeer] = useState(false);
   const [myRole, setMyRole] = useState<GroupRole | null>(null);
   const [memberStatus, setMemberStatus] = useState<'active' | 'removed' | 'left' | 'unknown'>('unknown');
   const [userState, setUserState] = useState<UserState | null>(null);
+
+  useEffect(() => {
+    const latestId = serverNewestId;
+    if (conversationVisible && useLocal && latestId) {
+      // Opening from the inbox after a background push has no tap payload.
+      // Fetch the known latest row directly instead of waiting behind history
+      // catch-up or the realtime connection; existing cached rows stay visible.
+      void notificationTargets.request(id, latestId).catch(() => {});
+    }
+  }, [conversationVisible, useLocal, id, serverNewestId]);
 
   const [replyTo, setReplyTo] = useState<ReplyTo | null>(null);
   const [editing, setEditing] = useState<{ messageId: string; originalText: string } | null>(null);
@@ -185,17 +198,11 @@ export default function Conversation({ route, navigation }: any) {
   const [selectedMentions, setSelectedMentions] = useState<Array<{ userId: string; displayName: string }>>([]);
 
   const listRef = useRef<FlatList<Message>>(null);
-  // Scroll bookkeeping for the inverted list. "bottom" (latest) is offset 0;
-  // nearBottomRef tracks whether we're there so we only auto-jump for genuinely
-  // NEW newest messages — never when older history loads at the top.
-  const nearBottomRef = useRef(true);
-  const lastBottomIdRef = useRef<string | null>(null);
   const dataLenRef = useRef(0); // total rendered rows (messages + queued), for jumpTo index math
   // Incoming messages we've already queued read/delivered receipts for, so we
   // don't re-enqueue (and re-kick the outbox) for the whole history on every
   // refresh/pagination — that was flooding the outbox with mark_receipt items.
   const receiptedRef = useRef<Set<string>>(new Set());
-  const [showScrollDown, setShowScrollDown] = useState(false);
 
   // Conversation doc. Firestore hands us a fresh object on every snapshot —
   // even when nothing actually changed for this screen (e.g. lastMessage
@@ -429,8 +436,8 @@ export default function Conversation({ route, navigation }: any) {
   // Apply local hide.
   const visibleMsgs = useMemo(() => {
     if (!effectiveMsgs) return null;
-    return effectiveMsgs.filter(m => !deletedForMe.has(m.id));
-  }, [effectiveMsgs, deletedForMe]);
+    return effectiveMsgs.filter(m => m.conversationId === id && !deletedForMe.has(m.id));
+  }, [effectiveMsgs, deletedForMe, id]);
 
   const visibleMediaIdsRef = useRef(new Set<string>());
   const visibleMsgsRef = useRef(visibleMsgs);
@@ -880,7 +887,7 @@ export default function Conversation({ route, navigation }: any) {
     }
   }
 
-  const s = buildStyles(colors, isRTL);
+  const s = useMemo(() => buildStyles(colors, isRTL), [colors, isRTL]);
 
   const headerSubtitle = useMemo(() => {
     const groupFallback = convo?.memberCount
@@ -917,31 +924,55 @@ export default function Conversation({ route, navigation }: any) {
     return [...visibleMsgs, ...queuedItems];
   }, [visibleMsgs, queuedItems]);
 
-  // Load older history when the user scrolls near the top. The list is NOT
-  // inverted (oldest at top, newest at bottom), so "older" lives at the top.
+  // Load older history when the user scrolls near the visual top.
   // local.loadOlder grows the local window and, when local history is
   // exhausted, back-fills from Firestore — so evicted/older messages return.
   // Inverted list: newest is at the top of the data array (index 0) and the
   // bottom of the screen (scroll offset 0).
   const invData = useMemo(() => data.slice().reverse(), [data]);
+  const viewport = useConversationViewport({
+    conversationId: id, uid: me, active: conversationVisible, focused: screenFocused,
+    rows: invData, focusMessageId, list: listRef,
+    consumeFocus: messageId => {
+      // A notification target is a one-time navigation intent, not a saved
+      // history anchor that should be replayed whenever this screen reopens.
+      if (route.params?.messageId === messageId) navigation.setParams({ messageId: undefined });
+    },
+  });
+  const { onScroll: onListScroll, scrollToBottom, showScrollDown, highlightId } = viewport;
 
   // Native viewability controls receipts and prefetch, not the entire history.
-  const viewContext = useRef({ id, me, useLocal, newestId: invData[0]?.id });
-  viewContext.current = { id, me, useLocal, newestId: invData[0]?.id };
+  const viewContext = useRef({ id, me, useLocal, newestId: invData[0]?.id, active: conversationVisible,
+    serverNewestId, live: local.live, onVisible: viewport.onVisible });
+  viewContext.current = { id, me, useLocal, newestId: invData[0]?.id, active: conversationVisible,
+    serverNewestId, live: local.live, onVisible: viewport.onVisible };
   const readNewestRef = useRef('');
-  useEffect(() => { receiptedRef.current.clear(); readNewestRef.current = ''; }, [id, me]);
+  const lastViewableRef = useRef<Array<{ item: any; isViewable: boolean }>>([]);
+  useEffect(() => { receiptedRef.current.clear(); readNewestRef.current = ''; lastViewableRef.current = []; }, [id, me]);
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 60, minimumViewTime: 150 }).current;
   const onViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: Array<{ item: any; isViewable: boolean }> }) => {
     const ctx = viewContext.current;
-    const visible = viewableItems.filter(v => v.isViewable).map(v => v.item);
+    lastViewableRef.current = viewableItems;
+    const visible = viewableItems.filter(v => v.isViewable && v.item.conversationId === ctx.id).map(v => v.item);
     const locations=new Set<string>(visible.filter(m=>(m.type==='location' || m.type==='clip') && !m.deletedForEveryone).map(m=>m.id));
     setVisibleLocationIds(previous=>previous.size===locations.size && [...locations].every(id=>previous.has(id))?previous:locations);
     visibleMediaIdsRef.current = new Set(visible.map(m => m.id));
     perfObserve(visible.map(m => m.id), 'viewable');
     prefetchMedia(visible);
-    if (!ctx.id || !ctx.me) return;
+    if (!ctx.id || !ctx.me || !ctx.active) return;
+    const visibleIds = visible.map(m => m.id);
+    ctx.onVisible(visibleIds);
+    const latestVisible = visibleIds.includes(ctx.newestId);
+    // Cached rows may predate the notification. Do not clear all notices or
+    // mark the entire chat read until the known server newest row is visible.
+    const caughtUp = ctx.serverNewestId === ctx.newestId || (!ctx.serverNewestId && (!ctx.useLocal || ctx.live === 'live'));
+    void dismissConversationNotifications(ctx.id, {
+      readAt: Date.now(),
+      ...(latestVisible && caughtUp ? {} : { messageIds: visibleIds }),
+      isActive: () => viewContext.current.active && viewContext.current.id === ctx.id,
+    });
     const readKey = `${ctx.id}/${ctx.newestId}`;
-    if (visible.some(m => m.id === ctx.newestId) && readNewestRef.current !== readKey) {
+    if (latestVisible && caughtUp && readNewestRef.current !== readKey) {
       readNewestRef.current = readKey;
       void markRead(ctx.id).catch(() => { if (readNewestRef.current === readKey) readNewestRef.current = ''; });
     }
@@ -957,6 +988,12 @@ export default function Conversation({ route, navigation }: any) {
       } else markReceipt(ctx.id, m.id, 'read');
     }
   }, []);
+  useEffect(() => {
+    if (!conversationVisible) { readNewestRef.current = ''; return; }
+    // Native viewability may not fire again when an already-mounted screen
+    // regains focus, or when only its server watermark changes.
+    onViewableItemsChanged({ viewableItems: lastViewableRef.current });
+  }, [conversationVisible, id, invData[0]?.id, serverNewestId, local.live, onViewableItemsChanged]);
 
   // Timing (test builds, src/lib/perf.ts): the same screen-level points as the
   // baseline build — open → first rows, and every render reports its ids so
@@ -970,13 +1007,6 @@ export default function Conversation({ route, navigation }: any) {
   }, [invData]);
   useEffect(() => { dataLenRef.current = data.length; }, [data]);
 
-  const onListScroll = useCallback((e: any) => {
-    // Inverted: the bottom (latest) is offset 0; away from it → show the button.
-    const nearBottom = e.nativeEvent.contentOffset.y <= 80;
-    nearBottomRef.current = nearBottom;
-    setShowScrollDown(prev => (prev === !nearBottom ? prev : !nearBottom));
-  }, []);
-
   // Pagination: onEndReached fires near the visual TOP in an inverted list.
   // Depends on the STABLE loadOlder (not the whole `local` object), so the
   // memoised list body isn't rebuilt on every render.
@@ -988,51 +1018,6 @@ export default function Conversation({ route, navigation }: any) {
     perfBegin('older_to_visible', { minCount: rendered.length + 1, lastNot: rendered[rendered.length - 1] });
     loadOlder();
   }, [useLocal, loadOlder]);
-
-  // Notification deep link: once the target message is on screen, scroll to it
-  // and briefly highlight it. Runs once per target.
-  const [highlightId, setHighlightId] = useState<string | null>(null);
-  const focusedRef = useRef<string | null>(null);
-  useEffect(() => {
-    const f = local.focus;
-    if (!f || f.state !== 'ready' || focusedRef.current === f.messageId) return;
-    const idx = invData.findIndex((m: any) => m.id === f.messageId);
-    if (idx < 0) return;
-    focusedRef.current = f.messageId;
-    setHighlightId(f.messageId);
-    requestAnimationFrame(() => {
-      if (idx === 0) listRef.current?.scrollToOffset?.({ offset: 0, animated: true });
-      else listRef.current?.scrollToIndex?.({ index: idx, animated: true, viewPosition: 0.5 });
-    });
-    const h = setTimeout(() => setHighlightId(null), 2500);
-    return () => clearTimeout(h);
-  }, [local.focus, invData]);
-
-  const scrollToBottom = useCallback(() => {
-    // One reliable jump — offset 0 is the latest message in an inverted list.
-    listRef.current?.scrollToOffset?.({ offset: 0, animated: true });
-    nearBottomRef.current = true;
-    setShowScrollDown(false);
-  }, []);
-
-  // Jump to the bottom only for genuinely new newest messages: ones I sent, or
-  // incoming ones while I'm already near the bottom. If I'm reading older
-  // messages, leave my position alone and surface the scroll-to-latest button.
-  useEffect(() => {
-    if (!data.length) return;
-    const last = data[data.length - 1]; // chronological newest
-    const lastId: string | null = last?.id ?? null;
-    if (lastBottomIdRef.current === lastId) return; // older loaded → not a new bottom msg
-    const prev = lastBottomIdRef.current;
-    lastBottomIdRef.current = lastId;
-    if (prev == null) return; // first population — inverted list already sits at the bottom
-    const mine = last?.senderUid === me || (last as any)?.senderId === me;
-    if (mine || nearBottomRef.current) {
-      requestAnimationFrame(() => listRef.current?.scrollToOffset?.({ offset: 0, animated: true }));
-    } else {
-      setShowScrollDown(true);
-    }
-  }, [data, me]);
 
   const body = useMemo(() => {
     if (visibleMsgs === null) return <LoadingState fullPage title="Loading messages…" />;
@@ -1049,7 +1034,7 @@ export default function Conversation({ route, navigation }: any) {
         <Text style={s.emptyName}>{peerName}</Text>
         {peerUsername ? <Text style={s.emptyHandle}>@{peerUsername}</Text> : null}
         <View style={s.e2eNotice}>
-          <Ionicons name="lock-closed" size={12} color="#92400E" />
+          <Ionicons name="lock-closed" size={12} color={colors.notice.title} />
           <Text style={s.e2eText}>Messages here are end-to-end encrypted</Text>
         </View>
         <Text style={s.emptyNudge}>Say hi — your first message will start the chat.</Text>
@@ -1072,7 +1057,7 @@ export default function Conversation({ route, navigation }: any) {
         ListFooterComponent={
           <View style={s.listHeader}>
             <View style={s.e2eBanner}>
-              <Ionicons name="lock-closed" size={12} color="#92400E" />
+              <Ionicons name="lock-closed" size={12} color={colors.notice.title} />
               <Text style={s.e2eBannerText}>Messages and calls are end-to-end encrypted</Text>
             </View>
           </View>
@@ -1080,6 +1065,7 @@ export default function Conversation({ route, navigation }: any) {
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={viewabilityConfig}
         onScroll={onListScroll}
+        onLayout={viewport.onLayout}
         scrollEventThrottle={64}
         // Page in older history when the user nears the top of the inverted list.
         onEndReached={onReachOlder}
@@ -1183,7 +1169,7 @@ export default function Conversation({ route, navigation }: any) {
         }}
       />
     );
-  }, [invData, visibleMsgs, queuedItems, me, isGroup, id, myRoleIsAdmin, starred, convo?.pinnedMessage, convo?.memberCount, reactorNames, useLocal, startReply, startEdit, startForward, openClip, jumpTo, openInfo, openImage, retryMedia, onPlayedVoice, onSendViaSms, onAvatarPress, onListScroll, onReachOlder, t, isOffline, retrySend, highlightId, screenFocused, visibleLocationIds]);
+  }, [invData, visibleMsgs, queuedItems, me, isGroup, id, myRoleIsAdmin, starred, convo?.pinnedMessage, convo?.memberCount, reactorNames, useLocal, startReply, startEdit, startForward, openClip, jumpTo, openInfo, openImage, retryMedia, onPlayedVoice, onSendViaSms, onAvatarPress, onListScroll, onReachOlder, t, isOffline, retrySend, highlightId, screenFocused, visibleLocationIds, viewport.onLayout, s, colors.notice.title]);
 
   return (
     <KeyboardAvoidingView behavior="padding" style={s.root}>
@@ -1199,14 +1185,23 @@ export default function Conversation({ route, navigation }: any) {
         >
           <Text style={s.back}>{isRTL ? '›' : '‹'}</Text>
         </Pressable>
-        <Pressable
-          style={s.headerInfo}
-          onPress={() => { if (isGroup) navigation.navigate('GroupInfo', { id }); }}
-          accessible={true}
-          accessibilityRole={isGroup ? 'button' : 'text'}
-          accessibilityLabel={isGroup ? `${peerName}, ${t('group.info')}` : peerName}
-        >
-          <View style={s.headerAvatarWrap}>
+        <View style={s.headerInfo}>
+          <Pressable
+            style={[s.headerAvatarWrap, !isGroup && peerStories && {
+              borderWidth: 2, borderColor: peerStories.unviewedCount ? colors.action.primary : colors.text.muted,
+              borderRadius: 24, padding: 2, width: 48, height: 48,
+            }]}
+            accessibilityRole="button"
+            accessibilityLabel={!isGroup && peerStories ? t('status.viewStatus', { defaultValue: 'View status' }) : peerName}
+            onPress={() => {
+              if (!isGroup && peerStories) navigation.navigate('StatusViewer', {
+                title: peerStories.authorName, authorId: peerStories.authorId,
+                authorPhotoURL: peerStories.authorPhotoURL, items: peerStories.items, startIndex: peerStories.startIndex,
+              });
+              else if (isGroup) navigation.navigate('GroupInfo', { id });
+              else if (peerUid) onAvatarPress(peerUid);
+            }}
+          >
             {headerPhoto ? (
               <Image source={{ uri: headerPhoto }} style={s.headerAvatar} />
             ) : (
@@ -1215,12 +1210,13 @@ export default function Conversation({ route, navigation }: any) {
               </View>
             )}
             {!isGroup && presence.online ? <View style={s.onlineDot} /> : null}
-          </View>
-          <View style={{ flex: 1 }}>
+          </Pressable>
+          <Pressable style={{ flex: 1 }} accessibilityRole="button" accessibilityLabel={peerName}
+            onPress={() => { if (isGroup) navigation.navigate('GroupInfo', { id }); else if (peerUid) onAvatarPress(peerUid); }}>
             <Text style={s.title} numberOfLines={1}>{peerName}</Text>
             {headerSubtitle ? <Text style={s.subtitle}>{headerSubtitle}</Text> : null}
-          </View>
-        </Pressable>
+          </Pressable>
+        </View>
         <Pressable
           onPress={() => navigation.navigate('ChatWallpaper', { conversationId: id })}
           hitSlop={10}
@@ -1543,8 +1539,8 @@ function buildStyles(colors: any, rtl: boolean) {
     emptyAvatarText:{ color: '#fff', fontSize: 34, fontWeight: '800' },
     emptyName:     { fontSize: 20, fontWeight: '800', color: colors.text.primary, textAlign: 'center' },
     emptyHandle:   { fontSize: 13, color: colors.text.muted, textAlign: 'center' },
-    e2eNotice:     { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FBEFD0', paddingHorizontal: 14, paddingVertical: 9, borderRadius: 14, marginTop: 16 },
-    e2eText:       { fontSize: 12, color: '#92400E' },
+    e2eNotice:     { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.notice.background, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 14, marginTop: 16 },
+    e2eText:       { fontSize: 12, color: colors.notice.text },
     emptyNudge:    { fontSize: 13, color: colors.text.muted, textAlign: 'center', marginTop: 14, lineHeight: 19 },
     header:   { paddingTop: 50, paddingBottom: 12, paddingHorizontal: 14, backgroundColor: colors.background.surface, flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 10, zIndex: 2, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 4 },
     back:     { fontSize: 24, color: colors.action.primary, minWidth: 28, textAlign: 'center' },
@@ -1562,21 +1558,21 @@ function buildStyles(colors: any, rtl: boolean) {
     focusHighlight: { backgroundColor: 'rgba(31,123,168,0.16)', borderRadius: 12 },
     datePill:   { backgroundColor: colors.background.surface, paddingHorizontal: 14, paddingVertical: 5, borderRadius: 999, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 3, shadowOffset: { width: 0, height: 1 }, elevation: 1 },
     datePillText: { fontSize: 12, fontWeight: '700', color: colors.text.muted },
-    e2eBanner:  { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FBEFD0', paddingHorizontal: 14, paddingVertical: 9, borderRadius: 14, maxWidth: '88%' },
-    e2eBannerText: { fontSize: 12, color: '#92400E', textAlign: 'center', flexShrink: 1 },
-    pinBanner: { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 10, paddingVertical: 8, paddingHorizontal: 14, backgroundColor: '#FEF3C7', borderBottomWidth: 1, borderColor: '#F59E0B' },
+    e2eBanner:  { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.notice.background, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 14, maxWidth: '88%' },
+    e2eBannerText: { fontSize: 12, color: colors.notice.text, textAlign: 'center', flexShrink: 1 },
+    pinBanner: { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 10, paddingVertical: 8, paddingHorizontal: 14, backgroundColor: colors.notice.background, borderBottomWidth: 1, borderColor: colors.notice.border },
     pinIcon:   { fontSize: 16 },
-    pinTitle:  { fontSize: 11, fontWeight: '700', color: '#A16207', textAlign: rtl ? 'right' : 'left' },
-    pinPreview:{ fontSize: 12, color: colors.text.primary, marginTop: 2, textAlign: rtl ? 'right' : 'left' },
-    pinClose:  { fontSize: 18, color: '#A16207', fontWeight: '700', paddingHorizontal: 4, minWidth: 32, minHeight: 32, textAlignVertical: 'center', textAlign: 'center' },
+    pinTitle:  { fontSize: 11, fontWeight: '700', color: colors.notice.title, textAlign: rtl ? 'right' : 'left' },
+    pinPreview:{ fontSize: 12, color: colors.notice.text, marginTop: 2, textAlign: rtl ? 'right' : 'left' },
+    pinClose:  { fontSize: 18, color: colors.notice.title, fontWeight: '700', paddingHorizontal: 4, minWidth: 32, minHeight: 32, textAlignVertical: 'center', textAlign: 'center' },
     // @mention suggestion list above the composer (capped height; scrolls within).
     mentionList:    { marginHorizontal: 12, marginBottom: 6, maxHeight: 260, backgroundColor: colors.background.surface, borderRadius: 16, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 12, shadowOffset: { width: 0, height: 3 }, elevation: 6 },
     mentionScroll:  { maxHeight: 260 },
     mentionRow:     { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 11, backgroundColor: colors.background.surface },
-    mentionRowPressed: { backgroundColor: colors.surface2 },
+    mentionRowPressed: { backgroundColor: colors.background.subtle },
     // Light-gray separator with a soft drop shadow so it reads as a raised "3D"
     // divider rather than a flat hairline.
-    mentionDivider: { height: 1, backgroundColor: '#E2E6EB', marginHorizontal: 12, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 1.5, shadowOffset: { width: 0, height: 1 }, elevation: 2 },
+    mentionDivider: { height: 1, backgroundColor: colors.border.subtle, marginHorizontal: 12, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 1.5, shadowOffset: { width: 0, height: 1 }, elevation: 2 },
     composerMentionText: { color: colors.action.primary, fontWeight: '800' },
     mentionAvatar:  { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
     mentionAvatarImg:  { width: 42, height: 42, borderRadius: 21 },
@@ -1612,7 +1608,7 @@ function buildStyles(colors: any, rtl: boolean) {
     // changes child index across the idle↔recording transition (which would
     // drop the active gesture responder). Just hide it when not recording.
     lockPillHidden: { opacity: 0 },
-    gate:     { padding: 16, paddingBottom: 28, backgroundColor: '#EAF2FB', borderTopWidth: 1, borderColor: colors.border.subtle },
+    gate:     { padding: 16, paddingBottom: 28, backgroundColor: colors.background.subtle, borderTopWidth: 1, borderColor: colors.border.subtle },
     gateText: { fontSize: 12, color: colors.text.muted, textAlign: 'center' },
     gateAction: { marginTop: 10, alignSelf: 'center', paddingHorizontal: 20, paddingVertical: 9, borderRadius: 999, backgroundColor: colors.action.primary },
     gateActionText: { fontSize: 13, fontWeight: '800', color: colors.action.primaryFg },

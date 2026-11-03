@@ -13,13 +13,25 @@ let stopNet: (() => void) | null = null;
 let stopConn: (() => void) | null = null;
 let appStateSub: { remove: () => void } | null = null;
 let activeConversationId: string | undefined;
+let activeConversationOwner: symbol | undefined;
 
 export function setActiveConversation(id?: string): void {
+  activeConversationOwner = undefined;
   if (id === activeConversationId) return;
   activeConversationId = id;
   // Catch up the newly opened conversation (messages + members, which have no
   // realtime feeder) without waiting for the next foreground/timer tick.
   if (id) void syncNow('active-change', id);
+}
+
+/** A focused screen owns its registration; stale stack cleanup cannot clear another screen. */
+export function activateConversation(id: string): () => void {
+  const owner = Symbol(id);
+  setActiveConversation(id);
+  activeConversationOwner = owner;
+  return () => {
+    if (activeConversationOwner === owner) setActiveConversation(undefined);
+  };
 }
 
 /** The conversation the user is currently viewing (for foreground push
@@ -62,6 +74,7 @@ export function stopScheduler(): void {
   stopConn?.(); stopConn = null;
   appStateSub?.remove(); appStateSub = null;
   activeConversationId = undefined;
+  activeConversationOwner = undefined;
 }
 
 /** Kick a sync immediately, e.g. right after enqueuing an outbox item. */

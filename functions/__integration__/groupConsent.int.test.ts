@@ -14,7 +14,7 @@ import { sendTextMessage } from '../src/chats/sendTextMessage';
 import { previewSmsEscalation } from '../src/sms/previewEscalation';
 beforeEach(async () => {
   await resetEmulators();
-  for (const uid of ['owner','peer','other']) await db().doc(`users/${uid}`).set({ displayName: uid, status: 'active' });
+  for (const uid of ['owner','peer','other']) await db().doc(`users/${uid}`).set({ displayName: uid, username: uid, usernameLower: uid, status: 'active' });
 });
 async function create() { return (await createGroup.run(req('owner', { name: 'Consent', memberUids: ['peer'] }))).conversationId; }
 const respond = (uid: string, cid: string, accept: boolean) => respondToGroupInvitation.run(req(uid, { conversationId: cid, accept }));
@@ -75,6 +75,28 @@ describe('recipient-controlled membership', () => {
       await approveGroupJoinRequest.run(req('owner', { conversationId: cid, requestId: 'other' }));
     } else expect(result.status).toBe('joined');
     expect((await db().doc(`conversations/${cid}`).get()).get('memberCount')).toBe(301);
+    expect((await db().doc(`conversations/${cid}/members/other`).get()).get('status')).toBe('active');
+  });
+  it.each(['open', 'approval_required'] as const)('resumes the same %s invitation after completing a missing username', async joinMode => {
+    const cid = await create();
+    await db().doc('users/other').set({ displayName: 'Other', status: 'active' });
+    const link = await createOrUpdateGroupInviteLink.run(req('owner', { conversationId: cid, enabled: true, joinMode }));
+    const join = () => joinGroupByInviteLink.run(req('other', { inviteCode: link.inviteCode }));
+
+    await expect(join()).rejects.toMatchObject({
+      code: 'failed-precondition', message: 'username-required', details: { reason: 'username-required' },
+    });
+    expect((await db().doc(`conversations/${cid}/members/other`).get()).exists).toBe(false);
+    expect((await db().doc(`conversations/${cid}/joinRequests/other`).get()).exists).toBe(false);
+    expect((await db().doc(`conversations/${cid}`).get()).get('participantUids')).toEqual(['owner']);
+
+    await db().doc('users/other').update({ username: 'other', usernameLower: 'other' });
+    expect(await join()).toMatchObject({ status: joinMode === 'open' ? 'joined' : 'pending' });
+    if (joinMode === 'approval_required') {
+      expect((await db().doc(`conversations/${cid}/members/other`).get()).exists).toBe(false);
+      await approveGroupJoinRequest.run(req('owner', { conversationId: cid, requestId: 'other' }));
+    }
+    expect((await db().doc(`conversations/${cid}`).get()).get('memberCount')).toBe(2);
     expect((await db().doc(`conversations/${cid}/members/other`).get()).get('status')).toBe('active');
   });
   it('adds an external SMS recipient to a group already above 256 registered members', async () => {

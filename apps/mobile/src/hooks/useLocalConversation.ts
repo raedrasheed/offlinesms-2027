@@ -21,7 +21,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LOCAL_FIRST_CONVERSATION_ENABLED } from '../config/features';
 import {
-  openLocalDb, initLocalDb, messagesRepo, setActiveConversation, clearChat, getChatClearedAt,
+  openLocalDb, initLocalDb, messagesRepo, clearChat, getChatClearedAt,
   notificationTargets, type TargetState,
 } from '../localdb';
 import { startConversationFeeder } from '../localdb/sync/conversationFeeder';
@@ -151,7 +151,6 @@ export function useLocalConversation(
       },
       startLive: () => {
         // The first saved-message read is already queued before network work.
-        setActiveConversation(conversationId);
         let stopFeeder: () => void = () => {};
         const restart = () => {
           if (cancelled) return;
@@ -222,7 +221,6 @@ export function useLocalConversation(
       stopOpen();
       stopConn();
       stopLocal();
-      setActiveConversation(undefined);
     };
   }, [enabled, uid, conversationId, runner, revealFocus, lifecycle]);
 

@@ -20,6 +20,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: '/admin/groups',        label: 'Groups',        icon: MessageCircle, capability: 'view:groups' },
   { href: '/admin/communities',   label: 'Communities',   icon: Globe,        capability: 'view:communities' },
   { href: '/admin/clips',         label: 'Clips',        icon: Clapperboard, capability: 'view:clips' },
+  { href: '/admin/posts',         label: 'Posts',        icon: FileText, capability: 'manage:clips' },
   { href: '/admin/calls',         label: 'Calls',         icon: Phone,        capability: 'view:calls' },
   { href: '/admin/chats',         label: 'Chats',         icon: Inbox,        capability: 'view:groups' },
   { href: '/admin/sms',           label: 'SMS Gateway',   icon: Send,         capability: 'view:sms' },

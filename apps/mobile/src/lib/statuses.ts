@@ -13,7 +13,7 @@ import {
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { app, db, auth, storage } from './firebase';
-import type { StatusFeedItem, StatusType } from './statusModel';
+import type { StatusFeedItem, StatusType, StatusMention } from './statusModel';
 
 export type { StatusFeedItem, StatusType, AuthorStatusGroup } from './statusModel';
 export { groupStatusFeed } from './statusModel';
@@ -40,6 +40,8 @@ export type MyStatus = {
   viewCount:       number;
   createdAtMs:     number;
   expiresAtMs:     number;
+  mentions:       StatusMention[];
+  likeCount:      number;
 };
 
 function fn<T = unknown, R = unknown>(name: string) {
@@ -49,9 +51,10 @@ function fn<T = unknown, R = unknown>(name: string) {
 export async function createTextStatus(args: {
   body: string;
   backgroundColor: string;
+  mentionUids?: string[];
 }): Promise<string> {
   const res = await fn<
-    { type: 'text'; body: string; backgroundColor: string },
+    { type: 'text'; body: string; backgroundColor: string; mentionUids?: string[] },
     { statusId: string; expiresAtMs: number }
   >('createStatus')({ type: 'text', ...args });
   return res.data.statusId;
@@ -69,6 +72,7 @@ export async function createMediaStatus(args: {
   mimeType:   string;
   caption?:   string;
   durationMs?: number | null;
+  mentionUids?: string[];
 }): Promise<string> {
   const uid = auth.currentUser?.uid;
   if (!uid) throw new Error('sign-in-required');
@@ -91,17 +95,61 @@ export async function createMediaStatus(args: {
     mimeType:    args.mimeType,
     sizeBytes:   blob.size,
     durationMs:  args.type === 'video' ? args.durationMs ?? null : null,
+    mentionUids: args.mentionUids ?? [],
   });
   return out.data.statusId;
 }
 
-export async function fetchStatusFeed(): Promise<StatusFeedItem[]> {
-  const res = await fn<Record<string, never>, { items: StatusFeedItem[] }>('getStatusFeed')({});
-  return res.data.items ?? [];
+let cachedUid = '', cachedAt = 0, cachedFeed: StatusFeedItem[] = [];
+let pending: Promise<StatusFeedItem[]> | null = null;
+const feedListeners = new Set<() => void>();
+export function subscribeStatusFeedChanges(listener: () => void) { feedListeners.add(listener); return () => { feedListeners.delete(listener); }; }
+export function peekStatusFeed(): StatusFeedItem[] {
+  return cachedUid === auth.currentUser?.uid ? cachedFeed.filter(s => s.expiresAtMs > Date.now()) : [];
+}
+export async function fetchStatusFeed(force = false): Promise<StatusFeedItem[]> {
+  const uid = auth.currentUser?.uid ?? '';
+  if (!uid) return [];
+  if (cachedUid !== uid) { cachedUid = uid; cachedAt = 0; cachedFeed = []; pending = null; }
+  if (!force && cachedAt > Date.now() - 15_000) return peekStatusFeed();
+  if (pending) return pending;
+  const request = fn<Record<string, never>, { items: StatusFeedItem[] }>('getStatusFeed')({}).then(res => {
+    if (cachedUid !== uid || auth.currentUser?.uid !== uid) return [];
+    cachedFeed = res.data.items ?? []; cachedAt = Date.now(); feedListeners.forEach(fn => fn());
+    return peekStatusFeed();
+  }).finally(() => { if (pending === request) pending = null; });
+  pending = request;
+  return request;
 }
 
 export async function markStatusViewed(statusId: string): Promise<void> {
+  const uid = auth.currentUser?.uid;
   await fn<{ statusId: string }, { ok: true }>('markStatusViewed')({ statusId });
+  if (!uid || auth.currentUser?.uid !== uid || cachedUid !== uid) return;
+  cachedFeed = cachedFeed.map(s => s.statusId === statusId ? { ...s, viewedByMe: true } : s);
+  feedListeners.forEach(listener => listener());
+}
+
+export async function setStatusLike(statusId: string, liked: boolean) {
+  const uid = auth.currentUser?.uid;
+  const res = await fn<{ statusId: string; liked: boolean }, { liked: boolean; likeCount: number }>('setStatusLike')({ statusId, liked });
+  if (!uid || auth.currentUser?.uid !== uid || cachedUid !== uid) return res.data;
+  cachedFeed = cachedFeed.map(s => s.statusId === statusId ? { ...s, likedByMe: res.data.liked, likeCount: res.data.likeCount } : s);
+  feedListeners.forEach(listener => listener());
+  return res.data;
+}
+export type StatusViewerProfile = { uid: string; name: string; photoURL: string | null; viewedAtMs: number; liked: boolean };
+export async function listStatusViewers(statusId: string, after?: string) {
+  const res = await fn<{ statusId: string; after?: string }, { viewers: StatusViewerProfile[]; next: string | null }>('listStatusViewers')({ statusId, ...(after ? { after } : {}) });
+  return res.data;
+}
+export async function replyToStatus(statusId: string, text: string, localId: string) {
+  const res = await fn<{ statusId: string; text: string; localId: string }, { conversationId: string; messageId: string }>('replyToStatus')({ statusId, text, localId });
+  return res.data;
+}
+export async function getStatus(statusId: string) {
+  const res = await fn<{ statusId: string }, { item: StatusFeedItem; isMine: boolean }>('getStatus')({ statusId });
+  return res.data;
 }
 
 /** Author-direct delete — firestore.rules allows `authorId == uid`. */
@@ -136,6 +184,8 @@ export function subscribeMyStatuses(cb: (rows: MyStatus[]) => void) {
             viewCount:       s.viewCount ?? 0,
             createdAtMs:     s.createdAt?.toMillis?.() ?? 0,
             expiresAtMs:     s.expiresAt?.toMillis?.() ?? 0,
+            mentions:       Array.isArray(s.mentions) ? s.mentions : [],
+            likeCount:      s.likeCount ?? 0,
           } as MyStatus;
         })
         .filter(s => s.expiresAtMs > now)

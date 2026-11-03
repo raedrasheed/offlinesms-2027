@@ -10,7 +10,7 @@ import { isRTL } from '../../i18n';
 import { STICKER_PACKS, findSticker, stickerKey, parseStickerKey, type StickerDef } from '../../lib/stickers';
 import { createRecentStore } from '../../lib/recents';
 import { STICKER_SOURCES } from './stickerSources';
-import { customStickerUri, deleteCustomSticker, loadCustomStickers, type CustomSticker } from '../../lib/customStickers';
+import { customStickerUri, deleteCustomSticker, loadCustomStickers, subscribeCustomStickers, type CustomSticker } from '../../lib/customStickers';
 import { pickStickerImage, removeStickerTemp, type StickerSource } from '../../media/stickerImage';
 import { STICKER_LIBRARY_MAX } from '../../lib/stickerEditorModel';
 import { StickerEditor, type StickerEditorHandle } from './StickerEditor';
@@ -44,10 +44,12 @@ export function StickerPanel({ uid, onSend, customSendingAvailable = true }: { u
   const alive=useRef(true),importing=useRef(false);
   const editorRef=useRef<StickerEditorHandle>(null);
   useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
-  useEffect(() => { let active=true;
+  useEffect(() => { let active=true, changed=false;
+    setCustom([]);setRecents([]);setLibraryError(false);
+    const unsubscribe=subscribeCustomStickers(uid,value=>{changed=true;if(active){setCustom(value);setLibraryError(false);}});
     void recentStore(uid).load().then(value=>{if(active)setRecents(value);});
-    if(customSupported)void loadCustomStickers(uid).then(value=>{if(active)setCustom(value);}).catch(()=>{if(active)setLibraryError(true);});
-    return()=>{active=false;};
+    if(customSupported)void loadCustomStickers(uid).then(value=>{if(active&&!changed)setCustom(value);}).catch(()=>{if(active&&!changed)setLibraryError(true);});
+    return()=>{active=false;unsubscribe();};
   }, [uid]);
   useEffect(()=>()=>{if(editor && !editor.previous)void removeStickerTemp(editor.source.uri);},[editor]);
   async function createSticker() {

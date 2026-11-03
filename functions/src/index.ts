@@ -59,6 +59,12 @@ export { escalateOrgBatches } from './orgMessaging/escalateOrgBatches';
 // Status module — text statuses with audience + 24h expiry.
 export { createStatus }      from './statuses/createStatus';
 export { getStatusFeed }     from './statuses/getStatusFeed';
+export { getStatus, setStatusLike, listStatusViewers, replyToStatus } from './statuses/statusInteractions';
+export { listSocialActivity, markSocialActivityRead } from './social/activity';
+export {
+  createPost, getPost, listPosts, deletePost, setPostLike,
+  listPostComments, addPostComment, deletePostComment, reportPost, onPostRemoved,
+} from './social/posts';
 
 // Disappearing-message sweeper is implemented at
 // ./chats/sweepExpiredMessages but NOT exported here. Activation is

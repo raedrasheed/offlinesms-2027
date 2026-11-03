@@ -87,6 +87,7 @@ export function startChatListFeeder(uid: string, onChange: () => void): () => vo
         id: d.id,
         remote_id: d.id,
         type: isGroup ? 'group' as const : 'direct' as const,
+        participant_key: c.participantKey ?? null,
         title: isGroup ? (c.name ?? null) : null, // direct peer name resolved below
         // Groups carry their own avatar (Firestore `avatarUrl`); direct chats get
         // avatar_url from the peer-profile resolution step below.

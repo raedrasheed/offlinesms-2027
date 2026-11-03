@@ -44,7 +44,16 @@ export const lightSemantic = {
       success: colors.ok,
       warning: colors.warn,
       error:   colors.err,
+      errorText: '#B91C1C',
       info:    colors.primary,
+    },
+    // Paired foreground/background values for pinned messages and notices.
+    // A light fixed surface must never inherit the dark theme's white text.
+    notice: {
+      background: '#F3F7FA',
+      border: '#C5D6E0',
+      title: '#155E83',
+      text: '#243746',
     },
   },
 } as const;
@@ -86,7 +95,14 @@ export const darkSemantic = {
       success: colors.ok,
       warning: colors.warn,
       error:   colors.err,
+      errorText: '#FCA5A5',
       info:    colors.primaryTint,
+    },
+    notice: {
+      background: '#1B2C3B',
+      border: '#466174',
+      title: '#B9DFF1',
+      text: '#EDF4F8',
     },
   },
 } as const;

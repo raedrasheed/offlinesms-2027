@@ -26,10 +26,34 @@ export async function listConversations(filter: ConversationListFilter = {}): Pr
     params.push(`%${filter.search.trim().toLowerCase()}%`);
   }
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  return getDb().all<ConversationRow>(
+  const database = getDb();
+  const rows = await database.all<ConversationRow>(
     `SELECT * FROM conversations ${clause} ORDER BY last_message_at DESC NULLS LAST`,
     params,
   );
+  // Old installs can have message history without a parent summary. Inspect
+  // these candidates in one indexed SQL query before treating them as empty.
+  const missing = rows.filter(c => c.type === 'direct' && !c.last_message_id && !c.last_message_preview);
+  if (missing.length) {
+    const evidence = await database.all<{ conversation_id: string; message_id: string; created_at: number; preview: string | null }>(
+      `SELECT c.id AS conversation_id, COALESCE(m.remote_id, m.local_id, m.id) AS message_id,
+              m.created_at, m.preview
+       FROM conversations c JOIN messages m ON m.id = (
+         SELECT id FROM messages WHERE conversation_id = c.id AND deleted_for_me = 0
+         ORDER BY created_at DESC, id DESC LIMIT 1
+       ) WHERE c.id IN (${missing.map(() => '?').join(',')})`,
+      missing.map(c => c.id),
+    );
+    const byId = new Map(evidence.map(m => [m.conversation_id, m]));
+    for (const row of missing) {
+      const message = byId.get(row.id);
+      if (!message) continue;
+      row.last_message_id = message.message_id;
+      row.last_message_preview = message.preview;
+      row.last_message_at = message.created_at;
+    }
+  }
+  return rows;
 }
 
 export async function getConversation(id: string, database: LocalDatabase = getDb()): Promise<ConversationRow | null> {
@@ -66,6 +90,7 @@ export async function upsertRemoteConversation(c: Partial<ConversationRow> & { i
         type = COALESCE(?, type),
         title = COALESCE(?, title),
         avatar_url = COALESCE(?, avatar_url),
+        participant_key = COALESCE(?, participant_key),
         owner_uid = COALESCE(?, owner_uid),
         status = COALESCE(?, status),
         member_count = COALESCE(?, member_count),
@@ -77,7 +102,7 @@ export async function upsertRemoteConversation(c: Partial<ConversationRow> & { i
         sync_status = 'synced'
        WHERE id = ?`,
       [
-        c.remote_id ?? null, c.type ?? null, c.title ?? null, c.avatar_url ?? null,
+        c.remote_id ?? null, c.type ?? null, c.title ?? null, c.avatar_url ?? null, c.participant_key ?? null,
         c.owner_uid ?? null, c.status ?? null, c.member_count ?? null,
         c.pinned_message_id ?? null, c.last_message_id ?? null,
         c.last_message_preview ?? null, c.last_message_at ?? null,
@@ -87,12 +112,12 @@ export async function upsertRemoteConversation(c: Partial<ConversationRow> & { i
   } else {
     await database.run(
       `INSERT INTO conversations
-        (id, remote_id, type, title, avatar_url, owner_uid, status, member_count,
+        (id, remote_id, type, title, avatar_url, participant_key, owner_uid, status, member_count,
          pinned_message_id, last_message_id, last_message_preview, last_message_at,
          unread_count, muted, pinned, favorite, archived, local_updated_at, remote_updated_at, sync_status)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'synced')`,
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'synced')`,
       [
-        c.id, c.remote_id ?? c.id, c.type ?? 'direct', c.title ?? null, c.avatar_url ?? null,
+        c.id, c.remote_id ?? c.id, c.type ?? 'direct', c.title ?? null, c.avatar_url ?? null, c.participant_key ?? null,
         c.owner_uid ?? null, c.status ?? 'active', c.member_count ?? 0,
         c.pinned_message_id ?? null, c.last_message_id ?? null, c.last_message_preview ?? null,
         c.last_message_at ?? null, c.unread_count ?? 0, c.muted ?? 0, c.pinned ?? 0,

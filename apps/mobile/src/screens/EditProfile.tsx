@@ -6,7 +6,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
-import { colors, radius } from '../theme';
+import { radius } from '../theme';
+import { useTheme } from '../context/ThemeContext';
+import { useTranslation } from 'react-i18next';
 import { auth, db, storage } from '../lib/firebase';
 import { subscribeMe } from '../lib/user';
 import { normalizeUsername, validateUsername, usernameErrorCopy } from '../lib/username';
@@ -21,7 +23,11 @@ function initials(name: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-export default function EditProfile({ navigation }: any) {
+export default function EditProfile({ navigation, route }: any) {
+  const { colors } = useTheme();
+  const { t } = useTranslation();
+  const s = useMemo(() => buildStyles(colors), [colors]);
+  const returnToInvite = route?.params?.returnToInvite === true;
   const insets = useSafeAreaInsets();
   const me = auth.currentUser?.uid;
   const [displayName, setDisplayName] = useState('');
@@ -99,6 +105,7 @@ export default function EditProfile({ navigation }: any) {
     setServerError(null);
     try {
       await claimUsername({ username: usernameLower, displayName: displayName.trim(), about: null });
+      if (returnToInvite) { navigation.goBack(); return; }
       Alert.alert('Profile saved', 'Your profile has been updated.', [
         { text: 'OK', onPress: () => navigation.goBack() },
       ]);
@@ -110,18 +117,18 @@ export default function EditProfile({ navigation }: any) {
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#fff' }}>
+    <View style={{ flex: 1, backgroundColor: colors.background.app }}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView
           contentContainerStyle={[s.root, { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 24 }]}
           keyboardShouldPersistTaps="handled"
         >
           <Pressable style={s.back} onPress={() => navigation.goBack()} hitSlop={12}>
-            <Ionicons name="chevron-back" size={24} color={colors.ink} />
+            <Ionicons name="chevron-back" size={24} color={colors.text.primary} />
           </Pressable>
 
           <Text style={s.h1}>Set up your profile</Text>
-          <Text style={s.sub}>How friends will see you.</Text>
+          <Text style={s.sub}>{returnToInvite ? t('groupInvite.profileExplanation', { defaultValue: 'Choose a username, then save to continue joining the group.' }) : 'How friends will see you.'}</Text>
 
           <View style={s.avatarWrap}>
             <Pressable onPress={pickAvatar} style={s.avatar}>
@@ -140,7 +147,7 @@ export default function EditProfile({ navigation }: any) {
             value={displayName}
             onChangeText={setDisplayName}
             placeholder="Your name"
-            placeholderTextColor={colors.ink400}
+            placeholderTextColor={colors.text.muted}
             maxLength={DISPLAY_NAME_MAX}
             autoCapitalize="words"
           />
@@ -153,7 +160,7 @@ export default function EditProfile({ navigation }: any) {
               value={usernameRaw}
               onChangeText={t => setUsernameRaw(t.replace(/\s+/g, ''))}
               placeholder="yourhandle"
-              placeholderTextColor={colors.ink400}
+              placeholderTextColor={colors.text.muted}
               autoCapitalize="none"
               autoCorrect={false}
               maxLength={32}
@@ -168,7 +175,7 @@ export default function EditProfile({ navigation }: any) {
           <View style={{ flex: 1, minHeight: 24 }} />
 
           <Pressable style={[s.btn, !canSubmit && { opacity: 0.5 }]} onPress={save} disabled={!canSubmit}>
-            <Text style={s.btnText}>{busy ? 'Saving…' : 'Create profile'}</Text>
+            <Text style={s.btnText}>{busy ? 'Saving…' : returnToInvite ? t('groupInvite.saveContinue', { defaultValue: 'Save and continue' }) : 'Save profile'}</Text>
           </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -176,27 +183,28 @@ export default function EditProfile({ navigation }: any) {
   );
 }
 
-const s = StyleSheet.create({
-  root:    { paddingHorizontal: 24, flexGrow: 1, backgroundColor: '#fff' },
+function buildStyles(colors: ReturnType<typeof useTheme>['colors']) { return StyleSheet.create({
+  root:    { paddingHorizontal: 24, flexGrow: 1, backgroundColor: colors.background.surface },
   back:    { marginBottom: 8, alignSelf: 'flex-start' },
-  h1:      { fontSize: 26, fontWeight: '800', color: colors.ink, letterSpacing: -0.4 },
-  sub:     { fontSize: 13, color: colors.ink500, marginTop: 6 },
+  h1:      { fontSize: 26, fontWeight: '800', color: colors.text.primary, letterSpacing: -0.4 },
+  sub:     { fontSize: 13, color: colors.text.secondary, marginTop: 6 },
 
   avatarWrap: { alignItems: 'center', marginTop: 24, marginBottom: 8 },
-  avatar:     { width: 84, height: 84, borderRadius: 42, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  avatar:     { width: 84, height: 84, borderRadius: 42, backgroundColor: colors.action.primary, alignItems: 'center', justifyContent: 'center' },
   avatarImg:  { width: 84, height: 84, borderRadius: 42 },
   avatarText: { color: '#fff', fontSize: 28, fontWeight: '800' },
-  avatarBadge:{ position: 'absolute', bottom: 0, right: 0, width: 26, height: 26, borderRadius: 13, backgroundColor: colors.ok, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#fff' },
+  avatarBadge:{ position: 'absolute', bottom: 0, right: 0, width: 26, height: 26, borderRadius: 13, backgroundColor: colors.state.success, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: colors.background.surface },
 
-  label:   { fontSize: 11, fontWeight: '700', color: colors.ink500, marginTop: 18, marginBottom: 6, letterSpacing: 0.6 },
-  input:   { padding: 14, backgroundColor: '#fff', borderRadius: radius.md, fontSize: 15, fontWeight: '500', borderWidth: 1, borderColor: colors.ink200, color: colors.ink },
+  label:   { fontSize: 11, fontWeight: '700', color: colors.text.secondary, marginTop: 18, marginBottom: 6, letterSpacing: 0.6 },
+  input:   { padding: 14, backgroundColor: colors.background.surface, borderRadius: radius.md, fontSize: 15, fontWeight: '500', borderWidth: 1, borderColor: colors.border.default, color: colors.text.primary },
   usernameRow:    { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  usernamePrefix: { fontSize: 18, fontWeight: '800', color: colors.ink500 },
+  usernamePrefix: { fontSize: 18, fontWeight: '800', color: colors.text.secondary },
   usernameInput:  { flex: 1 },
-  hintError: { fontSize: 12, color: colors.err, marginTop: 6 },
-  hintMuted: { fontSize: 12, color: colors.ink500, marginTop: 6 },
-  serverError: { fontSize: 13, color: colors.err, marginTop: 16, textAlign: 'center' },
+  hintError: { fontSize: 12, color: colors.state.error, marginTop: 6 },
+  hintMuted: { fontSize: 12, color: colors.text.secondary, marginTop: 6 },
+  serverError: { fontSize: 13, color: colors.state.error, marginTop: 16, textAlign: 'center' },
 
-  btn:     { padding: 16, backgroundColor: colors.primary, borderRadius: radius.md, alignItems: 'center', marginTop: 16 },
+  btn:     { padding: 16, backgroundColor: colors.action.primary, borderRadius: radius.md, alignItems: 'center', marginTop: 16 },
   btnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
 });
+}

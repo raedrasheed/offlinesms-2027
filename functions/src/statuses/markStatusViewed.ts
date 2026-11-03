@@ -8,62 +8,38 @@
 // Not audited: status views are too noisy.
 
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
-import { getFirestore, FieldValue, Timestamp } from 'firebase-admin/firestore';
-import { isStatusAudienceMember, type StatusAudience as Audience } from './statusLogic';
+import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { assertStatusAccess, statusIdInput } from './statusAccess';
+import { isStatusAudienceMember } from './statusLogic';
 
 export const markStatusViewed = onCall(async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'sign-in-required');
 
-  const data = (request.data ?? {}) as { statusId?: unknown };
-  if (typeof data.statusId !== 'string' || !data.statusId)
-    throw new HttpsError('invalid-argument', 'statusId-required');
+  const statusId = statusIdInput(request.data?.statusId);
 
   const db = getFirestore();
-  const statusRef = db.collection('statuses').doc(data.statusId);
+  const statusRef = db.collection('statuses').doc(statusId);
   const statusSnap = await statusRef.get();
   if (!statusSnap.exists) throw new HttpsError('not-found', 'status-not-found');
 
-  const s = statusSnap.data() as {
-    authorId?: string;
-    audienceType?: Audience;
-    allowedViewerUids?: string[];
-    excludedViewerUids?: string[];
-    expiresAt?: Timestamp | null;
-  };
+  const s = statusSnap.data()!;
+  await assertStatusAccess(db, uid, s);
 
   // Author viewing own status — no-op.
   if (s.authorId === uid) {
     return { ok: true, applied: false, reason: 'self-view' };
   }
 
-  // Expiry check.
-  const expMs = s.expiresAt?.toMillis?.() ?? 0;
-  if (expMs > 0 && Date.now() > expMs) {
-    throw new HttpsError('failed-precondition', 'status-expired');
-  }
-
-  // Audience check (Phase 3 rules mirrored server-side).
-  if (!isStatusAudienceMember(s, uid)) {
-    throw new HttpsError('permission-denied', 'not-in-audience');
-  }
-
   const viewRef = statusRef.collection('views').doc(uid);
-  const viewSnap = await viewRef.get();
-  if (viewSnap.exists) {
-    return { ok: true, applied: false, reason: 'already-viewed' };
-  }
-
-  const batch = db.batch();
-  batch.set(viewRef, {
-    statusId:  data.statusId,
-    ownerUid:  s.authorId ?? null,
-    viewerUid: uid,
-    viewedAt:  FieldValue.serverTimestamp(),
+  return db.runTransaction(async tx => {
+    const [fresh, view] = await Promise.all([tx.get(statusRef), tx.get(viewRef)]);
+    if (!fresh.exists) throw new HttpsError('not-found', 'status-not-found');
+    if ((fresh.get('expiresAt')?.toMillis?.() ?? 0) <= Date.now()) throw new HttpsError('failed-precondition', 'status-expired');
+    if (fresh.get('authorId') !== s.authorId || !isStatusAudienceMember(fresh.data()!, uid)) throw new HttpsError('permission-denied', 'not-in-audience');
+    if (view.exists) return { ok: true, applied: false, reason: 'already-viewed' };
+    tx.set(viewRef, { statusId, ownerUid: s.authorId, viewerUid: uid, viewedAt: FieldValue.serverTimestamp() });
+    tx.update(statusRef, { viewCount: FieldValue.increment(1) });
+    return { ok: true, applied: true };
   });
-  // First view per viewer (doc id = uid) — keep the aggregate on the parent.
-  batch.update(statusRef, { viewCount: FieldValue.increment(1) });
-  await batch.commit();
-
-  return { ok: true, applied: true };
 });

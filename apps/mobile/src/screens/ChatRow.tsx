@@ -28,6 +28,9 @@ type Props = {
   onLongPress:    (id: string, name: string) => void;
   formatTime:     (ts?: any) => string;
   colors:         any;
+  statusRing?:    'unseen' | 'seen';
+  onOpenStatus?:  (id: string) => void;
+  statusLabel?:   string;
 };
 
 function activityText(p: ChatPresence | undefined, typing: string, recording: string): string | null {
@@ -37,10 +40,11 @@ function activityText(p: ChatPresence | undefined, typing: string, recording: st
   return null;
 }
 
-function ChatRowImpl({ item, presence, typingLabel, recordingLabel, onOpen, onLongPress, formatTime, colors }: Props) {
+function ChatRowImpl({ item, presence, typingLabel, recordingLabel, onOpen, onLongPress, formatTime, colors, statusRing, onOpenStatus, statusLabel }: Props) {
   const s = useMemo(() => styles(colors), [colors]);
   const handlePress     = useCallback(() => onOpen(item.id), [onOpen, item.id]);
   const handleLongPress = useCallback(() => onLongPress(item.id, item.peerName ?? ''), [onLongPress, item.id, item.peerName]);
+  const handleStatus = useCallback(() => onOpenStatus?.(item.id), [onOpenStatus, item.id]);
 
   const photoSrc = useMemo(() => (item.photoURL ? { uri: item.photoURL } : null), [item.photoURL]);
   const placeholderStyle = useMemo<any>(() => ({ backgroundColor: avatarColor(item.id) }), [item.id]);
@@ -52,16 +56,11 @@ function ChatRowImpl({ item, presence, typingLabel, recordingLabel, onOpen, onLo
   const preview  = activity ?? (item.state?.lastMessagePreview || item.lastMessageText || '');
 
   return (
-    <Pressable
-      style={s.row}
-      onPress={handlePress}
-      onLongPress={handleLongPress}
-      delayLongPress={300}
-      accessible
-      accessibilityRole="button"
-      accessibilityLabel={`${item.peerName ?? ''}${unread > 0 ? `, ${unread} unread` : ''}`}
-    >
-      <View style={s.avWrap} accessibilityElementsHidden>
+    <View style={s.row}>
+      <Pressable style={s.avWrap} onPress={statusRing ? handleStatus : handlePress}
+        onLongPress={handleLongPress} accessibilityRole="button"
+        accessibilityLabel={statusRing ? `${statusLabel ?? 'View status'}: ${item.peerName ?? ''}` : item.peerName ?? ''}>
+        {statusRing ? <View pointerEvents="none" style={[s.storyRing, { borderColor: statusRing === 'unseen' ? colors.action.primary : colors.text.muted }]} /> : null}
         {photoSrc ? (
           <Image source={photoSrc} style={[s.av, item.type === 'group' && s.avGroup]} />
         ) : (
@@ -70,8 +69,9 @@ function ChatRowImpl({ item, presence, typingLabel, recordingLabel, onOpen, onLo
           </View>
         )}
         {online ? <View style={s.onlineDot} /> : null}
-      </View>
-      <View style={s.bodyCol}>
+      </Pressable>
+      <Pressable style={s.bodyCol} onPress={handlePress} onLongPress={handleLongPress} delayLongPress={300}
+        accessibilityRole="button" accessibilityLabel={`${item.peerName ?? ''}${unread > 0 ? `, ${unread} unread` : ''}`}>
         <View style={s.rowTop}>
           <Text style={s.name} numberOfLines={1}>
             {item.peerName}
@@ -91,8 +91,8 @@ function ChatRowImpl({ item, presence, typingLabel, recordingLabel, onOpen, onLo
             ) : null}
           </View>
         </View>
-      </View>
-    </Pressable>
+      </Pressable>
+    </View>
   );
 }
 
@@ -106,6 +106,9 @@ function areRowPropsEqual(a: Props, b: Props): boolean {
   if (a.recordingLabel!== b.recordingLabel)return false;
   if (a.colors        !== b.colors)        return false;
   if (a.presence      !== b.presence)      return false;
+  if (a.statusRing    !== b.statusRing)    return false;
+  if (a.onOpenStatus  !== b.onOpenStatus)  return false;
+  if (a.statusLabel   !== b.statusLabel)   return false;
   const i = a.item, j = b.item;
   if (i === j) return true;
   if (i.id !== j.id) return false;
@@ -139,6 +142,7 @@ function styles(colors: any) {
   return StyleSheet.create({
     row:         { flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 14, paddingVertical: 12, paddingHorizontal: 16 },
     avWrap:      { width: 52, height: 52 },
+    storyRing:   { position: 'absolute', left: -4, top: -4, width: 60, height: 60, borderRadius: 30, borderWidth: 2 },
     av:          { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
     avGroup:     { borderRadius: 18 },
     avText:      { color: '#fff', fontWeight: '800', fontSize: 17 },

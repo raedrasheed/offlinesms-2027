@@ -11,6 +11,16 @@ import { validClipId } from './clipReference';
 
 const PENDING_KEY = 'pendingInvite.v1';
 const PENDING_CLIP_KEY = 'pendingClip.v1';
+const inviteListeners = new Set<() => void>();
+
+export function subscribePendingInvite(listener: () => void): () => void {
+  inviteListeners.add(listener);
+  return () => { inviteListeners.delete(listener); };
+}
+
+export async function peekPendingInvite(): Promise<string | null> {
+  try { return await AsyncStorage.getItem(PENDING_KEY); } catch { return null; }
+}
 
 export async function setPendingClip(clipId: string): Promise<void> {
   if (validClipId(clipId)) await AsyncStorage.setItem(PENDING_CLIP_KEY, clipId).catch(() => {});
@@ -30,13 +40,13 @@ export function inviteCodeFromUrl(url: string | null | undefined): string | null
 }
 
 export async function setPendingInvite(code: string): Promise<void> {
-  try { await AsyncStorage.setItem(PENDING_KEY, code); } catch { /* noop */ }
+  try { await AsyncStorage.setItem(PENDING_KEY, code); inviteListeners.forEach(listener => listener()); } catch { /* noop */ }
 }
 
 export async function takePendingInvite(): Promise<string | null> {
   try {
     const code = await AsyncStorage.getItem(PENDING_KEY);
-    if (code) await AsyncStorage.removeItem(PENDING_KEY);
+    if (code) { await AsyncStorage.removeItem(PENDING_KEY); inviteListeners.forEach(listener => listener()); }
     return code;
   } catch { return null; }
 }

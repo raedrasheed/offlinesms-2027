@@ -405,7 +405,7 @@ function MessageBubbleImpl({
           </Pressable>
         ) : null}
 
-        {customSticker ? <CustomStickerBubble message={m} mine={mine} onOpen={onOpenImage}
+        {customSticker ? <CustomStickerBubble message={m} uid={context.myUid} mine={mine} onOpen={onOpenImage}
           onLongPress={() => setSheetOpen(true)} onRetry={() => onRetryMedia?.(m)} /> : !deleted && m.type === 'image' ? (
           <ImageMessageBubble
             message={m}

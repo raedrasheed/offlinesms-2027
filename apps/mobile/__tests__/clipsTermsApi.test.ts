@@ -15,7 +15,7 @@ beforeEach(()=>{vi.clearAllMocks();state.buttons=[];let attempted=false;state.ca
 describe('Clips callable consent integration',()=>{
   it('shows localized complete terms before accepting and replaying an explicit like',async()=>{
     const result=setClipInteraction('clip','like',true);await vi.waitFor(()=>expect(state.alert).toHaveBeenCalledOnce());
-    expect(state.alert.mock.calls[0][0]).toBe('شروط مجتمع المقاطع');expect(state.alert.mock.calls[0][1]).toContain('الفيديوهات والتعليقات');expect(state.alert.mock.calls[0][1]).toContain('clips-v1');
+    expect(state.alert.mock.calls[0][0]).toBe('شروط المجتمع');expect(state.alert.mock.calls[0][1]).toContain('الفيديوهات والتعليقات');expect(state.alert.mock.calls[0][1]).toContain('clips-v1');
     expect(state.call.mock.calls.some(([name])=>name==='acceptClipsTerms')).toBe(false);
     state.buttons.find(button=>button.text==='أوافق').onPress();await expect(result).resolves.toEqual({ok:true,likeCount:3});
     expect(state.call.mock.calls.map(([name])=>name)).toEqual(['setClipInteraction','getClipsConfig','getClipsConfig','acceptClipsTerms','setClipInteraction']);

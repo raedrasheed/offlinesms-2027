@@ -206,6 +206,9 @@ export const joinGroupByInviteLink = onCall(async (request) => {
 
     if (decision === 'already_member') return { status: 'already_member' as const };
     if (decision === 'request_pending') return { status: 'pending' as const };
+    if (typeof profile?.username !== 'string' || !profile.username.trim()) {
+      throw new HttpsError('failed-precondition', 'username-required', { reason: 'username-required' });
+    }
 
     if (decision === 'create_request') {
       tx.set(convoRef.collection('joinRequests').doc(uid), {

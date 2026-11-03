@@ -69,7 +69,13 @@
     "filterGroups": "Groups",
     "clearChat": "Clear chat",
     "clearChatTitle": "Clear chat?",
-    "clearChatMessage": "This removes the messages from this device. Messages others have are not affected."
+    "clearChatMessage": "This removes the messages from this device. Messages others have are not affected.",
+    "deleteChat": "Delete chat from this device",
+    "deleteChatTitle": "Delete this chat?",
+    "deleteChatMessage": "Remove this chat and its downloaded history from this device. Other participants keep their messages. The chat returns when a new message is sent or received.",
+    "actionFailed": "Could not update this chat. Please try again.",
+    "loading": "Loading chats…",
+    "viewStatus": "View status"
   },
   "status": {
     "title": "Status",
@@ -88,7 +94,22 @@
     "photoVideo": "Photo & video status",
     "addCaption": "Add a caption…",
     "videoTooLong": "Videos can be up to 30 seconds.",
-    "mediaPermission": "Allow photo and video access to share a media status."
+    "mediaPermission": "Allow photo and video access to share a media status.",
+    "interactionFailed": "Could not update this story. Try again.",
+    "replyFailed": "Could not send your reply. Your text is kept for retry.",
+    "loadingMedia": "Loading story…",
+    "previous": "Previous story. Hold to pause.",
+    "next": "Next story. Hold to pause.",
+    "mediaFailed": "This story could not be loaded.",
+    "viewersTitle": "Who viewed your story",
+    "replyPlaceholder": "Reply privately…",
+    "like": "Like story",
+    "unlike": "Unlike story",
+    "noViewers": "No views yet.",
+    "moreViewers": "Load more",
+    "mention": "Mention someone",
+    "removeMention": "Remove mention: {{name}}",
+    "unavailable": "This story expired or is unavailable."
   },
   "calls": {
     "title": "Calls",
@@ -628,7 +649,9 @@
     "sendingUnavailable": "Sending personal stickers is currently unavailable. You can still create, edit and save them.",
     "keepOriginal": "Use original",
     "removeBackground": "Remove background",
-    "cutoutError": "Could not remove the background. Tap to retry, or choose Use original. Requires iOS 17+ or Android with Google Play services."
+    "cutoutError": "Could not remove the background. Tap to retry, or choose Use original. Requires iOS 17+ or Android with Google Play services.",
+    "saveToLibrary": "Save to my stickers",
+    "savedToLibrary": "Saved to my stickers"
   },
   "poll": {
     "create": "New poll",
@@ -845,5 +868,28 @@
     "sent": "Invitations sent. Membership starts after acceptance.",
     "noNew": "No new invitations were sent. A pending or declined invitation is not sent again.",
     "from": "Invited by {{name}}"
+  },
+  "groupInvite": {
+    "usernameRequired": "Choose a username before joining this group. After saving, we will return to this invitation.",
+    "expired": "This invitation is invalid or has expired. Ask a group admin for a new link.",
+    "disabled": "This invite link has been disabled. Ask a group admin for a new link.",
+    "full": "This group is full. Contact a group admin.",
+    "permission": "You do not have permission to join this group. Contact a group admin.",
+    "signin": "Sign in again to use this invitation.",
+    "rateLimit": "Too many attempts. Wait a while before trying again.",
+    "offline": "Connect to the internet to open this invitation.",
+    "failed": "Could not complete this invitation. Please try again.",
+    "memberCount": "{{count}} members",
+    "open": "Anyone can join",
+    "approval": "Admin approval required",
+    "setUsername": "Set username and continue",
+    "openGroup": "Open group",
+    "pending": "Your request is pending admin approval.",
+    "cancel": "Cancel request",
+    "join": "Join group",
+    "request": "Request to join",
+    "profileExplanation": "Choose a username, then save to continue joining the group.",
+    "saveContinue": "Save and continue",
+    "onboarding": "To join the group, first choose a display name and username. Your invitation is saved and will reopen after you continue."
   }
 }

@@ -52,6 +52,7 @@ const interactiveCalls = new Set([
   'updateClipProfile', 'followClipCreator', 'respondClipFollowRequest', 'removeClipFollower',
   'setClipInteraction', 'reportClip', 'addClipComment', 'deleteClipComment', 'setClipCommentLike',
   'updateClip', 'deleteClip', 'shareClip',
+  'createPost', 'deletePost', 'setPostLike', 'addPostComment', 'deletePostComment', 'reportPost',
 ]);
 export function clipCall<R>(name: string, args: Record<string, unknown> = {}): Promise<R> {
   const invoke = () => rawClipCall<R>(name, args);

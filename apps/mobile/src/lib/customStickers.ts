@@ -6,9 +6,22 @@ import { cleanStickerEdits, STICKER_LIBRARY_MAX, type StickerEdits } from './sti
 export interface CustomSticker {
   id: string; revision: string; name: string; createdAt: number; updatedAt: number;
   sourceWidth: number; sourceHeight: number; sizeBytes: number; edits: StickerEdits;
+  /** Local provenance prevents repeated saves of the same received message. */
+  sourceMessageKey?: string;
 }
 const safeId = (s: unknown): s is string => typeof s === 'string' && /^[a-zA-Z0-9-]{1,80}$/.test(s);
 const key = (uid: string) => `customStickers.v1:${uid}`;
+const listeners = new Map<string, Set<(stickers: CustomSticker[]) => void>>();
+export function subscribeCustomStickers(uid: string, listener: (stickers: CustomSticker[]) => void) {
+  const group = listeners.get(uid) ?? new Set();
+  group.add(listener); listeners.set(uid, group);
+  return () => { group.delete(listener); if (!group.size) listeners.delete(uid); };
+}
+function publishLibrary(uid: string, stickers: CustomSticker[]) {
+  for (const listener of listeners.get(uid) ?? []) {
+    try { listener(stickers); } catch { /* A mounted picker must not fail persistence. */ }
+  }
+}
 function directory(uid: string) {
   if (!uid || !FS.documentDirectory) throw Error('sticker-storage-unavailable');
   return `${FS.documentDirectory}OfflineSMS/Stickers/account-${encodeURIComponent(uid)}/`;
@@ -32,6 +45,8 @@ export async function loadCustomStickers(uid: string): Promise<CustomSticker[]> 
       createdAt: Number(s.createdAt) || 0, updatedAt: Number(s.updatedAt) || 0,
       sourceWidth: s.sourceWidth, sourceHeight: s.sourceHeight, sizeBytes: s.sizeBytes,
       edits: cleanStickerEdits(s.edits),
+      ...(typeof s.sourceMessageKey === 'string' && s.sourceMessageKey.length <= 300
+        ? { sourceMessageKey: s.sourceMessageKey } : {}),
     }));
 }
 // Serialise mutations per account, including a save followed immediately by a
@@ -49,9 +64,11 @@ async function removeFiles(uid: string, sticker: CustomSticker) {
 export function saveCustomSticker(uid: string, input: {
   previous?: CustomSticker; name: string; sourceUri: string; imageUri: string;
   sourceWidth: number; sourceHeight: number; edits: StickerEdits;
+  sourceMessageKey?: string;
 }): Promise<CustomSticker[]> {
   return serial(uid, async () => {
     const list = await loadCustomStickers(uid);
+    if (!input.previous && input.sourceMessageKey && list.some(s => s.sourceMessageKey === input.sourceMessageKey)) return list;
     const previous = input.previous ? list.find(s => s.id === input.previous!.id) : undefined;
     if (input.previous && previous?.revision !== input.previous.revision) throw Error('sticker-changed');
     if (!previous && list.length >= STICKER_LIBRARY_MAX) throw Error('sticker-library-full');
@@ -63,7 +80,9 @@ export function saveCustomSticker(uid: string, input: {
     const sticker: CustomSticker = { id: previous?.id ?? randomUUID(), revision: randomUUID(),
       name: input.name.trim().slice(0, 60), createdAt: previous?.createdAt ?? now, updatedAt: now,
       sourceWidth: input.sourceWidth, sourceHeight: input.sourceHeight, sizeBytes: image.size,
-      edits: cleanStickerEdits(input.edits) };
+      edits: cleanStickerEdits(input.edits),
+      ...((previous?.sourceMessageKey ?? input.sourceMessageKey)
+        ? { sourceMessageKey: (previous?.sourceMessageKey ?? input.sourceMessageKey)!.slice(0, 300) } : {}) };
     await FS.makeDirectoryAsync(directory(uid), { intermediates: true });
     const next = [sticker, ...list.filter(s => s.id !== sticker.id)];
     try {
@@ -72,6 +91,7 @@ export function saveCustomSticker(uid: string, input: {
       await AsyncStorage.setItem(key(uid), JSON.stringify(next));
     } catch (error) { await removeFiles(uid, sticker); throw error; }
     if (previous) await removeFiles(uid, previous);
+    publishLibrary(uid, next);
     return next;
   });
 }
@@ -81,6 +101,7 @@ export function deleteCustomSticker(uid: string, id: string): Promise<CustomStic
     const next = list.filter(s => s.id !== id);
     await AsyncStorage.setItem(key(uid), JSON.stringify(next));
     if (old) await removeFiles(uid, old);
+    publishLibrary(uid, next);
     return next;
   });
 }

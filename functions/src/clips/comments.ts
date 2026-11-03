@@ -1,3 +1,4 @@
+import { writeSocialActivity } from '../social/activityModel';
 import { createHash } from 'node:crypto';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore, FieldValue, FieldPath, Timestamp } from 'firebase-admin/firestore';
@@ -49,6 +50,8 @@ export const addClipComment = onCall({ region: 'us-central1' }, async request =>
     if (parent && (!parent.exists || parent.get('parentId') != null || parent.get('deleted') === true))
       throw new HttpsError('failed-precondition', 'comment-parent-unavailable');
     if (parent && await clipsBlocked(db, uid, parent.get('authorUid'), tx)) throw new HttpsError('not-found', 'comment-parent-unavailable');
+    writeSocialActivity(db, tx, clip.get('ownerUid'), { kind: 'comment', actorUid: uid, clipId: id, commentId });
+    if (parent && parent.get('authorUid') !== clip.get('ownerUid')) writeSocialActivity(db, tx, parent.get('authorUid'), { kind: 'reply', actorUid: uid, clipId: id, commentId });
     tx.create(commentRef, { authorUid: uid, text, parentId, likeCount: 0, replyCount: 0, deleted: false, clientId,
       createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
     tx.update(ref, { commentCount: FieldValue.increment(1) });
@@ -90,6 +93,7 @@ export const setClipCommentLike = onCall({ region: 'us-central1' }, async reques
     if (like.exists !== active) {
       likeCount = Math.max(0, likeCount + (active ? 1 : -1));
       if (active) tx.create(likeRef, { uid, createdAt: FieldValue.serverTimestamp() }); else tx.delete(likeRef);
+      writeSocialActivity(db, tx, comment.get('authorUid'), { kind: 'commentLike', actorUid: uid, clipId: id, commentId }, active);
       tx.update(commentRef, { likeCount });
     }
     return { ok: true, likeCount };

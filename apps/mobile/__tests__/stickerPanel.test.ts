@@ -8,7 +8,7 @@ vi.mock('react-i18next',()=>({useTranslation:()=>({t:(k:string)=>k,i18n:{languag
 vi.mock('../src/context/ThemeContext',()=>({useTheme:()=>({colors:{action:{primary:'#00897B',primaryFg:'#FFFFFF'},text:{primary:'#111',muted:'#777'},background:{surface:'#FFF',subtle:'#EEE'},border:{subtle:'#DDD'}}})}));
 vi.mock('../src/i18n',()=>({isRTL:true}));
 vi.mock('../src/lib/recents',()=>({createRecentStore:()=>({load:async()=>[],add:async()=>[]})}));
-vi.mock('../src/lib/customStickers',()=>({loadCustomStickers:mock.load,deleteCustomSticker:mock.remove,customStickerUri:(uid:string,s:any,source=false)=>`file:///${uid}/${s.id}-${s.revision}${source?'-source':''}.png`}));
+vi.mock('../src/lib/customStickers',()=>({loadCustomStickers:mock.load,deleteCustomSticker:mock.remove,subscribeCustomStickers:()=>()=>{},customStickerUri:(uid:string,s:any,source=false)=>`file:///${uid}/${s.id}-${s.revision}${source?'-source':''}.png`}));
 vi.mock('../src/media/stickerImage',()=>({pickStickerImage:mock.pick,removeStickerTemp:mock.removeTemp}));
 vi.mock('../src/components/chat/stickerSources',()=>({STICKER_SOURCES:{simsim:{hi:1}}}));
 vi.mock('../src/components/chat/StickerEditor',()=>({StickerEditor:'Editor'}));

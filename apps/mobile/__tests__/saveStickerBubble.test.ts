@@ -1,0 +1,51 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createElement } from 'react';
+import { act, create, type ReactTestRenderer } from 'react-test-renderer';
+const mock=vi.hoisted(()=>({save:vi.fn(),alert:vi.fn(),uri:'file:///cached-sticker.png'}));
+vi.mock('react-native',()=>({View:'View',Pressable:'Pressable',Image:'Image',ActivityIndicator:'ActivityIndicator',Platform:{OS:'android'},Alert:{alert:mock.alert}}));
+vi.mock('@expo/vector-icons',()=>({Ionicons:'Icon'}));
+vi.mock('react-i18next',()=>({useTranslation:()=>({t:(key:string)=>key})}));
+vi.mock('../src/context/ThemeContext',()=>({useTheme:()=>({colors:{background:{surface:'#fff'},border:{subtle:'#ddd'},action:{primary:'#123'}}})}));
+vi.mock('../src/hooks/useCachedMediaUri',()=>({useCachedMediaUri:()=>mock.uri}));
+vi.mock('../src/hooks/useTransfer',()=>({useTransfer:()=>null}));
+vi.mock('../src/media/mediaCache',()=>({retryDownload:vi.fn()}));
+vi.mock('../src/components/chat/MediaUploadProgress',()=>({MediaUploadProgress:'Progress'}));
+vi.mock('../src/components/chat/StickerBubble',()=>({STICKER_SIZE:160}));
+vi.mock('../src/lib/saveMessageSticker',()=>({saveMessageSticker:mock.save}));
+import { CustomStickerBubble } from '../src/components/chat/CustomStickerBubble';
+let renderer:ReactTestRenderer;
+const message:any={id:'message-1',conversationId:'conversation-1',type:'image',media:{presentation:'sticker',uploadStatus:'uploaded'}};
+const button=(label:string)=>renderer.root.findAllByType('Pressable' as any).find(node=>node.props.accessibilityLabel===label);
+beforeEach(()=>{vi.clearAllMocks();mock.save.mockResolvedValue([]);vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);});
+afterEach(async()=>{if(renderer)await act(async()=>renderer.unmount());vi.unstubAllGlobals();});
+describe('Save sticker from a conversation',()=>{
+  it('saves to the active account with explicit feedback and preserves tap-to-view and long-press actions',async()=>{
+    const open=vi.fn(),longPress=vi.fn();
+    await act(async()=>{renderer=create(createElement(CustomStickerBubble,{message,uid:'me',mine:false,onOpen:open,onLongPress:longPress}));});
+    expect(mock.save).not.toHaveBeenCalled();
+    await act(async()=>button('stickers.saveToLibrary')!.props.onPress());
+    expect(mock.save).toHaveBeenCalledWith('me',message,'stickers.customSticker');
+    expect(button('stickers.savedToLibrary')!.props.disabled).toBe(true);
+    await act(async()=>{button('stickers.customSticker')!.props.onPress();button('stickers.customSticker')!.props.onLongPress();});
+    expect(open).toHaveBeenCalledWith(mock.uri);expect(longPress).toHaveBeenCalledOnce();
+  });
+  it('shows a retryable failure without marking saved or sending the sticker',async()=>{
+    mock.save.mockRejectedValueOnce(Error('sticker-library-full'));
+    await act(async()=>{renderer=create(createElement(CustomStickerBubble,{message,uid:'me',mine:false}));});
+    await act(async()=>button('stickers.saveToLibrary')!.props.onPress());
+    expect(mock.alert).toHaveBeenCalledWith('stickers.saveError','stickers.libraryFull');
+    expect(button('stickers.saveToLibrary')!.props.disabled).toBe(false);
+    await act(async()=>button('stickers.saveToLibrary')!.props.onPress());
+    expect(button('stickers.savedToLibrary')).toBeDefined();
+  });
+  it('does not offer to save a pending/deleted sticker and resets feedback when a cell is reused',async()=>{
+    await act(async()=>{renderer=create(createElement(CustomStickerBubble,{message:{...message,media:{...message.media,uploadStatus:'pending'}},uid:'me',mine:true}));});
+    expect(button('stickers.saveToLibrary')).toBeUndefined();
+    await act(async()=>renderer.update(createElement(CustomStickerBubble,{message,uid:'me',mine:false})));
+    await act(async()=>button('stickers.saveToLibrary')!.props.onPress());
+    await act(async()=>renderer.update(createElement(CustomStickerBubble,{message:{...message,id:'message-2'},uid:'me',mine:false})));
+    expect(button('stickers.saveToLibrary')!.props.disabled).toBe(false);
+    await act(async()=>renderer.update(createElement(CustomStickerBubble,{message:{...message,deletedForEveryone:true},uid:'me',mine:false})));
+    expect(button('stickers.saveToLibrary')).toBeUndefined();
+  });
+});
