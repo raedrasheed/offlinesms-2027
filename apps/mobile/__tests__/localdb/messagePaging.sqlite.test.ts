@@ -18,6 +18,25 @@ beforeEach(async () => { db = await createSqlJsDb(); resetFake(); });
 afterEach(() => { db.close(); vi.restoreAllMocks(); });
 
 describe('server-owned paging cursors', () => {
+  it('keeps the cursor on a partial page failure and replays it without losing or duplicating messages', async () => {
+    for (let k = 0; k < 100; k++) fakeSeed(`conversations/c/messages/m${k}`, data(k));
+    const transaction = db.transaction.bind(db);
+    let calls = 0;
+    const spy = vi.spyOn(db, 'transaction').mockImplementation(async fn => {
+      if (++calls === 2) throw new Error('disk busy');
+      await transaction(fn);
+    });
+    await expect(pullMessageHistoryPage('c', 100)).rejects.toThrow('disk busy');
+    expect(await listMessages('c', 100)).toHaveLength(20);
+    expect(await getState('history_v2:c')).toBeNull();
+    spy.mockRestore();
+    expect(await pullMessageHistoryPage('c', 100)).toBe(100);
+    const rows = await listMessages('c', 100);
+    expect(rows).toHaveLength(100);
+    expect(new Set(rows.map(r => r.remote_id)).size).toBe(100);
+    expect(await getState('history_v2:c')).not.toBeNull();
+  });
+
   it('loads the newest 25 despite an old forward cursor and does not skip the middle gap', async () => {
     for (let k = 0; k < 1000; k++) fakeSeed(`conversations/c/messages/m${k}`, data(k));
     const cursor = JSON.stringify({ seconds: T / 1000, nanoseconds: 0, id: 'm0' });

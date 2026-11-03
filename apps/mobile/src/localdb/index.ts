@@ -78,7 +78,7 @@ function prepareUser(uid: string): void {
 export async function openLocalDb(uid: string): Promise<void> {
   prepareUser(uid);
   await openForUser(uid);
-  notificationTargets.onDbOpened();
+  if (auth.currentUser?.uid === uid && getCurrentUid() === uid) notificationTargets.onDbOpened();
 }
 
 export async function initLocalDb(uid: string): Promise<void> {

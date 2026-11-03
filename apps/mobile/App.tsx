@@ -71,9 +71,9 @@ import * as Notifications from 'expo-notifications';
 import { installForegroundHandler, registerForPush, routeFromNotification } from './src/lib/notifications';
 import { initAppCheck } from './src/lib/appCheck';
 import { dispatchForRoute, pushTarget } from './src/lib/pushRouting';
-import { perfMark, perfBegin } from './src/lib/perf';
+import { perfMark, perfBegin, perfNow } from './src/lib/perf';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { notificationTargets, pullConversationNow } from './src/localdb';
+import { notificationTargets, pullConversationNow, openLocalDb } from './src/localdb';
 import { ShareIntentProvider, useShareIntentContext } from 'expo-share-intent';
 import ShareToChat from './src/screens/ShareToChat';
 import { Linking as RNLinking } from 'react-native';
@@ -247,6 +247,21 @@ export default function App() {
 
   useEffect(() => onAuthStateChanged(auth, u => {
     perfMark('auth:resolved', { signedIn: !!u }, true);
+    // Start SQLite as soon as Firebase restores the account. A cold-start push
+    // is queued independently of navigation; it must not wait for the profile
+    // snapshot, onboarding cache or ChatsList to mount before downloading.
+    if (u) {
+      const started = perfNow();
+      void openLocalDb(u.uid).then(() => {
+        if (auth.currentUser?.uid === u.uid) {
+          perfMark('startup:messages:ready', { durationMs: Math.round(perfNow() - started) });
+        }
+      }).catch(() => {
+        // Screens retry opening the database. A storage failure must not break
+        // auth or leave an unhandled rejection on launch.
+        perfMark('startup:messages:error');
+      });
+    }
     setUser(u);
     setReady(true);
     if (!u) { setProfileCompleted(null); setUserTheme(null); }
@@ -328,8 +343,8 @@ export default function App() {
       pendingPushRef.current = data;
       drainPush();
     };
-    // Sync the related chat the moment a notification ARRIVES (foreground, and
-    // iOS content-available background), so its messages are already local.
+    // Sync while JS is running in the foreground. A system-displayed push does
+    // not itself run this listener when the app is terminated.
     const subRecv = Notifications.addNotificationReceivedListener(n => {
       prefetchFromData(n.request.content.data);
     });

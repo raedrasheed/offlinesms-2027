@@ -9,6 +9,7 @@ vi.mock('firebase/firestore', () => ({ ...firestoreMock, getDocsFromServer: mock
 vi.mock('../../src/localdb/sync/messageReads', () => ({ readRecentMessages: mock.recent, readMessageById: mock.target }));
 import { pullMessages, pullRecentMessages, pullMessageById } from '../../src/localdb/sync/firebasePull';
 import { applyRemoteMessages, listMessages } from '../../src/localdb/repositories/messagesRepo';
+import { onLocalMessagesChanged } from '../../src/localdb/messageChanges';
 const message = { remoteId: 'new', conversationId: 'c', senderUid: 'peer', text: 'new', remoteCreatedAt: 100 };
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -19,6 +20,18 @@ beforeEach(async () => { db = await createSqlJsDb(); mock.uid = 'me'; vi.resetAl
 afterEach(() => db.close());
 
 describe('foreground message priority', () => {
+  it('stops remaining chunks if the signed-in account changes between commits', async () => {
+    mock.recent.mockResolvedValue(Array.from({ length: 25 }, (_, i) => ({ ...message, remoteId: `m${i}` })));
+    const originalDb = db;
+    const otherDb = await createSqlJsDb();
+    const stop = onLocalMessagesChanged(() => { mock.uid = 'other'; db = otherDb; });
+    try {
+      await expect(pullRecentMessages('c')).rejects.toThrow('sync-session-changed');
+      expect(await listMessages('c')).toHaveLength(0);
+      expect(await originalDb.first('SELECT COUNT(*) AS n FROM messages')).toEqual({ n: 20 });
+    } finally { stop(); originalDb.close(); }
+  });
+
   it('commits recent messages while the ordinary WebChannel catch-up is stalled', async () => {
     const background = deferred<any>();
     mock.background.mockReturnValue(background.promise);

@@ -11,7 +11,7 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from '../../lib/firebase';
 import { upsertRemoteConversation, applyUserState } from '../repositories/conversationsRepo';
-import { applyRemoteMessages } from '../repositories/messagesRepo';
+import { applyRemoteMessages, type RemoteMessageInput } from '../repositories/messagesRepo';
 import { remoteMessageInput } from './remoteMessage';
 import { upsertMember } from '../repositories/membersRepo';
 import { getCurrentUid, getDb, type LocalDatabase } from '../connection';
@@ -21,6 +21,7 @@ import { perfMark, perfNow } from '../../lib/perf';
 
 const CONV_PAGE = 50;
 const MSG_PAGE = 50;
+const MESSAGE_COMMIT_SIZE = 20;
 
 function ms(ts: any): number | null {
   return ts?.toMillis?.() ?? null;
@@ -89,6 +90,26 @@ function after(c: PageCursor) { return startAfter(new Timestamp(c.seconds, c.nan
 function assertUser(uid: string | null) {
   if (getCurrentUid() !== uid || auth.currentUser?.uid !== uid) throw new Error('sync-session-changed');
 }
+
+/** Release SQLite between chunks so a notification/read/render can run while
+ * history is still being stored. Advance page cursors only after ALL chunks
+ * succeed; replaying a partial page is safe because upserts are idempotent. */
+async function applyMessagePage(
+  batch: RemoteMessageInput[], uid: string | null, database: LocalDatabase,
+  options: { insertOnly?: boolean } = {},
+): Promise<void> {
+  const assertSession = () => {
+    assertUser(uid);
+    if (getDb() !== database) throw new Error('sync-session-changed');
+  };
+  assertSession();
+  for (let offset = 0; offset < batch.length; offset += MESSAGE_COMMIT_SIZE) {
+    assertSession();
+    await applyRemoteMessages(batch.slice(offset, offset + MESSAGE_COMMIT_SIZE), options);
+    if (offset + MESSAGE_COMMIT_SIZE < batch.length) await new Promise<void>(resolve => setTimeout(resolve, 0));
+  }
+  assertSession();
+}
 const forwardFlights = new Map<string, Promise<number>>();
 
 const recentFlights = new Map<string, { database: LocalDatabase; task: Promise<number> }>();
@@ -108,7 +129,7 @@ export function pullRecentMessages(conversationId: string): Promise<number> {
     assertUser(uid);
     if (getDb() !== database) throw new Error('sync-session-changed');
     const started = perfNow();
-    await applyRemoteMessages(batch, { insertOnly: true });
+    await applyMessagePage(batch, uid, database, { insertOnly: true });
     perfMark('sync:recent:commit', { durationMs: Math.round(perfNow() - started), count: batch.length });
     return batch.length;
   })().finally(() => { if (recentFlights.get(key)?.task === task) recentFlights.delete(key); });
@@ -119,6 +140,7 @@ export function pullRecentMessages(conversationId: string): Promise<number> {
 /** Bounded catch-up; a complete tuple cursor resumes the next run exactly. */
 export function pullMessages(conversationId: string, max = MSG_PAGE, pages = 8): Promise<number> {
   const uid = getCurrentUid();
+  const database = getDb();
   const flightKey = `${uid}/${conversationId}`;
   const existing = forwardFlights.get(flightKey);
   if (existing) return existing;
@@ -133,7 +155,7 @@ export function pullMessages(conversationId: string, max = MSG_PAGE, pages = 8):
       const recent = await getDocs(query(collection(db, 'conversations', conversationId, 'messages'),
         orderBy('createdAt', 'desc'), orderBy(documentId(), 'desc'), qlimit(max)));
       assertUser(uid);
-      await applyRemoteMessages(recent.docs.map(d => remoteMessageInput(d.id, conversationId, d.data())));
+      await applyMessagePage(recent.docs.map(d => remoteMessageInput(d.id, conversationId, d.data())), uid, database);
       if (recent.docs[0]) await setState(key, JSON.stringify(cursorOf(recent.docs[0])));
       return recent.size;
     }
@@ -146,7 +168,7 @@ export function pullMessages(conversationId: string, max = MSG_PAGE, pages = 8):
         ...(cursor ? [after(cursor)] : []), qlimit(max),
       ));
       assertUser(uid);
-      await applyRemoteMessages(snap.docs.map(d => remoteMessageInput(d.id, conversationId, d.data())));
+      await applyMessagePage(snap.docs.map(d => remoteMessageInput(d.id, conversationId, d.data())), uid, database);
       total += snap.size;
       const last = snap.docs[snap.docs.length - 1];
       if (last) { cursor = cursorOf(last); await setState(key, JSON.stringify(cursor)); }
@@ -167,6 +189,7 @@ const historyFlights = new Map<string, Promise<number>>();
  */
 export function pullMessageHistoryPage(conversationId: string, max = 100): Promise<number> {
   const uid = getCurrentUid();
+  const database = getDb();
   const flightKey = `${uid}/${conversationId}`;
   const existing = historyFlights.get(flightKey);
   if (existing) return existing;
@@ -183,7 +206,7 @@ export function pullMessageHistoryPage(conversationId: string, max = 100): Promi
       ...(saved.cursor ? [after(saved.cursor)] : []), qlimit(max),
     ));
     assertUser(uid);
-    await applyRemoteMessages(snap.docs.map(d => remoteMessageInput(d.id, conversationId, d.data())));
+    await applyMessagePage(snap.docs.map(d => remoteMessageInput(d.id, conversationId, d.data())), uid, database);
     const last = snap.docs[snap.docs.length - 1];
     await setState(key, JSON.stringify({ cursor: last ? cursorOf(last) : saved.cursor, done: snap.size < max }));
     return snap.size;
@@ -224,6 +247,8 @@ export async function pullMessageById(conversationId: string, messageId: string)
  * watermark so paging never crosses it and resurrects cleared history.
  */
 export async function pullMessagesBefore(conversationId: string, beforeMs: number, afterMs = 0, max = MSG_PAGE): Promise<number> {
+  const uid = getCurrentUid();
+  const database = getDb();
   const constraints = [
     where('createdAt', '<', Timestamp.fromMillis(beforeMs)),
     ...(afterMs > 0 ? [where('createdAt', '>', Timestamp.fromMillis(afterMs))] : []),
@@ -236,7 +261,7 @@ export async function pullMessagesBefore(conversationId: string, beforeMs: numbe
   ));
   // Same mapper as the live path: older photos / voice notes keep their type,
   // caption and media instead of arriving as empty text rows.
-  await applyRemoteMessages(snap.docs.map(d => remoteMessageInput(d.id, conversationId, d.data())));
+  await applyMessagePage(snap.docs.map(d => remoteMessageInput(d.id, conversationId, d.data())), uid, database);
   return snap.size;
 }
 

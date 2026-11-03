@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSqlJsDb, type CountingDb } from '../support/sqljsDb';
+import { firestoreMock, fakeSeed, fakeTs, resetFake } from '../support/fakeFirestore';
+vi.mock('firebase/firestore', () => firestoreMock);
+vi.mock('firebase/firestore/lite', () => ({ ...firestoreMock, getFirestore: () => ({}) }));
+vi.mock('../../src/lib/firebase', () => ({ app: {}, db: {}, auth: { currentUser: { uid: 'u_me' } } }));
 
 let engine: CountingDb;
 let opens = 0;
@@ -25,15 +29,44 @@ vi.mock('expo-sqlite', () => ({
 import { openForUser, closeDb } from '../../src/localdb/connection';
 import * as messagesRepo from '../../src/localdb/repositories/messagesRepo';
 import * as conversationsRepo from '../../src/localdb/repositories/conversationsRepo';
+import { pullMessages, pullMessageById } from '../../src/localdb/sync/firebasePull';
+import { onLocalMessagesChanged } from '../../src/localdb/messageChanges';
 
 beforeEach(async () => {
   opens = 0;
+  resetFake();
   engine = await createSqlJsDb();
   await engine.exec('CREATE TABLE concurrent_writes (id TEXT PRIMARY KEY)');
 });
 afterEach(async () => { await closeDb(); engine.close(); });
 
 describe('native SQLite concurrency', () => {
+  it('shows a notification target before a 100-message history page finishes writing', async () => {
+    await openForUser('u_me');
+    for (let i = 0; i < 100; i++) fakeSeed(`conversations/c/messages/history${i}`, {
+      senderUid: 'peer', text: `history ${i}`, createdAt: fakeTs(1000 + i),
+    });
+    fakeSeed('conversations/urgent/messages/target', { senderUid: 'peer', text: 'just arrived', createdAt: fakeTs(2000) });
+    let target: Promise<void> | undefined;
+    let storedHistoryWhenTargetVisible = 0;
+    const stop = onLocalMessagesChanged(c => {
+      if (c !== 'c' || target) return;
+      target = pullMessageById('urgent', 'target').then(async found => {
+        expect(found).toBe(true);
+        expect((await messagesRepo.listMessages('urgent'))[0].text).toBe('just arrived');
+        storedHistoryWhenTargetVisible = (await messagesRepo.listMessages('c', 100)).length;
+      });
+    });
+    try {
+      await pullMessages('c', 100);
+      expect(target).toBeDefined();
+      await target;
+      expect(storedHistoryWhenTargetVisible).toBeGreaterThan(0);
+      expect(storedHistoryWhenTargetVisible).toBeLessThan(100);
+      expect(await messagesRepo.listMessages('c', 100)).toHaveLength(100);
+    } finally { stop(); }
+  });
+
   it('stores real repository batches arriving together without losing or duplicating messages', async () => {
     await openForUser('u_me');
     const message = (id: string) => ({ remoteId: id, conversationId: 'c', senderUid: 'peer', text: id, remoteCreatedAt: 1 });

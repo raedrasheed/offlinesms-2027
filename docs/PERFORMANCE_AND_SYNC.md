@@ -89,15 +89,79 @@ Query plans (from the same run):
 
 `src/lib/perf.ts` records these marks; they are logged in development builds and readable through `perfReport()`:
 
-`auth:resolved`, `profile:fromCache`, `chatList:firstLocalRender`, `conversation:open`, `conversation:firstLocalRender`, `push:tap`, `push:prefetch`, `push:targetVisible`.
+Current marks include `auth:resolved`, `startup:messages:ready`, `chatList:shown`,
+`push:tap`, `sync:target:network`, `sync:recent:network`, `sync:recent:commit`,
+`sync:local:read`, and `sync:live:first-server`. Marks with `durationMs` separate
+database startup, network latency, commit latency and local reads. No message
+content or user identifiers are logged by these marks.
+
+`push_to_visible` ends when the target is in the list's data; `push_to_viewable`
+ends only on native viewability. Likewise, `conversation_open` and
+`conversation_first_viewable` distinguish data readiness from actual visibility.
 
 To compare builds on one device:
 1. Install each build in turn on the same phone, on the same Wi-Fi or with the same throttle profile.
-2. Capture `adb logcat | grep '\[perf\]'` over 5 cold starts, 5 chat opens and 5 notification taps.
-3. Compare the medians of `auth:resolved → chatList:firstLocalRender`, `conversation:open → conversation:firstLocalRender` and `push:tap → push:targetVisible`.
+2. Build with `EXPO_PUBLIC_PERF_LOG=1` and capture `adb logcat | grep '\[perf\]'`
+   over at least 5 cold starts, 5 chat opens and 5 notification taps. Use the
+   device console on iOS. Keep logging disabled in normal store builds.
+3. Compare `push_to_viewable` and `conversation_first_viewable` medians and tails.
+   Inspect the individual network/commit/read marks for slow runs. The tap mark
+   starts when JavaScript handles the tap, so it excludes native launch and JS
+   bundle startup; use a screen recording to measure the complete user wait.
+4. Repeat on a slow connection, with a large unsynced history, and after an
+   offline start followed by reconnect. Verify both direct and group messages.
 
 ## 4. Not yet validated
 
 - Physical-device timings (the marks above). This environment has no device or emulator with Google Play services.
 - Real FCM delivery in the foreground, background and killed states, plus throttled-network runs.
 - The expression index on the bundled SQLite of old Android versions. Expression indexes need SQLite ≥ 3.9, and expo-sqlite bundles a recent SQLite, but this has not been checked on a device.
+
+## 5. Cold-start and SQLite queue follow-up (2026-11-03)
+
+Two remaining dependencies were found in source, relative to `e0bc969`:
+
+- **Cold start:** notification targets were queued correctly, but SQLite was
+  opened by screen hooks. A target therefore waited for the profile gate and
+  navigator to mount those screens. `App` now starts opening the per-account
+  database directly from the Firebase auth callback. Once open, queued targets
+  can download before the profile screen/navigation is ready. This starts no
+  history scheduler. A late open for an account that is no longer signed in
+  cannot wake notification targets; a failed open remains retryable by screens.
+- **Database queue:** catch-up/history pages still wrote 50–100 messages in one
+  transaction on the serialized native SQLite connection. Local reads and a
+  notification's write could wait behind the whole page. Page writes now commit
+  at most 20 messages and yield between chunks, emitting post-commit refreshes
+  as each chunk becomes available. The recent 25-message bootstrap uses the
+  same bounded path; the single-target fetch remains one transaction.
+
+Each chunk verifies the account and database handle. Page cursors advance only
+after every chunk succeeds. If a later chunk fails, already committed rows stay
+available and retry replays the page through idempotent upserts.
+
+Validation:
+
+- The native SQLite queue regression uses the real connection serializer and
+  repositories, with sql.js in place of the native engine. It fetches a notified
+  message while a 100-message page is being committed. **On `e0bc969`, the target
+  only became readable after all 100 history rows were stored, and the new test
+  failed. With this change it is readable before the page completes.** This
+  proves ordering, not physical-device elapsed time.
+- New regressions cover failure of the second chunk (cursor unchanged, complete
+  retry without duplicates) and account switching between chunks (remaining
+  rows cannot enter the new account's database).
+- All 1,284 tests in 130 unit/component/SQLite suites passed, including existing
+  cold-start notification queueing, reconnect and media-completion tests.
+  Mobile TypeScript checking and Android/iOS Expo JS exports passed.
+- No production deployment, signed native build, or physical-device latency
+  measurement was performed for this change. Ship the mobile code in a new
+  application build and run the device comparison above. There are no server,
+  Firestore-rule or database-schema changes in this follow-up.
+
+Receiving a visible push does **not** prove that the message has been downloaded
+into SQLite: the operating system can display it while the app is not running.
+The foreground received listener is not a background download worker. See the
+[Expo notification delivery table](https://docs.expo.dev/push-notifications/what-you-need-to-know/#push-notification-behaviors)
+and [background notification limitations](https://docs.expo.dev/push-notifications/what-you-need-to-know/#headless-background-notifications).
+This change improves opening the app; it does not claim guaranteed pre-download
+while the app is terminated.
