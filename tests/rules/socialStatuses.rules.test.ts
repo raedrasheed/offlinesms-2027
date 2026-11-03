@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { assertFails, assertSucceeds, initializeTestEnvironment, type RulesTestEnvironment } from '@firebase/rules-unit-testing';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, query, setDoc, Timestamp, updateDoc, where } from 'firebase/firestore';
+import { collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, query, setDoc, Timestamp, updateDoc, where, type QuerySnapshot } from 'firebase/firestore';
 import { deleteObject, getBytes, getDownloadURL, listAll, ref, updateMetadata, uploadBytes } from 'firebase/storage';
 
 const hasStorage = !!process.env.FIREBASE_STORAGE_EMULATOR_HOST;
@@ -44,15 +44,32 @@ describe('status document audience and trusted interactions', () => {
   it('preserves the owner query and live updates even when own stories expire', async () => {
     const db = env.authenticatedContext('owner').firestore();
     const own = query(collection(db, 'statuses'), where('authorId', '==', 'owner'));
-    const first = await assertSucceeds(getDocs(own)); expect(first.docs.map(row => row.id).sort()).toEqual(['allowed', 'excluded', 'expired']);
-    let release!: () => void;
-    const live = new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => { release?.(); reject(new Error('Owner subscription did not receive the updated count')); }, 10_000);
-      release = onSnapshot(own, snapshot => {
-        if (snapshot.docs.find(row => row.id === 'allowed')?.get('viewCount') === 2) { clearTimeout(timeout); resolve(); }
-      }, error => { clearTimeout(timeout); reject(error); });
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let receiveSnapshot: (snapshot: QuerySnapshot) => void;
+    let rejectSnapshot: (error: Error) => void;
+    const waitForServerCount = (expected: number) => new Promise<QuerySnapshot>((resolve, reject) => {
+      rejectSnapshot = error => { clearTimeout(timeout); reject(error); };
+      receiveSnapshot = snapshot => {
+        if (snapshot.metadata.fromCache || snapshot.metadata.hasPendingWrites) return;
+        if (snapshot.docs.find(row => row.id === 'allowed')?.get('viewCount') === expected) {
+          clearTimeout(timeout); resolve(snapshot);
+        }
+      };
+      timeout = setTimeout(() => rejectSnapshot(new Error(`Owner subscription did not receive server count ${expected}`)), 10_000);
     });
-    try { await mutate('statuses/allowed', { viewCount: 2 }); await live; } finally { release(); }
+    // Use one watch for the initial query and mutation. getDocs followed by
+    // onSnapshot rapidly unlistens/relistens and can trigger the emulator's
+    // malformed gRPC frame bug: firebase/firebase-tools#8654.
+    let release = () => {};
+    try {
+      const first = waitForServerCount(1);
+      release = onSnapshot(own, { includeMetadataChanges: true },
+        snapshot => receiveSnapshot(snapshot), error => rejectSnapshot(error));
+      const initial = await first;
+      expect(initial.docs.map(row => row.id).sort()).toEqual(['allowed', 'excluded', 'expired']);
+      const live = waitForServerCount(2);
+      await Promise.all([mutate('statuses/allowed', { viewCount: 2 }), live]);
+    } finally { clearTimeout(timeout); release(); }
     await assertSucceeds(deleteDoc(doc(db, 'statuses/expired')));
   });
 
