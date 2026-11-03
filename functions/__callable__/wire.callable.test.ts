@@ -202,14 +202,15 @@ async function phoneSignin(phone: string, code: (challengeId: string) => Promise
 
 async function groupWithExternal(id: string, phone: string) {
   const ref = db().collection('conversations').doc(id);
-  await ref.set({ type: 'group', participantUids: ['owner-x'], memberIds: ['owner-x'], memberCount: 1, externalMemberCount: 1 });
+  await ref.set({ type: 'group', ownerUid: 'owner-x', participantUids: ['owner-x'], memberIds: ['owner-x'], memberCount: 1, externalMemberCount: 1 });
+  await ref.collection('members').doc('owner-x').set({ uid: 'owner-x', role: 'owner', status: 'active' });
   const digits = phone.replace(/\D/g, '');
   await ref.collection('externalMembers').doc(digits).set({ normalizedPhone: digits, phoneE164: phone, displayName: 'Ext', isRegistered: false });
   return ref;
 }
 
 describe('N2 — store-review login over HTTP never reaches phone-linking triggers', () => {
-  it('review login: no phone recorded, no group promotion; a normal sign-in in the same run IS promoted (trigger live)', async () => {
+  it('review login creates no phone link or group invitation; normal sign-in links contacts and invites without enrolling (trigger live)', async () => {
     const REVIEW = '+970599100071';
     const NORMAL = '+970599100072';
     const CODE = '246813';
@@ -234,16 +235,24 @@ describe('N2 — store-review login over HTTP never reaches phone-linking trigge
     expect(rev.uid).toBe(demo.uid);
     expect((await db().collection('relayJobs').where('phoneE164', '==', REVIEW).get()).size).toBe(0);
 
-    // Positive control: the real trigger runs and promotes a genuine phone sign-in.
+    // Positive control: a genuine phone sign-in runs the same live trigger,
+    // linking contacts and inviting the user without granting group membership.
     const normal = await phoneSignin(NORMAL, async id => {
       const body = (await db().collection('relayJobs').doc(`pauth_${id}`).get()).get('messageBody') as string;
       return /\b(\d{6})\b/.exec(body)![1];
     });
-    await waitFor(async () => ((await normalGroup.get()).get('participantUids') as string[]).includes(normal.uid));
+    const normalInvitation = db().doc(`users/${normal.uid}/groupInvitations/${normalGroup.id}`);
+    await waitFor(async () => (await normalInvitation.get()).get('status') === 'pending');
     await new Promise(r => setTimeout(r, 1500)); // let any (wrongly) queued review trigger land too
 
     expect((await db().collection('phoneContacts').doc('c-normal').get()).get('linkedUid')).toBe(normal.uid); // trigger live
+    expect((await normalInvitation.get()).data()).toMatchObject({ status: 'pending', inviterUid: 'owner-x', conversationId: normalGroup.id });
+    expect((await normalGroup.collection('externalMembers').doc(NORMAL.replace(/\D/g, '')).get()).data()).toMatchObject({ isRegistered: true, linkedUid: normal.uid });
+    expect((await normalGroup.get()).get('participantUids')).toEqual(['owner-x']);
+    expect((await normalGroup.collection('members').doc(normal.uid).get()).exists).toBe(false);
     expect((await reviewGroup.get()).get('participantUids')).toEqual(['owner-x']);
+    expect((await reviewGroup.collection('members').doc(demo.uid).get()).exists).toBe(false);
+    expect((await db().doc(`users/${demo.uid}/groupInvitations/${reviewGroup.id}`).get()).exists).toBe(false);
     const rc = (await db().collection('phoneContacts').doc('c-review').get()).data()!;
     expect(rc.isRegistered).toBe(false);
     expect(rc.linkedUid).toBeUndefined();

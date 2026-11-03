@@ -23,8 +23,10 @@ requires React 19. The 19.0 line avoids an additional React minor-version upgrad
 React, React DOM, Next, Lucide and Recharts resolve the same installed React
 instance. The root lockfile includes their required framework dependencies.
 
-Mobile remains a standalone installation with its own manifest and lockfile.
-Neither mobile nor Functions source or manifests change in this patch.
+Mobile remains a standalone installation with its own package manifest and
+lockfile. Its runtime dependency versions and the Functions runtime are unchanged.
+The release-validation repairs below include an Android manifest/plugin fix and
+test-fixture corrections found by the full CI run.
 
 ## Application compatibility
 
@@ -77,3 +79,33 @@ Review and integrate the change through the normal repository release process.
 After deploying a reviewed build, verify authenticated sign-in, permissions,
 clips administration, settings saves and exports with the intended test account.
 Those live workflows have not been exercised by this local validation.
+
+## Release-validation repairs
+
+The first pull-request CI run exposed four blockers. They are corrected without
+removing checks or weakening the historical comparison guard:
+
+- Android Back tests now import the navigation library's public exports instead
+  of compiling its private legacy TSX implementation. Mobile and workspace
+  typechecks and the five existing lifecycle tests pass with the new root types.
+- The store-review wire test now seeds a valid group owner and verifies that a
+  normal phone login creates a consent invitation without granting membership.
+  It continues to prove that review login creates neither a phone link nor an
+  invitation. Full wire validation runs in CI; local emulator IPC is restricted.
+- The historical APK overlay now includes the two runtime dependencies added by
+  earlier releases. All 867 shipped dependency entries and the performance
+  instrumentation match the updated app; the existing equality guard is intact.
+- Native Android and the Expo plugin combine ML Kit's `subject_segment` and
+  `barcode_ui` metadata using an attribute-specific merge override. Regression
+  tests check both installed library declarations, native/prebuild parity and
+  repeated prebuild behavior. Actual Gradle compilation remains a CI check.
+
+On the assembled repair tree under Node.js 24.22.1, the mobile typecheck and all
+1,465 unit tests in 155 files pass locally. Full native builds and the repaired wire test still
+require the GitHub Actions rerun.
+
+The production command `node node_modules/next/dist/bin/next start apps/dashboard
+-p 3000` uses the verified root entrypoint and port. Local HTTP checks add an
+explicit loopback hostname because this execution environment restricts network
+interface enumeration; DigitalOcean's existing command does not need changing
+based on that local restriction.

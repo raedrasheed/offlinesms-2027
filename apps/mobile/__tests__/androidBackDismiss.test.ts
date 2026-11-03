@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createElement, useState } from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 // Exercise the installed navigation library's real focus/blur lifecycle.
-import NavigationContext from '../node_modules/@react-navigation/core/src/NavigationContext';
+import { NavigationContext } from '@react-navigation/core';
 const native = vi.hoisted(() => ({ os: 'android', listeners: [] as Array<() => boolean> }));
 vi.mock('@react-navigation/native', async () => ({
-  useFocusEffect: (await import('../node_modules/@react-navigation/core/src/useFocusEffect')).default,
+  useFocusEffect: (await import('@react-navigation/core')).useFocusEffect,
 }));
 vi.mock('react-native', () => ({
   Platform: { get OS() { return native.os; } },
