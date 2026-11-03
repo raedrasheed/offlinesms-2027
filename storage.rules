@@ -46,21 +46,24 @@ service firebase.storage {
     // Account/master-policy checks happen at reservation, publish and processing;
     // already issued private source leases last until uploadExpiresAt.
     match /clipUploads/{uid}/{clipId}/source {
-      function clip() { return firestore.get(/databases/(default)/documents/clips/$(clipId)).data; }
-      function profile() { return firestore.get(/databases/(default)/documents/clipProfiles/$(uid)).data; }
+      function canUploadSource() {
+        // Bind each document once to stay within the two-call limit.
+        let publisher = firestore.get(/databases/(default)/documents/clipProfiles/$(uid)).data;
+        let reservation = firestore.get(/databases/(default)/documents/clips/$(clipId)).data;
+        return publisher.get('suspended', false) != true
+          && publisher.get('deleting', false) != true
+          && reservation.ownerUid == uid
+          && reservation.status in ['uploading', 'failed']
+          && reservation.sourcePath == 'clipUploads/' + uid + '/' + clipId + '/source'
+          && reservation.uploadExpiresAt > request.time
+          && request.resource.size > 0
+          && request.resource.size <= reservation.maxUploadBytes
+          && request.resource.size <= 200 * 1024 * 1024
+          && request.resource.contentType in ['video/mp4', 'video/quicktime', 'video/webm']
+          && request.resource.metadata.keys().hasOnly([]);
+      }
       allow read: if false;
-      allow write: if isSelf(uid) && request.resource != null
-        && profile().get('suspended', false) != true
-        && profile().get('deleting', false) != true
-        && clip().ownerUid == uid
-        && clip().status in ['uploading', 'failed']
-        && clip().sourcePath == 'clipUploads/' + uid + '/' + clipId + '/source'
-        && clip().uploadExpiresAt > request.time
-        && request.resource.size > 0
-        && request.resource.size <= clip().maxUploadBytes
-        && request.resource.size <= 200 * 1024 * 1024
-        && request.resource.contentType in ['video/mp4', 'video/quicktime', 'video/webm']
-        && request.resource.metadata.keys().hasOnly([]);
+      allow write: if isSelf(uid) && request.resource != null && canUploadSource();
     }
     match /clipMedia/{path=**} {
       allow read, write: if false;

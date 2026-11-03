@@ -3,7 +3,7 @@ import { initializeTestEnvironment, type RulesTestEnvironment } from '@firebase/
 import { createMockUserToken } from '@firebase/util';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { doc, setDoc, Timestamp, updateDoc } from 'firebase/firestore';
+import { deleteDoc, doc, setDoc, Timestamp, updateDoc } from 'firebase/firestore';
 import { deleteObject, getBytes, ref } from 'firebase/storage';
 
 const hasStorage = !!process.env.FIREBASE_STORAGE_EMULATOR_HOST;
@@ -107,6 +107,32 @@ describe.skipIf(!hasStorage)('native clip resumable upload protocol with product
     const sessionUrl = await start('native-upload-peer', bytes.length);
     const completed = await send(sessionUrl, 'native-upload-peer', bytes, 0, true);
     expect(completed.status).toBe(403);
+    await env.withSecurityRulesDisabled(async context => {
+      await expect(getBytes(ref(context.storage(bucket), sourcePath))).rejects.toMatchObject({ code: 'storage/object-not-found' });
+    });
+  });
+
+  it('permits a reserved upload when an existing publisher profile omits optional flags', async () => {
+    await env.withSecurityRulesDisabled(async context => {
+      await setDoc(doc(context.firestore(), `clipProfiles/${owner}`), { termsVersion: 'clips-v1' });
+    });
+    const bytes = new Uint8Array([1, 2, 3]);
+    const sessionUrl = await start(owner, bytes.length);
+    const completed = await send(sessionUrl, owner, bytes, 0, true);
+    expect(completed.status).toBe(200);
+    expect(completed.headers.get('x-goog-upload-status')).toBe('final');
+    await env.withSecurityRulesDisabled(async context => {
+      expect(new Uint8Array(await getBytes(ref(context.storage(bucket), sourcePath)))).toEqual(bytes);
+    });
+  });
+
+  it('rejects finalization if the publisher profile disappears after the session starts', async () => {
+    const bytes = new Uint8Array([1, 2, 3]);
+    const sessionUrl = await start(owner, bytes.length);
+    await env.withSecurityRulesDisabled(async context => {
+      await deleteDoc(doc(context.firestore(), `clipProfiles/${owner}`));
+    });
+    expect((await send(sessionUrl, owner, bytes, 0, true)).status).toBe(403);
     await env.withSecurityRulesDisabled(async context => {
       await expect(getBytes(ref(context.storage(bucket), sourcePath))).rejects.toMatchObject({ code: 'storage/object-not-found' });
     });
