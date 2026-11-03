@@ -46,6 +46,12 @@ service firebase.storage {
     // Account/master-policy checks happen at reservation, publish and processing;
     // already issued private source leases last until uploadExpiresAt.
     match /clipUploads/{uid}/{clipId}/source {
+      function hasNoCustomMetadata(incoming) {
+        // Uploads without custom metadata can omit the field or use null. Check
+        // the shape before calling map methods; supplied custom keys still deny.
+        return !('metadata' in incoming) || incoming.metadata == null
+          || (incoming.metadata is map && incoming.metadata.keys().hasOnly([]));
+      }
       function canUploadSource() {
         // Bind each document once to stay within the two-call limit.
         let publisher = firestore.get(/databases/(default)/documents/clipProfiles/$(uid)).data;
@@ -60,7 +66,7 @@ service firebase.storage {
           && request.resource.size <= reservation.maxUploadBytes
           && request.resource.size <= 200 * 1024 * 1024
           && request.resource.contentType in ['video/mp4', 'video/quicktime', 'video/webm']
-          && request.resource.metadata.keys().hasOnly([]);
+          && hasNoCustomMetadata(request.resource);
       }
       allow read: if false;
       allow write: if isSelf(uid) && request.resource != null && canUploadSource();
