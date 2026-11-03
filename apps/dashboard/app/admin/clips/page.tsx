@@ -4,7 +4,8 @@ import { CLIP_STATUSES } from '@/lib/clipAdminPolicy';
 
 const label = (v: string) => v.replace(/_/g, ' ');
 const box = { background: 'var(--c-card)', border: '1px solid var(--c-border)' };
-export default async function ClipsPage({ searchParams = {} }: { searchParams?: { status?: string; ownerUid?: string; cursor?: string } }) {
+export default async function ClipsPage({ searchParams: searchParamsPromise }: { searchParams?: Promise<{ status?: string; ownerUid?: string; cursor?: string }> }) {
+  const searchParams = (await searchParamsPromise) ?? {};
   const status = searchParams.status ?? 'pending_review';
   const ownerUid = searchParams.ownerUid?.trim() ?? '';
   const [page, stats] = await Promise.all([

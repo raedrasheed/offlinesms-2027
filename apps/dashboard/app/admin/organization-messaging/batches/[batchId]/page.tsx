@@ -44,11 +44,12 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export default async function OrgBatchDetailPage({
-  params,
+  params: paramsPromise,
 }: {
-  params: { batchId: string };
+  params: Promise<{ batchId: string }>;
 }) {
-  const cookie = cookies().get('__session')?.value;
+  const params = await paramsPromise;
+  const cookie = (await cookies()).get('__session')?.value;
   const session = await verifySession(cookie);
   if (session.state !== 'authorized') redirect('/login?next=/admin/organization-messaging');
   if (!canDo(session.role, 'view:organization_messaging')) {

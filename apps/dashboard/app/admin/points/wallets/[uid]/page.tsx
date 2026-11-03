@@ -19,8 +19,9 @@ import WalletFreezeAction from '../WalletFreezeAction';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-export default async function WalletDetailPage({ params }: { params: { uid: string } }) {
-  const cookie = cookies().get('__session')?.value;
+export default async function WalletDetailPage({ params: paramsPromise }: { params: Promise<{ uid: string }> }) {
+  const params = await paramsPromise;
+  const cookie = (await cookies()).get('__session')?.value;
   const session = await verifySession(cookie);
   if (session.state !== 'authorized') redirect('/login?next=/admin/points/wallets');
   if (!canDo(session.role, 'view:points')) {

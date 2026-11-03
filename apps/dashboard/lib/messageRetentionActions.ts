@@ -9,7 +9,7 @@ import { retentionPolicy, retentionCutoff, validRetentionDays, chatMessagePath }
 
 export type RetentionActionState = { error?: string; success?: boolean } | null;
 export async function previewMessageRetention(days: number): Promise<{ count?: number; lowerBound?: boolean; error?: string }> {
-  const session = await verifySession(cookies().get('__session')?.value);
+  const session = await verifySession((await cookies()).get('__session')?.value);
   if (session.state !== 'authorized' || !isPlatformAdmin(session)) return { error: 'Platform admin access required.' };
   if (!validRetentionDays(days)) return { error: 'Enter a whole number from 1 to 3650 days.' };
   try {
@@ -29,7 +29,7 @@ export async function previewMessageRetention(days: number): Promise<{ count?: n
 }
 
 export async function updateMessageRetention(_prev: RetentionActionState, form: FormData): Promise<RetentionActionState> {
-  const session = await verifySession(cookies().get('__session')?.value);
+  const session = await verifySession((await cookies()).get('__session')?.value);
   if (session.state !== 'authorized' || !isPlatformAdmin(session)) return { error: 'Platform admin access required.' };
   const days = Number(form.get('messageRetentionDays'));
   const enabled = form.get('messageRetentionEnabled') === 'true';

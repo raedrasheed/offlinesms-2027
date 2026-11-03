@@ -6,7 +6,7 @@ const fake = vi.hoisted(() => ({
   readFailure: false,
   writes: [] as Array<{ collection: string; id?: string; data: any; options?: any }>,
 }));
-vi.mock('next/headers', () => ({ cookies: () => ({ get: () => ({ value: 'session' }) }) }));
+vi.mock('next/headers', () => ({ cookies: async () => ({ get: () => ({ value: 'session' }) }) }));
 vi.mock('../lib/session', () => ({ verifySession: async () => session.current }));
 vi.mock('../lib/firebase-admin', () => ({ adminDb: {
   collection: (collection: string) => ({

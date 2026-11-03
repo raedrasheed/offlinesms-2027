@@ -16,7 +16,7 @@ export async function updateSystemSettings(
   _prev: SettingsActionState,
   data: FormData,
 ): Promise<SettingsActionState> {
-  const cookie = cookies().get('__session')?.value;
+  const cookie = (await cookies()).get('__session')?.value;
   const session = await verifySession(cookie);
   if (session.state !== 'authorized' || !canDo(session.role, 'manage:settings') || !isPlatformAdmin(session)) {
     return { error: 'Permission denied.' };

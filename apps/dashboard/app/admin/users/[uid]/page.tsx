@@ -23,8 +23,9 @@ import { userLabel, userInitial } from '@/lib/userLabel';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-export default async function UserDetailPage({ params }: { params: { uid: string } }) {
-  const cookie = cookies().get('__session')?.value;
+export default async function UserDetailPage({ params: paramsPromise }: { params: Promise<{ uid: string }> }) {
+  const params = await paramsPromise;
+  const cookie = (await cookies()).get('__session')?.value;
   const session = await verifySession(cookie);
   if (session.state !== 'authorized') redirect('/login?next=/admin/users');
   if (!canDo(session.role, 'view:users')) {

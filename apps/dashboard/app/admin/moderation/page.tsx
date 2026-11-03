@@ -42,11 +42,12 @@ async function fetchFlags(status?: string): Promise<FlagRow[]> {
 }
 
 export default async function ModerationPage({
-  searchParams,
+  searchParams: searchParamsPromise,
 }: {
-  searchParams?: { status?: string };
+  searchParams?: Promise<{ status?: string }>;
 }) {
-  const cookie = cookies().get('__session')?.value;
+  const searchParams = await searchParamsPromise;
+  const cookie = (await cookies()).get('__session')?.value;
   const session = await verifySession(cookie);
   if (session.state !== 'authorized') redirect('/login?next=/admin/moderation');
   if (!canDo(session.role, 'view:moderation')) {

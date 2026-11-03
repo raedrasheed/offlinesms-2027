@@ -16,8 +16,9 @@ export const runtime = 'nodejs';
 const CARD   = 'var(--c-card)';
 const BORDER = 'var(--c-border)';
 
-export default async function WalletsPage({ searchParams }: { searchParams?: { cursor?: string; status?: string } }) {
-  const cookie = cookies().get('__session')?.value;
+export default async function WalletsPage({ searchParams: searchParamsPromise }: { searchParams?: Promise<{ cursor?: string; status?: string }> }) {
+  const searchParams = await searchParamsPromise;
+  const cookie = (await cookies()).get('__session')?.value;
   const session = await verifySession(cookie);
   if (session.state !== 'authorized') redirect('/login?next=/admin/points/wallets');
   if (!canDo(session.role, 'view:points')) {

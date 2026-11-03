@@ -119,14 +119,15 @@ const RESULT_STYLE: Record<string, { bg: string; color: string }> = {
 };
 
 export default async function AuditLogPage({
-  searchParams,
+  searchParams: searchParamsPromise,
 }: {
-  searchParams?: {
+  searchParams?: Promise<{
     cursor?: string; actor?: string; action?: string;
     targetType?: string; result?: string; from?: string; to?: string;
-  };
+  }>;
 }) {
-  const sessionCookie = cookies().get('__session')?.value;
+  const searchParams = await searchParamsPromise;
+  const sessionCookie = (await cookies()).get('__session')?.value;
   const session = await verifySession(sessionCookie);
   if (session.state !== 'authorized') redirect('/login?next=/admin/audit');
   if (!canDo(session.role, 'view:audit')) {

@@ -13,8 +13,9 @@ import { updatePointsPackage } from '@/lib/packageActions';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-export default async function EditPackagePage({ params }: { params: { packageId: string } }) {
-  const cookie = cookies().get('__session')?.value;
+export default async function EditPackagePage({ params: paramsPromise }: { params: Promise<{ packageId: string }> }) {
+  const params = await paramsPromise;
+  const cookie = (await cookies()).get('__session')?.value;
   const session = await verifySession(cookie);
   if (session.state !== 'authorized') redirect('/login?next=/admin/points/packages');
   if (!canDo(session.role, 'manage:packages')) {

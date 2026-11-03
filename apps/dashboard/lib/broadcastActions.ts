@@ -35,7 +35,7 @@ const DEAD_TOKEN_CODES = new Set([
 type Authorized = SessionResult & { state: 'authorized' };
 
 async function authorize(needManage = false): Promise<Authorized | { error: string }> {
-  const cookie = cookies().get('__session')?.value;
+  const cookie = (await cookies()).get('__session')?.value;
   const session = await verifySession(cookie);
   if (session.state !== 'authorized') return { error: 'Not authenticated.' };
   const cap = needManage ? 'manage:broadcast_notifications' : 'view:broadcast_notifications';

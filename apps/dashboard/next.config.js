@@ -2,7 +2,7 @@
 const nextConfig = {
   reactStrictMode: true,
   transpilePackages: ['@offlinesms/design-tokens'],
-  experimental: { typedRoutes: true },
+  typedRoutes: true,
   webpack: (config, { dev }) => {
     // Dev-only: avoid the webpack persistent-cache gzip allocation that OOMs
     // ("RangeError: Array buffer allocation failed") on low-memory machines.

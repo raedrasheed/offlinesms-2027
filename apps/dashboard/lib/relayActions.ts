@@ -40,7 +40,7 @@ const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 type AuthorizedSession = SessionResult & { state: 'authorized' };
 
 async function authorize(): Promise<AuthorizedSession | { error: string }> {
-  const cookie = cookies().get('__session')?.value;
+  const cookie = (await cookies()).get('__session')?.value;
   const session = await verifySession(cookie);
   if (session.state !== 'authorized') return { error: 'Not authenticated.' };
   if (!canDo(session.role, 'manage:relay')) return { error: 'You do not have relay management access.' };

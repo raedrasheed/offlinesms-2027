@@ -13,11 +13,12 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export default async function OrgsAdminPage({
-  searchParams,
+  searchParams: searchParamsPromise,
 }: {
-  searchParams?: { cursor?: string };
+  searchParams?: Promise<{ cursor?: string }>;
 }) {
-  const cookie = cookies().get('__session')?.value;
+  const searchParams = await searchParamsPromise;
+  const cookie = (await cookies()).get('__session')?.value;
   const session = await verifySession(cookie);
   if (session.state !== 'authorized') redirect('/login?next=/admin/organizations');
   if (!canDo(session.role, 'view:organizations')) {

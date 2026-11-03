@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const session = vi.hoisted(() => ({ current: { state: 'unauthenticated' } as any }));
 const fake = vi.hoisted(() => ({ current: { messageRetentionDays: 14, messageRetentionEnabled: false }, writes: [] as any[] }));
-vi.mock('next/headers', () => ({ cookies: () => ({ get: () => ({ value: 'session' }) }) }));
+vi.mock('next/headers', () => ({ cookies: async () => ({ get: () => ({ value: 'session' }) }) }));
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
 vi.mock('../lib/session', () => ({ verifySession: async () => session.current }));
 vi.mock('../lib/firebase-admin', () => ({ adminDb: {
