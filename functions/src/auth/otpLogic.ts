@@ -9,10 +9,9 @@ export const OTP_RESEND_COOLDOWN_MS = 60 * 1000;  // min gap between sends
 export const OTP_MAX_PER_HOUR = 5;                // sends per phone per hour
 export const OTP_CODE_LENGTH = 6;
 
-// NOTE: the former App-review test number with a fixed code (+970599999999 /
-// 123456) was removed together with public phone sign-in. A fixed credential
-// shipped in the server code is a production bypass; app review now uses an
-// email account (see docs/PHONE_LINKING_SECURITY.md).
+// The old OTP endpoints remain retired. Fixed store-review access now lives
+// in phoneAuth/fixedReview.ts and the protected v2 flow: one designated demo
+// uid, no phone lookup/ownership, no SMS and no welcome-credit grant.
 
 // Sign-in is restricted to the mobile prefixes the relay serves. The national
 // (significant) number must start with one of these — for EVERY number. A

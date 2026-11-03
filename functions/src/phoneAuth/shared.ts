@@ -19,19 +19,29 @@ export const SESSION_TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
 export const INSTALLATION_ID_RE = /^[A-Za-z0-9_-]{16,64}$/;
 export const REQUEST_ID_RE = /^[A-Za-z0-9_-]{8,64}$/;
 
-export type GateMode = 'send' | 'verify';
+export type GateMode = 'send' | 'verify' | 'start' | 'fixed-review';
 
 /**
  * Load the sign-in config and apply the feature gates. `send` needs the
  * purpose enabled AND not emergency-stopped; `verify` only needs the purpose
  * enabled (checking an already-sent code sends nothing). Unreadable config ⇒
- * `service-paused` (fail closed).
+ * `service-paused` (fail closed). `start` also admits sessions when the fixed
+ * demo is configured; `fixed-review` is only for its exact number/challenges
+ * and does not enable real SMS. App Check and abuse limits remain enforced.
  */
 export async function requireSigninConfig(db: Firestore, mode: GateMode): Promise<PhoneAuthConfig> {
   let cfg: PhoneAuthConfig;
   try { cfg = await loadPhoneAuthConfig(db); } catch { throw new HttpsError('unavailable', 'service-paused'); }
+  // Fixed review sends nothing. Only server-validated fixed-number requests or
+  // session-bound fixed-review challenges may use this mode. Normal numbers
+  // still pass every existing SMS gate, even when their session started here.
+  if (mode === 'fixed-review') {
+    if (!cfg.fixedReview) throw new HttpsError('failed-precondition', 'phone-auth-unavailable');
+    return { ...cfg, review: cfg.fixedReview };
+  }
+  if (mode === 'start' && cfg.fixedReview) return cfg;
   if (!cfg.enabled) throw new HttpsError('failed-precondition', 'phone-auth-unavailable');
-  if (mode === 'send' && (cfg.emergencyStop || !cfg.businessId)) throw new HttpsError('unavailable', 'service-paused');
+  if ((mode === 'send' || mode === 'start') && (cfg.emergencyStop || !cfg.businessId)) throw new HttpsError('unavailable', 'service-paused');
   return cfg;
 }
 

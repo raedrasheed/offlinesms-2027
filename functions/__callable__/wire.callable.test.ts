@@ -77,6 +77,50 @@ describe('retired endpoints over HTTP', () => {
 });
 
 describe('public phone sign-in over HTTP (no app, no UI)', () => {
+  it('fixed review logs into only its demo, sends no SMS and cannot read another user\'s private data', async () => {
+    const uid = 'wire-fixed-demo';
+    await getAuth().createUser({ uid });
+    await getAuth().setCustomUserClaims(uid, { demoReview: true });
+    await db().doc(`users/${uid}`).set({ status: 'active', demo: true, profileCompleted: true });
+    await db().doc(`wallets/${uid}`).set({ balance: 73 });
+    await db().doc('wallets/unrelated').set({ balance: 900 });
+    await db().doc('users/unrelated/userPrivate/profile').set({ email: 'private@example.test' });
+    await db().doc('conversations/unrelated').set({ participantUids: ['unrelated'], type: 'group' });
+    await db().doc('smsConfig/otp').set({
+      enabled: false, emergencyStop: true,
+      signin: { enabled: false, limits: { powBits: 8, powMaxBits: 8 }, fixedReview: { enabled: true, uid } },
+    });
+    await db().doc('relayDevices/dev-wire').delete();
+    expect((await call('getSupportedPhoneCountries', { v: 2 })).result).toEqual({ available: true, countries: ['PS'] });
+    const s = (await call('startPhoneAuth', {})).result;
+    const phone = '+970599999999';
+    const request = await call('requestPhoneAuthCode', {
+      sessionToken: s.sessionToken, phoneE164: phone, requestId: 'fixed-review-wire-1',
+      powNonce: s.pow.nonce, powSolution: solve(s.pow.nonce, phone, s.pow.bits),
+    });
+    expect(request.http).toBe(200);
+    const result = await call('verifyPhoneAuthCode', {
+      sessionToken: s.sessionToken, challengeId: request.result.challengeId, code: '123456', uid: 'unrelated',
+    });
+    expect(result.http).toBe(200);
+    expect(result.result).toMatchObject({ uid, isNewUser: false });
+    const authResponse = await fetch(`http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=fake-api-key`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token: result.result.customToken, returnSecureToken: true }),
+    });
+    const { idToken } = await authResponse.json() as { idToken: string };
+    expect(idToken).toBeTruthy();
+    const read = (path: string) => fetch(`http://127.0.0.1:8080/v1/projects/${PROJECT}/databases/(default)/documents/${path}`, {
+      headers: { authorization: `Bearer ${idToken}` },
+    });
+    expect((await read(`wallets/${uid}`)).status).toBe(200);
+    for (const path of ['wallets/unrelated', 'users/unrelated/userPrivate/profile', 'conversations/unrelated']) {
+      expect((await read(path)).status).toBe(403);
+    }
+    expect((await db().collection('relayJobs').get()).size).toBe(0);
+    expect((await db().doc(`wallets/${uid}`).get()).get('balance')).toBe(73);
+  });
+
   it('direct calls without a valid proof never queue an SMS; a valid proof queues exactly one', async () => {
     const s = (await call('startPhoneAuth', {})).result as { sessionToken: string; pow: { nonce: string; bits: number } };
     expect(s.sessionToken).toMatch(/^[A-Za-z0-9_-]{43}$/);

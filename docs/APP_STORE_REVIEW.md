@@ -1,3 +1,72 @@
+# App Store Review — fixed demo login
+
+Current phone credentials: **+970599999999 / 123456**.
+
+The server's v2 phone flow reserves this alias for a single, admin-bound demo
+UID. It never resolves the alias to an ordinary phone owner, queues an SMS,
+creates another account, or grants welcome points. The credential has no automatic
+expiry. Individual sessions/challenges still expire; App Check, proof-of-work
+and abuse limits remain enforced. Disabling the binding or the demo account
+blocks new tokens, including retries.
+
+## Restore the existing demo
+
+Use an account authorized to deploy Firebase Functions and Admin SDK credentials
+for the same project. Keep credential files outside the repository.
+
+```powershell
+# From the updated repository (Node.js 22):
+npm ci
+npx firebase deploy --project offlinesms-prod-2027 --only "functions:startPhoneAuth,functions:requestPhoneAuthCode,functions:verifyPhoneAuthCode,functions:getSupportedPhoneCountries"
+
+# Set this to your existing service-account JSON; never upload/commit the key.
+$env:GOOGLE_APPLICATION_CREDENTIALS = "C:\secure\offlinesms-service-account.json"
+node --import tsx scripts/restoreFixedReview.ts --project=offlinesms-prod-2027
+```
+
+The restore script finds the original phone demo created by `seedReviewDemo.ts`
+and requires its exact historical demo markers, an active profile and no
+privileged claims. It preserves the UID, conversations, contacts, wallet and
+transactions, designates the account with only `demoReview: true`, removes the
+unproved phone identity and enables `smsConfig/otp.signin.fixedReview`.
+It does not turn on general SMS, change relay settings or create a substitute
+account if the original is missing. Re-running it reuses the bound UID.
+
+If an already-designated demo is used instead, pass `--uid=<demo uid>` explicitly.
+A normal/admin account is rejected. Do not rerun the historical `seed:review`
+script to activate this login: it predates the protected flow and may create a
+different phone account. For a deliberate shutdown:
+
+```powershell
+node --import tsx scripts/restoreFixedReview.ts --project=offlinesms-prod-2027 --disable
+```
+
+## Verify the submitted build before resubmission
+
+1. Sign out and open the actual iOS build sent to App Review.
+2. Choose **Continue with phone → Palestine (+970)** and enter **599999999**.
+3. Tap **Send code**, then enter **123456** manually. No SMS is sent.
+4. Confirm the existing demo content appears. Sign out and repeat.
+5. Update App Review Information with these exact credentials and instructions.
+
+This server change supports builds using `startPhoneAuth`,
+`requestPhoneAuthCode` and `verifyPhoneAuthCode` (the current mobile source).
+Retired legacy OTP endpoints remain disabled; an older build using them needs
+an app update. Repository/emulator checks do not establish production activation
+or successful testing of Apple's submitted binary.
+
+Suggested App Review login notes:
+
+> Demo phone: +970599999999. Verification code: 123456.
+> Choose Continue with phone, select Palestine (+970), enter 599999999,
+> tap Send code, and enter 123456 manually. This is a designated demo account;
+> no SMS is sent. The login credentials do not expire automatically.
+
+## Archived notes for version 2.2.16 (build 8)
+
+The material below describes an older release and its old seeding procedure.
+Use the restoration procedure above for the current protected phone flow.
+
 # App Store Review — OfflineSMS Messenger 2.2.16 (build 8)
 
 Addresses the rejection of 2.2.15 (build 7):

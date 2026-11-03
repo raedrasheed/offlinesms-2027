@@ -33,6 +33,7 @@ import {
 } from '../phoneLink/limits';
 import { profileIsActive } from '../phoneLink/gates';
 import { PHONE_AUTH_COLLECTIONS as C, requireSigninConfig, requireAttestation, sessionKeyFor } from './shared';
+import { FIXED_REVIEW_PHONE } from './fixedReview';
 
 const CHALLENGE_ID_RE = /^[0-9a-f]{32}$/;
 const CODE_RE = /^\d{6}$/;
@@ -66,8 +67,6 @@ type VerifyTx =
 
 export async function handleVerifyPhoneAuthCode(request: CallableRequest<unknown>) {
   const db = getFirestore();
-  const cfg = await requireSigninConfig(db, 'verify');
-  requireAttestation(request, cfg);
   const pepper = requirePepper();
   const data = (request.data ?? {}) as Record<string, unknown>;
   const sessionKey = sessionKeyFor(pepper, data.sessionToken);
@@ -75,6 +74,14 @@ export async function handleVerifyPhoneAuthCode(request: CallableRequest<unknown
   if (!sessionKey || !challengeId) throw new HttpsError('not-found', 'challenge-not-found');
   const code = typeof data.code === 'string' ? data.code.trim() : '';
   if (!CODE_RE.test(code)) throw new HttpsError('invalid-argument', 'code-invalid');
+
+  // Use only persisted, session-bound state to select the demo-only gate.
+  // Client-supplied uid / phone / review flags never select an account.
+  const initial = await db.collection(C.challenges).doc(challengeId).get();
+  const fixedReview = initial.get('fixedReview') === true && initial.get('review') === true
+    && initial.get('phoneE164') === FIXED_REVIEW_PHONE && initial.get('sessionKey') === sessionKey;
+  const cfg = await requireSigninConfig(db, fixedReview ? 'fixed-review' : 'verify');
+  requireAttestation(request, cfg);
 
   const L = cfg.limits;
   const now = Date.now();
@@ -84,7 +91,8 @@ export async function handleVerifyPhoneAuthCode(request: CallableRequest<unknown
   const res = await db.runTransaction<VerifyTx>(async tx => {
     const [chS, opS] = await tx.getAll(chRef, opRef);
     // Anything not created for THIS session looks exactly like "no such challenge".
-    if (!chS.exists || chS.get('sessionKey') !== sessionKey || chS.get('purpose') !== 'signin') {
+    if (!chS.exists || chS.get('sessionKey') !== sessionKey || chS.get('purpose') !== 'signin'
+      || (chS.get('fixedReview') === true) !== fixedReview) {
       return { kind: 'error', code: 'challenge-not-found' };
     }
     if (opS.exists) {
@@ -134,7 +142,7 @@ export async function handleVerifyPhoneAuthCode(request: CallableRequest<unknown
       // resolves the number, creates or touches another account, and — since
       // no SMS proved possession — records NO phone on the demo account (no
       // phoneVerified, no private phone, so no contact/group linking).
-      challengeId, sessionKey, stage: 'review-ready', uid: review.uid, created: false, review: true,
+      challengeId, sessionKey, stage: 'review-ready', uid: review.uid, created: false, review: true, fixedReview,
       reviewGen: reviewGeneration(review), phoneKey: ch.phoneKey, acceptedAtMs: now,
       createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
     } : {
@@ -222,7 +230,8 @@ export function isDemoReviewAccount(user: { customClaims?: Record<string, unknow
  */
 async function assertMintAllowed(op: FirebaseFirestore.DocumentSnapshot): Promise<UserRecord> {
   await phoneAuthDeps.beforeMintGate(op.id);
-  const cur = await requireSigninConfig(getFirestore(), 'verify'); // fresh: throws if sign-in is suspended
+  const fixedReview = op.get('fixedReview') === true && op.get('review') === true;
+  const cur = await requireSigninConfig(getFirestore(), fixedReview ? 'fixed-review' : 'verify');
   const now = Date.now();
   if (!withinCompletionWindow(op.get('acceptedAtMs'), now, cur.limits.tokenRetryWindowSec)) {
     throw new HttpsError('not-found', 'challenge-not-found');
@@ -238,7 +247,9 @@ async function assertMintAllowed(op: FirebaseFirestore.DocumentSnapshot): Promis
   try { user = await phoneAuthDeps.getUser(uid); } catch { throw new HttpsError('unavailable', 'signin-interrupted'); }
   if (user.disabled) throw new HttpsError('permission-denied', 'account-disabled');
   if (op.get('review') === true && !isDemoReviewAccount(user)) throw new HttpsError('permission-denied', 'account-disabled');
+  if (fixedReview && (user.phoneNumber || user.email)) throw new HttpsError('permission-denied', 'account-disabled');
   const profile = await getFirestore().collection('users').doc(uid).get();
+  if (fixedReview && (!profile.exists || profile.get('demo') !== true)) throw new HttpsError('permission-denied', 'account-disabled');
   if (profile.exists && !profileIsActive(true, profile.get('status'))) throw new HttpsError('permission-denied', 'account-disabled');
   return user;
 }

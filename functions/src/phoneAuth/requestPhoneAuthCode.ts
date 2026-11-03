@@ -32,6 +32,7 @@ import {
   type DestinationCounter, type WindowCounter, type DistinctCounter, type LimitRejection,
 } from '../phoneLink/limits';
 import { verifyPow, newPowNonce, adaptiveBits } from './pow';
+import { FIXED_REVIEW_PHONE } from './fixedReview';
 import {
   PHONE_AUTH_COLLECTIONS as C, SIGNIN_GLOBAL_COUNTER_ID, SHARED_COUNTER_ID, REQUEST_ID_RE,
   requireSigninConfig, requireAttestation, sourceKeyFor, sessionKeyFor,
@@ -52,22 +53,24 @@ type TxOut =
 
 export async function handleRequestPhoneAuthCode(request: CallableRequest<unknown>) {
   const db = getFirestore();
-  const cfg = await requireSigninConfig(db, 'send');
+  const data = (request.data ?? {}) as Record<string, unknown>;
+  const num = normalizeLinkNumber(data.phoneE164);
+  const fixedReview = num?.e164 === FIXED_REVIEW_PHONE;
+  // Reserved review alias MUST NEVER fall through to real SMS, even disabled.
+  const cfg = await requireSigninConfig(db, fixedReview ? 'fixed-review' : 'send');
   requireAttestation(request, cfg);
 
-  const data = (request.data ?? {}) as Record<string, unknown>;
   if (data.purpose !== undefined && data.purpose !== 'signin') throw new HttpsError('invalid-argument', 'purpose-invalid');
   const requestId = typeof data.requestId === 'string' && REQUEST_ID_RE.test(data.requestId) ? data.requestId : null;
   if (!requestId) throw new HttpsError('invalid-argument', 'request-invalid');
-  const num = normalizeLinkNumber(data.phoneE164);
   if (!num) throw new HttpsError('invalid-argument', 'number-not-supported');
 
   const pepper = requirePepper();
   const sessionKey = sessionKeyFor(pepper, data.sessionToken);
   if (!sessionKey) throw new HttpsError('failed-precondition', 'session-expired');
 
-  // Store-review number (admin-configured, time-boxed): no SMS is ever queued
-  // for it; the reviewer receives the code out of band. Same budgets apply.
+  // Store-review number (temporary or fixed): no SMS is ever queued for it;
+  // the reviewer receives the code out of band. Same budgets apply.
   const isReview = !!cfg.review && cfg.review.phoneE164 === num.e164;
   if (!isReview) {
     const relays = await loadActiveRelayDevices(cfg.businessId!);
@@ -202,7 +205,7 @@ export async function handleRequestPhoneAuthCode(request: CallableRequest<unknow
     tx.set(chRef, {
       challengeId, purpose: 'signin', sessionKey,
       phoneKey: destKey, phoneE164: num.e164, countryCode: num.countryCode,
-      codeVerifier: isReview ? null : verifier, review: isReview,
+      codeVerifier: isReview ? null : verifier, review: isReview, fixedReview,
       attempts: 0, maxAttempts: L.maxVerifyAttempts,
       status: 'pending', jobId: isReview ? null : jobId, policyVersion: cfg.policyVersion,
       sourceTag: auditTag(srcKey), appCheckPresent: !!request.app,

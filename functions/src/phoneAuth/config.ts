@@ -16,6 +16,7 @@
 // plus a server-verified proof-of-work bound to the session and the number.
 
 import type { Firestore } from 'firebase-admin/firestore';
+import { resolveFixedReviewAccess } from './fixedReview';
 import {
   loadPolicyDoc, resolveShared, purposeSection, purposeEnvEnabled, resolveBounded,
 } from '../verification/policy';
@@ -152,6 +153,8 @@ export interface PhoneAuthConfig {
   attestation: AttestationMode;
   /** Store-review access when configured, enabled and unexpired; else null. */
   review: ReviewAccess | null;
+  /** Permanent fixed credentials, bound by an admin to one designated demo. */
+  fixedReview: ReviewAccess | null;
 }
 
 export function resolvePhoneAuthConfig(envEnabled: boolean, doc: Record<string, unknown> | null): PhoneAuthConfig {
@@ -171,6 +174,7 @@ export function resolvePhoneAuthConfig(envEnabled: boolean, doc: Record<string, 
     sharedPerDay: shared.sharedPerDay,
     attestation: signin.attestation === 'required' ? 'required' : 'off',
     review: resolveReviewAccess(signin.review),
+    fixedReview: resolveFixedReviewAccess(signin.fixedReview),
   };
 }
 

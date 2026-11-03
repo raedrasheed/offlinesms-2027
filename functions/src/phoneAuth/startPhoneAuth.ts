@@ -24,7 +24,7 @@ import {
 
 export async function handleStartPhoneAuth(request: CallableRequest<unknown>) {
   const db = getFirestore();
-  const cfg = await requireSigninConfig(db, 'send');
+  const cfg = await requireSigninConfig(db, 'start');
   requireAttestation(request, cfg);
   const pepper = requirePepper();
   const L = cfg.limits;

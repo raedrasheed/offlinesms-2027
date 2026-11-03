@@ -17,6 +17,8 @@ import { handleRequestPhoneAuthCode } from '../src/phoneAuth/requestPhoneAuthCod
 import { handleVerifyPhoneAuthCode, phoneAuthDeps } from '../src/phoneAuth/verifyPhoneAuthCode';
 import { handleRequestPhoneLinkOtp } from '../src/phoneLink/requestPhoneLinkOtp';
 import { solvePow } from '../src/phoneAuth/pow';
+import { FIXED_REVIEW_PHONE, FIXED_REVIEW_CODE } from '../src/phoneAuth/fixedReview';
+import { getSupportedPhoneCountries } from '../src/auth/getSupportedPhoneCountries';
 
 type Pow = { nonce: string; bits: number; expiresAtMs: number };
 interface Sess { sessionToken: string; expiresAtMs: number; pow: Pow; ip: string }
@@ -433,10 +435,10 @@ describe('A17 + N2 — store-review access: designated demo only, no phone side 
     return { s, r };
   }
 
-  it('no review access unless configured: the old fixed number/code is just a normal number', async () => {
+  it('the reserved fixed number never sends SMS while its demo binding is disabled', async () => {
     const s = await start();
-    const r = await send(s, '+970599999999');
-    await expectHttps(verify(s, r.challengeId, '123456'), 'permission-denied', 'code-invalid');
+    await expectHttps(send(s, FIXED_REVIEW_PHONE), 'failed-precondition', 'phone-auth-unavailable');
+    expect(await authJobs()).toBe(0);
   });
 
   it('signs into the designated demo only, sends no SMS, creates nothing, records NO phone', async () => {
@@ -514,14 +516,15 @@ describe('A17 + N2 — store-review access: designated demo only, no phone side 
 
   it('setup script: refuses a non-designated uid; --create-demo makes a clean designated account', async () => {
     const { spawnSync } = await import('node:child_process');
-    const run = (args: string[]) => spawnSync('npx', ['tsx', 'scripts/setReviewAccess.ts', '--project=demo-offlinesms', ...args], {
+    const run = (args: string[]) => spawnSync(process.execPath, ['--import', 'tsx', 'scripts/setReviewAccess.ts', '--project=demo-offlinesms', ...args], {
       cwd: process.cwd().endsWith('functions') ? '..' : process.cwd(), encoding: 'utf8',
       env: { ...process.env, GOOGLE_APPLICATION_CREDENTIALS: '' },
     });
     const plain = await getAuth().createUser({});
     const admin = await getAuth().createUser({});
     await getAuth().setCustomUserClaims(admin.uid, { demoReview: true, admin: true });
-    expect(run([`--phone=${REVIEW}`, `--uid=${plain.uid}`]).status).toBe(2);
+    const plainResult = run([`--phone=${REVIEW}`, `--uid=${plain.uid}`]);
+    expect(plainResult.status, plainResult.stderr).toBe(2);
     expect(run([`--phone=${REVIEW}`, `--uid=${admin.uid}`]).status).toBe(2);
     const ok = run([`--phone=${REVIEW}`, '--create-demo', '--days=3']);
     expect(ok.status).toBe(0);
@@ -650,6 +653,130 @@ describe('N1 — every token mint re-checks eligibility inside a bounded window'
     await verify(s, r.challengeId, await code(r.challengeId));
     await advance(601_000);
     await expectHttps(verify(s, r.challengeId, '000000'), 'not-found', 'challenge-not-found');
+  });
+});
+
+describe('permanent fixed store-review login', () => {
+  async function setupFixed() {
+    const demo = await getAuth().createUser({ displayName: 'OfflineSMS Reviewer' });
+    await getAuth().setCustomUserClaims(demo.uid, { demoReview: true });
+    await db().doc(`users/${demo.uid}`).set({ demo: true, status: 'active', profileCompleted: true });
+    await db().doc(`wallets/${demo.uid}`).set({ balance: 73, reserved: 0 });
+    await db().doc(`conversations/demo-${demo.uid}`).set({ participantUids: [demo.uid], type: 'group' });
+    await seedPolicy({ enabled: false, emergencyStop: true, businessId: null,
+      signin: { enabled: false, limits: FAST, fixedReview: { enabled: true, uid: demo.uid } } });
+    process.env.PHONE_AUTH_ENABLED = '';
+    await db().doc('relayDevices/relay-dev-1').delete();
+    return demo.uid;
+  }
+
+  it('logs into the SAME demo with 123456 while SMS is stopped, without relay jobs or wallet grants', async () => {
+    const uid = await setupFixed();
+    // Even a different Auth account owning this number is never resolved.
+    const other = await getAuth().createUser({ phoneNumber: FIXED_REVIEW_PHONE });
+    await db().doc(`users/${other.uid}`).set({ status: 'active', displayName: 'Other' });
+    const before = await authUserCount();
+    const lookup = vi.spyOn(phoneAuthDeps, 'getUserByPhone');
+    const create = vi.spyOn(phoneAuthDeps, 'createUser');
+    expect(await getSupportedPhoneCountries.run(req(null, { v: 2 }))).toEqual({ available: true, countries: ['PS'] });
+    const s = await start();
+    const r = await send(s, FIXED_REVIEW_PHONE);
+    await expectHttps(verify(s, r.challengeId, '654321'), 'permission-denied', 'code-invalid');
+    const result = await verify(s, r.challengeId, FIXED_REVIEW_CODE);
+    expect(result).toMatchObject({ uid, isNewUser: false });
+    // Exercise the actual Auth token exchange, not just a non-empty token.
+    const response = await fetch(`http://${process.env.FIREBASE_AUTH_EMULATOR_HOST}/identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=test`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: result.customToken, returnSecureToken: true }),
+    });
+    expect(response.ok).toBe(true);
+    const authResponse = await response.json() as { idToken: string };
+    const tokenClaims = JSON.parse(Buffer.from(authResponse.idToken.split('.')[1], 'base64url').toString('utf8'));
+    expect(tokenClaims.sub).toBe(uid);
+    expect(tokenClaims.demoReview).toBe(true);
+    expect((await verify(s, r.challengeId, FIXED_REVIEW_CODE)).uid).toBe(uid);
+    expect(await authUserCount()).toBe(before);
+    expect(lookup).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+    expect((await relayJobs()).length).toBe(0);
+    expect((await db().doc(`wallets/${uid}`).get()).get('balance')).toBe(73);
+    expect((await db().doc(`conversations/demo-${uid}`).get()).exists).toBe(true);
+    expect((await db().doc(`users/${uid}/userPrivate/profile`).get()).exists).toBe(false);
+    expect((await getAuth().getUser(uid)).phoneNumber).toBeUndefined();
+    expect((await getAuth().getUser(other.uid)).phoneNumber).toBe(FIXED_REVIEW_PHONE);
+  });
+
+  it('does not enable normal SMS login or accept the fixed code for another number', async () => {
+    await setupFixed();
+    const s = await start();
+    await expectHttps(send(s, num(191)), 'failed-precondition', 'phone-auth-unavailable');
+    expect((await relayJobs()).length).toBe(0);
+  });
+
+  it('does not accept a challenge from another session or a client-selected uid', async () => {
+    const uid = await setupFixed();
+    const s = await start();
+    const r = await send(s, FIXED_REVIEW_PHONE);
+    const other = await start({ ip: '203.0.113.55' });
+    await expect(verify(other, r.challengeId, FIXED_REVIEW_CODE)).rejects.toBeInstanceOf(HttpsError);
+    const result = await handleVerifyPhoneAuthCode(req(null, {
+      sessionToken: s.sessionToken, challengeId: r.challengeId, code: FIXED_REVIEW_CODE,
+      uid: 'admin', phoneE164: num(193), fixedReview: false,
+    }));
+    expect(result.uid).toBe(uid);
+  });
+
+  it('keeps credentials after 31 days but still expires individual challenges', async () => {
+    const uid = await setupFixed();
+    const s = await start();
+    const r = await send(s, FIXED_REVIEW_PHONE);
+    await advance(31 * 86_400_000);
+    await expectHttps(verify(s, r.challengeId, FIXED_REVIEW_CODE), 'deadline-exceeded', 'code-expired');
+    const fresh = await start();
+    const next = await send(fresh, FIXED_REVIEW_PHONE);
+    expect((await verify(fresh, next.challengeId, FIXED_REVIEW_CODE)).uid).toBe(uid);
+    expect((await relayJobs()).length).toBe(0);
+  });
+
+  it.each(['disabled', 'admin', 'suspended', 'phone', 'email', 'missing-demo-marker'])(
+    'refuses an ineligible demo (%s) before minting', async reason => {
+      const uid = await setupFixed();
+      const s = await start();
+      const r = await send(s, FIXED_REVIEW_PHONE);
+      if (reason === 'disabled') await getAuth().updateUser(uid, { disabled: true });
+      if (reason === 'admin') await getAuth().setCustomUserClaims(uid, { demoReview: true, admin: true });
+      if (reason === 'suspended') await db().doc(`users/${uid}`).update({ status: 'suspended' });
+      if (reason === 'phone') await getAuth().updateUser(uid, { phoneNumber: num(194) });
+      if (reason === 'email') await getAuth().updateUser(uid, { email: 'normal@example.test' });
+      if (reason === 'missing-demo-marker') await db().doc(`users/${uid}`).update({ demo: false });
+      const mint = vi.spyOn(phoneAuthDeps, 'mintToken');
+      await expectHttps(verify(s, r.challengeId, FIXED_REVIEW_CODE), 'permission-denied', 'account-disabled');
+      expect(mint).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rechecks revocation even for an already accepted retry', async () => {
+    await setupFixed();
+    const s = await start();
+    const r = await send(s, FIXED_REVIEW_PHONE);
+    await verify(s, r.challengeId, FIXED_REVIEW_CODE);
+    await db().doc('smsConfig/otp').update({ 'signin.fixedReview.enabled': false });
+    const mint = vi.spyOn(phoneAuthDeps, 'mintToken');
+    await expectHttps(verify(s, r.challengeId, FIXED_REVIEW_CODE), 'failed-precondition', 'phone-auth-unavailable');
+    expect(mint).not.toHaveBeenCalled();
+    expect(await getSupportedPhoneCountries.run(req(null, { v: 2 }))).toEqual({ available: false, countries: [] });
+  });
+
+  it('rechecks the binding at the final token gate', async () => {
+    await setupFixed();
+    const s = await start();
+    const r = await send(s, FIXED_REVIEW_PHONE);
+    phoneAuthDeps.beforeMintGate = async () => {
+      await db().doc('smsConfig/otp').update({ 'signin.fixedReview.uid': 'another-account' });
+    };
+    const mint = vi.spyOn(phoneAuthDeps, 'mintToken');
+    await expectHttps(verify(s, r.challengeId, FIXED_REVIEW_CODE), 'not-found', 'challenge-not-found');
+    expect(mint).not.toHaveBeenCalled();
   });
 });
 
