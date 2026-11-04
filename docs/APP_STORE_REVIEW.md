@@ -33,7 +33,34 @@ It does not turn on general SMS, change relay settings or create a substitute
 account if the original is missing. Re-running it reuses the bound UID.
 
 If an already-designated demo is used instead, pass `--uid=<demo uid>` explicitly.
-A normal/admin account is rejected. Do not rerun the historical `seed:review`
+A normal/admin account is rejected by the default restoration flow.
+
+### Existing test account with its own profile and review data
+
+If the operator has confirmed an existing account is their Apple review test
+account, its display name, username and biography need not match the historical
+seed. Explicitly designate its **known UID**, preserving those fields and all
+existing content:
+
+```powershell
+node --import tsx scripts/restoreFixedReview.ts --project=offlinesms-prod-2027 --uid=<existing-test-account-uid> --designate-existing-demo
+```
+
+This option requires Admin SDK credentials, an explicit UID, an active account
+with the exact fixed phone alias, no email/other sign-in providers or MFA, no
+custom claims, and no privileged/organization profile fields. A conflicting
+fixed-review UID is rejected. It designates only that account, then runs the
+same restoration steps: no new user, no SMS, and no reset of profile text,
+messages, contacts, wallet or transactions. Repeating it for the same account
+after successful designation is supported even after its Auth phone is removed.
+The number remains a fixed login alias; it is not recorded as verified phone
+ownership. Do not apply this option to an ordinary user's account.
+
+Only this local administrative script needs updating; the option does not
+require a mobile rebuild or another Functions deployment once the fixed-login
+functions above are deployed. Test a **fresh** login after successful setup.
+
+Do not rerun the historical `seed:review`
 script to activate this login: it predates the protected flow and may create a
 different phone account. For a deliberate shutdown:
 
