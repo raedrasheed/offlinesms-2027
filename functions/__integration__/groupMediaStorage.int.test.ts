@@ -24,14 +24,29 @@ const samples = [
   { label: 'MP4', type: 'video', mimeType: 'video/mp4', fileName: 'video.mp4', bytes: Buffer.from([0, 0, 0, 16, 102, 116, 121, 112, 109, 112, 52, 50, 0, 0, 0, 0]) },
 ] as const;
 
-// Match the native chat uploader's raw-body Firebase Storage REST request.
-// Neither upload nor download uses Admin Storage or a download token: every
-// request must pass the production Storage rules.
+// The pinned firebase-tools 13.35.1 emulator drops Content-Type on raw media
+// uploads and substitutes application/octet-stream. Send explicit multipart
+// metadata to exercise the real reservation/MIME rules without that emulator
+// defect. This is authenticated REST coverage, not an exact native-wire test.
+// https://github.com/firebase/firebase-tools/blob/v13.35.1/src/emulator/storage/apis/firebase.ts
+// Neither upload nor download uses Admin Storage or a download token.
 function upload(uid: string, path: string, sample: typeof samples[number]) {
-  return fetch(`${origin}/v0/b/${bucket}/o?uploadType=media&name=${encodeURIComponent(path)}`, {
+  const boundary = 'offlinesms-group-media-test';
+  const body = Buffer.concat([
+    Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=utf-8\r\n\r\n${JSON.stringify({
+      name: path, contentType: sample.mimeType,
+    })}\r\n--${boundary}\r\nContent-Type: ${sample.mimeType}\r\n\r\n`),
+    sample.bytes,
+    Buffer.from(`\r\n--${boundary}--\r\n`),
+  ]);
+  return fetch(`${origin}/v0/b/${bucket}/o?name=${encodeURIComponent(path)}`, {
     method: 'POST',
-    headers: { Authorization: authorization(uid), 'Content-Type': sample.mimeType },
-    body: sample.bytes,
+    headers: {
+      Authorization: authorization(uid),
+      'Content-Type': `multipart/related; boundary=${boundary}`,
+      'X-Goog-Upload-Protocol': 'multipart',
+    },
+    body,
   });
 }
 function read(uid: string | null, path: string) {
@@ -40,7 +55,7 @@ function read(uid: string | null, path: string) {
   });
 }
 
-describe('group media through native Storage requests and real membership handlers', () => {
+describe('group media through authenticated REST and real membership handlers', () => {
   beforeAll(async () => {
     env = await initializeTestEnvironment({
       projectId: PROJECT,
@@ -68,10 +83,22 @@ describe('group media through native Storage requests and real membership handle
     for (const uid of ['peer', 'removable']) {
       await respondToGroupInvitation.run(req(uid, { conversationId, accept: true }));
     }
+    const group = await db().doc(`conversations/${conversationId}`).get();
+    expect(group.get('mediaAclVersion')).toBe(2);
+    expect(group.get('participantUids')).toContain('peer');
     const reservation = await reserve('peer');
+    expect((await db().doc(`conversations/${conversationId}/messages/${reservation.messageId}`).get()).data())
+      .toMatchObject({ senderUid: 'peer', type: sample.type, media: {
+        storagePath: reservation.storagePath, mimeType: sample.mimeType,
+        sizeBytes: sample.bytes.length, uploadStatus: 'pending',
+      } });
     expect((await upload('owner', reservation.storagePath, sample)).status).toBe(403);
     const uploaded = await upload('peer', reservation.storagePath, sample);
-    expect(uploaded.status, await uploaded.text()).toBe(200);
+    const responseText = await uploaded.text();
+    expect(uploaded.status, responseText).toBe(200);
+    const metadata = JSON.parse(responseText);
+    expect(metadata).toMatchObject({ name: reservation.storagePath, contentType: sample.mimeType });
+    expect(Number(metadata.size)).toBe(sample.bytes.length);
     expect((await read('owner', reservation.storagePath)).status).toBe(403);
 
     const finalized = await finalizeMediaMessage.run(req('peer', { conversationId, messageId: reservation.messageId }));

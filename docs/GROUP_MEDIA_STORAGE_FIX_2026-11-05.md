@@ -65,10 +65,10 @@ Do not activate Storage rules after a partial or failed prerequisite rollout. If
 
 ## Verification
 
-Automated coverage targets the two-document rule budget, JPEG/PNG/MP4 uploads through the native REST endpoint, pending/finalized media reads, wrong sender/path/size/MIME, removed/left members, deleted parent conversations, forged ACL markers, concurrent membership changes, and conservative reconciliation. See the pull request's CI results for the checks actually completed.
+Automated coverage targets the two-document rule budget, JPEG/PNG/MP4 uploads through authenticated Storage REST requests, pending/finalized media reads, wrong sender/path/size/MIME, removed/left members, deleted parent conversations, forged ACL markers, concurrent membership changes, and conservative reconciliation. See the pull request's CI results for the checks actually completed.
 
 After deployment, use two real accounts to send a new image and video in an existing group and a newly created group; confirm delivery, playback, and display after reopening. Confirm a direct-chat attachment still works. Remove or leave with a test member and verify new authenticated access is denied. Previously issued download URLs or already downloaded copies are not retroactively revoked by Storage rules.
 
 Old blank attachments may represent uploads that never reached Storage. Retry from the original sender if the local file and retry action remain available; otherwise resend the image/video. The repair cannot recreate file bytes that were never uploaded.
 
-Automated tests do not replace production device verification. This change does not modify mobile UI, the review account, contact handling, or unrelated release work.
+The installed firebase-tools 13.35.1 emulator drops the HTTP Content-Type header on raw media uploads, defaulting to application/octet-stream. The integration test therefore sends authenticated REST multipart uploads with explicit MIME metadata and the unchanged production rules. It verifies authorization, stored bytes and create/finalize handlers; it does not claim byte-identical native uploader coverage. The production mobile uploader is unchanged and still requires the device check above. See [the affected emulator implementation](https://github.com/firebase/firebase-tools/blob/v13.35.1/src/emulator/storage/apis/firebase.ts).
