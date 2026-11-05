@@ -118,7 +118,8 @@ describe('transactional group media membership', () => {
   });
 
   it('disables a group when its last member leaves', async () => {
-    const cid = await create([]);
+    // A pending invite satisfies creation validation without adding a member.
+    const cid = await create(['alice']);
     expect(await leave(cid, 'owner')).toEqual({ ok: true });
     await expectRoster(cid, []);
     expect((await group(cid).get()).get('status')).toBe('disabled');
