@@ -132,7 +132,7 @@ function VideoSession({ uri, paused = false, controls = true, style, nativeTestI
   return <View style={style}>
     <Video ref={player} testID={nativeTestID} source={{ uri }} style={[StyleSheet.absoluteFillObject, controls && s.videoWithControls]}
       resizeMode={ResizeMode.CONTAIN} useNativeControls={false} shouldPlay={desired} progressUpdateIntervalMillis={250}
-      onLoad={value => { status(value); if (value.isLoaded && live.current && !failed.current) { ready(); sync(undefined, true); } }}
+      onLoad={value => { status(value); if (value.isLoaded && live.current && !failed.current) { sync(undefined, true); } }}
       onReadyForDisplay={event => {
         if (!live.current || failed.current) return;
         const size = event?.naturalSize ? videoDisplayDimensions(event.naturalSize) : null;

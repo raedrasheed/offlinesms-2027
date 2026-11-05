@@ -37,7 +37,7 @@ afterEach(async () => { if (renderer) await act(async () => renderer!.unmount())
 describe('video startup and timeline', () => {
   it('explicitly starts the loaded native player even if its first frame is stopped', async () => {
     await mount(); expect(native().props.useNativeControls).toBe(false);
-    await load(); expect(mock.command).toHaveBeenLastCalledWith({ shouldPlay: true }); expect(mock.ready).toHaveBeenCalledTimes(1);
+    await load(); expect(mock.command).toHaveBeenLastCalledWith({ shouldPlay: true }); expect(mock.ready).not.toHaveBeenCalled();
     await act(async () => native().props.onReadyForDisplay({ naturalSize: { width: 1920, height: 1080 } }));
     expect(mock.ready).toHaveBeenCalledTimes(1);
     await press(); expect(mock.command).toHaveBeenLastCalledWith({ shouldPlay: true });
