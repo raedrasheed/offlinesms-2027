@@ -10,6 +10,7 @@ vi.mock('react-native', () => ({
 }));
 vi.mock('@expo/vector-icons', () => ({Ionicons:'Icon'}));
 vi.mock('expo-av', () => ({Video:'Video',ResizeMode:{CONTAIN:'contain'}}));
+vi.mock('expo-image', () => ({Image:'ExpoImage'}));
 vi.mock('expo-location', () => ({}));
 vi.mock('expo-document-picker', () => ({}));
 vi.mock('expo-image-picker', () => ({}));

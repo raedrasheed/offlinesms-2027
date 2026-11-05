@@ -56,10 +56,10 @@ import { dismissConversationNotifications } from '../lib/notifications';
 import { useMessagePersistence } from '../hooks/useLocalPersistence';
 import { queueSendMessage, queueEditMessage, queueMarkReceipt, retryMediaMessage, queueSendVoiceMessage, queueSendAttachment, openLocalDb, kickSync, retryQueuedMessage, notificationTargets } from '../localdb';
 import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system';
 import { prefetchMedia } from '../media/mediaCache';
 import { AttachmentComposer, type AttachmentDraft } from '../components/chat/AttachmentComposer';
 import { selectAttachment } from '../media/selectAttachment';
+import { prepareChatImage } from '../media/prepareChatImage';
 import { AttachmentSheet } from '../components/chat/AttachmentSheet';
 import { ComposerPanel } from '../components/chat/ComposerPanel';
 import type { PickedSticker } from '../components/chat/StickerPanel';
@@ -555,17 +555,12 @@ export default function Conversation({ route, navigation }: any) {
   async function handleAsset(res: ImagePicker.ImagePickerResult) {
     if (res.canceled || !res.assets?.[0]) return;
     const a = res.assets[0];
-    let size = a.fileSize ?? 0;
-    if (!size) {
-      try { const info = await FileSystem.getInfoAsync(a.uri); size = (info as any).size ?? 0; } catch { /* best-effort */ }
-    }
+    const image = await prepareChatImage(a);
     navigation.navigate('ImagePreview', {
       conversationId: id,
-      uri: a.uri,
+      ...image,
       width: a.width,
       height: a.height,
-      mimeType: a.mimeType ?? 'image/jpeg',
-      sizeBytes: size,
       replyTo: replyTo ?? null,
     });
     setReplyTo(null);
@@ -581,7 +576,10 @@ export default function Conversation({ route, navigation }: any) {
     if (key === 'photos') {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) { Alert.alert(t('media.photosPermissionTitle'), t('media.photosPermissionMessage')); return; }
-      const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.8 });
+      // Android compression can emit JPEG while retaining WebP metadata and
+      // flattening animation/alpha. iOS already preserves WebP at either quality;
+      // keep its JPEG conversion for other image formats that require it.
+      const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: Platform.OS === 'android' ? 1 : 0.8, allowsEditing: false });
       await handleAsset(res);
     } else if (key === 'poll') {
       setPollOpen(true);

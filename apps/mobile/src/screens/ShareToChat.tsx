@@ -8,14 +8,15 @@
 // Single-select (share = one destination at a time), mirroring ForwardPicker's
 // conversation list.
 
-import { useEffect, useMemo, useState } from 'react';
-import { View, Text, TextInput, FlatList, Pressable, StyleSheet } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { View, Text, TextInput, FlatList, Pressable, StyleSheet, Alert } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { auth } from '../lib/firebase';
 import { useDisplayNames } from '../lib/userProfiles';
 import { subscribeConversations, Conversation } from '../lib/conversations';
 import { colors, radius } from '../theme';
 import { LoadingState, EmptyState } from '../components/state';
+import { prepareChatImage } from '../media/prepareChatImage';
 
 type Row = Conversation & { peerName: string };
 
@@ -29,6 +30,7 @@ export default function ShareToChat({ route, navigation }: any) {
   const [rows, setRows]   = useState<Conversation[] | null>(null);
   const { t } = useTranslation();
   const [search, setSearch] = useState('');
+  const preparingImage = useRef(false);
 
   useEffect(() => subscribeConversations(setRows), []);
 
@@ -58,16 +60,23 @@ export default function ShareToChat({ route, navigation }: any) {
     return enriched.filter(c => c.peerName.toLowerCase().includes(q));
   }, [enriched, search]);
 
-  function pick(conversationId: string) {
+  async function pick(conversationId: string) {
+    if (preparingImage.current) return;
     if (image?.uri) {
-      // Replace so Back from the preview returns to the chat list, not here.
-      navigation.replace('ImagePreview', {
-        conversationId,
-        uri: image.uri,
-        mimeType: image.mimeType ?? 'image/jpeg',
-        sizeBytes: image.size ?? 0,
-        replyTo: null,
-      });
+      preparingImage.current = true;
+      try {
+        const prepared = await prepareChatImage(image);
+        // Replace so Back from the preview returns to the chat list, not here.
+        navigation.replace('ImagePreview', {
+          conversationId,
+          ...prepared,
+          replyTo: null,
+        });
+      } catch {
+        Alert.alert(t('attachments.invalidFile'), t('attachments.pickerError'));
+      } finally {
+        preparingImage.current = false;
+      }
     } else {
       navigation.replace('Conversation', { id: conversationId, sharedText: text ?? '' });
     }

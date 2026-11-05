@@ -5,7 +5,8 @@
 // opens the full-screen viewer. Footer (time/ticks) and long-press actions are
 // owned by the surrounding MessageBubble.
 
-import { View, Image } from 'react-native';
+import { View } from 'react-native';
+import { Image } from 'expo-image';
 import { useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Message } from '../../lib/conversations';
@@ -29,13 +30,16 @@ export function ImageMessageBubble({
   const { t } = useTranslation();
   const media = message.media;
   const resolvedUri = useCachedMediaUri(message);
-  const [failedUris, setFailedUris] = useState<string[]>([]);
+  const sourceKey = JSON.stringify([message.conversationId, message.id, resolvedUri]);
+  const [failures, setFailures] = useState<{ sourceKey: string; uris: string[] } | null>(null);
+  const failedUris = failures?.sourceKey === sourceKey ? failures.uris : [];
   const uri = !!resolvedUri && failedUris.includes(resolvedUri) && media?.downloadURL && !failedUris.includes(media.downloadURL) ? media.downloadURL : resolvedUri;
   const imageFailed = !!uri && failedUris.includes(uri);
   const transfer = useTransfer(message.id);
 
-  const [loaded, setLoaded] = useState<{ uri: string; size: MediaDimensions } | null>(null);
-  const dimensions = validMediaDimensions(media?.width, media?.height) || (loaded?.uri === uri ? loaded.size : null);
+  const [loaded, setLoaded] = useState<{ sourceKey: string; uri: string; size: MediaDimensions } | null>(null);
+  const dimensions = validMediaDimensions(media?.width, media?.height)
+    || (loaded?.sourceKey === sourceKey && loaded.uri === uri ? loaded.size : null);
 
   const status = media?.uploadStatus ?? 'uploaded';
   // Upload progress/retry only applies to your own outgoing message.
@@ -63,14 +67,17 @@ export function ImageMessageBubble({
           <MediaUploadProgress progress={transfer?.progress ?? 0} mode="download" />
         ) : null}
         {downloadFailed ? (
-          <MediaUploadProgress progress={0} failed mode="download" onRetry={() => { setFailedUris([]); void retryDownload(message); }} />
+          <MediaUploadProgress progress={0} failed mode="download" onRetry={() => { setFailures(null); void retryDownload(message); }} />
         ) : null}
         </> : null}
       >
         {uri ? (
-          <Image source={{ uri }} style={s.content} resizeMode="contain" onError={() => setFailedUris(prev => prev.includes(uri) ? prev : [...prev, uri])} onLoad={event => {
-            const size = validMediaDimensions(event.nativeEvent.source.width, event.nativeEvent.source.height);
-            if (size) setLoaded({ uri, size });
+          <Image source={{ uri }} style={s.content} contentFit="contain" useAppleWebpCodec={false} recyclingKey={`${sourceKey}:${uri}`} onError={() => setFailures(previous => {
+            const uris = previous?.sourceKey === sourceKey ? previous.uris : [];
+            return { sourceKey, uris: uris.includes(uri) ? uris : [...uris, uri] };
+          })} onLoad={event => {
+            const size = validMediaDimensions(event.source.width, event.source.height);
+            if (size) setLoaded({ sourceKey, uri, size });
           }} />
         ) : (
           <View style={[s.content, s.placeholder]} />

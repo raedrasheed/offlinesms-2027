@@ -6,6 +6,7 @@ import type { Message } from '../src/lib/conversations';
 
 const mocks = vi.hoisted(() => ({
   window: { width: 390, height: 844 }, cache: vi.fn(), alert: vi.fn(), share: vi.fn(), sharingAvailable: vi.fn(),
+  retryDownload: vi.fn(),
 }));
 vi.mock('react-native', () => ({
   View:'View',Text:'Text',Image:'Image',Pressable:'Pressable',Modal:'Modal',TextInput:'TextInput',
@@ -15,15 +16,18 @@ vi.mock('react-native', () => ({
   useWindowDimensions:()=>mocks.window,
 }));
 vi.mock('expo-av',()=>({Video:'Video',ResizeMode:{CONTAIN:'contain'}}));
+vi.mock('expo-image',()=>({Image:'ExpoImage'}));
 vi.mock('expo-sharing',()=>({isAvailableAsync:mocks.sharingAvailable,shareAsync:mocks.share}));
 vi.mock('expo-location',()=>({}));
 vi.mock('@expo/vector-icons',()=>({Ionicons:'Icon'}));
 vi.mock('react-native-svg',()=>({default:'Svg',Circle:'Circle'}));
 vi.mock('react-native-safe-area-context',()=>({useSafeAreaInsets:()=>({top:24,bottom:20,left:0,right:0})}));
 vi.mock('react-i18next',()=>({useTranslation:()=>({t:(key:string)=>key})}));
+vi.mock('../src/i18n',()=>({isRTL:false}));
 vi.mock('../src/hooks/useTransfer',()=>({useTransfer:()=>undefined}));
 vi.mock('../src/hooks/useCachedMediaUri',()=>({useCachedMediaUri:(m:Message)=>m.media?.localUri ?? m.media?.thumbnailURL ?? null}));
-vi.mock('../src/media/mediaCache',()=>({ensureCached:mocks.cache,retryDownload:vi.fn()}));
+vi.mock('../src/media/mediaCache',()=>({ensureCached:mocks.cache,retryDownload:mocks.retryDownload}));
+vi.mock('../src/lib/firebase',()=>({auth:{currentUser:{uid:'me'}}}));
 vi.mock('../src/lib/saveMessageSticker',()=>({saveMessageSticker:vi.fn()}));
 vi.mock('../src/context/ThemeContext',()=>({useTheme:()=>({colors:{background:{surface:'#fff'},border:{subtle:'#ddd'},action:{primary:'#123'}}})}));
 vi.mock('../src/lib/userProfiles',()=>({useDisplayNames:()=>()=> 'Sender'}));
@@ -47,6 +51,9 @@ import { MessageBubble } from '../src/components/MessageBubble';
 import { ImageMessageBubble } from '../src/components/chat/ImageMessageBubble';
 import { VideoMessageBubble } from '../src/components/chat/VideoMessageBubble';
 import { AttachmentComposer } from '../src/components/chat/AttachmentComposer';
+import { AttachmentMediaPreview } from '../src/components/chat/AttachmentMediaPreview';
+import ImagePreviewScreen from '../src/screens/ImagePreviewScreen';
+import ImageViewerScreen from '../src/screens/ImageViewerScreen';
 import { fitMediaDimensions, validMediaDimensions, videoDisplayDimensions } from '../src/media/mediaDimensions';
 
 let renderer: ReactTestRenderer;
@@ -86,7 +93,7 @@ describe('proportional photo and video messages',()=>{
     if (type === 'video') {
       await act(async () => frame().props.onPress());
       expect(nodes('Video')[0].props.source.uri).toBe('file:///cached.mp4');
-    } else expect(nodes('Image').some(n => n.props.source?.uri === m.media!.thumbnailURL)).toBe(true);
+    } else expect(nodes('ExpoImage').some(n => n.props.source?.uri === m.media!.thumbnailURL)).toBe(true);
   });
   it.each([[1920,1080],[1080,1920],[800,800],[4000,500],[500,4000]])('preserves %s × %s in identical image/video frames',async(width,height)=>{
     const frames=[];
@@ -99,6 +106,7 @@ describe('proportional photo and video messages',()=>{
       expect(nodes('AttachmentMessageBubble')).toHaveLength(0);
       expect(nodes('Video')).toHaveLength(0);
       expect(nodes('Image').every(node=>node.props.resizeMode==='contain')).toBe(true);
+      expect(nodes('ExpoImage').every(node=>node.props.contentFit==='contain')).toBe(true);
       await act(async()=>renderer.unmount());
     }
     expect(frames[0]).toEqual(frames[1]);
@@ -158,7 +166,7 @@ describe('proportional photo and video messages',()=>{
   it('learns missing legacy image dimensions on load and does not reuse them for another URI',async()=>{
     const m=message('image');m.media={...m.media!,width:null,height:null};
     await act(async()=>{renderer=create(createElement(ImageMessageBubble,{message:m,mine:false,onOpen:vi.fn()}));});
-    await act(async()=>nodes('Image')[0].props.onLoad({nativeEvent:{source:{width:600,height:1200}}}));
+    await act(async()=>nodes('ExpoImage')[0].props.onLoad({source:{width:600,height:1200}}));
     expect(style(mediaBox()).height/style(mediaBox()).width).toBe(2);
     const next={...m,id:'another',media:{...m.media!,localUri:'file:///another'}};
     await act(async()=>renderer.update(createElement(ImageMessageBubble,{message:next,mine:false,onOpen:vi.fn()})));
@@ -233,14 +241,75 @@ describe('attachment send preview',()=>{
       draft:{kind:'binary',mediaType:type,uri:'file:///picked',fileName:'picked',mimeType:type==='image'?'image/gif':'video/mp4',sizeBytes:4000},
       onClose:vi.fn(),onSend,
     }));});
-    const node=nodes(type==='image'?'Image':'Video')[0];
+    const node=nodes(type==='image'?'ExpoImage':'Video')[0];
     await act(async()=>type==='image'
-      ? node.props.onLoad({nativeEvent:{source:{width:1080,height:1920}}})
+      ? node.props.onLoad({source:{width:1080,height:1920}})
       : node.props.onReadyForDisplay({naturalSize:{width:1920,height:1080,orientation:'portrait'}}));
-    const box=style(nodes(type==='image'?'Image':'Video')[0]);
+    const box=style(nodes(type==='image'?'ExpoImage':'Video')[0]);
     expect(box.width/box.height).toBeCloseTo(9/16);expect(onSend).not.toHaveBeenCalled();
     const send=nodes('Pressable').find(node=>node.props.children?.props?.children==='attachments.send')!;
     await act(async()=>send.props.onPress());
     expect(onSend).toHaveBeenCalledWith(expect.objectContaining({width:1080,height:1920,mediaType:type}));
+  });
+});
+
+describe('chat image renderer',()=>{
+  it('keeps WebP source data and falls back to the remote image before offering retry',async()=>{
+    const m=message('image');
+    m.media={...m.media!,localUri:'file:///cached.webp',downloadURL:'https://example.test/original.webp',mimeType:'image/webp'};
+    const onOpen=vi.fn();
+    await act(async()=>{renderer=create(createElement(ImageMessageBubble,{message:m,mine:false,onOpen}));});
+    expect(nodes('ExpoImage')[0].props).toMatchObject({source:{uri:'file:///cached.webp'},contentFit:'contain',useAppleWebpCodec:false});
+    const cachedKey=nodes('ExpoImage')[0].props.recyclingKey;
+    await act(async()=>nodes('ExpoImage')[0].props.onError({error:'decode-failed'}));
+    expect(nodes('ExpoImage')[0].props.source.uri).toBe(m.media.downloadURL);
+    expect(nodes('ExpoImage')[0].props.recyclingKey).not.toBe(cachedKey);
+    await act(async()=>frame().props.onPress());
+    expect(onOpen).toHaveBeenCalledWith(m.media.downloadURL);
+    await act(async()=>nodes('ExpoImage')[0].props.onError({error:'unavailable'}));
+    expect(button('media.retryDownload')).toBeTruthy();
+    await act(async()=>button('media.retryDownload').props.onPress());
+    expect(mocks.retryDownload).toHaveBeenCalledWith(m);
+    expect(nodes('ExpoImage')[0].props.source.uri).toBe(m.media.localUri);
+  });
+
+  it('clears errors and learned dimensions when a recycled bubble receives another message',async()=>{
+    const m=message('image');m.media={...m.media!,width:null,height:null};
+    await act(async()=>{renderer=create(createElement(ImageMessageBubble,{message:m,mine:false,onOpen:vi.fn()}));});
+    await act(async()=>nodes('ExpoImage')[0].props.onLoad({source:{width:600,height:1200}}));
+    expect(style(mediaBox()).height/style(mediaBox()).width).toBe(2);
+    await act(async()=>nodes('ExpoImage')[0].props.onError({error:'local-failed'}));
+    await act(async()=>nodes('ExpoImage')[0].props.onError({error:'remote-failed'}));
+    expect(button('media.retryDownload')).toBeTruthy();
+    const oldKey=nodes('ExpoImage')[0].props.recyclingKey;
+    await act(async()=>renderer.update(createElement(ImageMessageBubble,{message:{...m,id:'next'},mine:false,onOpen:vi.fn()})));
+    expect(nodes('ExpoImage')[0].props.recyclingKey).not.toBe(oldKey);
+    expect(nodes('ExpoImage')[0].props.source.uri).toBe(m.media.localUri);
+    expect(button('media.retryDownload')).toBeUndefined();
+    expect(style(mediaBox()).width/style(mediaBox()).height).toBeCloseTo(4/3);
+  });
+
+  it('uses Expo image load dimensions and resets the attachment ratio for a new source',async()=>{
+    const onDimensions=vi.fn();
+    await act(async()=>{renderer=create(createElement(AttachmentMediaPreview,{uri:'file:///first.webp',type:'image',onDimensions}));});
+    await act(async()=>nodes('ExpoImage')[0].props.onLoad({source:{width:600,height:1200}}));
+    expect(onDimensions).toHaveBeenLastCalledWith({width:600,height:1200});
+    expect(style(nodes('ExpoImage')[0]).width/style(nodes('ExpoImage')[0]).height).toBeCloseTo(1/2);
+    await act(async()=>renderer.update(createElement(AttachmentMediaPreview,{uri:'file:///second.webp',type:'image',onDimensions})));
+    expect(nodes('ExpoImage')[0].props.recyclingKey).toBe('file:///second.webp');
+    expect(style(nodes('ExpoImage')[0]).width/style(nodes('ExpoImage')[0]).height).toBeCloseTo(4/3);
+    await act(async()=>nodes('ExpoImage')[0].props.onLoad({source:{width:0,height:Infinity}}));
+    expect(onDimensions).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([ImagePreviewScreen,ImageViewerScreen])('keeps full-screen image sources contained and refreshes a changed URI',async Screen=>{
+    const navigation={goBack:vi.fn()};
+    const route={params:{conversationId:'chat',uri:'file:///transparent.webp',mimeType:'image/webp',sizeBytes:4000}};
+    await act(async()=>{renderer=create(createElement(Screen,{route,navigation}));});
+    expect(nodes('ExpoImage')[0].props).toMatchObject({source:{uri:route.params.uri},contentFit:'contain',useAppleWebpCodec:false,recyclingKey:route.params.uri});
+    const next={params:{...route.params,uri:'file:///animated.webp'}};
+    await act(async()=>renderer.update(createElement(Screen,{route:next,navigation})));
+    expect(nodes('ExpoImage')[0].props.source.uri).toBe(next.params.uri);
+    expect(nodes('ExpoImage')[0].props.recyclingKey).toBe(next.params.uri);
   });
 });
