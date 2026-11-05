@@ -1,6 +1,7 @@
 // Phase 23 — full-screen image viewer (tap an image bubble to open).
 
-import { View, Image, Pressable, StyleSheet } from 'react-native';
+import { View, Pressable, StyleSheet } from 'react-native';
+import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,7 +22,7 @@ export default function ImageViewerScreen({ route, navigation }: any) {
       >
         <Ionicons name="close" size={28} color="#fff" />
       </Pressable>
-      <Image source={{ uri }} style={s.image} resizeMode="contain" />
+      <Image source={{ uri }} style={s.image} contentFit="contain" useAppleWebpCodec={false} recyclingKey={uri} />
     </View>
   );
 }

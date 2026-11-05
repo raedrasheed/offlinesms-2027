@@ -6,8 +6,9 @@
 
 import { useState } from 'react';
 import {
-  View, Text, Image, TextInput, Pressable, StyleSheet, Alert, KeyboardAvoidingView, Platform, ActivityIndicator,
+  View, Text, TextInput, Pressable, StyleSheet, Alert, KeyboardAvoidingView, Platform, ActivityIndicator,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -71,7 +72,7 @@ export default function ImagePreviewScreen({ route, navigation }: any) {
       </View>
 
       <View style={s.previewWrap}>
-        <Image source={{ uri }} style={s.preview} resizeMode="contain" />
+        <Image source={{ uri }} style={s.preview} contentFit="contain" useAppleWebpCodec={false} recyclingKey={uri} />
       </View>
 
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>

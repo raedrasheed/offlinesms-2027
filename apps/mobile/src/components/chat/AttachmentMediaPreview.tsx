@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Image, useWindowDimensions } from 'react-native';
+import { useWindowDimensions } from 'react-native';
+import { Image } from 'expo-image';
 import { Video, ResizeMode } from 'expo-av';
 import { fitMediaDimensions, validMediaDimensions, videoDisplayDimensions, type MediaDimensions } from '../../media/mediaDimensions';
 import { mediaFrameStyles } from './MediaMessageFrame';
@@ -11,7 +12,9 @@ export function AttachmentMediaPreview({ uri, type, width, height, onDimensions 
 }) {
   const window = useWindowDimensions();
   const [natural, setNatural] = useState<MediaDimensions | null>(null);
-  const size = fitMediaDimensions(natural || validMediaDimensions(width, height), window.width - 44, window.height * 0.6);
+  const [imageNatural, setImageNatural] = useState<{ uri: string; size: MediaDimensions } | null>(null);
+  const learned = type === 'image' ? (imageNatural?.uri === uri ? imageNatural.size : null) : natural;
+  const size = fitMediaDimensions(learned || validMediaDimensions(width, height), window.width - 44, window.height * 0.6);
   function update(dimensions: MediaDimensions | null) {
     if (!dimensions) return;
     setNatural(previous => previous?.width === dimensions.width && previous.height === dimensions.height ? previous : dimensions);
@@ -21,6 +24,11 @@ export function AttachmentMediaPreview({ uri, type, width, height, onDimensions 
   return type === 'video'
     ? <Video source={{ uri }} style={style} useNativeControls resizeMode={ResizeMode.CONTAIN} shouldPlay={false}
       onReadyForDisplay={event => update(videoDisplayDimensions(event.naturalSize))}/>
-    : <Image source={{ uri }} style={style} resizeMode="contain"
-      onLoad={event => update(validMediaDimensions(event.nativeEvent.source.width, event.nativeEvent.source.height))}/>;
+    : <Image source={{ uri }} style={style} contentFit="contain" useAppleWebpCodec={false} recyclingKey={uri}
+      onLoad={event => {
+        const dimensions = validMediaDimensions(event.source.width, event.source.height);
+        if (!dimensions) return;
+        setImageNatural({ uri, size: dimensions });
+        onDimensions(dimensions);
+      }}/>;
 }
