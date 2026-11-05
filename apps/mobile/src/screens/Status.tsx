@@ -3,11 +3,11 @@
 //
 // Own statuses subscribe live (authorId == uid is the one rules-provable
 // query); the others' feed comes from the getStatusFeed callable since the
-// audience rules are per-document. Feed refreshes on focus and via
-// pull-to-refresh.
+// audience rules are per-document. Refresh the visible feed on focus,
+// foreground resume, pull-to-refresh and while the tab remains open.
 
 import { useCallback, useMemo, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, ScrollView, RefreshControl, Alert, Image } from 'react-native';
+import { View, Text, Pressable, StyleSheet, ScrollView, RefreshControl, Alert, Image, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { useFocusEffect } from '@react-navigation/native';
@@ -17,9 +17,10 @@ import { auth } from '../lib/firebase';
 import { useDisplayNames, useDisplayName, useUserProfiles } from '../lib/userProfiles';
 import { useTheme } from '../context/ThemeContext';
 import { isRTL } from '../i18n';
+import { useStatusFeed } from '../hooks/useStatusFeed';
 import {
-  MyStatus, StatusFeedItem, AuthorStatusGroup,
-  subscribeMyStatuses, fetchStatusFeed, groupStatusFeed,
+  MyStatus, AuthorStatusGroup,
+  subscribeMyStatuses, groupStatusFeed,
   STATUS_VIDEO_MAX_MS,
 } from '../lib/statuses';
 
@@ -51,25 +52,20 @@ export default function Status({ navigation }: any) {
   const myPhoto = myProfiles[auth.currentUser?.uid ?? '']?.photoURL ?? auth.currentUser?.photoURL;
   const s = buildStyles(colors, isRTL);
 
-  const [mine, setMine] = useState<MyStatus[]>([]);
-  const [feed, setFeed] = useState<StatusFeedItem[] | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
+  const uid = auth.currentUser?.uid;
+  const [own, setOwn] = useState<{ uid?: string; items: MyStatus[] }>({ uid, items: [] });
+  const mine = own.uid === uid ? own.items : [];
+  const { items: feed, loading, refreshing, loaded, error, refresh } = useStatusFeed();
 
-  useFocusEffect(useCallback(() => subscribeMyStatuses(setMine), []));
+  useFocusEffect(useCallback(() => {
+    let live = true;
+    const unsubscribe = subscribeMyStatuses(items => {
+      if (live && auth.currentUser?.uid === uid) setOwn({ uid, items });
+    });
+    return () => { live = false; unsubscribe(); };
+  }, [uid]));
 
-  const loadFeed = useCallback(async (force = false) => {
-    try { setFeed(await fetchStatusFeed(force)); }
-    catch { setFeed(prev => prev ?? []); }
-  }, []);
-
-  useFocusEffect(useCallback(() => { void loadFeed(); }, [loadFeed]));
-
-  async function onRefresh() {
-    setRefreshing(true);
-    try { await loadFeed(true); } finally { setRefreshing(false); }
-  }
-
-  const groups = useMemo(() => groupStatusFeed(feed ?? []), [feed]);
+  const groups = useMemo(() => groupStatusFeed(feed), [feed]);
   const recent = groups.filter(g => g.unviewedCount > 0);
   const viewed = groups.filter(g => g.unviewedCount === 0);
   // Author names: live profile via the shared resolver; the server-stored
@@ -154,9 +150,9 @@ export default function Status({ navigation }: any) {
 
       <ScrollView
         contentContainerStyle={{ paddingBottom: 150 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        refreshControl={<RefreshControl refreshing={refreshing && !loading} onRefresh={() => { void refresh(); }} />}
       >
-        <Pressable style={s.myRow} onPress={openMine}>
+        <Pressable testID="status-my-status" style={s.myRow} onPress={openMine}>
           <View style={s.myAvatarWrap}>
             <View style={[s.ring, latestMine ? { borderColor: colors.action.primary } : { borderColor: 'transparent' }]}>
               {myPhoto ? <Image source={{ uri: myPhoto }} style={s.av} /> : <View style={s.av}><Text style={s.avText}>{initials(myName)}</Text></View>}
@@ -175,7 +171,18 @@ export default function Status({ navigation }: any) {
 
         <Text style={s.sectionLabel}>{t('status.recentUpdates')}</Text>
 
-        {recent.length === 0 && viewed.length === 0 ? (
+        {error ? <View testID="status-feed-error" style={s.feedback}>
+          <Text style={s.emptyDesc}>{t('status.feedLoadFailed')}</Text>
+          <Pressable testID="status-feed-retry" accessibilityRole="button" disabled={refreshing} onPress={() => { void refresh(); }} style={s.retryButton}>
+            <Text style={s.retryLabel}>{t('common.retry')}</Text>
+          </Pressable>
+        </View> : null}
+        {loading ? <View testID="status-feed-loading" style={s.feedback}>
+          <ActivityIndicator color={colors.action.primary} />
+          <Text style={s.emptyDesc}>{t('status.loadingUpdates')}</Text>
+        </View> : null}
+
+        {loaded && !loading && !error && recent.length === 0 && viewed.length === 0 ? (
           <View style={s.emptyWrap}>
             <View style={s.emptyIcon}>
               <Ionicons name="ellipse-outline" size={28} color={colors.text.disabled} />
@@ -234,6 +241,9 @@ function buildStyles(colors: any, rtl: boolean) {
     emptyIcon:  { width: 56, height: 56, borderRadius: 28, backgroundColor: colors.background.subtle, alignItems: 'center', justifyContent: 'center' },
     emptyTitle: { fontSize: 15, fontWeight: '700', color: colors.text.primary, textAlign: 'center' },
     emptyDesc:  { fontSize: 13, color: colors.text.muted, textAlign: 'center', lineHeight: 19 },
+    feedback: { alignItems: 'center', paddingHorizontal: 24, paddingVertical: 18, gap: 10 },
+    retryButton: { paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20, backgroundColor: colors.action.primary },
+    retryLabel: { color: colors.action.primaryFg, fontWeight: '700' },
 
     fab: { position: 'absolute', bottom: 104, right: rtl ? undefined : 18, left: rtl ? 18 : undefined, width: 54, height: 54, borderRadius: 27, backgroundColor: colors.action.primary, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 8 },
     fabSecondary: { position: 'absolute', bottom: 170, right: rtl ? undefined : 22, left: rtl ? 22 : undefined, width: 46, height: 46, borderRadius: 23, backgroundColor: colors.background.surface, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 6 },
