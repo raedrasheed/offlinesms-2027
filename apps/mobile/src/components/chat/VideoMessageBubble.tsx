@@ -11,20 +11,24 @@ import { fitMediaDimensions, validMediaDimensions, videoDisplayDimensions, type 
 import { useTransfer } from '../../hooks/useTransfer';
 import { MediaMessageFrame, mediaFrameStyles } from './MediaMessageFrame';
 import { MediaUploadProgress } from './MediaUploadProgress';
+import { useChatVideoThumbnail } from '../../hooks/useChatVideoThumbnail';
 
 /** Same card as a photo. A video decoder/download exists only after an explicit tap. */
-export function VideoMessageBubble({ message, mine, footer, onRetry, onLongPress }: {
+export function VideoMessageBubble({ message, mine, footer, onRetry, onLongPress, uid = '', visible = false }: {
   message: Message;
   mine: boolean;
   footer?: ReactNode;
   onRetry?: () => void;
   onLongPress?: () => void;
+  uid?: string;
+  visible?: boolean;
 }) {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const window = useWindowDimensions();
   const transfer = useTransfer(message.id);
   const media = message.media;
+  const thumbnailURL = useChatVideoThumbnail(message, uid, visible);
   const [viewerUri, setViewerUri] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -87,7 +91,7 @@ export function VideoMessageBubble({ message, mine, footer, onRetry, onLongPress
           <View style={s.play}><Ionicons name={ready ? 'play' : 'time-outline'} size={30} color="#fff"/></View>
           {!ready ? <Text style={s.waiting}>{t('attachments.waitingUpload')}</Text> : null}
         </View>}>
-      {media?.thumbnailURL ? <Image source={{ uri: media.thumbnailURL }} style={mediaFrameStyles.content} resizeMode="contain"/>
+      {thumbnailURL ? <Image source={{ uri: thumbnailURL }} style={mediaFrameStyles.content} resizeMode="contain"/>
         : <View style={[mediaFrameStyles.content, mediaFrameStyles.placeholder]}/>}
     </MediaMessageFrame>
     {viewerUri ? <Modal visible animationType="fade" onRequestClose={() => setViewerUri(null)}>

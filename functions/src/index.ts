@@ -16,6 +16,7 @@ export { sendTextMessage, sendPollMessage } from './chats/sendTextMessage';
 // Phase 23 — media messages (images & voice notes).
 export { createMediaMessage }   from './chats/createMediaMessage';
 export { finalizeMediaMessage } from './chats/finalizeMediaMessage';
+export { ensureChatVideoThumbnail, onChatVideoThumbnailWrite } from './chats/videoThumbnails';
 export { markRead }                       from './chats/markRead';
 export { setTyping }                      from './chats/setTyping';
 
@@ -175,3 +176,4 @@ export {
 export {
   onClipAccountErasure, retryClipAccountErasure, onClipUserDeleted, onClipAuthUserDeleted,
 } from './clips/accountCleanup';
+

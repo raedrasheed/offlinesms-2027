@@ -101,7 +101,7 @@ export type MessageBubbleProps = {
   // Offline-first: locally queued outgoing message not yet on the server.
   pending?:   'queued' | 'syncing' | 'failed';
   onRetry?:   (message: Message) => void;
-  /** Only visible rich cards may request map tiles or protected clip metadata. */
+  /** Only visible rich cards may request tiles, clip metadata or video covers. */
   locationVisible?: boolean;
 };
 
@@ -424,7 +424,7 @@ function MessageBubbleImpl({
           <ClipMessageBubble clipId={m.clipId} uid={context.myUid} visible={locationVisible}
             onOpen={onOpenClip} onLongPress={() => setSheetOpen(true)} />
         ) : !deleted && m.type === 'video' ? (
-          <VideoMessageBubble key={m.id} message={m} mine={mine}
+          <VideoMessageBubble key={m.id} message={m} mine={mine} uid={context.myUid} visible={locationVisible}
             onRetry={() => onRetryMedia?.(m)} onLongPress={() => setSheetOpen(true)}
             footer={mediaOverlayFooter ? <>
               <Text style={s.imgFootTime}>{timeText}</Text>
