@@ -95,6 +95,8 @@ export const createGroup = onCall(async (request) => {
     createdBy:   uid,
     ownerUid:    uid,
     participantUids,
+    // Only consented active members enter this server-owned media ACL.
+    mediaAclVersion: 2,
     participantKey: null,
     memberCount: participantUids.length,
     externalMemberCount: external.size,
