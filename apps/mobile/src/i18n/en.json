@@ -1,4 +1,10 @@
 {
+  "profileStartup": {
+    "loading": "Loading your profile…",
+    "errorTitle": "Couldn’t load your profile",
+    "errorDescription": "Check your connection and try again.",
+    "retry": "Try again"
+  },
   "welcome": {
     "title": "Conversations that just flow.",
     "subtitle": "Private messaging built for how modern teams and friends actually talk.",

@@ -11,6 +11,8 @@ import { auth } from './src/lib/firebase';
 import { ThemeProvider, useTheme } from './src/context/ThemeContext';
 import { OfflineProvider } from './src/context/OfflineContext';
 import { useAccountProfile } from './src/hooks/useAccountProfile';
+import { ErrorState, LoadingState } from './src/components/state';
+import { useTranslation } from 'react-i18next';
 import './src/i18n';
 
 import Splash from './src/screens/Splash';
@@ -256,7 +258,8 @@ function MainTabs() {
 export default function App() {
   const [ready, setReady] = useState(false);
   const [user, setUser] = useState<User | null>(null);
-  const { profileCompleted, userTheme } = useAccountProfile(user?.uid ?? null);
+  const { profileCompleted, userTheme, profileError, retryProfile } = useAccountProfile(user?.uid ?? null);
+  const { t } = useTranslation();
 
   useEffect(() => onAuthStateChanged(auth, u => {
     perfMark('auth:resolved', { signedIn: !!u }, true);
@@ -412,7 +415,10 @@ export default function App() {
         {!user ? (
           <AuthFlow />
         ) : profileCompleted === null ? (
-          null /* waiting for users/{uid} snapshot */
+          profileError ? <ErrorState fullPage title={t('profileStartup.errorTitle')}
+            description={t('profileStartup.errorDescription')}
+            primaryAction={{ label: t('profileStartup.retry'), onPress: retryProfile }} />
+            : <LoadingState fullPage title={t('profileStartup.loading')} />
         ) : profileCompleted === false ? (
           <OnboardingFlow />
         ) : (
