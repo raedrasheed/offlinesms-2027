@@ -1,5 +1,7 @@
 # Profile setup appears only after confirmed incomplete data
 
+> Superseded: mandatory profile setup was removed entirely in the follow-up change. See [STARTUP_AND_STICKER_PRESENTATION_2026-11-05.md](STARTUP_AND_STICKER_PRESENTATION_2026-11-05.md). The gate described below is historical and no longer ships.
+
 The navigation gate must keep three distinct states: loading/unknown, complete and incomplete. `ProfileCompletion` is mounted only for incomplete. Returning users with a saved completion for their own account continue to open the app offline.
 
 The previous listener ignored an incomplete local cache but accepted any negative snapshot with `fromCache=false` immediately. It did not check `hasPendingWrites`. This allowed an unacknowledged local change or an initial negative result to mount the form before a completed profile arrived. The reported screenshot alone cannot identify which event sequence happened on the device; both sequences are covered by regression tests.

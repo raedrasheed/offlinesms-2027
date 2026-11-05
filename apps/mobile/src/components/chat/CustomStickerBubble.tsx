@@ -43,10 +43,10 @@ export function CustomStickerBubble({ message, uid, mine, onOpen, onLongPress, o
       if (current === generation.current) { savingRef.current = false; setSaving(false); }
     }
   }
-  return <View style={{ width: STICKER_SIZE, height: STICKER_SIZE }} testID="custom-sticker-bubble">
-    <Pressable style={{ flex: 1 }} onLongPress={onLongPress} delayLongPress={300} accessibilityRole="imagebutton"
+  return <View style={{ width: STICKER_SIZE, height: STICKER_SIZE, backgroundColor: 'transparent' }} testID="custom-sticker-bubble">
+    <Pressable style={{ flex: 1, backgroundColor: 'transparent' }} onLongPress={onLongPress} delayLongPress={300} accessibilityRole="imagebutton"
       accessibilityLabel={t('stickers.customSticker')} onPress={() => { if (uri && !uploading && !failedUpload && !failedDownload) onOpen?.(uri); }}>
-      {uri ? <Image source={{ uri }} resizeMode="contain" style={{ width: '100%', height: '100%' }}
+      {uri ? <Image source={{ uri }} resizeMode="contain" style={{ width: '100%', height: '100%', backgroundColor: 'transparent' }}
         onError={() => setBadUri(uri)} onLoad={() => setBadUri(null)} /> : <ActivityIndicator style={{ flex: 1 }} />}
     </Pressable>
     {Platform.OS !== 'web' && uid && status === 'uploaded' && !message.deletedForEveryone ? <Pressable
