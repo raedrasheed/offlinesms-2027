@@ -84,6 +84,8 @@
     "recentUpdates": "Recent updates",
     "viewedUpdates": "Viewed updates",
     "noUpdatesTitle": "No recent updates",
+    "loadingUpdates": "Loading status updates…",
+    "feedLoadFailed": "Could not refresh status updates. Check your connection and try again.",
     "noUpdatesDesc": "When your contacts post a status, it’ll show up here.",
     "typeStatus": "Type a status",
     "postFailed": "Couldn’t post your status. Please try again.",
