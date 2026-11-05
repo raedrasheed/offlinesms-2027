@@ -130,7 +130,7 @@ function VideoSession({ uri, paused = false, controls = true, style, nativeTestI
   const displayed = scrub ?? position;
   const fraction = duration > 0 ? Math.max(0, Math.min(1, displayed / duration)) : 0;
   return <View style={style}>
-    <Video ref={player} testID={nativeTestID} source={{ uri }} style={StyleSheet.absoluteFillObject}
+    <Video ref={player} testID={nativeTestID} source={{ uri }} style={[StyleSheet.absoluteFillObject, controls && s.videoWithControls]}
       resizeMode={ResizeMode.CONTAIN} useNativeControls={false} shouldPlay={desired} progressUpdateIntervalMillis={250}
       onLoad={value => { status(value); if (value.isLoaded && live.current && !failed.current) { ready(); sync(undefined, true); } }}
       onReadyForDisplay={event => {
@@ -165,6 +165,7 @@ function VideoSession({ uri, paused = false, controls = true, style, nativeTestI
 }
 
 const s = StyleSheet.create({
+  videoWithControls: { bottom: 64 },
   loading: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
   controls: { position: 'absolute', left: 0, right: 0, bottom: 0, minHeight: 64, paddingHorizontal: 8, flexDirection: 'row', direction: 'ltr', alignItems: 'center', gap: 8, backgroundColor: 'rgba(0,0,0,0.72)' },
   toggle: { width: 44, height: 48, alignItems: 'center', justifyContent: 'center' },

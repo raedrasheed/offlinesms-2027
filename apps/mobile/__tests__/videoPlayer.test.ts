@@ -114,15 +114,15 @@ describe('video startup and timeline', () => {
     expect(mock.error).toHaveBeenCalledTimes(1);
   });
   it('ends a stalled first frame after a bounded timeout and reports native failure once', async () => {
-    await mount(); await load(); await act(async () => vi.advanceTimersByTime(25_000));
+    await mount(); await load(); await act(async () => { vi.advanceTimersByTime(25_000); });
     expect(mock.error).toHaveBeenCalledTimes(1);
     await act(async () => native().props.onError()); expect(mock.error).toHaveBeenCalledTimes(1);
   });
   it('does not time out moving video or a deliberately held first frame', async () => {
     await mount({ paused: true, controls: false }); await load();
     expect(renderer!.root.findAllByProps({ testID: 'video-seek-bar' })).toHaveLength(0);
-    await act(async () => vi.advanceTimersByTime(30_000)); expect(mock.error).not.toHaveBeenCalled();
+    await act(async () => { vi.advanceTimersByTime(30_000); }); expect(mock.error).not.toHaveBeenCalled();
     await update({ paused: false }); await status({ isPlaying: true, positionMillis: 250 });
-    await act(async () => vi.advanceTimersByTime(30_000)); expect(mock.error).not.toHaveBeenCalled();
+    await act(async () => { vi.advanceTimersByTime(30_000); }); expect(mock.error).not.toHaveBeenCalled();
   });
 });
