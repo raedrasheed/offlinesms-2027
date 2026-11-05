@@ -23,78 +23,67 @@ export const leaveGroup = onCall(async (request) => {
   const db = getFirestore();
   const convoRef = db.collection('conversations').doc(data.conversationId);
 
-  const [convoSnap, callerSnap] = await Promise.all([
-    convoRef.get(),
-    convoRef.collection('members').doc(uid).get(),
-  ]);
+  // Membership, the media-access roster and ownership must commit from one
+  // consistent snapshot, including when another member leaves or is removed.
+  const { callerRole, successorUid } = await db.runTransaction(async tx => {
+    const [convoSnap, callerSnap] = await tx.getAll(
+      convoRef,
+      convoRef.collection('members').doc(uid),
+    );
 
-  if (!convoSnap.exists) throw new HttpsError('not-found', 'conversation-not-found');
-  const convo = convoSnap.data() as { type?: string; participantUids?: string[]; memberCount?: number };
-  if (convo.type !== 'group') throw new HttpsError('failed-precondition', 'not-a-group');
+    if (!convoSnap.exists) throw new HttpsError('not-found', 'conversation-not-found');
+    const convo = convoSnap.data() as { type?: string; participantUids?: string[] };
+    if (convo.type !== 'group') throw new HttpsError('failed-precondition', 'not-a-group');
 
-  if (!callerSnap.exists || (callerSnap.data()?.status ?? 'active') !== 'active') {
-    throw new HttpsError('failed-precondition', 'not-a-member');
-  }
+    if (!callerSnap.exists || (callerSnap.data()?.status ?? 'active') !== 'active') {
+      throw new HttpsError('failed-precondition', 'not-a-member');
+    }
 
-  const callerRole = (callerSnap.data()?.role ?? 'member') as string;
-  const nextParticipants = (convo.participantUids ?? []).filter(u => u !== uid);
+    const role = (callerSnap.data()?.role ?? 'member') as string;
+    const nextParticipants = (convo.participantUids ?? []).filter(u => u !== uid);
 
-  // When the owner leaves a group that still has members, hand ownership to
-  // the most senior remaining member so the group is never left ownerless.
-  let successorUid: string | null = null;
-  if (callerRole === 'owner' && nextParticipants.length > 0) {
-    const membersSnap = await convoRef.collection('members').get();
-    const candidates: SuccessorCandidate[] = membersSnap.docs
-      .filter(d => d.id !== uid)
-      .map(d => {
-        const m = d.data() as { role?: string; status?: string; joinedAt?: { toMillis?: () => number } };
-        return { d, m };
-      })
-      .filter(({ m }) => (m.status ?? 'active') === 'active')
-      .map(({ d, m }) => ({
-        uid:        d.id,
-        role:       m.role ?? 'member',
-        joinedAtMs: m.joinedAt?.toMillis?.() ?? 0,
-      }));
-    successorUid = chooseOwnershipSuccessor(candidates);
-  }
+    let successor: string | null = null;
+    if (role === 'owner' && nextParticipants.length > 0) {
+      const membersSnap = await tx.get(convoRef.collection('members'));
+      const candidates: SuccessorCandidate[] = membersSnap.docs
+        .filter(d => nextParticipants.includes(d.id))
+        .map(d => {
+          const m = d.data() as { role?: string; status?: string; joinedAt?: { toMillis?: () => number } };
+          return { d, m };
+        })
+        .filter(({ m }) => (m.status ?? 'active') === 'active')
+        .map(({ d, m }) => ({
+          uid:        d.id,
+          role:       m.role ?? 'member',
+          joinedAtMs: m.joinedAt?.toMillis?.() ?? 0,
+        }));
+      successor = chooseOwnershipSuccessor(candidates);
+    }
 
-  const now = FieldValue.serverTimestamp();
-  const batch = db.batch();
-
-  if (nextParticipants.length === 0) {
-    // Last person out — disable the conversation.
-    batch.update(convoRef, {
-      status:          'disabled',
-      participantUids: nextParticipants,
-      memberIds:       nextParticipants,
-      memberCount:     0,
-      updatedAt:       now,
-    });
-  } else {
+    const now = FieldValue.serverTimestamp();
     const convoUpdate: Record<string, unknown> = {
       participantUids: nextParticipants,
       memberIds:       nextParticipants,
       memberCount:     nextParticipants.length,
       updatedAt:       now,
     };
-    if (successorUid) {
-      convoUpdate.ownerUid = successorUid;
-      batch.update(convoRef.collection('members').doc(successorUid), {
+    if (nextParticipants.length === 0) {
+      convoUpdate.status = 'disabled';
+    } else if (successor) {
+      convoUpdate.ownerUid = successor;
+      tx.update(convoRef.collection('members').doc(successor), {
         role: 'owner',
         updatedAt: now,
       });
     }
-    batch.update(convoRef, convoUpdate);
-  }
-
-  batch.update(convoRef.collection('members').doc(uid), {
-    status: 'left',
-    role: 'member',
-    updatedAt: now,
+    tx.update(convoRef, convoUpdate);
+    tx.update(convoRef.collection('members').doc(uid), {
+      status: 'left',
+      role: 'member',
+      updatedAt: now,
+    });
+    return { callerRole: role, successorUid: successor };
   });
-
-  await batch.commit();
 
   await writeAuditLog({
     action: 'group.member.left',

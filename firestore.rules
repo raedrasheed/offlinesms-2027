@@ -300,7 +300,11 @@ service cloud.firestore {
                           || (('memberIds' in resource.data) && request.auth.uid in resource.data.memberIds)
                           || isAdmin()
                        );
+      // Only trusted server/admin writers may certify reconciled media ACLs.
+      // Reject the field on every client create, including direct/legacy docs,
+      // so deleting and recreating a parent cannot forge a trusted group ACL.
       allow create: if isAuthed()
+                       && (!('mediaAclVersion' in request.resource.data) || isAdmin())
                        && isConversationParticipantData(request.resource.data)
                        && (!isGroupTypeData(request.resource.data) || safeGroupConversationCreate());
       // F4: conversation docs are mutated ONLY by the callables (Admin SDK) —

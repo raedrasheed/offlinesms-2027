@@ -13,10 +13,13 @@ service firebase.storage {
       ];
     }
     function activeParticipant(conversationId) {
+      // Storage permits at most two Firestore document reads: this live
+      // conversation and the message reservation below. Group membership
+      // writers maintain participantUids transactionally after ACL version 2;
+      // legacy groups must be reconciled before they can authorize media.
       let c = firestore.get(/databases/(default)/documents/conversations/$(conversationId)).data;
       return isAuthed() && request.auth.uid in c.get('participantUids', c.get('memberIds', []))
-        && (c.get('type', 'direct') != 'group' ||
-          firestore.get(/databases/(default)/documents/conversations/$(conversationId)/members/$(request.auth.uid)).data.get('status', 'active') == 'active');
+        && (c.get('type', 'direct') != 'group' || c.get('mediaAclVersion', 0) == 2);
     }
     match /chatMedia/{conversationId}/{senderId}/{messageId}/{file} {
       function message() { return firestore.get(/databases/(default)/documents/conversations/$(conversationId)/messages/$(messageId)).data; }

@@ -12,7 +12,7 @@ describe.skipIf(!process.env.FIREBASE_STORAGE_EMULATOR_HOST)('attachment storage
       storage: { host: '127.0.0.1', port: 9199, rules: readFileSync(resolve('storage.rules'), 'utf8') },
     });
     await env.withSecurityRulesDisabled(async ctx => {
-      await setDoc(doc(ctx.firestore(),'conversations/attachments-rule'),{type:'group',participantUids:['sender','peer','removed']});
+      await setDoc(doc(ctx.firestore(),'conversations/attachments-rule'),{type:'group',mediaAclVersion:2,participantUids:['sender','peer'],memberIds:['sender','peer','removed']});
       for(const uid of ['sender','peer','removed']) await setDoc(doc(ctx.firestore(),`conversations/attachments-rule/members/${uid}`),{status:uid === 'removed' ? 'removed' : 'active'});
       for(const id of ['live','expiring','file','wrong-mime','wrong-size','wrong-path']) await setDoc(doc(ctx.firestore(),`conversations/attachments-rule/messages/${id}`),{senderUid:'sender',type:'file',retentionDeleting:id==='expiring',media:{storagePath:`chatMedia/attachments-rule/sender/${id}/file.pdf`,mimeType:'application/pdf',sizeBytes:3,uploadStatus:'pending'}});
     });
