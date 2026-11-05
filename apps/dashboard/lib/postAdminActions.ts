@@ -1,5 +1,6 @@
 'use server';
 
+import { assertPostsEnabled } from './postsFeature';
 import { FieldValue } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
 import { revalidatePath } from 'next/cache';
@@ -19,6 +20,7 @@ function audit(actor: {uid: string; email: string | null}, action: string, id: s
 export async function moderatePost(input: {postId: string; version: string; action: PostModerationAction; reason: string}): Promise<PostAdminResult> {
   try {
     const actor = await requireClipsAdmin();
+    assertPostsEnabled();
     if (!isClipDocumentId(input.postId) || !['approve', 'reject', 'remove'].includes(input.action)) throw new Error('Invalid post action.');
     const reason = adminReason(input.reason);
     const ref = adminDb.collection('posts').doc(input.postId), auditRef = adminDb.collection('auditLogs').doc();
@@ -51,6 +53,7 @@ export async function moderatePost(input: {postId: string; version: string; acti
 export async function getAdminPostImage(postId: string): Promise<{url?: string; expiresAtMs?: number; error?: string}> {
   try {
     const actor = await requireClipsAdmin();
+    assertPostsEnabled();
     if (!isClipDocumentId(postId)) throw new Error('Invalid post.');
     const post = await adminDb.collection('posts').doc(postId).get();
     const path = post.get('imagePath');
@@ -68,6 +71,7 @@ export async function getAdminPostImage(postId: string): Promise<{url?: string; 
 export async function resolvePostReport(input: {reportId: string; version: string; decision: 'resolved' | 'dismissed'; reason: string}): Promise<PostAdminResult> {
   try {
     const actor = await requireClipsAdmin();
+    assertPostsEnabled();
     if (!isClipDocumentId(input.reportId) || !['resolved', 'dismissed'].includes(input.decision)) throw new Error('Invalid report action.');
     const reason = adminReason(input.reason), ref = adminDb.collection('postReports').doc(input.reportId), auditRef = adminDb.collection('auditLogs').doc();
     await adminDb.runTransaction(async tx => {

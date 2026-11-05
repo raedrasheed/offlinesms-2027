@@ -1,3 +1,5 @@
+// Archive behavior coverage only; production policy is tested in postsDisabled.int.test.ts.
+vi.mock('../src/social/postsFeature', () => ({ POSTS_ENABLED: true, assertPostsEnabled: () => {} }));
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { db, req, resetEmulators, Timestamp, expectHttps } from './harness';
 import { setClipInteraction, addClipComment, followClipCreator, respondClipFollowRequest } from '../src/clips/core';

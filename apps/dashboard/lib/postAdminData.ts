@@ -1,3 +1,4 @@
+import { assertPostsEnabled } from './postsFeature';
 import { FieldPath } from 'firebase-admin/firestore';
 import { adminDb } from './firebase-admin';
 import { requireClipsAdmin } from './clipAdminAuth';
@@ -15,12 +16,14 @@ function serialize(row: FirebaseFirestore.DocumentSnapshot): AdminPost {
 }
 export async function getAdminPost(id: string): Promise<AdminPost | null> {
   await requireClipsAdmin();
+    assertPostsEnabled();
   if (!isClipDocumentId(id)) return null;
   const row = await adminDb.collection('posts').doc(id).get();
   return row.exists ? serialize(row) : null;
 }
 export async function listAdminPosts(status: string, cursor?: string) {
   await requireClipsAdmin();
+    assertPostsEnabled();
   if (!(POST_STATUSES as readonly string[]).includes(status)) throw new Error('Invalid post status.');
   let query: FirebaseFirestore.Query = adminDb.collection('posts').where('status', '==', status)
     .orderBy('createdAt', 'desc').orderBy(FieldPath.documentId(), 'desc');
@@ -35,6 +38,7 @@ export async function listAdminPosts(status: string, cursor?: string) {
 }
 export async function listOpenPostReports(cursor?: string) {
   await requireClipsAdmin();
+    assertPostsEnabled();
   let query: FirebaseFirestore.Query = adminDb.collection('postReports').where('status', '==', 'open')
     .orderBy('createdAt', 'desc').orderBy(FieldPath.documentId(), 'desc');
   if (cursor) {

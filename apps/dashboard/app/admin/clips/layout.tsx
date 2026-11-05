@@ -20,7 +20,6 @@ export default async function ClipsLayout({ children }: { children: React.ReactN
         <p className="text-sm mt-1" style={{ color: 'var(--c-text-3)' }}>Review videos, handle reports and manage publishing.</p></div>
       <nav aria-label="Clips administration" className="flex gap-2 text-sm font-semibold">
         <Link href={'/admin/clips' as any} className="rounded-lg border px-3 py-2" style={{ borderColor: 'var(--c-border)' }}>Videos</Link>
-        <Link href={'/admin/posts' as any} className="rounded-lg border px-3 py-2" style={{ borderColor: 'var(--c-border)' }}>Posts</Link>
         <Link href={'/admin/clips/reports' as any} className="rounded-lg border px-3 py-2" style={{ borderColor: 'var(--c-border)' }}>Reports</Link>
         <Link href={'/admin/clips/settings' as any} className="rounded-lg border px-3 py-2" style={{ borderColor: 'var(--c-border)' }}>Settings</Link>
       </nav>
