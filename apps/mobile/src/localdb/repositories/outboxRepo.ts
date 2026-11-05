@@ -78,13 +78,19 @@ export async function claimDue(now = Date.now(), limit = 10, lane: OutboxLane = 
   return getDb().all<OutboxRow>(
     `SELECT * FROM outbox
       WHERE status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?)${laneClause(lane)}
+      AND (type NOT IN ('add_external_contact_to_group','remove_external_contact_from_group') OR NOT EXISTS (
+        SELECT 1 FROM outbox prior WHERE prior.conversation_id = outbox.conversation_id AND prior.entity_id = outbox.entity_id
+        AND prior.type IN ('add_external_contact_to_group','remove_external_contact_from_group')
+        AND prior.status IN ('pending','processing')
+        AND (prior.created_at < outbox.created_at OR (prior.created_at = outbox.created_at AND prior.rowid < outbox.rowid))
+      ))
       ORDER BY
         CASE
           WHEN type IN ('send_message','send_image_message','send_voice_message','send_attachment_message') THEN 0
           WHEN type = 'mark_receipt' THEN 2
           ELSE 1
         END,
-        created_at ASC
+        created_at ASC, rowid ASC
       LIMIT ?`,
     [now, limit],
   );
@@ -161,4 +167,5 @@ export async function pendingCount(): Promise<number> {
     `SELECT COUNT(*) AS n FROM outbox WHERE status IN ('pending','processing')`);
   return row?.n ?? 0;
 }
+
 

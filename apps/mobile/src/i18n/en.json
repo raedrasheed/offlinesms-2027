@@ -849,6 +849,11 @@
     "retryMap": "Retry map"
   },
   "phoneChat": {
+    "syncPending": "Waiting to sync",
+    "syncFailed": "Could not sync contact",
+    "retrySync": "Retry sync",
+    "syncHint": "Available for OfflineSMS after syncing.",
+    "syncQueued": "{{n}} contacts waiting to sync; {{failed}} could not be saved.",
     "hint": "Enter a phone number to send SMS, even if they do not use the app. Joining the group in the app requires their approval.",
     "name": "Contact name",
     "number": "Phone number",
@@ -900,3 +905,4 @@
     "seek": "Video progress"
   }
 }
+

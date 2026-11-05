@@ -11,6 +11,8 @@ import { app, auth } from '../../lib/firebase';
 import * as messagesRepo from '../repositories/messagesRepo';
 import { setTransferProgress, clearTransfer } from '../../media/transferProgress';
 import { emitLocalMessagesChanged } from '../messageChanges';
+import { confirmExternalMember } from '../repositories/externalMembersRepo';
+import { emitExternalMembersChanged } from '../externalMemberChanges';
 import { getCurrentUid, getDb } from '../connection';
 import { saveOwnPollVote } from '../pollVote';
 import type { OutboxRow } from '../types';
@@ -282,9 +284,15 @@ export async function pushOutboxItem(item: OutboxRow): Promise<PushResult> {
     case 'create_phone_contact':
       await call('createPhoneContact', payload);
       return { ok: true };
-    case 'add_external_contact_to_group':
+    case 'add_external_contact_to_group': {
+      const uid = getCurrentUid(), local = uid ? getDb() : null;
       await call('addExternalContactToGroup', payload);
+      if (local && getCurrentUid() === uid) {
+        await confirmExternalMember(payload.conversationId, item.entity_id ?? '', item.id, local);
+        emitExternalMembersChanged(payload.conversationId, uid);
+      }
       return { ok: true };
+    }
     case 'remove_external_contact_from_group':
       await call('removeExternalContactFromGroup', payload);
       return { ok: true };
@@ -292,4 +300,5 @@ export async function pushOutboxItem(item: OutboxRow): Promise<PushResult> {
       throw Object.assign(new Error(`unknown outbox type: ${item.type}`), { code: 'functions/invalid-argument' });
   }
 }
+
 

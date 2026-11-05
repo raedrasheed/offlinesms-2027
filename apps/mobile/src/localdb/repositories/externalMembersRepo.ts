@@ -1,30 +1,36 @@
 // Phase 25 — external phone-only group members repository (local mirror).
-import { getDb } from '../connection';
+import { getDb, type LocalDatabase } from '../connection';
 import { localId } from '../sync/ids';
 import { toExternalMemberView, type ExternalMemberRow, type ExternalMemberView } from './externalMembersModel';
 
 export { toExternalMemberView };
 export type { ExternalMemberRow, ExternalMemberView };
 
-export async function listExternalMembers(conversationId: string): Promise<ExternalMemberView[]> {
-  const rows = await getDb().all<ExternalMemberRow>(
-    `SELECT * FROM external_members WHERE conversation_id = ? ORDER BY display_name`,
-    [conversationId],
-  );
-  return rows.map(toExternalMemberView);
+export async function listExternalMembers(conversationId: string, db: LocalDatabase = getDb()): Promise<ExternalMemberView[]> {
+  const rows = await db.all<ExternalMemberRow & { sync_status: string | null; sync_error: string | null }>(
+    `SELECT e.*, o.status AS sync_status, o.last_error_code AS sync_error FROM external_members e
+     LEFT JOIN outbox o ON o.id = (SELECT id FROM outbox
+       WHERE conversation_id = e.conversation_id AND entity_id = e.contact_id
+       AND type IN ('add_external_contact_to_group','remove_external_contact_from_group')
+       ORDER BY created_at DESC, rowid DESC LIMIT 1)
+     WHERE e.conversation_id = ? ORDER BY e.display_name`, [conversationId]);
+  return rows.map(row => ({ ...toExternalMemberView(row),
+    syncState: !row.pending ? 'synced' as const : row.sync_status === 'dead' || row.sync_status === 'failed' ? 'failed' as const : 'pending' as const,
+    syncErrorCode: row.sync_error,
+  }));
 }
 
 export async function upsertExternalMember(m: {
   conversationId: string; contactId: string; displayName: string; phoneE164: string;
   normalizedPhone: string; isRegistered?: boolean; linkedUid?: string | null; pending?: boolean;
-}): Promise<void> {
+}, db: LocalDatabase = getDb()): Promise<void> {
   const now = Date.now();
-  const existing = await getDb().first<{ id: string }>(
+  const existing = await db.first<{ id: string }>(
     `SELECT id FROM external_members WHERE conversation_id = ? AND contact_id = ?`,
     [m.conversationId, m.contactId],
   );
   if (existing) {
-    await getDb().run(
+    await db.run(
       `UPDATE external_members SET display_name = ?, phone_e164 = ?, normalized_phone = ?,
          is_registered = ?, linked_uid = ?, pending = ?, updated_at = ?
        WHERE conversation_id = ? AND contact_id = ?`,
@@ -32,7 +38,7 @@ export async function upsertExternalMember(m: {
        m.linkedUid ?? null, m.pending ? 1 : 0, now, m.conversationId, m.contactId],
     );
   } else {
-    await getDb().run(
+    await db.run(
       `INSERT INTO external_members
          (id, conversation_id, contact_id, display_name, phone_e164, normalized_phone, is_registered, linked_uid, pending, updated_at)
        VALUES (?,?,?,?,?,?,?,?,?,?)`,
@@ -42,8 +48,8 @@ export async function upsertExternalMember(m: {
   }
 }
 
-export async function removeExternalMember(conversationId: string, contactId: string): Promise<void> {
-  await getDb().run(
+export async function removeExternalMember(conversationId: string, contactId: string, db: LocalDatabase = getDb()): Promise<void> {
+  await db.run(
     `DELETE FROM external_members WHERE conversation_id = ? AND contact_id = ?`,
     [conversationId, contactId],
   );
@@ -68,4 +74,13 @@ export async function replaceFromRemote(conversationId: string, remote: Array<{
   for (const r of remote) {
     await upsertExternalMember({ ...r, conversationId, pending: false });
   }
+}
+
+/** Only a successful server response can clear the optimistic pending flag. */
+export async function confirmExternalMember(conversationId: string, contactId: string, operationId: string, db: LocalDatabase = getDb()): Promise<void> {
+  await db.run(`UPDATE external_members SET pending = 0, updated_at = ? WHERE conversation_id = ? AND contact_id = ?
+    AND (SELECT id FROM outbox WHERE conversation_id = ? AND entity_id = ?
+      AND type IN ('add_external_contact_to_group','remove_external_contact_from_group')
+      ORDER BY created_at DESC, rowid DESC LIMIT 1) = ?`,
+    [Date.now(), conversationId, contactId, conversationId, contactId, operationId]);
 }

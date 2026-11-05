@@ -33,12 +33,13 @@ import { maskPhone } from '../lib/phone';
 import { useTranslation } from 'react-i18next';
 import { useDisplayNames } from '../lib/userProfiles';
 import { LOCAL_FIRST_CONVERSATION_ENABLED } from '../config/features';
-import { queueRemoveExternalContactFromGroup, externalMembersRepo, getCurrentUid } from '../localdb';
+import { queueRemoveExternalContactFromGroup, queueAddExternalContactToGroup, onExternalMembersChanged, externalMembersRepo, getCurrentUid } from '../localdb';
 import { colors, radius } from '../theme';
 import { RegisteredBadge } from '../components/RegisteredBadge';
 import { LoadingState, PermissionState } from '../components/state';
 
-type RosterRow = { kind: 'member'; member: GroupMember } | { kind: 'external'; contact: ExternalMember };
+type PhoneContactRow = ExternalMember & { syncState?: 'pending' | 'failed' | 'synced' };
+type RosterRow = { kind: 'member'; member: GroupMember } | { kind: 'external'; contact: PhoneContactRow };
 type RosterSection = { title: string; data: RosterRow[] };
 
 function roleBadge(role: GroupMember['role']) {
@@ -56,7 +57,8 @@ export default function GroupInfo({ route, navigation }: any) {
   const [convo, setConvo]     = useState<Conversation | null | undefined>(undefined);
   const [members, setMembers] = useState<GroupMember[] | null>(null);
   const [remoteExternals, setRemoteExternals] = useState<ExternalMember[]>([]);
-  const [pendingExternals, setPendingExternals] = useState<ExternalMember[]>([]);
+  const [pendingExternals, setPendingExternals] = useState<PhoneContactRow[]>([]);
+  const [externalRevision, setExternalRevision] = useState(0);
   const [busy, setBusy]       = useState(false);
   // Member action sheet (custom modal so all entries are guaranteed visible;
   // Alert.alert can clip or reorder >3 buttons on some Android dialogs).
@@ -94,6 +96,10 @@ export default function GroupInfo({ route, navigation }: any) {
   useEffect(() => subscribeInviteSettings(id, setInvite), [id]);
   useEffect(() => subscribePendingJoinRequests(id, rows => setPendingCount(rows.length)), [id]);
 
+  useEffect(() => onExternalMembersChanged((conversationId, ownerUid) => {
+    if (conversationId === id && ownerUid === me && getCurrentUid() === me) setExternalRevision(value => value + 1);
+  }), [id, me]);
+
   // Merge offline-queued (pending) external contacts that the server snapshot
   // doesn't have yet, so an add made while offline shows immediately. Pure
   // additive — never deletes from the remote list. Refreshes whenever the
@@ -110,12 +116,13 @@ export default function GroupInfo({ route, navigation }: any) {
           .map(l => ({
             contactId: l.contactId, displayName: l.displayName, phoneE164: l.phoneE164,
             normalizedPhone: l.normalizedPhone, isRegistered: l.isRegistered, linkedUid: l.linkedUid,
+            syncState: l.syncState ?? 'pending',
           }));
-        if (alive) setPendingExternals(pend);
+        if (alive && getCurrentUid() === me) setPendingExternals(pend);
       } catch { if (alive) setPendingExternals([]); }
     })();
     return () => { alive = false; };
-  }, [id, remoteExternals]);
+  }, [id, remoteExternals, externalRevision, me]);
 
   const externals = useMemo(() => [...remoteExternals, ...pendingExternals]
     .sort((a, b) => compareNames((a.displayName ?? '').trim(), (b.displayName ?? '').trim()) || a.contactId.localeCompare(b.contactId)),
@@ -160,6 +167,13 @@ export default function GroupInfo({ route, navigation }: any) {
       ],
     );
   }
+  async function retryPhoneContact(contact: PhoneContactRow) {
+    await withBusy(async () => {
+      const result = await queueAddExternalContactToGroup({ conversationId: id,
+        displayName: contact.displayName, phoneE164: contact.phoneE164 });
+      if (!result.ok) throw new Error('localdb-unavailable');
+    }, t('phoneChat.syncFailed'));
+  }
   function confirmRemoveExternal(c: ExternalMember) {
     Alert.alert(
       'Remove contact',
@@ -167,7 +181,11 @@ export default function GroupInfo({ route, navigation }: any) {
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Remove', style: 'destructive', onPress: () => withBusy(async () => {
-          if (LOCAL_FIRST_CONVERSATION_ENABLED && getCurrentUid()) { await queueRemoveExternalContactFromGroup({ conversationId: id, contactId: c.contactId }); setPendingExternals(p => p.filter(x => x.contactId !== c.contactId)); }
+          if (LOCAL_FIRST_CONVERSATION_ENABLED && getCurrentUid()) {
+            const result = await queueRemoveExternalContactFromGroup({ conversationId: id, contactId: c.contactId });
+            if (!result.ok) throw new Error('localdb-unavailable');
+            setPendingExternals(p => p.filter(x => x.contactId !== c.contactId));
+          }
           else await removeExternalContactFromGroup(id, c.contactId);
         }, 'Couldn’t remove') },
       ],
@@ -283,8 +301,16 @@ export default function GroupInfo({ route, navigation }: any) {
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={s.memberName}>{contact.displayName}</Text>
-                  <Text style={s.memberSub}>{maskPhone(contact.phoneE164)}{contact.isRegistered ? ' · on OfflineSMS' : ' · SMS only'}</Text>
+                  <Text style={s.memberSub}>{maskPhone(contact.phoneE164)}{contact.syncState === 'pending' || contact.syncState === 'failed'
+                    ? ` · ${t(contact.syncState === 'failed' ? 'phoneChat.syncFailed' : 'phoneChat.syncPending')}`
+                    : contact.isRegistered ? ' · on OfflineSMS' : ' · SMS only'}</Text>
+                  {contact.syncState === 'pending' || contact.syncState === 'failed' ? <Text style={s.memberSub}>{t('phoneChat.syncHint')}</Text> : null}
                 </View>
+                {isAdmin && (contact.syncState === 'pending' || contact.syncState === 'failed') ? <Pressable disabled={busy}
+                  accessibilityRole="button" accessibilityLabel={t('phoneChat.retrySync')} style={s.retryContact}
+                  onPress={event => { event.stopPropagation(); void retryPhoneContact(contact); }}>
+                  <Text style={s.actionText}>{t('phoneChat.retrySync')}</Text>
+                </Pressable> : null}
               </Pressable>
             );
           }
@@ -442,6 +468,7 @@ export default function GroupInfo({ route, navigation }: any) {
 }
 
 const s = StyleSheet.create({
+  retryContact: { padding: 12, minHeight: 44, justifyContent: 'center' },
   root:      { flex: 1, backgroundColor: colors.bgCanvas },
   header:    { paddingTop: 50, paddingBottom: 12, paddingHorizontal: 14, backgroundColor: colors.primaryLight, flexDirection: 'row', alignItems: 'center', gap: 12 },
   back:      { fontSize: 24, color: colors.primary },
@@ -488,3 +515,4 @@ const s = StyleSheet.create({
   sheetItemText:{ fontSize: 15, color: colors.ink, fontWeight: '600' },
   sheetCancel:  { borderBottomWidth: 0, marginTop: 4 },
 });
+

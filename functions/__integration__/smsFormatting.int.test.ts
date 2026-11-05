@@ -5,6 +5,7 @@ import { escalateSms } from '../src/sms/escalate';
 import { retryFailedSmsRecipients } from '../src/sms/retryFailed';
 import { onSmsBatchAccepted } from '../src/sms/onSmsBatchAccepted';
 import { settleSmsBatch } from '../src/sms/settlement';
+import { addExternalContactToGroup } from '../src/contacts/externalMembers';
 import { reserveSmsBatch } from '../src/sms/reserveBatch';
 
 const args = { conversationId: 'group', messageId: 'message', audience: 'everyone', smsBody: 'x'.repeat(150) };
@@ -41,6 +42,22 @@ beforeEach(async () => {
 });
 
 describe('SMS metadata and price consistency', () => {
+  it('adds an unregistered phone to the authoritative roster, preview and relay jobs without an app account', async () => {
+    const digits = num(4).replace(/\D/g, '');
+    await db().doc('conversations/group/members/sender').set({ role: 'owner', status: 'active' });
+    const payload = { conversationId: 'group', displayName: 'Phone-only recipient', phoneNumber: num(4) };
+    expect(await addExternalContactToGroup.run(req('sender', payload))).toMatchObject({ added: 1, contactId: digits, isRegistered: false });
+    expect(await addExternalContactToGroup.run(req('sender', payload))).toMatchObject({ added: 0, contactId: digits });
+    expect((await db().doc('conversations/group').get()).get('externalMemberCount')).toBe(1);
+    const { quote, result, ref } = await send();
+    expect(quote.eligibleRecipients).toEqual(expect.arrayContaining([expect.objectContaining({ uid: `ext:${digits}`, displayName: payload.displayName })]));
+    expect(quote).toMatchObject({ eligibleCount: 3, pointsCost: 168, pointsPerRecipient: 56 });
+    expect((await ref.get()).get('recipientCount')).toBe(3);
+    const job = await db().doc(`relayJobs/${result.batchId}:ext:${digits}`).get();
+    expect(job.exists).toBe(true);
+    expect(job.get('messageBody')).toBe(quote.finalSmsBody);
+    expect((await db().doc(`users/ext:${digits}`).get()).exists).toBe(false);
+  });
   it('sends exactly the preview, settles two segments per recipient once, and retries the snapshotted relay body/price', async () => {
     const { quote, result, ref } = await send();
     const expected = `[OfflineSMS]\n[Team]\n${num(1)}\n\n${args.smsBody}`;
@@ -159,3 +176,4 @@ describe('shared settlement compatibility/recovery', () => {
     expect((await ref.get()).data()).toMatchObject({ pointsDeducted: 56, pointsRefunded: 56 });
   });
 });
+

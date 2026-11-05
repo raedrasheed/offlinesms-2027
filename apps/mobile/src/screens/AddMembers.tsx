@@ -126,7 +126,8 @@ export default function AddMembers({ route, navigation }: any) {
     for (const c of cs) {
       try {
         if (useLocalQueue) {
-          await queueAddExternalContactToGroup({ conversationId: id, displayName: c.name, phoneE164: c.phoneE164, defaultCountry: defaultDial });
+          const result = await queueAddExternalContactToGroup({ conversationId: id, displayName: c.name, phoneE164: c.phoneE164, defaultCountry: defaultDial });
+          if (!result.ok) throw new Error('localdb-unavailable');
         } else {
           await addExternalContactToGroup({ conversationId: id, displayName: c.name, phoneNumber: c.phoneE164, defaultCountry: defaultDial });
         }
@@ -138,7 +139,9 @@ export default function AddMembers({ route, navigation }: any) {
     }
     setBusy(false);
     setBulkProgress(null);
-    const summary = failed === 0
+    const summary = useLocalQueue
+      ? t('phoneChat.syncQueued', { n: done, failed })
+      : failed === 0
       ? `Added ${done} contact${done === 1 ? '' : 's'} to the group.`
       : `Added ${done}, failed ${failed}. Try again for the failed ones.`;
     Alert.alert(failed === 0 ? 'Done' : 'Partially added', summary, [
@@ -156,7 +159,8 @@ export default function AddMembers({ route, navigation }: any) {
       // Local-first: queue optimistically (survives offline + app restart, shows
       // immediately in GroupInfo). Falls back to the direct callable otherwise.
       if (LOCAL_FIRST_CONVERSATION_ENABLED && getCurrentUid()) {
-        await queueAddExternalContactToGroup({ conversationId: id, displayName: name, phoneE164: e164, defaultCountry: defaultDial });
+        const result = await queueAddExternalContactToGroup({ conversationId: id, displayName: name, phoneE164: e164, defaultCountry: defaultDial });
+        if (!result.ok) throw new Error('localdb-unavailable');
         navigation.goBack();
       } else {
         const res = await addExternalContactToGroup({ conversationId: id, displayName: name, phoneNumber: e164, defaultCountry: defaultDial });
@@ -344,3 +348,4 @@ const s = StyleSheet.create({
   pickBtnText:{ color: colors.primary, fontWeight: '700', fontSize: 14 },
   pickRow:    { flexDirection: 'row', gap: 8 },
 });
+
