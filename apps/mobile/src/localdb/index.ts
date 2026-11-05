@@ -9,15 +9,17 @@
 // Write path for an optimistic outgoing message: queueSendMessage(...).
 
 import { attachmentFallback, type LocationAttachment, type ContactAttachment } from '../media/attachmentModel';
-import { openForUser, closeDb, wipeUserData, getCurrentUid } from './connection';
+import { openForUser, closeDb, wipeUserData, getCurrentUid, getDb } from './connection';
 import { startScheduler, stopScheduler, kick } from './sync/syncScheduler';
 import * as messagesRepo from './repositories/messagesRepo';
 import * as outboxRepo from './repositories/outboxRepo';
-import * as externalMembersRepo from './repositories/externalMembersRepo';
 import { getDeviceId, getCursor, setCursor, getState, setState } from './repositories/syncStateRepo';
 import { idempotencyKey, localId } from './sync/ids';
 import { sanitizePoll } from '../lib/pollModel';
 import { toggleReaction } from './sync/reactionLogic';
+import { stageExternalMemberChange } from './externalMemberActions';
+import { emitExternalMembersChanged } from './externalMemberChanges';
+export { onExternalMembersChanged } from './externalMemberChanges';
 import { phoneDigits } from '../lib/phone';
 import { isOnline, onConnectivityChange } from './sync/networkState';
 import { pullMessageById } from './sync/firebasePull';
@@ -509,36 +511,16 @@ export async function queueMarkReceipt(args: { conversationId: string; messageId
 }
 
 // ── External phone contacts (Phase 25) ──────────────────────────────────────
-// Optimistic local write to external_members + durable outbox item, so adds
-// survive offline / app restart and sync on reconnect. Idempotency keys are
-// stable per (conversation, phone) so a retry never double-adds.
-
+// Local roster and the retryable server mutation commit together.
 export async function queueAddExternalContactToGroup(args: {
   conversationId: string; displayName: string; phoneE164: string; defaultCountry?: string;
 }): Promise<ActionResult> {
-  if (!getCurrentUid()) return { ok: false, reason: 'not-initialised' };
-  const digits = phoneDigits(args.phoneE164);
-  // Optimistic row (pending) — appears immediately in GroupInfo, even offline.
-  await externalMembersRepo.upsertExternalMember({
-    conversationId:  args.conversationId,
-    contactId:       digits,                 // matches the server's externalMember id
-    displayName:     args.displayName,
-    phoneE164:       args.phoneE164,
-    normalizedPhone: digits,
-    isRegistered:    false,
-    pending:         true,
-  });
-  await outboxRepo.enqueue({
-    type: 'add_external_contact_to_group', entityType: 'externalMember', entityId: digits,
-    conversationId: args.conversationId,
-    idempotencyKey: idempotencyKey(['addExternal', args.conversationId, digits]),
-    payload: {
-      conversationId: args.conversationId,
-      displayName: args.displayName,
-      phoneNumber: args.phoneE164,
-      defaultCountry: args.defaultCountry,
-    },
-  });
+  const uid = getCurrentUid();
+  if (!uid) return { ok: false, reason: 'not-initialised' };
+  const db = getDb();
+  await stageExternalMemberChange(db, { ...args, contactId: phoneDigits(args.phoneE164), action: 'add' });
+  if (getCurrentUid() !== uid) return { ok: false, reason: 'not-initialised' };
+  emitExternalMembersChanged(args.conversationId, uid);
   kick('outbox');
   return { ok: true };
 }
@@ -546,14 +528,12 @@ export async function queueAddExternalContactToGroup(args: {
 export async function queueRemoveExternalContactFromGroup(args: {
   conversationId: string; contactId: string;
 }): Promise<ActionResult> {
-  if (!getCurrentUid()) return { ok: false, reason: 'not-initialised' };
-  await externalMembersRepo.removeExternalMember(args.conversationId, args.contactId);
-  await outboxRepo.enqueue({
-    type: 'remove_external_contact_from_group', entityType: 'externalMember', entityId: args.contactId,
-    conversationId: args.conversationId,
-    idempotencyKey: idempotencyKey(['removeExternal', args.conversationId, args.contactId]),
-    payload: { conversationId: args.conversationId, contactId: args.contactId },
-  });
+  const uid = getCurrentUid();
+  if (!uid) return { ok: false, reason: 'not-initialised' };
+  const db = getDb();
+  await stageExternalMemberChange(db, { ...args, action: 'remove' });
+  if (getCurrentUid() !== uid) return { ok: false, reason: 'not-initialised' };
+  emitExternalMembersChanged(args.conversationId, uid);
   kick('outbox');
   return { ok: true };
 }

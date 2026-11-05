@@ -22,6 +22,8 @@ export interface ExternalMemberView {
   isRegistered: boolean;
   linkedUid: string | null;
   pending: boolean;
+  syncState?: 'pending' | 'failed' | 'synced';
+  syncErrorCode?: string | null;
 }
 
 /** Pure row → view mapper. */
@@ -36,3 +38,4 @@ export function toExternalMemberView(r: ExternalMemberRow): ExternalMemberView {
     pending:         r.pending === 1,
   };
 }
+

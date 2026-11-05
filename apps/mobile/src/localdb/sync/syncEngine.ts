@@ -11,6 +11,7 @@ import { isOnline } from './networkState';
 import { isPermanent, errorCode, nextAttemptAt } from './retryPolicy';
 import { emitLocalMessagesChanged } from '../messageChanges';
 import { LOCAL_MESSAGE_RETENTION_LIMIT } from '../../config/features';
+import { emitExternalMembersChanged } from '../externalMemberChanges';
 import { getCurrentUid } from '../connection';
 
 let running = false;   // guards the heavy pull + history backfill
@@ -82,6 +83,7 @@ export type SyncReason =
 export async function pushOutbox(lane: outboxRepo.OutboxLane = 'all'): Promise<number> {
   if (!isOnline()) { console.log('[outbox] skip: offline'); return 0; }
   let completed = 0;
+  const ownerUid = getCurrentUid();
   const due = await outboxRepo.claimDue(Date.now(), lane === 'media' ? 1 : 10, lane);
   if (due.length) console.log(`[outbox] pushing ${due.length} item(s)`);
   for (const item of due) {
@@ -124,6 +126,8 @@ export async function pushOutbox(lane: outboxRepo.OutboxLane = 'all'): Promise<n
       }
       if (item.type === 'close_poll' && item.conversation_id) emitLocalMessagesChanged(item.conversation_id);
     }
+    if (item.conversation_id && (item.type === 'add_external_contact_to_group' || item.type === 'remove_external_contact_from_group'))
+      emitExternalMembersChanged(item.conversation_id, ownerUid);
     if ((item.type === 'send_message' || item.type === 'vote_poll') && item.conversation_id) emitLocalMessagesChanged(item.conversation_id);
   }
   return completed;
@@ -219,3 +223,4 @@ export async function retryFailedOutboxItem(id: string): Promise<void> {
 export function isSyncing(): boolean {
   return running;
 }
+

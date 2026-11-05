@@ -495,7 +495,7 @@ export function subscribeExternalMembers(
 ) {
   return onSnapshot(
     collection(db, 'conversations', conversationId, 'externalMembers'),
-    snap => cb(snap.docs.map(d => ({ contactId: d.id, ...(d.data() as Omit<ExternalMember, 'contactId'>) }))),
+    snap => cb(snap.docs.map(d => ({ ...(d.data() as Omit<ExternalMember, 'contactId'>), contactId: d.id }))),
     err => { if (__DEV__) console.warn('[conversations] subscribeExternalMembers failed:', err); },
   );
 }
@@ -867,3 +867,4 @@ export async function markStatusViewed(statusId: string): Promise<void> {
 export async function respondToGroupInvitation(conversationId: string, accept: boolean) {
   return (await fn<{ conversationId: string; accept: boolean }, { status: string }>('respondToGroupInvitation')({ conversationId, accept })).data;
 }
+
