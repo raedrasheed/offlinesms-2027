@@ -14,7 +14,9 @@ vi.mock('react-native', () => ({
   Platform:{OS:'android'},Linking:{},Clipboard:{},Alert:{alert:mocks.alert},
   StyleSheet:{create:(value:unknown)=>value,absoluteFillObject:{position:'absolute',top:0,left:0,right:0,bottom:0}},
   useWindowDimensions:()=>mocks.window,
+  AppState:{currentState:'active',addEventListener:()=>({remove:()=>{}})},
 }));
+vi.mock('@react-navigation/native',()=>({useIsFocused:()=>true}));
 vi.mock('expo-av',()=>({Video:'Video',ResizeMode:{CONTAIN:'contain'}}));
 vi.mock('expo-image',()=>({Image:'ExpoImage'}));
 vi.mock('expo-sharing',()=>({isAvailableAsync:mocks.sharingAvailable,shareAsync:mocks.share}));
@@ -193,7 +195,7 @@ describe('explicit video playback',()=>{
     expect(nodes('Image')[0].props).toMatchObject({source:{uri:updated.media.thumbnailURL},resizeMode:'contain'});
     expect(nodes('Video')).toHaveLength(0);expect(mocks.cache).not.toHaveBeenCalled();
     await act(async()=>frame().props.onPress());
-    expect(nodes('Video')[0].props.useNativeControls).toBe(true);
+    expect(nodes('Video')[0].props.useNativeControls).toBe(false);
   });
   it('downloads only on a tap, ignores rapid taps, and unmounts the player when closed',async()=>{
     let finish!:(uri:string)=>void;mocks.cache.mockImplementation(()=>new Promise(resolve=>{finish=resolve;}));
@@ -203,7 +205,7 @@ describe('explicit video playback',()=>{
     await act(async()=>{frame().props.onPress();frame().props.onPress();});
     expect(mocks.cache).toHaveBeenCalledOnce();expect(nodes('Video')).toHaveLength(0);
     await act(async()=>finish('file:///cached.mp4'));
-    expect(nodes('Video')[0].props).toMatchObject({source:{uri:'file:///cached.mp4'},resizeMode:'contain',useNativeControls:true});
+    expect(nodes('Video')[0].props).toMatchObject({source:{uri:'file:///cached.mp4'},resizeMode:'contain',useNativeControls:false});
     await act(async()=>button('names.close').props.onPress());
     expect(nodes('Video')).toHaveLength(0);expect(frame()).toBeTruthy();
   });
@@ -238,7 +240,11 @@ describe('explicit video playback',()=>{
     await mountVideo();await act(async()=>frame().props.onPress());
     await act(async()=>nodes('Video')[0].props.onReadyForDisplay({naturalSize:{width:1920,height:1080,orientation:'portrait'}}));
     expect(style(mediaBox()).width/style(mediaBox()).height).toBeCloseTo(9/16);
-    expect(style(nodes('Video')[0]).width/style(nodes('Video')[0]).height).toBeCloseTo(9/16);
+    expect(nodes('Video')[0].props.resizeMode).toBe('contain');
+    expect(renderer.root.findByProps({testID:'video-seek-bar'})).toBeTruthy();
+    await act(async()=>nodes('Video')[0].props.onError('bad-cache'));
+    expect(nodes('Video')[0].props.source.uri).toBe('https://example.test/media');
+    expect(mocks.alert).not.toHaveBeenCalled();
     await act(async()=>nodes('Video')[0].props.onError('bad-video'));
     expect(nodes('Video')).toHaveLength(0);expect(button('media.retryDownload')).toBeTruthy();
     expect(mocks.alert).toHaveBeenCalled();
@@ -324,3 +330,4 @@ describe('chat image renderer',()=>{
     expect(nodes('ExpoImage')[0].props.recyclingKey).toBe(next.params.uri);
   });
 });
+

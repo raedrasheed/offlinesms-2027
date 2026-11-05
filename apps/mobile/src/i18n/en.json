@@ -893,5 +893,10 @@
     "profileExplanation": "Choose a username, then save to continue joining the group.",
     "saveContinue": "Save and continue",
     "onboarding": "To join the group, first choose a display name and username. Your invitation is saved and will reopen after you continue."
+  },
+  "videoPlayer": {
+    "play": "Play video",
+    "pause": "Pause video",
+    "seek": "Video progress"
   }
 }

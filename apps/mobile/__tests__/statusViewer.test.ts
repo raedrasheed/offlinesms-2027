@@ -11,6 +11,7 @@ vi.mock('@expo/vector-icons', () => ({ Ionicons: 'Icon' }));
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string, options?: any) => options?.defaultValue ?? key }) }));
 vi.mock('@react-navigation/native', () => ({ useIsFocused: () => true }));
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 24, bottom: 12 }) }));
+vi.mock('../src/components/VideoPlayer', () => ({ VideoPlayer: (props: any) => createElement('Video', { testID: props.nativeTestID, source: {uri: props.uri}, shouldPlay: !props.paused, onReadyForDisplay: props.onReady, onPlaybackStatusUpdate: props.onStatus, onError: props.onError }) }));
 vi.mock('expo-av', () => ({ Video: 'Video', ResizeMode: { CONTAIN: 'contain' } }));
 vi.mock('../src/lib/statuses', () => ({ markStatusViewed: mock.mark, deleteStatus: mock.remove, subscribeStatusViewCount: (_id: string, cb: (n: number) => void) => { cb(3); return () => {}; }, setStatusLike: mock.like, listStatusViewers: mock.list, replyToStatus: mock.reply, getStatus: mock.get }));
 import StatusViewer from '../src/screens/StatusViewer';
@@ -82,3 +83,4 @@ describe('story playback and interactions', () => {
     expect(mock.nav.replace).toHaveBeenCalledWith('Conversation', { id: 'dm', title: 'Author' });
   });
 });
+
