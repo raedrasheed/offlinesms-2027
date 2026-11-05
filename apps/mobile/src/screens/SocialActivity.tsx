@@ -40,8 +40,6 @@ export default function SocialActivity({ navigation }: any) {
       case 'statusMention': return c('mentioned you in a story', 'أشار إليك في حالة');
       case 'statusLike': return c('liked your story', 'أعجب بحالتك');
       case 'statusReply': return c('replied to your story', 'ردّ على حالتك');
-      case 'postLike': return c('liked your post', 'أعجب بمنشورك');
-      case 'postComment': return c('commented on your post', 'علّق على منشورك');
     }
   }
   async function open(item: SocialActivityItem) {
@@ -50,7 +48,7 @@ export default function SocialActivity({ navigation }: any) {
       await markSocialActivityRead([item.id]);
       if (generation !== epoch.current || uid !== auth.currentUser?.uid) return;
       setItems(old => old.map(row => row.id === item.id ? { ...row, unread: false } : row));
-      const target = socialActivityDestination(item); navigation.navigate(target.screen, target.params);
+      const target = socialActivityDestination(item); if (target) navigation.navigate(target.screen, target.params);
     } catch { if (generation === epoch.current) setError(c('Could not open this notification. Try again.', 'تعذّر فتح الإشعار. حاول مجددًا.')); }
   }
   return <View style={[s.root, { paddingTop: insets.top, backgroundColor: colors.background.app }]}>

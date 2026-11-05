@@ -1,3 +1,5 @@
+// Archive behavior coverage; the real disabled gate is tested separately.
+vi.mock('../lib/postsFeature', () => ({ assertPostsEnabled: () => {} }));
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const state = vi.hoisted(() => ({ session: { state: 'unauthenticated' } as any,
   docs: new Map<string, { data: Record<string, any>; version: number }>(),

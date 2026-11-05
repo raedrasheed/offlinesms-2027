@@ -1,3 +1,5 @@
+// Archive behavior coverage only; production policy is tested in postsDisabled.int.test.ts.
+vi.mock('../src/social/postsFeature', () => ({ POSTS_ENABLED: true, assertPostsEnabled: () => {} }));
 import { createHash } from 'node:crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { db, expectHttps, req, resetEmulators, Timestamp } from './harness';

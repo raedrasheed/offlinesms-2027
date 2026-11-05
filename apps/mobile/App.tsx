@@ -62,9 +62,6 @@ import ClipPreferences from './src/screens/clips/ClipPreferences';
 import ClipComposer from './src/screens/clips/ClipComposer';
 import ClipDrafts from './src/screens/clips/ClipDrafts';
 import ClipFollowRequests from './src/screens/clips/ClipFollowRequests';
-import PostsFeed from './src/screens/posts/PostsFeed';
-import PostComposer from './src/screens/posts/PostComposer';
-import PostViewer from './src/screens/posts/PostViewer';
 import SocialActivity from './src/screens/SocialActivity';
 import { useClipsCopy } from './src/lib/clipsCopy';
 import Settings from './src/screens/Settings';
@@ -439,9 +436,6 @@ export default function App() {
             <RootStack.Screen name="ClipComposer" component={ClipComposer} options={{ presentation: 'fullScreenModal' }} />
             <RootStack.Screen name="ClipDrafts" component={ClipDrafts} />
             <RootStack.Screen name="ClipFollowRequests" component={ClipFollowRequests} />
-            <RootStack.Screen name="PostsFeed" component={PostsFeed} />
-            <RootStack.Screen name="PostComposer" component={PostComposer} options={{ presentation: 'fullScreenModal' }} />
-            <RootStack.Screen name="PostViewer" component={PostViewer} />
             <RootStack.Screen name="SocialActivity" component={SocialActivity} />
             <RootStack.Screen name="GroupInvitations" component={GroupInvitations} />
             <RootStack.Screen name="GroupInfo" component={GroupInfo} />

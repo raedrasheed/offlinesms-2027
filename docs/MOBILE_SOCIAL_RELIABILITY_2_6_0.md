@@ -1,5 +1,7 @@
 # Mobile reliability and social features — 2.6.0 (34)
 
+> Posts were retired on 2026-11-05. The Posts sections below describe archived behavior; current policy and deployment steps are in [POSTS_DISABLED_2026-11-05.md](POSTS_DISABLED_2026-11-05.md). Clips, statuses and their activity remain available.
+
 This release fixes chat lifecycle, notification cleanup, story playback and interactions,
 sticker saving, theme contrast and group-invite recovery. It also adds text/photo posts
 and a private social activity inbox beside the existing Clips feature.

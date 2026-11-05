@@ -5,9 +5,9 @@ import { socialActivityDestination, type SocialActivityItem } from '../src/lib/s
 const item: SocialActivityItem = { id: 'event', kind: 'like', actor: { uid: 'actor', displayName: 'Person', username: 'person', photoURL: null },
   clipId: 'clip', statusId: null, messageId: null, followStatus: null, createdAtMs: 1, unread: true };
 describe('Social activity navigation', () => {
-  it('opens the actual clip or post rather than creating a conversation', () => {
+  it('opens the actual clip and ignores retired post destinations', () => {
     expect(socialActivityDestination(item)).toEqual({ screen: 'ClipViewer', params: { clipId: 'clip' } });
-    expect(socialActivityDestination({ ...item, clipId: null, kind: 'postLike', postId: 'post' })).toEqual({ screen: 'PostViewer', params: { postId: 'post' } });
+    expect(socialActivityDestination({ ...item, clipId: null, kind: 'postLike', postId: 'post' })).toBeNull();
   });
   it('opens the specific story or its existing reply conversation using the message target', () => {
     expect(socialActivityDestination({ ...item, clipId: null, kind: 'statusMention', statusId: 'story' })).toEqual({ screen: 'StatusViewer', params: { statusId: 'story' } });
