@@ -10,9 +10,7 @@ import { onAuthStateChanged, User } from 'firebase/auth';
 import { auth } from './src/lib/firebase';
 import { ThemeProvider, useTheme } from './src/context/ThemeContext';
 import { OfflineProvider } from './src/context/OfflineContext';
-import { useAccountProfile } from './src/hooks/useAccountProfile';
-import { ErrorState, LoadingState } from './src/components/state';
-import { useTranslation } from 'react-i18next';
+import { useAccountTheme } from './src/hooks/useAccountTheme';
 import './src/i18n';
 
 import Splash from './src/screens/Splash';
@@ -22,7 +20,6 @@ import Otp from './src/screens/Otp';
 import EmailLogin from './src/screens/EmailLogin';
 import EmailEntry from './src/screens/EmailEntry';
 import EmailOtp from './src/screens/EmailOtp';
-import ProfileCompletion from './src/screens/ProfileCompletion';
 import CreatePin from './src/screens/CreatePin';
 import LinkPhone from './src/screens/LinkPhone';
 import ChangeEmail from './src/screens/ChangeEmail';
@@ -125,7 +122,6 @@ function tryDispatchPush(data: unknown, authed: boolean): boolean {
 }
 
 const AuthStack = createNativeStackNavigator();
-const OnboardingStack = createNativeStackNavigator();
 const Tabs = createBottomTabNavigator();
 const RootStack = createNativeStackNavigator();
 
@@ -167,14 +163,6 @@ function AuthFlow() {
       <AuthStack.Screen name="EmailEntry" component={EmailEntry} />
       <AuthStack.Screen name="EmailOtp" component={EmailOtp} />
     </AuthStack.Navigator>
-  );
-}
-
-function OnboardingFlow() {
-  return (
-    <OnboardingStack.Navigator screenOptions={{ headerShown: false }}>
-      <OnboardingStack.Screen name="ProfileCompletion" component={ProfileCompletion} />
-    </OnboardingStack.Navigator>
   );
 }
 
@@ -255,8 +243,7 @@ function MainTabs() {
 export default function App() {
   const [ready, setReady] = useState(false);
   const [user, setUser] = useState<User | null>(null);
-  const { profileCompleted, userTheme, profileError, retryProfile } = useAccountProfile(user?.uid ?? null);
-  const { t } = useTranslation();
+  const userTheme = useAccountTheme(user?.uid ?? null);
 
   useEffect(() => onAuthStateChanged(auth, u => {
     perfMark('auth:resolved', { signedIn: !!u }, true);
@@ -280,11 +267,11 @@ export default function App() {
   }), []);
 
   // Invite deep links (offlinesms://join/{code} | https://links.offlinesms.com
-  // /join/{code}, plus legacy offlinesms.com links). If logged in + onboarded,
+  // /join/{code}, plus legacy offlinesms.com links). If logged in,
   // open JoinGroup now; otherwise stash the code and replay it after auth
   // (effect below).
   const authedRef = useRef(false);
-  authedRef.current = !!user && profileCompleted === true;
+  authedRef.current = !!user;
   const accountRef = useRef<string | null>(null);
   accountRef.current = user?.uid ?? null;
   const clipLinks = useRef<ReturnType<typeof createPendingClipNavigation> | null>(null);
@@ -315,10 +302,10 @@ export default function App() {
     return () => sub.remove();
   }, []);
 
-  // Register for push once authenticated + onboarded (asks permission then).
+  // Register for push once authenticated (asks permission then).
   useEffect(() => {
-    if (user && profileCompleted === true) void registerForPush(user.uid);
-  }, [user, profileCompleted]);
+    if (user) void registerForPush(user.uid);
+  }, [user]);
 
   // A tapped-notification destination we couldn't navigate to yet (cold start:
   // navigator not mounted / auth not resolved). Drained once both are ready.
@@ -364,11 +351,11 @@ export default function App() {
     return () => { subRecv.remove(); subTap.remove(); };
   }, [drainPush]);
 
-  // Once authed + onboarded (and the navigator is mounted), drain any pending
+  // Once authenticated (and the navigator is mounted), drain any pending
   // notification tap. Retries until the authed RootStack is ready so a cold-
   // start tap reliably lands on the right chat.
   useEffect(() => {
-    if (!(user && profileCompleted === true)) return;
+    if (!user) return;
     let cancelled = false;
     const tryDrain = () => {
       if (cancelled || !pushTaps.current?.hasPending()) return;
@@ -378,20 +365,20 @@ export default function App() {
     };
     tryDrain();
     return () => { cancelled = true; };
-  }, [user, profileCompleted, drainPush]);
+  }, [user, drainPush]);
 
-  // Replay a stashed invite once the user is authenticated + onboarded.
+  // Replay a stashed invite once the user is authenticated.
   useEffect(() => {
-    if (!(user && profileCompleted === true)) return;
+    if (!user) return;
     void inviteLinks.current?.drain().catch(() => {});
-  }, [user, profileCompleted]);
+  }, [user]);
 
   // A protected clip link is replayed after sign-in; the viewer asks the
   // server for current access before showing metadata or obtaining media.
   useEffect(() => {
-    if (!(user && profileCompleted === true)) return;
+    if (!user) return;
     void clipLinks.current?.drain().catch(() => {});
-  }, [user, profileCompleted]);
+  }, [user]);
 
   // Mirror the user's chats into the local SQLite DB for the whole session.
   useChatListPersistence(user?.uid);
@@ -407,17 +394,10 @@ export default function App() {
     <SafeAreaProvider>
     <KeyboardProvider>
       <ErrorBoundary>
-      <ShareIntentHandler authed={!!user && profileCompleted === true} />
+      <ShareIntentHandler authed={!!user} />
       <NavigationContainer ref={navRef} onReady={() => { drainPush(); void clipLinks.current?.drain().catch(() => {}); void inviteLinks.current?.drain().catch(() => {}); }}>
         {!user ? (
           <AuthFlow />
-        ) : profileCompleted === null ? (
-          profileError ? <ErrorState fullPage title={t('profileStartup.errorTitle')}
-            description={t('profileStartup.errorDescription')}
-            primaryAction={{ label: t('profileStartup.retry'), onPress: retryProfile }} />
-            : <LoadingState fullPage title={t('profileStartup.loading')} />
-        ) : profileCompleted === false ? (
-          <OnboardingFlow />
         ) : (
           <RootStack.Navigator key={user.uid} screenOptions={{ headerShown: false }}>
             <RootStack.Screen name="Tabs" component={MainTabs} />

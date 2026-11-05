@@ -8,6 +8,7 @@ import { emitLocalMessagesChanged } from '../messageChanges';
 import { getDb, type LocalDatabase } from '../connection';
 import { localMessageId } from '../sync/ids';
 import type { MessageRow, MessageStatus, MessageSyncStatus } from '../types';
+import { parsePayload } from '../../media/attachmentModel';
 
 const PAGE = 40;
 
@@ -418,6 +419,17 @@ export async function upsertRemoteMessage(r: RemoteMessageInput, database: Local
     const sameMedia = r.media?.storagePath && existing.media_storage_path
       ? r.media.storagePath === existing.media_storage_path
       : !!r.media?.downloadURL && r.media.downloadURL === existing.media_download_url;
+    // Older caches discarded image filenames/presentation. Repair only missing
+    // metadata for the same original, without rolling back edits or tombstones.
+    if (!existing.deleted_for_everyone && !existing.deleted_for_me && !r.deletedForEveryone
+      && existing.type === 'image' && r.type === 'image' && sameMedia && r.payload) {
+      const previous = parsePayload(existing.payload_json), incoming = parsePayload(r.payload);
+      const fileName = !previous.fileName && typeof incoming.fileName === 'string' && incoming.fileName ? incoming.fileName : null;
+      const presentation = !previous.presentation && incoming.presentation === 'sticker' ? 'sticker' : null;
+      if (fileName || presentation) await database.run(
+        'UPDATE messages SET payload_json = ?, updated_at = ? WHERE remote_id = ? AND conversation_id = ? AND deleted_for_everyone = 0 AND deleted_for_me = 0',
+        [JSON.stringify({ ...previous, ...(fileName ? { fileName } : {}), ...(presentation ? { presentation } : {}) }), Date.now(), r.remoteId, r.conversationId]);
+    }
     if (!existing.deleted_for_everyone && !existing.deleted_for_me && !r.deletedForEveryone && existing.type === 'video' && r.type === 'video'
       && sameMedia && !existing.media_thumb_url && r.media?.thumbnailURL && r.media.uploadStatus === 'uploaded') {
       await writeMissingVideoThumbnail({ conversationId: r.conversationId, messageId: r.remoteId,
