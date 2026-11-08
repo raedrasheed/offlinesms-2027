@@ -952,7 +952,7 @@ export default function Conversation({ route, navigation }: any) {
     const ctx = viewContext.current;
     lastViewableRef.current = viewableItems;
     const visible = viewableItems.filter(v => v.isViewable && v.item.conversationId === ctx.id).map(v => v.item);
-    const locations=new Set<string>(visible.filter(m=>(m.type==='location' || m.type==='clip') && !m.deletedForEveryone).map(m=>m.id));
+    const locations=new Set<string>(visible.filter(m=>(m.type==='location' || m.type==='clip' || m.type==='video') && !m.deletedForEveryone).map(m=>m.id));
     setVisibleLocationIds(previous=>previous.size===locations.size && [...locations].every(id=>previous.has(id))?previous:locations);
     visibleMediaIdsRef.current = new Set(visible.map(m => m.id));
     perfObserve(visible.map(m => m.id), 'viewable');

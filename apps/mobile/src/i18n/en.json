@@ -1,4 +1,10 @@
 {
+  "profileStartup": {
+    "loading": "Loading your profile…",
+    "errorTitle": "Couldn’t load your profile",
+    "errorDescription": "Check your connection and try again.",
+    "retry": "Try again"
+  },
   "welcome": {
     "title": "Conversations that just flow.",
     "subtitle": "Private messaging built for how modern teams and friends actually talk.",
@@ -849,6 +855,11 @@
     "retryMap": "Retry map"
   },
   "phoneChat": {
+    "syncPending": "Waiting to sync",
+    "syncFailed": "Could not sync contact",
+    "retrySync": "Retry sync",
+    "syncHint": "Available for OfflineSMS after syncing.",
+    "syncQueued": "{{n}} contacts waiting to sync; {{failed}} could not be saved.",
     "hint": "Enter a phone number to send SMS, even if they do not use the app. Joining the group in the app requires their approval.",
     "name": "Contact name",
     "number": "Phone number",
@@ -893,5 +904,11 @@
     "profileExplanation": "Choose a username, then save to continue joining the group.",
     "saveContinue": "Save and continue",
     "onboarding": "To join the group, first choose a display name and username. Your invitation is saved and will reopen after you continue."
+  },
+  "videoPlayer": {
+    "play": "Play video",
+    "pause": "Pause video",
+    "seek": "Video progress"
   }
 }
+

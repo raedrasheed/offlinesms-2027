@@ -20,6 +20,41 @@ import {mapMessageRow} from '../../src/hooks/messageModel';
 import {enqueue,claimDue,markProcessing,markFailed,retryByEntityId,requeueStaleProcessing,getById} from '../../src/localdb/repositories/outboxRepo';
 beforeEach(async()=>{db=await createSqlJsDb();});afterEach(()=>db.close());
 describe('attachments survive SQLite and remote reconciliation',()=>{
+  it.each([null,''])('hydrates a late video thumbnail from history when the cached cover is %s, preserving live edits',async thumbnailURL=>{
+    const original={type:'video',senderUid:'peer',text:'Video',caption:'Current caption',editedAt:2000,createdAt:1000,
+      media:{storagePath:'chatMedia/c/peer/video/video.mp4',downloadURL:'https://example.test/original',mimeType:'video/mp4',uploadStatus:'uploaded',thumbnailURL,thumbnailPath:'legacy-placeholder'}};
+    await applyRemoteMessages([remoteMessageInput('video','c',original)]);
+    await applyRemoteMessages([remoteMessageInput('video','c',{...original,text:'Old text',caption:'Old caption',editedAt:null,
+      media:{...original.media,thumbnailURL:'https://example.test/frame0.jpg',thumbnailPath:'chatMedia/c/peer/video/frame0.jpg'}})],{insertOnly:true});
+    const row=(await listMessages('c'))[0];
+    expect(row.caption).toBe('Current caption');expect(row.edited_at).toBe(2000);
+    expect(mapMessageRow(row).media).toMatchObject({downloadURL:original.media.downloadURL,thumbnailURL:'https://example.test/frame0.jpg',thumbnailPath:'chatMedia/c/peer/video/frame0.jpg'});
+  });
+  it('does not replace a newer thumbnail or hydrate a different media source from history',async()=>{
+    const original={type:'video',senderUid:'peer',text:'Video',createdAt:1000,
+      media:{storagePath:'chatMedia/c/peer/video/video.mp4',downloadURL:'https://example.test/original',mimeType:'video/mp4',uploadStatus:'uploaded'}};
+    await applyRemoteMessages([remoteMessageInput('video','c',original)]);
+    await applyRemoteMessages([remoteMessageInput('video','c',{...original,media:{...original.media,storagePath:'another/video.mp4',thumbnailURL:'https://example.test/wrong.jpg'}})],{insertOnly:true});
+    expect(mapMessageRow((await listMessages('c'))[0]).media?.thumbnailURL).toBeNull();
+    await applyRemoteMessages([remoteMessageInput('video','c',{...original,media:{...original.media,thumbnailURL:'https://example.test/new.jpg'}})]);
+    await applyRemoteMessages([remoteMessageInput('video','c',{...original,media:{...original.media,thumbnailURL:'https://example.test/old.jpg'}})],{insertOnly:true});
+    expect(mapMessageRow((await listMessages('c'))[0]).media?.thumbnailURL).toBe('https://example.test/new.jpg');
+  });
+  it('uses matching original URLs for legacy rows without storage paths and never restores deleted media',async()=>{
+    const original={type:'video',senderUid:'peer',text:'Video',createdAt:1000,media:{downloadURL:'https://example.test/original',mimeType:'video/mp4',uploadStatus:'uploaded'}};
+    const withCover={...original,media:{...original.media,thumbnailURL:'https://example.test/frame0.jpg'}};
+    await applyRemoteMessages([remoteMessageInput('legacy','c',original)]);
+    await applyRemoteMessages([remoteMessageInput('legacy','c',withCover)],{insertOnly:true});
+    expect(mapMessageRow((await listMessages('c'))[0]).media?.thumbnailURL).toBe(withCover.media.thumbnailURL);
+    await applyRemoteMessages([remoteMessageInput('deleted','c',{...original,deletedForEveryone:true})]);
+    await applyRemoteMessages([remoteMessageInput('deleted','c',withCover)],{insertOnly:true});
+    const deleted=(await db.first<any>('SELECT * FROM messages WHERE remote_id = ?',['deleted']))!;
+    expect(deleted.deleted_for_everyone).toBe(1);expect(deleted.media_thumb_url).toBeNull();
+    await applyRemoteMessages([remoteMessageInput('local-deleted','c',original)]);
+    await db.run('UPDATE messages SET deleted_for_me = 1 WHERE remote_id = ?',['local-deleted']);
+    await applyRemoteMessages([remoteMessageInput('local-deleted','c',withCover)],{insertOnly:true});
+    expect((await db.first<any>('SELECT * FROM messages WHERE remote_id = ?',['local-deleted']))!.media_thumb_url).toBeNull();
+  });
   it('retains protected clip references through realtime and history reconciliation',async()=>{
     await applyRemoteMessages([remoteMessageInput('clip-message','c',{
       type:'clip',clipId:'clip123',senderUid:'peer',text:'Video clip',createdAt:1000,

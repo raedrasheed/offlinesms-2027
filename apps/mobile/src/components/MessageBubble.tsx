@@ -36,7 +36,7 @@ import { VoiceMessageBubble } from './chat/VoiceMessageBubble';
 import { AnimatedEmoji3D } from './chat/AnimatedEmoji3D';
 import { StickerBubble } from './chat/StickerBubble';
 import { CustomStickerBubble } from './chat/CustomStickerBubble';
-import { isCustomStickerMessage } from '../media/attachmentModel';
+import { isStickerImage } from '../media/stickerPresentation';
 import { PollBubble } from './chat/PollBubble';
 import { matchAnimatedEmoji } from '../lib/emoji3d';
 import {
@@ -101,7 +101,7 @@ export type MessageBubbleProps = {
   // Offline-first: locally queued outgoing message not yet on the server.
   pending?:   'queued' | 'syncing' | 'failed';
   onRetry?:   (message: Message) => void;
-  /** Only visible rich cards may request map tiles or protected clip metadata. */
+  /** Only visible rich cards may request tiles, clip metadata or video covers. */
   locationVisible?: boolean;
 };
 
@@ -125,7 +125,7 @@ function MessageBubbleImpl({
   const mine    = context.isMyMessage;
   const deleted = m.deletedForEveryone === true;
   // Photos and videos use the same card and overlay receipts when captionless.
-  const customSticker = !deleted && isCustomStickerMessage(m);
+  const customSticker = !deleted && isStickerImage(m);
   const mediaMessage = !deleted && !customSticker && (m.type === 'image' || m.type === 'video');
   const mediaOverlayFooter = mediaMessage && !m.caption?.trim();
   const locationCard = !deleted && m.type==='location' && !!m.location;
@@ -180,52 +180,6 @@ function MessageBubbleImpl({
     : mediaMessage
       ? { color: colors.ink500 }
       : (mine ? { color: TG_GREEN } : undefined);
-
-  if (pending && !attachmentCard && !customSticker) {
-    // Same row/column wrappers as a normal sent bubble so it hugs its content,
-    // caps at 80% width, and right-aligns — instead of stretching full width.
-    return (
-      <View style={[s.row, s.rowMine]}>
-        <View style={[s.col, s.colMine]}>
-          <Pressable
-            style={{ marginBottom: 2 }}
-            onPress={pending === 'failed' ? () => onRetry?.(m) : undefined}
-            disabled={pending !== 'failed'}
-          >
-            <View style={[s.bubble, s.sent, pending !== 'failed' && { opacity: 0.92 }]}>
-              {m.type === 'poll' && m.poll ? (
-                <PollBubble poll={m.poll} me={context.myUid} isCreator={false} mine={mine}
-                  interactive={false} onVote={() => {}} onClose={() => {}} />
-              ) : m.type === 'sticker' ? <StickerBubble sticker={m.sticker} fallbackText={m.text} /> : (
-                <View style={s.bubbleRow}>
-                  <Text style={s.bubbleText}>{m.text ?? ''}</Text>
-                </View>
-              )}
-              <View style={s.bubbleFooter}>
-                {pending === 'failed' ? (
-                  <>
-                    <Ionicons name="alert-circle" size={12} color={colors.err} />
-                    <Text style={[s.foot, { color: colors.err }]}>Failed · tap to retry</Text>
-                  </>
-                ) : pending === 'syncing' ? (
-                  <>
-                    <Ionicons name="sync-outline" size={12} color={TG_GREEN} />
-                    <Text style={[s.foot, { color: TG_GREEN }]}>Sending…</Text>
-                  </>
-                ) : (
-                  <>
-                    <Ionicons name="time-outline" size={12} color={TG_GREEN} />
-                    <Text style={[s.foot, { color: TG_GREEN }]}>Queued · sends when online</Text>
-                  </>
-                )}
-                <Text style={[s.foot, { color: TG_GREEN }]}>{timeText}</Text>
-              </View>
-            </View>
-          </Pressable>
-        </View>
-      </View>
-    );
-  }
 
   const canEdit = mine && !deleted && (m.type ?? 'text') === 'text' && (() => {
     const ms = createdAtMillis(m.createdAt);
@@ -345,6 +299,52 @@ function MessageBubbleImpl({
         { key: 'delete', label: 'Delete', icon: 'trash-outline', destructive: true, onPress: () => { close(); confirmDelete(); } },
       ];
 
+  if (pending && !deleted && !attachmentCard && !customSticker) {
+    // Same row/column wrappers as a normal sent bubble so it hugs its content,
+    // caps at 80% width, and right-aligns — instead of stretching full width.
+    return (
+      <View style={[s.row, s.rowMine]}>
+        <View style={[s.col, s.colMine]}>
+          <Pressable
+            style={{ marginBottom: 2 }}
+            onPress={pending === 'failed' ? () => onRetry?.(m) : undefined}
+            disabled={pending !== 'failed'}
+          >
+            <View testID="message-surface" style={[s.bubble, transparentBubble ? s.bubbleEmoji : s.sent, pending !== 'failed' && { opacity: 0.92 }]}>
+              {m.type === 'poll' && m.poll ? (
+                <PollBubble poll={m.poll} me={context.myUid} isCreator={false} mine={mine}
+                  interactive={false} onVote={() => {}} onClose={() => {}} />
+              ) : m.type === 'sticker' ? <StickerBubble sticker={m.sticker} fallbackText={m.text} /> : (
+                <View style={s.bubbleRow}>
+                  <Text style={s.bubbleText}>{m.text ?? ''}</Text>
+                </View>
+              )}
+              <View style={[s.bubbleFooter, transparentBubble && s.bubbleFooterEmoji]}>
+                {pending === 'failed' ? (
+                  <>
+                    <Ionicons name="alert-circle" size={12} color={colors.err} />
+                    <Text style={[s.foot, { color: colors.err }]}>Failed · tap to retry</Text>
+                  </>
+                ) : pending === 'syncing' ? (
+                  <>
+                    <Ionicons name="sync-outline" size={12} color={TG_GREEN} />
+                    <Text style={[s.foot, { color: transparentBubble ? '#FFFFFF' : TG_GREEN }]}>Sending…</Text>
+                  </>
+                ) : (
+                  <>
+                    <Ionicons name="time-outline" size={12} color={TG_GREEN} />
+                    <Text style={[s.foot, { color: transparentBubble ? '#FFFFFF' : TG_GREEN }]}>Queued · sends when online</Text>
+                  </>
+                )}
+                <Text style={[s.foot, { color: transparentBubble ? '#FFFFFF' : TG_GREEN }]}>{timeText}</Text>
+              </View>
+            </View>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={[s.row, mine ? s.rowMine : s.rowTheirs]}>
       {showAvatar ? (
@@ -377,6 +377,7 @@ function MessageBubbleImpl({
       <Pressable
         onLongPress={pending?undefined:() => setSheetOpen(true)}
         delayLongPress={300}
+        testID="message-surface"
         style={[
           s.bubble,
           transparentBubble ? s.bubbleEmoji : mediaMessage ? s.bubbleMedia : mine ? s.sent : s.recv,
@@ -424,7 +425,7 @@ function MessageBubbleImpl({
           <ClipMessageBubble clipId={m.clipId} uid={context.myUid} visible={locationVisible}
             onOpen={onOpenClip} onLongPress={() => setSheetOpen(true)} />
         ) : !deleted && m.type === 'video' ? (
-          <VideoMessageBubble key={m.id} message={m} mine={mine}
+          <VideoMessageBubble key={m.id} message={m} mine={mine} uid={context.myUid} visible={locationVisible}
             onRetry={() => onRetryMedia?.(m)} onLongPress={() => setSheetOpen(true)}
             footer={mediaOverlayFooter ? <>
               <Text style={s.imgFootTime}>{timeText}</Text>
@@ -569,7 +570,7 @@ const s = StyleSheet.create({
   attachmentTime:{fontSize:11,color:'#667B70'},
   // Emoji message: no bubble chrome at all — the 3D emoji sits on the wallpaper
   // and its time/ticks live in a translucent pill (Telegram sticker style).
-  bubbleEmoji:    { backgroundColor: 'transparent', paddingHorizontal: 0, paddingVertical: 0, shadowOpacity: 0, elevation: 0 },
+  bubbleEmoji:    { backgroundColor: 'transparent', borderWidth: 0, borderRadius: 0, paddingHorizontal: 0, paddingVertical: 0, shadowOpacity: 0, elevation: 0 },
   bubbleFooterEmoji: { alignSelf: 'flex-end', backgroundColor: 'rgba(0,0,0,0.30)', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3, marginTop: 2 },
   bubbleRow:      { flexDirection: 'row', alignItems: 'flex-end', gap: 6 },
   emoji3dWrap:    { alignItems: 'center', justifyContent: 'center', paddingVertical: 4, paddingHorizontal: 8 },
@@ -663,4 +664,3 @@ function areBubblePropsEqual(prev: MessageBubbleProps, next: MessageBubbleProps)
 }
 
 export const MessageBubble = memo(MessageBubbleImpl, areBubblePropsEqual);
-

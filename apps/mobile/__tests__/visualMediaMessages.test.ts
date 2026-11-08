@@ -14,7 +14,9 @@ vi.mock('react-native', () => ({
   Platform:{OS:'android'},Linking:{},Clipboard:{},Alert:{alert:mocks.alert},
   StyleSheet:{create:(value:unknown)=>value,absoluteFillObject:{position:'absolute',top:0,left:0,right:0,bottom:0}},
   useWindowDimensions:()=>mocks.window,
+  AppState:{currentState:'active',addEventListener:()=>({remove:()=>{}})},
 }));
+vi.mock('@react-navigation/native',()=>({useIsFocused:()=>true}));
 vi.mock('expo-av',()=>({Video:'Video',ResizeMode:{CONTAIN:'contain'}}));
 vi.mock('expo-image',()=>({Image:'ExpoImage'}));
 vi.mock('expo-sharing',()=>({isAvailableAsync:mocks.sharingAvailable,shareAsync:mocks.share}));
@@ -26,6 +28,7 @@ vi.mock('react-i18next',()=>({useTranslation:()=>({t:(key:string)=>key})}));
 vi.mock('../src/i18n',()=>({isRTL:false}));
 vi.mock('../src/hooks/useTransfer',()=>({useTransfer:()=>undefined}));
 vi.mock('../src/hooks/useCachedMediaUri',()=>({useCachedMediaUri:(m:Message)=>m.media?.localUri ?? m.media?.thumbnailURL ?? null}));
+vi.mock('../src/hooks/useChatVideoThumbnail',()=>({useChatVideoThumbnail:(m:Message)=>m.media?.thumbnailURL ?? null}));
 vi.mock('../src/media/mediaCache',()=>({ensureCached:mocks.cache,retryDownload:mocks.retryDownload}));
 vi.mock('../src/lib/firebase',()=>({auth:{currentUser:{uid:'me'}}}));
 vi.mock('../src/lib/saveMessageSticker',()=>({saveMessageSticker:vi.fn()}));
@@ -184,6 +187,16 @@ describe('proportional photo and video messages',()=>{
 });
 
 describe('explicit video playback',()=>{
+  it('shows a late first-frame thumbnail without downloading or mounting a video decoder',async()=>{
+    const m=message('video');await mountVideo(m);
+    expect(nodes('Image')).toHaveLength(0);expect(nodes('Video')).toHaveLength(0);expect(mocks.cache).not.toHaveBeenCalled();
+    const updated={...m,media:{...m.media!,thumbnailURL:'https://example.test/first-frame.jpg'}};
+    await act(async()=>renderer.update(createElement(VideoMessageBubble,{message:updated,mine:true})));
+    expect(nodes('Image')[0].props).toMatchObject({source:{uri:updated.media.thumbnailURL},resizeMode:'contain'});
+    expect(nodes('Video')).toHaveLength(0);expect(mocks.cache).not.toHaveBeenCalled();
+    await act(async()=>frame().props.onPress());
+    expect(nodes('Video')[0].props.useNativeControls).toBe(false);
+  });
   it('downloads only on a tap, ignores rapid taps, and unmounts the player when closed',async()=>{
     let finish!:(uri:string)=>void;mocks.cache.mockImplementation(()=>new Promise(resolve=>{finish=resolve;}));
     const longPress=vi.fn();await mountVideo(message('video'),{onLongPress:longPress});
@@ -192,7 +205,7 @@ describe('explicit video playback',()=>{
     await act(async()=>{frame().props.onPress();frame().props.onPress();});
     expect(mocks.cache).toHaveBeenCalledOnce();expect(nodes('Video')).toHaveLength(0);
     await act(async()=>finish('file:///cached.mp4'));
-    expect(nodes('Video')[0].props).toMatchObject({source:{uri:'file:///cached.mp4'},resizeMode:'contain',useNativeControls:true});
+    expect(nodes('Video')[0].props).toMatchObject({source:{uri:'file:///cached.mp4'},resizeMode:'contain',useNativeControls:false});
     await act(async()=>button('names.close').props.onPress());
     expect(nodes('Video')).toHaveLength(0);expect(frame()).toBeTruthy();
   });
@@ -227,7 +240,11 @@ describe('explicit video playback',()=>{
     await mountVideo();await act(async()=>frame().props.onPress());
     await act(async()=>nodes('Video')[0].props.onReadyForDisplay({naturalSize:{width:1920,height:1080,orientation:'portrait'}}));
     expect(style(mediaBox()).width/style(mediaBox()).height).toBeCloseTo(9/16);
-    expect(style(nodes('Video')[0]).width/style(nodes('Video')[0]).height).toBeCloseTo(9/16);
+    expect(nodes('Video')[0].props.resizeMode).toBe('contain');
+    expect(renderer.root.findByProps({testID:'video-seek-bar'})).toBeTruthy();
+    await act(async()=>nodes('Video')[0].props.onError('bad-cache'));
+    expect(nodes('Video')[0].props.source.uri).toBe('https://example.test/media');
+    expect(mocks.alert).not.toHaveBeenCalled();
     await act(async()=>nodes('Video')[0].props.onError('bad-video'));
     expect(nodes('Video')).toHaveLength(0);expect(button('media.retryDownload')).toBeTruthy();
     expect(mocks.alert).toHaveBeenCalled();
@@ -313,3 +330,4 @@ describe('chat image renderer',()=>{
     expect(nodes('ExpoImage')[0].props.recyclingKey).toBe(next.params.uri);
   });
 });
+

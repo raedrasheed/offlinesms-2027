@@ -7,6 +7,8 @@ import { clipFfmpegPath, clipFfprobePath, clipMediaBinaryEnv } from './mediaBina
 const exec = promisify(execFile);
 export const CLIP_SOURCE_MAX_MS = 10 * 60_000;
 export const CLIP_MIME_TYPES = ['video/mp4', 'video/quicktime', 'video/webm'];
+// Versioned independently of the app and the user's edit/render revision.
+export const CLIP_ENCODING_VERSION = 2;
 export interface ClipEdits {
   trimStartMs: number; trimEndMs: number; coverTimeMs: number; overlayText: string; mute: boolean;
 }
@@ -84,13 +86,16 @@ export async function renderClipVideo(source: string, directory: string, edits: 
   await runFfmpeg(['-protocol_whitelist', 'file,pipe', '-format_whitelist', 'mov,matroska,webm',
     '-ss', (edits.trimStartMs / 1000).toFixed(3), '-f', probe.format, '-i', source,
     '-t', (length / 1000).toFixed(3), '-map', '0:v:0', ...(!edits.mute && probe.hasAudio ? ['-map', '0:a:0'] : []),
-    '-vf', filter, '-c:v', 'libx264', '-threads', '1', '-preset', 'veryfast', '-crf', '25', '-pix_fmt', 'yuv420p',
+    '-vf', filter, '-c:v', 'libx264', '-threads', '1', '-preset', 'veryfast', '-crf', '27',
+    '-maxrate', '1100k', '-bufsize', '2200k', '-pix_fmt', 'yuv420p', '-g', '60',
     '-r', '30', ...(!edits.mute && probe.hasAudio ? ['-c:a', 'aac', '-b:a', '96k', '-ac', '2'] : ['-an']),
     '-map_metadata', '-1', '-movflags', '+faststart', standard]);
   await runFfmpeg(['-i', standard, '-vf', scaleFilter(360, 640), '-c:v', 'libx264', '-threads', '1', '-preset', 'veryfast', '-crf', '30',
+    '-maxrate', '450k', '-bufsize', '900k', '-r', '24', '-g', '48',
     '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '64k', '-map_metadata', '-1', '-movflags', '+faststart', dataSaver]);
   const coverSecond = Math.min(Math.max(0, edits.coverTimeMs - edits.trimStartMs), Math.max(0, length - 100)) / 1000;
   await runFfmpeg(['-ss', coverSecond.toFixed(3), '-i', standard, '-frames:v', '1', '-vf', scaleFilter(360, 640), '-q:v', '3', cover]);
   const final = await probeClipVideo(standard);
   return { standard, dataSaver, cover, durationMs: final.durationMs, width: final.width, height: final.height };
 }
+

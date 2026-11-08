@@ -10,7 +10,7 @@ import { getStorage } from 'firebase-admin/storage';
 import { loadClipsConfig, assertActiveClipUser, assertClipGroupMember, assertClipsEnabled, isClipGroupMember } from './access';
 import { clipId, millis, clipsConfig } from './model';
 import { clipSourcePath, clipOutputPath } from './media';
-import { CLIP_MIME_TYPES, renderClipVideo, validateClipEdits } from './mediaTools';
+import { CLIP_ENCODING_VERSION, CLIP_MIME_TYPES, renderClipVideo, validateClipEdits } from './mediaTools';
 
 const LEASE_MS = 10 * 60_000;
 const MAX_ATTEMPTS = 3;
@@ -111,6 +111,8 @@ export async function processClipMedia(id: string): Promise<void> {
         status: review ? 'pending_review' : 'published',
         standardPath: files[0].path, dataSaverPath: files[1].path, coverPath: files[2].path,
         durationMs: output.durationMs, width: output.width, height: output.height, processedBytes,
+        encodingVersion: CLIP_ENCODING_VERSION,
+        optimizedPlayback: null,
         totalStorageBytes: processedBytes + size, sourceSizeBytes: size,
         processingLeaseToken: null, processingLeaseUntil: null, errorCode: null,
         processedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
@@ -255,3 +257,4 @@ export const cleanupClipMedia = onSchedule({ schedule: 'every 60 minutes', regio
     }
   }
 });
+

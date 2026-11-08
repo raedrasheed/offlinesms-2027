@@ -1,55 +1,59 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { View, Text, Image, Modal, Pressable, StyleSheet, Alert, useWindowDimensions } from 'react-native';
-import { Video, ResizeMode } from 'expo-av';
+import { View, Text, Image, Modal, Pressable, StyleSheet, Alert } from 'react-native';
+import { VideoPlayer } from '../VideoPlayer';
+import { useIsFocused } from '@react-navigation/native';
 import * as Sharing from 'expo-sharing';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import type { Message } from '../../lib/conversations';
 import { ensureCached } from '../../media/mediaCache';
-import { fitMediaDimensions, validMediaDimensions, videoDisplayDimensions, type MediaDimensions } from '../../media/mediaDimensions';
+import { validMediaDimensions, type MediaDimensions } from '../../media/mediaDimensions';
 import { useTransfer } from '../../hooks/useTransfer';
 import { MediaMessageFrame, mediaFrameStyles } from './MediaMessageFrame';
 import { MediaUploadProgress } from './MediaUploadProgress';
+import { useChatVideoThumbnail } from '../../hooks/useChatVideoThumbnail';
 
 /** Same card as a photo. A video decoder/download exists only after an explicit tap. */
-export function VideoMessageBubble({ message, mine, footer, onRetry, onLongPress }: {
+export function VideoMessageBubble({ message, mine, footer, onRetry, onLongPress, uid = '', visible = false }: {
   message: Message;
   mine: boolean;
   footer?: ReactNode;
   onRetry?: () => void;
   onLongPress?: () => void;
+  uid?: string;
+  visible?: boolean;
 }) {
   const { t } = useTranslation();
+  const focused = useIsFocused();
   const insets = useSafeAreaInsets();
-  const window = useWindowDimensions();
   const transfer = useTransfer(message.id);
   const media = message.media;
+  const thumbnailURL = useChatVideoThumbnail(message, uid, visible);
   const [viewerUri, setViewerUri] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [natural, setNatural] = useState<MediaDimensions | null>(null);
   const opening = useRef(false);
+  const streamedFallback = useRef(false);
   const shareInFlight = useRef(false);
   const generation = useRef(0);
   useEffect(() => {
     opening.current = false;
     setViewerUri(null); setBusy(false); setFailed(false); setNatural(null);
     return () => { generation.current++; };
-  }, [message.id, media?.downloadURL, media?.localUri]);
+  }, [message.id, media?.downloadURL, media?.localUri, uid]);
 
   const dimensions = natural || validMediaDimensions(media?.width, media?.height);
   const status = media?.uploadStatus ?? 'uploaded';
   const uploading = mine && (status === 'pending' || status === 'uploading');
   const uploadFailed = mine && status === 'failed';
   const ready = status === 'uploaded';
-  const viewerSize = fitMediaDimensions(dimensions, window.width - insets.left - insets.right,
-    window.height - insets.top - insets.bottom - 64);
 
   async function open() {
     if (opening.current || !ready) return;
-    opening.current = true;
+    opening.current = true; streamedFallback.current = false;
     const request = generation.current;
     setBusy(true); setFailed(false);
     try {
@@ -87,7 +91,7 @@ export function VideoMessageBubble({ message, mine, footer, onRetry, onLongPress
           <View style={s.play}><Ionicons name={ready ? 'play' : 'time-outline'} size={30} color="#fff"/></View>
           {!ready ? <Text style={s.waiting}>{t('attachments.waitingUpload')}</Text> : null}
         </View>}>
-      {media?.thumbnailURL ? <Image source={{ uri: media.thumbnailURL }} style={mediaFrameStyles.content} resizeMode="contain"/>
+      {thumbnailURL ? <Image source={{ uri: thumbnailURL }} style={mediaFrameStyles.content} resizeMode="contain"/>
         : <View style={[mediaFrameStyles.content, mediaFrameStyles.placeholder]}/>}
     </MediaMessageFrame>
     {viewerUri ? <Modal visible animationType="fade" onRequestClose={() => setViewerUri(null)}>
@@ -101,11 +105,13 @@ export function VideoMessageBubble({ message, mine, footer, onRetry, onLongPress
           </Pressable>
         </View>
         <View style={s.playerWrap}>
-          <Video source={{ uri: viewerUri }} style={viewerSize} useNativeControls resizeMode={ResizeMode.CONTAIN} shouldPlay
-            onReadyForDisplay={event => {
-              const size = videoDisplayDimensions(event.naturalSize);
-              if (size) setNatural(previous => previous?.width === size.width && previous.height === size.height ? previous : size);
-            }} onError={() => {
+          <VideoPlayer uri={viewerUri} style={s.player} nativeTestID="chat-video-player" paused={!focused}
+            onDimensions={size => setNatural(previous => previous?.width === size.width && previous.height === size.height ? previous : size)}
+            onError={() => {
+              // Retry a broken local cache once from the original source, not the same unreadable file forever.
+              if (!streamedFallback.current && viewerUri.startsWith('file:') && media?.downloadURL?.startsWith('https://')) {
+                streamedFallback.current = true; setViewerUri(media.downloadURL); return;
+              }
               setViewerUri(null); setFailed(true);
               Alert.alert(t('attachments.openError'), t('attachments.retryHint'));
             }}/>
@@ -123,4 +129,6 @@ const s = StyleSheet.create({
   toolbar: { height: 64, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 12 },
   tool: { padding: 10 },
   playerWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  player: { flex: 1, width: '100%' },
 });
+

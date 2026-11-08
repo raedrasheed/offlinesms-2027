@@ -14,6 +14,11 @@ export function clipSourcePath(uid: string, id: string): string { return `clipUp
 export function clipOutputPath(uid: string, id: string, file: 'standard.mp4' | 'dataSaver.mp4' | 'cover.jpg'): string {
   return `clipMedia/${uid}/${id}/${file}`;
 }
+export function clipOptimizedOutputPath(uid: string, id: string, token: string, quality: 'standard' | 'dataSaver'): string {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(token))
+    throw new HttpsError('failed-precondition', 'clip-media-path-invalid');
+  return `clipMedia/${uid}/${id}/playback-v2-${token}/${quality}.mp4`;
+}
 function validBucketContentType(value: unknown): value is string { return typeof value === 'string' && CLIP_MIME_TYPES.includes(value); }
 
 /** Include authorization documents in the write transaction, preventing a
@@ -117,10 +122,11 @@ export interface ClipPlaybackOptions { quality?: 'standard' | 'dataSaver'; downl
 /** Application authorization happens before signing. A URL is a short-lived
  * bearer capability and expires after two minutes; downloaded bytes cannot be revoked. */
 export async function getPlaybackUrls(db: Firestore, id: string, uid: string, claims: Record<string, unknown>, options: ClipPlaybackOptions = {}) {
-  const admin = isPlatformClipAdmin(claims), config = await loadClipsConfig(db);
-  await assertActiveClipUser(db, uid);
+  const admin = isPlatformClipAdmin(claims);
+  const [config, , snap] = await Promise.all([
+    loadClipsConfig(db), assertActiveClipUser(db, uid), db.doc(`clips/${id}`).get(),
+  ]);
   if (!admin) assertClipsEnabled(config);
-  const snap = await db.doc(`clips/${id}`).get();
   if (!snap.exists) throw new HttpsError('not-found', 'clip-unavailable');
   const clip = snap.data() as ClipDoc;
   await assertCanViewClip(db, clip, uid, admin);
@@ -129,14 +135,24 @@ export async function getPlaybackUrls(db: Firestore, id: string, uid: string, cl
     throw new HttpsError('permission-denied', 'clip-download-disabled');
   const quality = options.quality === 'dataSaver' ? 'dataSaver' : 'standard';
   const coverPath = clipOutputPath(clip.ownerUid, id, 'cover.jpg');
-  const videoPath = clipOutputPath(clip.ownerUid, id, quality === 'dataSaver' ? 'dataSaver.mp4' : 'standard.mp4');
+  let videoPath = clipOutputPath(clip.ownerUid, id, quality === 'dataSaver' ? 'dataSaver.mp4' : 'standard.mp4');
   if (clip.coverPath !== coverPath || clip[quality === 'dataSaver' ? 'dataSaverPath' : 'standardPath'] !== videoPath)
     throw new HttpsError('failed-precondition', 'clip-media-path-invalid');
+  const optimized = clip.optimizedPlayback;
+  if (optimized?.version === 2 && optimized[quality]) {
+    const expected = clipOptimizedOutputPath(clip.ownerUid, id, optimized.token, quality);
+    if (optimized[quality] !== expected) throw new HttpsError('failed-precondition', 'clip-media-path-invalid');
+    videoPath = expected;
+  }
   const expiresAtMs = Date.now() + CLIP_URL_TTL_MS, bucket = getStorage().bucket();
-  const [thumbnailUrl] = await bucket.file(coverPath).getSignedUrl({ version: 'v4', action: 'read', expires: expiresAtMs });
-  let url: string | null = null;
-  if (!options.thumbnailOnly) [url] = await bucket.file(videoPath).getSignedUrl({ version: 'v4', action: 'read', expires: expiresAtMs,
-    ...(options.download ? { responseDisposition: `attachment; filename="OfflineSMS-${id}.mp4"` } : {}) });
+  const [[thumbnailUrl], videoUrls] = await Promise.all([
+    bucket.file(coverPath).getSignedUrl({ version: 'v4', action: 'read', expires: expiresAtMs }),
+    options.thumbnailOnly ? Promise.resolve(null) : bucket.file(videoPath).getSignedUrl({
+      version: 'v4', action: 'read', expires: expiresAtMs,
+      ...(options.download ? { responseDisposition: `attachment; filename="OfflineSMS-${id}.mp4"` } : {}),
+    }),
+  ]);
+  const url = videoUrls?.[0] ?? null;
   return { url, thumbnailUrl, expiresAtMs, durationMs: Number(clip.durationMs) || 0, quality };
 }
 
@@ -164,3 +180,4 @@ export const getClipThumbnails = onCall({ region: REGION }, async request => {
   }
   return { items: result };
 });
+

@@ -1,3 +1,4 @@
+import { assertPostsEnabled } from './postsFeature';
 import { createHash, randomUUID } from 'node:crypto';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { onDocumentWritten } from 'firebase-functions/v2/firestore';
@@ -44,6 +45,7 @@ async function postRead(uid: string, id: string) {
   await assertPostAccess(db, row.data() as ClipDoc, uid); return row;
 }
 export const createPost = onCall({ region: 'us-central1', memory: '1GiB', timeoutSeconds: 120, concurrency: 1 }, async request => {
+  assertPostsEnabled();
   const uid = requireClipUid(request), db = getFirestore(); await assertClipMutation(db, uid); await assertSocialUser(db, uid);
   const clientId = clipId(request.data?.clientId, 'clientId'), data = validatePost(request.data ?? {});
   const id = createHash('sha256').update(`${uid}:${clientId}`).digest('hex'), ref = db.doc(`posts/${id}`), previous = await ref.get();
@@ -88,10 +90,12 @@ export const createPost = onCall({ region: 'us-central1', memory: '1GiB', timeou
   return { post: await serializePost(db, stored, uid) };
 });
 export const getPost = onCall({ region: 'us-central1' }, async request => {
+  assertPostsEnabled();
   const uid = requireClipUid(request), row = await postRead(uid, clipId(request.data?.postId, 'postId'));
   return { post: await serializePost(getFirestore(), row, uid) };
 });
 export const listPosts = onCall({ region: 'us-central1' }, async request => {
+  assertPostsEnabled();
   const uid = requireClipUid(request), db = getFirestore(); assertClipsEnabled(await loadClipsConfig(db)); await assertActiveClipUser(db, uid);
   const mode = request.data?.mode ?? 'feed';
   if (!['feed', 'mine'].includes(mode)) throw new HttpsError('invalid-argument', 'post-feed-invalid');
@@ -109,6 +113,7 @@ export const listPosts = onCall({ region: 'us-central1' }, async request => {
   return { items, nextCursor: rows.size === limit && last ? encodeClipCursor(last.get('createdAt'), last.id) : null };
 });
 export const deletePost = onCall({ region: 'us-central1' }, async request => {
+  assertPostsEnabled();
   const uid = requireClipUid(request), db = getFirestore(), ref = db.doc(`posts/${clipId(request.data?.postId, 'postId')}`);
   await db.runTransaction(async tx => {
     await assertActiveClipUser(db, uid, tx); await assertSocialUser(db, uid, tx); const row = await tx.get(ref);
@@ -118,6 +123,7 @@ export const deletePost = onCall({ region: 'us-central1' }, async request => {
   return { ok: true };
 });
 export const setPostLike = onCall({ region: 'us-central1' }, async request => {
+  assertPostsEnabled();
   const uid = requireClipUid(request), db = getFirestore(); await assertClipMutation(db, uid); await assertSocialUser(db, uid);
   const id = clipId(request.data?.postId, 'postId'), active = request.data?.active;
   if (typeof active !== 'boolean') throw new HttpsError('invalid-argument', 'active-invalid');
@@ -139,6 +145,7 @@ export const setPostLike = onCall({ region: 'us-central1' }, async request => {
   });
 });
 export const listPostComments = onCall({ region: 'us-central1' }, async request => {
+  assertPostsEnabled();
   const uid = requireClipUid(request), db = getFirestore(), row = await postRead(uid, clipId(request.data?.postId, 'postId'));
   const limit = pageLimit(request.data?.limit), cursor = decodeClipCursor(request.data?.cursor);
   let query = row.ref.collection('postComments').orderBy('createdAt', 'desc').orderBy(FieldPath.documentId(), 'desc').limit(limit);
@@ -156,6 +163,7 @@ export const listPostComments = onCall({ region: 'us-central1' }, async request 
   return { items, nextCursor: rows.size === limit && last ? encodeClipCursor(last.get('createdAt'), last.id) : null };
 });
 export const addPostComment = onCall({ region: 'us-central1' }, async request => {
+  assertPostsEnabled();
   const uid = requireClipUid(request), db = getFirestore(); await assertClipMutation(db, uid); await assertSocialUser(db, uid);
   const id = clipId(request.data?.postId, 'postId'), clientId = clipId(request.data?.clientId, 'clientId'), text = cleanClipText(request.data?.text, 1000, 'comment');
   if (!text) throw new HttpsError('invalid-argument', 'comment-empty');
@@ -174,6 +182,7 @@ export const addPostComment = onCall({ region: 'us-central1' }, async request =>
   return { commentId };
 });
 export const deletePostComment = onCall({ region: 'us-central1' }, async request => {
+  assertPostsEnabled();
   const uid = requireClipUid(request), db = getFirestore(), id = clipId(request.data?.postId, 'postId'), commentId = clipId(request.data?.commentId, 'commentId');
   const ref = db.doc(`posts/${id}`), commentRef = ref.collection('postComments').doc(commentId);
   await db.runTransaction(async tx => {
@@ -187,6 +196,7 @@ export const deletePostComment = onCall({ region: 'us-central1' }, async request
   return { ok: true };
 });
 export const reportPost = onCall({ region: 'us-central1' }, async request => {
+  assertPostsEnabled();
   const uid = requireClipUid(request), db = getFirestore(), id = clipId(request.data?.postId, 'postId');
   const reason = request.data?.reason, details = cleanClipText(request.data?.details ?? '', 1000, 'details');
   if (!['spam', 'abuse', 'sexual', 'violence', 'copyright', 'other'].includes(reason)) throw new HttpsError('invalid-argument', 'report-reason-invalid');

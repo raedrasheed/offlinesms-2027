@@ -8,6 +8,7 @@ import { emitLocalMessagesChanged } from '../messageChanges';
 import { getDb, type LocalDatabase } from '../connection';
 import { localMessageId } from '../sync/ids';
 import type { MessageRow, MessageStatus, MessageSyncStatus } from '../types';
+import { parsePayload } from '../../media/attachmentModel';
 
 const PAGE = 40;
 
@@ -264,6 +265,26 @@ export async function setMediaUploaded(localId: string, urls: { downloadURL?: st
   );
 }
 
+type VideoThumbnailInput = { conversationId: string; messageId: string; source: string; thumbnailURL: string; thumbnailPath?: string | null };
+async function writeMissingVideoThumbnail(input: VideoThumbnailInput, database: LocalDatabase): Promise<void> {
+  if (!input.source || !input.thumbnailURL) return;
+  await database.run(`UPDATE messages SET media_thumb_url = ?,
+    media_thumb_path = COALESCE(?, media_thumb_path), updated_at = ?
+    WHERE remote_id = ? AND conversation_id = ? AND type = 'video'
+      AND deleted_for_everyone = 0 AND deleted_for_me = 0
+      AND COALESCE(media_upload_status, 'uploaded') = 'uploaded'
+      AND COALESCE(NULLIF(media_storage_path, ''), media_download_url) = ?
+      AND (media_thumb_url IS NULL OR media_thumb_url = '')`,
+  [input.thumbnailURL, input.thumbnailPath ?? null, Date.now(), input.messageId, input.conversationId, input.source]);
+}
+
+/** A thumbnail-only listener must never overwrite an edited message or attach
+ * an old cover to a different source. The caller captures its account's DB. */
+export async function hydrateChatVideoThumbnail(input: VideoThumbnailInput, database: LocalDatabase): Promise<void> {
+  await writeMissingVideoThumbnail(input, database);
+  emitLocalMessagesChanged(input.conversationId);
+}
+
 /** Phase 23 — mark a media upload failed (keeps the row for retry). Records the
  *  failure code/message so the cause (e.g. storage/unauthorized, wrong bucket)
  *  is recoverable instead of a silent retry arrow. */
@@ -391,6 +412,29 @@ export async function upsertRemoteMessage(r: RemoteMessageInput, database: Local
         media_upload_status = 'uploaded', media_storage_path = COALESCE(?, media_storage_path), updated_at = ?
         WHERE remote_id = ? AND deleted_for_everyone = 0`,
       [r.media.downloadURL, r.media.thumbnailURL ?? null, r.media.storagePath ?? null, Date.now(), r.remoteId]);
+    }
+    // A server-generated video cover can arrive after its original upload and
+    // outside the live window. Hydrate only a missing cover for the same media;
+    // a bootstrap/history read must not roll back edits or newer thumbnails.
+    const sameMedia = r.media?.storagePath && existing.media_storage_path
+      ? r.media.storagePath === existing.media_storage_path
+      : !!r.media?.downloadURL && r.media.downloadURL === existing.media_download_url;
+    // Older caches discarded image filenames/presentation. Repair only missing
+    // metadata for the same original, without rolling back edits or tombstones.
+    if (!existing.deleted_for_everyone && !existing.deleted_for_me && !r.deletedForEveryone
+      && existing.type === 'image' && r.type === 'image' && sameMedia && r.payload) {
+      const previous = parsePayload(existing.payload_json), incoming = parsePayload(r.payload);
+      const fileName = !previous.fileName && typeof incoming.fileName === 'string' && incoming.fileName ? incoming.fileName : null;
+      const presentation = !previous.presentation && incoming.presentation === 'sticker' ? 'sticker' : null;
+      if (fileName || presentation) await database.run(
+        'UPDATE messages SET payload_json = ?, updated_at = ? WHERE remote_id = ? AND conversation_id = ? AND deleted_for_everyone = 0 AND deleted_for_me = 0',
+        [JSON.stringify({ ...previous, ...(fileName ? { fileName } : {}), ...(presentation ? { presentation } : {}) }), Date.now(), r.remoteId, r.conversationId]);
+    }
+    if (!existing.deleted_for_everyone && !existing.deleted_for_me && !r.deletedForEveryone && existing.type === 'video' && r.type === 'video'
+      && sameMedia && !existing.media_thumb_url && r.media?.thumbnailURL && r.media.uploadStatus === 'uploaded') {
+      await writeMissingVideoThumbnail({ conversationId: r.conversationId, messageId: r.remoteId,
+        source: r.media.storagePath || r.media.downloadURL || '', thumbnailURL: r.media.thumbnailURL,
+        thumbnailPath: r.media.thumbnailPath }, database);
     }
     return;
   }

@@ -5,9 +5,9 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { signOut } from 'firebase/auth';
 import {
-  LogOut, ChevronDown, Search, LayoutGrid, LineChart,
+  LogOut, Search, LayoutGrid, LineChart,
   Users, Building2, MessageCircle, Globe,
-  Inbox, Phone, Send, Clapperboard, FileText,
+  Inbox, Phone, Send, Clapperboard,
   Coins, ArrowLeftRight,
   LifeBuoy, Flag, Radio, Smartphone,
   Shield, ScrollText, Bell, Settings,
@@ -20,7 +20,7 @@ import clsx from 'clsx';
 import type { AdminRole } from '@/lib/session';
 
 type RoleKey = AdminRole | 'legacy_admin' | 'bootstrap_admin';
-type Props = { role: RoleKey };
+type Props = { role: RoleKey; workspace: string };
 
 type NavItemDef = {
   href: string;
@@ -59,7 +59,6 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Messaging',
     items: [
       { href: '/admin/clips', label: 'Clips', icon: Clapperboard, capability: 'view:clips' },
-      { href: '/admin/posts', label: 'Posts', icon: FileText, capability: 'manage:clips' },
       { href: '/admin/chats', label: 'Conversations', icon: Inbox,  capability: 'view:groups' },
       { href: '/admin/calls', label: 'Messages',      icon: Phone,  capability: 'view:calls' },
       { href: '/admin/sms',   label: 'SMS escalation', icon: Send,  capability: 'view:sms', badge: 'NEW' },
@@ -94,10 +93,11 @@ const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
-export default function Sidebar({ role }: Props) {
+export default function Sidebar({ role, workspace }: Props) {
   const path = usePathname();
   const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
+  const [search, setSearch] = useState('');
 
   useEffect(() => {
     setCollapsed(localStorage.getItem('sidebarCollapsed') === 'true');
@@ -169,7 +169,7 @@ export default function Sidebar({ role }: Props) {
       {/* Workspace selector */}
       {!collapsed && (
         <div className="px-3 pb-2 shrink-0">
-          <button
+          <div
             className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left transition hover:bg-white/5"
             style={{ background: 'var(--c-sidebar-sub)' }}
           >
@@ -177,13 +177,12 @@ export default function Sidebar({ role }: Props) {
               className="w-6 h-6 rounded-md flex items-center justify-center text-[10px] font-bold shrink-0"
               style={{ background: 'var(--c-nav-active-bg)', color: 'var(--c-nav-active-text)' }}
             >
-              A
+              {workspace.charAt(0).toUpperCase()}
             </div>
             <span className="text-[12px] font-medium flex-1 truncate" style={{ color: 'var(--c-text-2)' }}>
-              Acme Co workspace
+              {workspace}
             </span>
-            <ChevronDown size={13} style={{ color: 'var(--c-text-4)' }} className="shrink-0" />
-          </button>
+          </div>
         </div>
       )}
 
@@ -195,7 +194,7 @@ export default function Sidebar({ role }: Props) {
             style={{ background: 'var(--c-sidebar-sub)', border: '1px solid var(--c-border)' }}
           >
             <Search size={12} style={{ color: 'var(--c-text-4)' }} className="shrink-0" />
-            <span className="text-[12px]" style={{ color: 'var(--c-text-4)' }}>Search...</span>
+            <input aria-label="Filter navigation" placeholder="Find a page…" value={search} onChange={e => setSearch(e.target.value)} className="text-[12px] bg-transparent outline-none min-w-0 w-full" style={{ color: 'var(--c-text-2)' }} />
           </div>
         </div>
       )}
@@ -204,7 +203,7 @@ export default function Sidebar({ role }: Props) {
       <nav className="flex-1 px-2 pb-3 space-y-3 overflow-y-auto">
         {NAV_GROUPS.map(group => {
           const visibleItems = group.items.filter(item =>
-            canDo(role as any, item.capability as any)
+            canDo(role as any, item.capability as any) && item.label.toLowerCase().includes(search.trim().toLowerCase())
           );
           if (!visibleItems.length) return null;
           return (
@@ -273,3 +272,4 @@ export default function Sidebar({ role }: Props) {
     </aside>
   );
 }
+

@@ -16,6 +16,8 @@
     "sendPollMessage",
     "createMediaMessage",
     "finalizeMediaMessage",
+    "ensureChatVideoThumbnail",
+    "onChatVideoThumbnailWrite",
     "markRead",
     "setTyping",
     "editMessage",
@@ -171,6 +173,7 @@
     "getClipPlayback",
     "getClipThumbnails",
     "onClipProcessing",
+    "optimizeExistingClipMedia",
     "onClipRemoved",
     "cleanupClipMedia",
     "onClipSourceFinalized",
@@ -195,3 +198,5 @@
     "onPostRemoved"
   ]
 }
+
+

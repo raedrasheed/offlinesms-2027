@@ -1,3 +1,4 @@
+import { POSTS_ENABLED } from './postsFeature';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { FieldPath, FieldValue, Timestamp, getFirestore, type DocumentSnapshot, type Firestore } from 'firebase-admin/firestore';
 import { canViewClip, clipsBlocked, loadClipsConfig, requireClipUid } from '../clips/access';
@@ -14,6 +15,7 @@ async function visibleActivity(db: Firestore, row: DocumentSnapshot, uid: string
   const event = row.data() ?? {}, actorUid = event.actorUid;
   const kind = event.kind as SocialActivityKind;
   if (typeof kind !== 'string') return null;
+  if (!POSTS_ENABLED && (event.postId || kind === 'postLike' || kind === 'postComment')) return null;
   if (!kind.startsWith('status') && !clipsEnabled) return null;
   if (typeof actorUid !== 'string' || !actorUid || actorUid === uid) return null;
   const [actor, actorProfile] = await db.getAll(db.doc(`users/${actorUid}`), db.doc(`clipProfiles/${actorUid}`));

@@ -14,7 +14,7 @@ All endpoints are authenticated callable functions in us-central1, except asynch
 
 - `getClipsConfig({})` → `{config,termsAccepted:boolean}`.
 - `acceptClipsTerms({version,expectedUid?})` → `{ok:true}`.
-- `getClipsFeed({mode:'forYou'|'following'|'saved'|'profile',ownerUid?,query?,cursor?:string,limit?:number})` → `{items:ClipItem[],nextCursor:string|null}`. Clients must keep paging through an empty filtered page when nextCursor exists. Search matches caption/hashtags/author within each scanned page, not a global full-text index.
+- `getClipsFeed({mode:'forYou'|'following'|'saved'|'profile',ownerUid?,query?,cursor?:string,limit?:number})` → `{items:ClipItem[],nextCursor:string|null}`. Results preserve descending `createdAt` and document-ID order across pages. The For You feed no longer reorders older clips by engagement. Saved mode uses the save record's creation time. Clients must keep paging through an empty filtered page when nextCursor exists. Search matches caption/hashtags/author within each scanned page, not a global full-text index.
 - `getClip({clipId})` → `{clip:ClipItem}`.
 - `getClipProfile({uid})` → `{profile:ClipProfile}`.
 - `updateClipProfile({bio?:string,privateAccount?:boolean})` → `{profile:ClipProfile}`. Name/photo/username remain in existing app profile.
@@ -44,3 +44,4 @@ All endpoints are authenticated callable functions in us-central1, except asynch
 ## Access and counts
 
 `clipProfiles/{uid}.suspended` or `.deleting` restricts the whole Clips account and hides its content. Private account approval gates every clip audience, including public posts. Owners may view their unpublished clips; other viewers require published status, no mutual block, and the current audience membership. Profile clip/like totals are aggregate queries: owners see all their published posts; others see eligible public/follower posts, excluding group/private totals. Direct clients cannot read these collections.
+

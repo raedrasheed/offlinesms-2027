@@ -34,7 +34,8 @@ export function payloadFromRemote(type: string | undefined, m: Record<string, an
   if (type === 'clip') return validClipId(m.clipId) ? JSON.stringify({clipId: m.clipId}) : null;
   if (type === 'location' && m.location) return JSON.stringify(m.location);
   if (type === 'contact' && m.contact) return JSON.stringify(m.contact);
-  if (type === 'image' && m.media?.presentation === 'sticker') return JSON.stringify({ fileName: m.media.fileName ?? '', presentation: 'sticker' });
+  if (type === 'image' && m.media && (m.media.presentation === 'sticker' || typeof m.media.fileName === 'string' && m.media.fileName))
+    return JSON.stringify({ fileName: m.media.fileName ?? '', ...(m.media.presentation === 'sticker' ? { presentation: 'sticker' } : {}) });
   if (['file', 'video', 'audio'].includes(type ?? '') && m.media) return JSON.stringify({ fileName: m.media.fileName ?? '' });
   if (type === 'sticker' && m.sticker) {
     const s = m.sticker;
@@ -140,4 +141,3 @@ export function validatePollDraft(question: string, options: string[]): PollDraf
   if (new Set(opts.map(o => o.toLocaleLowerCase())).size !== opts.length) return 'duplicate';
   return null;
 }
-
