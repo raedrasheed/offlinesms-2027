@@ -24,7 +24,8 @@ export async function serializeClip(db: Firestore, snap: DocumentSnapshot, uid: 
 }
 export const getClip = onCall({ region: 'us-central1' }, async request => {
   const uid = requireClipUid(request), db = getFirestore();
-  assertClipsEnabled(await loadClipsConfig(db)); await assertActiveClipUser(db, uid);
+  const [config] = await Promise.all([loadClipsConfig(db), assertActiveClipUser(db, uid)]);
+  assertClipsEnabled(config);
   const row = await db.doc(`clips/${clipId(request.data?.clipId)}`).get();
   if (!row.exists) throw new HttpsError('not-found', 'clip-unavailable');
   await assertCanViewClip(db, row.data() as ClipDoc, uid);
@@ -35,7 +36,8 @@ export const getClip = onCall({ region: 'us-central1' }, async request => {
 // including empty audience-filtered pages. It never restarts at the newest item.
 export const getClipsFeed = onCall({ region: 'us-central1' }, async request => {
   const uid = requireClipUid(request), db = getFirestore();
-  assertClipsEnabled(await loadClipsConfig(db)); await assertActiveClipUser(db, uid);
+  const [config] = await Promise.all([loadClipsConfig(db), assertActiveClipUser(db, uid)]);
+  assertClipsEnabled(config);
   const data = request.data ?? {}, mode = data.mode ?? 'forYou';
   if (!['forYou', 'following', 'saved', 'profile'].includes(mode)) throw new HttpsError('invalid-argument', 'feed-mode-invalid');
   const limit = pageLimit(data.limit), cursor = decodeClipCursor(data.cursor);
@@ -47,28 +49,33 @@ export const getClipsFeed = onCall({ region: 'us-central1' }, async request => {
   const SCAN = 90, rows = await query.limit(SCAN).get();
   const items: Awaited<ReturnType<typeof serializeClip>>[] = [];
   let lastExamined: DocumentSnapshot | null = null;
-  for (const row of rows.docs) {
-    lastExamined = row;
-    const clip = mode === 'saved' ? await db.doc(`clips/${row.id}`).get() : row;
-    if (!clip.exists) continue;
-    const c = clip.data() as ClipDoc;
-    if (mode !== 'profile' && c.status !== 'published') continue;
-    if (mode === 'forYou' && c.audience === 'private') continue;
-    if (!(await canViewClip(db, c, uid))) continue;
-    if (mode !== 'profile' && mode !== 'saved' && (await db.doc(`clipProfiles/${uid}/hidden/${clip.id}`).get()).exists) continue;
-    if (mode === 'following' && (await db.doc(`clipProfiles/${c.ownerUid}/followers/${uid}`).get()).get('status') !== 'accepted') continue;
-    const item = await serializeClip(db, clip, uid);
-    if (search && ![item.caption, ...item.hashtags, item.author.displayName, item.author.username].some(v => String(v).toLocaleLowerCase().includes(search))) continue;
-    items.push(item);
-    if (items.length >= limit) break;
-  }
-  // Discovery combines recency with engagement only within this stable scan
-  // window. It is deliberately bounded, not a claim of global ML ranking.
-  if (mode === 'forYou' && !search) {
-    const score = (c: typeof items[number]) => Math.log1p(c.likeCount + 2 * c.commentCount) - (Date.now() - c.createdAtMs) / 86_400_000;
-    items.sort((a, b) => score(b) - score(a));
+  // Keep Firestore's newest-first order while overlapping independent access
+  // reads. Advance the cursor only through consumed rows, including rejections.
+  const BATCH = Math.min(8, limit);
+  for (let offset = 0; offset < rows.size && items.length < limit; offset += BATCH) {
+    const candidates = rows.docs.slice(offset, offset + BATCH);
+    const resolved = await Promise.all(candidates.map(async row => {
+      const clip = mode === 'saved' ? await db.doc(`clips/${row.id}`).get() : row;
+      if (!clip.exists) return null;
+      const c = clip.data() as ClipDoc;
+      if (mode !== 'profile' && c.status !== 'published') return null;
+      if (mode === 'forYou' && c.audience === 'private') return null;
+      if (!(await canViewClip(db, c, uid))) return null;
+      if (mode !== 'profile' && mode !== 'saved' && (await db.doc(`clipProfiles/${uid}/hidden/${clip.id}`).get()).exists) return null;
+      if (mode === 'following' && (await db.doc(`clipProfiles/${c.ownerUid}/followers/${uid}`).get()).get('status') !== 'accepted') return null;
+      const item = await serializeClip(db, clip, uid);
+      if (search && ![item.caption, ...item.hashtags, item.author.displayName, item.author.username].some(v => String(v).toLocaleLowerCase().includes(search))) return null;
+      return item;
+    }));
+    for (let index = 0; index < candidates.length; index++) {
+      lastExamined = candidates[index];
+      const item = resolved[index];
+      if (item) items.push(item);
+      if (items.length >= limit) break;
+    }
   }
   const examinedAll = lastExamined?.id === rows.docs[rows.size - 1]?.id;
   return { items, nextCursor: lastExamined && (!examinedAll || rows.size === SCAN)
     ? encodeClipCursor(lastExamined.get('createdAt'), lastExamined.id) : null };
 });
+

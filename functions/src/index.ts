@@ -169,6 +169,7 @@ export {
   shareClip,
 } from './clips/core';
 export { initClipUpload, publishClip, getClipPlayback, getClipThumbnails } from './clips/media';
+export { optimizeExistingClipMedia } from './clips/mediaOptimization';
 export {
   onClipProcessing, onClipRemoved, cleanupClipMedia,
   onClipSourceFinalized, onClipSourceMetadataUpdated,
@@ -176,4 +177,5 @@ export {
 export {
   onClipAccountErasure, retryClipAccountErasure, onClipUserDeleted, onClipAuthUserDeleted,
 } from './clips/accountCleanup';
+
 

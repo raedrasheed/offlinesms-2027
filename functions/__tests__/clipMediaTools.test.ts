@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { clipFfmpegPath, clipMediaBinaryEnv } from '../src/clips/mediaBinary';
+import { clipFfmpegPath, clipFfprobePath, clipMediaBinaryEnv } from '../src/clips/mediaBinary';
 import { probeClipVideo, renderClipVideo, validateClipEdits } from '../src/clips/mediaTools';
 
 const exec = promisify(execFile);
@@ -50,4 +50,25 @@ describe('actual clip bytes and processing', () => {
       { overlayText: 'a'.repeat(101) }, { mute: 'yes' }])
       expect(() => validateClipEdits({ ...edits, ...change }, 60)).toThrow();
   });
+  it('bounds busy-video bandwidth and writes decodable fast-start MP4s', async () => {
+    const busy = join(directory, 'busy.mp4'), target = join(directory, 'bounded');
+    await mkdir(target);
+    await exec(clipFfmpegPath, ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i',
+      'testsrc2=size=720x1280:rate=30,noise=alls=25:allf=t+u:all_seed=7',
+      '-t', '8', '-c:v', 'libx264', '-crf', '18', '-preset', 'ultrafast', '-threads', '1', busy],
+    { timeout: 60_000, env: clipMediaBinaryEnv });
+    const out = await renderClipVideo(busy, target, {
+      trimStartMs: 0, trimEndMs: 8000, coverTimeMs: 0, overlayText: '', mute: false,
+    });
+    for (const [path, maximumRate] of [[out.standard, 1_450_000], [out.dataSaver, 620_000]] as const) {
+      const bytes = await readFile(path);
+      const { stdout } = await exec(clipFfprobePath, ['-v', 'error', '-show_format', '-of', 'json', path], { env: clipMediaBinaryEnv });
+      expect(Number(JSON.parse(stdout).format.bit_rate)).toBeLessThan(maximumRate);
+      expect(bytes.indexOf(Buffer.from('moov'))).toBeGreaterThan(0);
+      expect(bytes.indexOf(Buffer.from('moov'))).toBeLessThan(bytes.indexOf(Buffer.from('mdat')));
+      await exec(clipFfmpegPath, ['-v', 'error', '-i', path, '-f', 'null', '-'], { timeout: 30_000, env: clipMediaBinaryEnv });
+    }
+    expect((await readFile(out.standard)).length).toBeLessThan((await readFile(busy)).length / 2);
+  }, 120_000);
 });
+

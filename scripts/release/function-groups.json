@@ -173,6 +173,7 @@
     "getClipPlayback",
     "getClipThumbnails",
     "onClipProcessing",
+    "optimizeExistingClipMedia",
     "onClipRemoved",
     "cleanupClipMedia",
     "onClipSourceFinalized",
@@ -197,4 +198,5 @@
     "onPostRemoved"
   ]
 }
+
 

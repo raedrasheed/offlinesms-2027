@@ -174,6 +174,32 @@ describe('Clips access and privacy', () => {
 });
 
 describe('Clips pagination and moderation', () => {
+  it('keeps newest clips first across pages regardless of engagement', async () => {
+    await Promise.all(Array.from({ length: 12 }, (_, index) => seedClip(`fresh${String(index).padStart(2, '0')}`, {
+      createdAt: Timestamp.fromMillis(createdAt.toMillis() + index * 1000),
+      likeCount: index === 0 ? 100_000 : 0, commentCount: index === 0 ? 50_000 : 0,
+    })));
+    const ids: string[] = [];
+    let cursor: string | null = null;
+    do {
+      const page = await getClipsFeed.run(req('bob', { limit: 5, ...(cursor ? { cursor } : {}) }));
+      ids.push(...page.items.map(item => item.id));
+      cursor = page.nextCursor;
+    } while (cursor);
+    expect(ids).toEqual(Array.from({ length: 12 }, (_, index) => `fresh${String(11 - index).padStart(2, '0')}`));
+  });
+  it('does not skip prefetched rows when a filtered batch fills a page partway through', async () => {
+    await Promise.all(Array.from({ length: 10 }, (_, index) => seedClip(`batch${index}`, {
+      createdAt: Timestamp.fromMillis(createdAt.toMillis() + 1000 - index),
+      audience: index < 2 ? 'private' : 'public',
+    })));
+    const first = await getClipsFeed.run(req('bob', { limit: 3 }));
+    const second = await getClipsFeed.run(req('bob', { limit: 3, cursor: first.nextCursor }));
+    const third = await getClipsFeed.run(req('bob', { limit: 3, cursor: second.nextCursor }));
+    expect([...first.items, ...second.items, ...third.items].map(item => item.id))
+      .toEqual(['batch2', 'batch3', 'batch4', 'batch5', 'batch6', 'batch7', 'batch8', 'batch9']);
+    expect(third.nextCursor).toBeNull();
+  });
   it('advances the cursor through a completely filtered scan window', async () => {
     const batch = db().batch();
     for (let i = 0; i < 92; i++) batch.set(db().doc(`clips/row${String(i).padStart(3, '0')}`), {
@@ -282,3 +308,4 @@ describe('Clips interactions, comments and safe sharing', () => {
     await expectHttps(shareClip.run(req('bob', { ...input, conversationId: 'group', clientId: 'removed' })), 'permission-denied');
   });
 });
+
