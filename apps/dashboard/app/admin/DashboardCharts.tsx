@@ -1,127 +1,54 @@
 'use client';
+import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts';
+import { formatDashboardNumber, type DashboardDay, type DashboardStatus } from '@/lib/dashboardOverview';
 
-import {
-  LineChart, Line, AreaChart, Area, BarChart, Bar,
-  XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie,
-} from 'recharts';
+const tick = { fill: 'var(--c-text-2)', fontSize: 10 };
+const tooltip = { background: 'var(--c-card)', border: '1px solid var(--c-border)', borderRadius: 8, color: 'var(--c-text)', fontSize: 12 };
 
-const msgData = [
-  { day: 'Mon', msgs: 22000 },
-  { day: 'Tue', msgs: 28000 },
-  { day: 'Wed', msgs: 31000 },
-  { day: 'Thu', msgs: 18000 },
-  { day: 'Fri', msgs: 42000 },
-  { day: 'Sat', msgs: 35000 },
-  { day: 'Sun', msgs: 29000 },
-];
-
-const deliveryData = [
-  { name: 'Delivered', value: 62, color: '#22C55E' },
-  { name: 'Failed',    value: 11, color: '#EF4444' },
-  { name: 'Pending',   value: 22, color: '#F59E0B' },
-  { name: 'Others',   value: 4,  color: '#475569' },
-];
-
-const pointsData = [
-  { day: 'Mon', pts: 12000 },
-  { day: 'Tue', pts: 19000 },
-  { day: 'Wed', pts: 15000 },
-  { day: 'Thu', pts: 24000 },
-  { day: 'Fri', pts: 31000 },
-  { day: 'Sat', pts: 28000 },
-  { day: 'Sun', pts: 20000 },
-];
-
-const CARD_BG = 'var(--c-card)';
-const BORDER  = 'var(--c-border)';
-
-export function MessagesChart() {
-  return (
-    <div className="rounded-xl p-4 flex flex-col gap-3" style={{ background: CARD_BG, border: `1px solid ${BORDER}` }}>
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-[13px] font-semibold" style={{ color: 'var(--c-text)' }}>Messages over time</p>
-          <p className="text-[11px]" style={{ color: 'var(--c-text-3)' }}>Last 7 days</p>
-        </div>
-        <span className="text-[11px] font-semibold px-2 py-0.5 rounded" style={{ background: '#0A2035', color: '#5BB6DE' }}>
-          +12% vs last week
-        </span>
-      </div>
-      <ResponsiveContainer width="100%" height={130}>
-        <AreaChart data={msgData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-          <defs>
-            <linearGradient id="msgGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%"  stopColor="#1F7BA8" stopOpacity={0.3} />
-              <stop offset="95%" stopColor="#1F7BA8" stopOpacity={0} />
-            </linearGradient>
-          </defs>
-          <XAxis dataKey="day" tick={{ fill: '#475569', fontSize: 10 }} axisLine={false} tickLine={false} />
-          <YAxis tick={{ fill: '#475569', fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
-          <Tooltip
-            contentStyle={{ background: 'var(--c-bg)', border: '1px solid var(--c-border)', borderRadius: 8, fontSize: 12, color: 'var(--c-text)' }}
-            formatter={(v) => [`${Number(v).toLocaleString()} msgs`, '']}
-            labelStyle={{ color: 'var(--c-text-2)' }}
-          />
-          <Area type="monotone" dataKey="msgs" stroke="#1F7BA8" strokeWidth={2} fill="url(#msgGrad)" dot={false} />
-        </AreaChart>
+export function TrendChart({ data, kind }: { data: DashboardDay[]; kind: 'batches' | 'points' }) {
+  const missing = data.some(d => d.value === null);
+  if (!missing && data.every(d => d.value === 0)) return <p className="h-40 grid place-items-center text-sm" style={{ color: 'var(--c-text-2)' }}>No {kind === 'points' ? 'settled SMS charges' : 'SMS batches'} in this period.</p>;
+  return <>
+    {missing && <p role="status" className="text-xs text-amber-600">Some days are unavailable. Gaps are not zero.</p>}
+    <div className="h-44 min-w-0" aria-label={kind === 'points' ? 'Daily SMS points spent' : 'Daily SMS batches'}>
+      <ResponsiveContainer width="100%" height="100%">
+        {kind === 'points' ? <BarChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+          <XAxis dataKey="label" tick={tick} axisLine={false} tickLine={false} />
+          <YAxis tick={tick} axisLine={false} tickLine={false} width={42} allowDecimals={false} />
+          <Tooltip contentStyle={tooltip} cursor={{ fill: 'var(--c-nav-active-bg)' }} formatter={v => [formatDashboardNumber(Number(v)), 'Points']} />
+          <Bar dataKey="value" fill="#1F7BA8" radius={[4, 4, 0, 0]} isAnimationActive={false} />
+        </BarChart> : <AreaChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+          <XAxis dataKey="label" tick={tick} axisLine={false} tickLine={false} />
+          <YAxis tick={tick} axisLine={false} tickLine={false} width={42} allowDecimals={false} />
+          <Tooltip contentStyle={tooltip} formatter={v => [formatDashboardNumber(Number(v)), 'Batches']} />
+          <Area type="linear" dataKey="value" stroke="#1F7BA8" fill="#1F7BA8" fillOpacity={0.14} strokeWidth={2} connectNulls={false} isAnimationActive={false} />
+        </AreaChart>}
       </ResponsiveContainer>
     </div>
-  );
+    <details className="mt-2 text-xs" style={{ color: 'var(--c-text-2)' }}>
+      <summary className="cursor-pointer">View daily values</summary>
+      <table className="w-full mt-2"><caption className="sr-only">Daily values in UTC</caption><thead><tr><th className="text-left">Date (UTC)</th><th className="text-right">{kind === 'points' ? 'Points' : 'Batches'}</th></tr></thead>
+        <tbody>{data.map(d => <tr key={d.date}><td>{d.date}</td><td className="text-right">{formatDashboardNumber(d.value)}</td></tr>)}</tbody>
+      </table>
+    </details>
+  </>;
 }
 
-export function DeliveryChart() {
-  return (
-    <div className="rounded-xl p-4 flex flex-col gap-3" style={{ background: CARD_BG, border: `1px solid ${BORDER}` }}>
-      <div>
-        <p className="text-[13px] font-semibold" style={{ color: 'var(--c-text)' }}>SMS delivery rate</p>
-        <p className="text-[11px]" style={{ color: 'var(--c-text-3)' }}>Last 7d</p>
-      </div>
-      <div className="flex items-center gap-3">
-        <ResponsiveContainer width={110} height={110}>
-          <PieChart>
-            <Pie data={deliveryData} cx="50%" cy="50%" innerRadius={32} outerRadius={50} dataKey="value" strokeWidth={0}>
-              {deliveryData.map((d, i) => <Cell key={i} fill={d.color} />)}
-            </Pie>
-          </PieChart>
-        </ResponsiveContainer>
-        <div className="flex flex-col gap-1.5 flex-1">
-          {deliveryData.map(d => (
-            <div key={d.name} className="flex items-center justify-between text-[11px]">
-              <div className="flex items-center gap-1.5">
-                <div className="w-2 h-2 rounded-full shrink-0" style={{ background: d.color }} />
-                <span style={{ color: 'var(--c-text-2)' }}>{d.name}</span>
-              </div>
-              <span className="font-semibold" style={{ color: 'var(--c-text)' }}>{d.value}%</span>
-            </div>
-          ))}
-        </div>
-      </div>
+export function BatchStatusChart({ data }: { data: DashboardStatus[] }) {
+  if (data.some(d => d.value === null)) return <p className="h-40 grid place-items-center text-sm" style={{ color: 'var(--c-text-2)' }}>Batch status data is unavailable.</p>;
+  const total = data.reduce((n, d) => n + d.value!, 0);
+  if (!total) return <p className="h-40 grid place-items-center text-sm" style={{ color: 'var(--c-text-2)' }}>No SMS batches in this period.</p>;
+  return <div className="flex flex-wrap items-center gap-4 min-h-44">
+    <div className="relative w-32 h-32 shrink-0" aria-hidden="true">
+      <ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={data.filter(d => d.value! > 0)} dataKey="value" innerRadius={42} outerRadius={60} strokeWidth={0} isAnimationActive={false}>
+        {data.filter(d => d.value! > 0).map(d => <Cell key={d.name} fill={d.color} />)}
+      </Pie></PieChart></ResponsiveContainer>
+      <div className="absolute inset-0 grid place-content-center text-center pointer-events-none"><strong>{formatDashboardNumber(total)}</strong><span className="text-[10px]" style={{ color: 'var(--c-text-2)' }}>batches</span></div>
     </div>
-  );
+    <ul className="flex-1 space-y-2 text-xs min-w-[150px]">{data.map(d => <li key={d.name} className="flex gap-2 items-center">
+      <span className="w-2 h-2 rounded-full shrink-0" style={{ background: d.color }} /><span className="flex-1" style={{ color: 'var(--c-text-2)' }}>{d.name}</span>
+      <span className="font-semibold">{formatDashboardNumber(d.value)} <span className="font-normal" style={{ color: 'var(--c-text-2)' }}>({((d.value! / total) * 100).toFixed(1)}%)</span></span>
+    </li>)}</ul>
+  </div>;
 }
 
-export function PointsChart() {
-  return (
-    <div className="rounded-xl p-4 flex flex-col gap-3" style={{ background: CARD_BG, border: `1px solid ${BORDER}` }}>
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-[13px] font-semibold" style={{ color: 'var(--c-text)' }}>Points usage</p>
-          <p className="text-[11px]" style={{ color: 'var(--c-text-3)' }}>Last 7d</p>
-        </div>
-        <span className="text-[11px] font-semibold" style={{ color: '#EF4444' }}>-4% last 7d</span>
-      </div>
-      <ResponsiveContainer width="100%" height={110}>
-        <BarChart data={pointsData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-          <XAxis dataKey="day" tick={{ fill: '#475569', fontSize: 10 }} axisLine={false} tickLine={false} />
-          <YAxis tick={{ fill: '#475569', fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
-          <Tooltip
-            contentStyle={{ background: 'var(--c-bg)', border: '1px solid var(--c-border)', borderRadius: 8, fontSize: 12, color: 'var(--c-text)' }}
-            formatter={(v) => [`${Number(v).toLocaleString()} pts`, '']}
-            labelStyle={{ color: 'var(--c-text-2)' }}
-          />
-          <Bar dataKey="pts" fill="#1F7BA8" radius={[3, 3, 0, 0]} />
-        </BarChart>
-      </ResponsiveContainer>
-    </div>
-  );
-}

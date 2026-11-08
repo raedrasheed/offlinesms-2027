@@ -9,6 +9,7 @@ import Sidebar from '@/components/Sidebar';
 import AdminTopbar from '@/components/AdminTopbar';
 import { PermissionState } from '@/components/state';
 import { verifySession } from '@/lib/session';
+import { getAdminWorkspace } from '@/lib/adminWorkspace';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -40,14 +41,16 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   }
 
   const { user, role } = session;
+  const workspace = await getAdminWorkspace(session);
 
   return (
     <div className="flex min-h-screen" style={{ background: 'var(--c-bg)' }}>
-      <Sidebar role={role} />
+      <Sidebar role={role} workspace={workspace} />
       <div className="flex-1 min-w-0 flex flex-col">
-        <AdminTopbar email={user.email} role={role} />
+        <AdminTopbar email={user.email} role={role} workspace={workspace} />
         <main id="main-content" className="flex-1">{children}</main>
       </div>
     </div>
   );
 }
+
