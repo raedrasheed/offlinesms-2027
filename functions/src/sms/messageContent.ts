@@ -40,8 +40,11 @@ export function prepareSmsContentWithContext(body: string, context: SmsContentCo
 /** Resolve branding and identity exclusively from trusted server-owned data. */
 export async function prepareSmsContent(db: Firestore, context: {
   body: string; senderUid?: string; groupName?: string | null;
+  includeSenderIdentityFallback?: boolean;
 }) {
-  const metadata = await loadSmsContentContext(db, { ...context, includeSenderIdentityFallback: true });
+  const metadata = await loadSmsContentContext(db, {
+    ...context, includeSenderIdentityFallback: context.includeSenderIdentityFallback ?? true,
+  });
   return prepareSmsContentWithContext(context.body, metadata);
 }
 

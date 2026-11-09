@@ -87,6 +87,8 @@ export const escalateSms = onCall({ region: 'us-central1' }, async (request) => 
   const content = await prepareSmsContent(db, {
     body: inputBody, senderUid,
     groupName: convo.type === 'group' ? convo.name : null,
+    // Legacy clients can only send the single-part text they confirmed themselves.
+    includeSenderIdentityFallback: data.quoteToken !== undefined,
   });
   const { finalSmsBody: smsBody, ...pricing } = content;
 
