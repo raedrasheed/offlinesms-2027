@@ -41,6 +41,7 @@ export async function assertClipGroupMember(db: Firestore, groupId: string, uid:
 }
 export async function canViewClip(db: Firestore, clip: ClipDoc, uid: string, admin = false, tx?: Transaction): Promise<boolean> {
   if (!clip.ownerUid || clip.status === 'removed') return false;
+  if (clip.status === 'suspended') return false;
   if (admin) return true;
   // Mutation transactions read the actor tombstone too: a concurrent account
   // erasure must conflict/retry before any interaction can be recreated.

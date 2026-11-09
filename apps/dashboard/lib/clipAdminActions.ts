@@ -45,7 +45,7 @@ export async function saveClipSettings(_previous: ClipAdminActionState, data: Fo
 export async function moderateClip(input: { clipId: string; action: ClipModerationAction; reason: string; version: string }): Promise<ClipAdminActionState> {
   try {
     const actor = await requireClipsAdmin();
-    if (!isClipDocumentId(input.clipId) || !['approve', 'reject', 'remove'].includes(input.action)) throw new Error('Invalid moderation action.');
+    if (!isClipDocumentId(input.clipId) || !['approve', 'reject', 'remove', 'suspend', 'restore'].includes(input.action)) throw new Error('Invalid moderation action.');
     const reason = adminReason(input.reason);
     const ref = adminDb.collection('clips').doc(input.clipId);
     const auditRef = adminDb.collection('auditLogs').doc();
@@ -58,6 +58,7 @@ export async function moderateClip(input: { clipId: string; action: ClipModerati
       // an updated item must pass its exact update-time lease.
       if (before === status && clip.get('moderatedBy') === actor.uid && clip.get('moderationReason') === reason) return;
       assertVersion(clip, input.version);
+      if (before === status && (input.action === 'suspend' || input.action === 'restore')) return;
       if (status === 'published' && (!validateClipMediaPath(clip.get('ownerUid'), clip.id, clip.get('standardPath'))
           || !clip.get('standardPath').endsWith('/standard.mp4'))) {
         throw new Error('Processed video is missing. This clip cannot be approved.');
@@ -81,7 +82,7 @@ export async function getAdminClipPreview(clipId: string): Promise<{ url?: strin
     const actor = await requireClipsAdmin();
     if (!isClipDocumentId(clipId)) throw new Error('Invalid clip.');
     const clip = await adminDb.collection('clips').doc(clipId).get();
-    if (!clip.exists || !['pending_review', 'published', 'rejected'].includes(clip.get('status'))) throw new Error('This clip has no playable review copy.');
+    if (!clip.exists || !['pending_review', 'published', 'suspended', 'rejected'].includes(clip.get('status'))) throw new Error('This clip has no playable review copy.');
     const path = clip.get('standardPath');
     if (!validateClipMediaPath(clip.get('ownerUid'), clip.id, path) || !path.endsWith('/standard.mp4')) throw new Error('Processed video is unavailable.');
     const bucketName = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET;

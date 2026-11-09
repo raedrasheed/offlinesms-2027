@@ -1,6 +1,6 @@
-export const CLIP_STATUSES = ['uploading', 'processing', 'failed', 'pending_review', 'published', 'rejected', 'removed'] as const;
+export const CLIP_STATUSES = ['uploading', 'processing', 'failed', 'pending_review', 'published', 'suspended', 'rejected', 'removed'] as const;
 export type ClipStatus = typeof CLIP_STATUSES[number];
-export type ClipModerationAction = 'approve' | 'reject' | 'remove';
+export type ClipModerationAction = 'approve' | 'reject' | 'remove' | 'suspend' | 'restore';
 export type ClipAdminConfig = {
   enabled: boolean; moderationRequired: boolean; maxDurationSeconds: number;
   maxUploadMB: number; maxDailyUploads: number; termsVersion: string; supportEmail: string;
@@ -65,7 +65,9 @@ export function parseClipAdminConfig(data: FormData): ClipAdminConfig {
 export function moderationTarget(status: string, action: ClipModerationAction): ClipStatus {
   if (action === 'approve' && (status === 'pending_review' || status === 'published')) return 'published';
   if (action === 'reject' && (status === 'pending_review' || status === 'rejected')) return 'rejected';
-  if (action === 'remove' && ['pending_review', 'published', 'rejected', 'failed', 'removed'].includes(status)) return 'removed';
+  if (action === 'remove' && ['pending_review', 'published', 'suspended', 'rejected', 'failed', 'removed'].includes(status)) return 'removed';
+  if (action === 'suspend' && (status === 'published' || status === 'suspended')) return 'suspended';
+  if (action === 'restore' && (status === 'suspended' || status === 'published')) return 'published';
   throw new Error('This clip has changed or is not ready for that moderation action. Reload it.');
 }
 

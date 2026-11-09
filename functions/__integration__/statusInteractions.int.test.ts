@@ -12,6 +12,24 @@ beforeEach(async () => {
   await story().set({ authorId: 'owner', type: 'text', body: 'A story', audienceType: 'only_share_with', allowedViewerUids: ['viewer'], createdAt: Timestamp.now(), expiresAt: Timestamp.fromMillis(Date.now() + 60_000), viewCount: 0, likeCount: 0 });
 });
 describe('status interaction permissions and idempotency', () => {
+  it('hides a suspended status from feeds and blocks direct access and interactions until restored', async () => {
+    expect((await getStatusFeed.run(req('viewer', {}))).items).toHaveLength(1);
+    await story().update({ moderationSuspended: true });
+    expect((await getStatusFeed.run(req('viewer', {}))).items).toHaveLength(0);
+    for (const operation of [
+      () => getStatus.run(req('viewer', { statusId: 'story' })),
+      () => markStatusViewed.run(req('viewer', { statusId: 'story' })),
+      () => setStatusLike.run(req('viewer', { statusId: 'story', liked: true })),
+      () => replyToStatus.run(req('viewer', { statusId: 'story', text: 'Hello', localId: 'reply-12345' })),
+      () => listStatusViewers.run(req('owner', { statusId: 'story' })),
+    ]) {
+      await expect(operation()).rejects.toMatchObject({ code: 'not-found' });
+    }
+    expect((await story().get()).data()).toMatchObject({ viewCount: 0, likeCount: 0 });
+    await story().update({ moderationSuspended: false });
+    expect((await getStatus.run(req('viewer', { statusId: 'story' }))).item.statusId).toBe('story');
+    expect((await getStatusFeed.run(req('viewer', {}))).items).toHaveLength(1);
+  });
   it('counts concurrent repeated views once and exposes names/photos only to the owner', async () => {
     await Promise.all(Array.from({ length: 5 }, () => markStatusViewed.run(req('viewer', { statusId: 'story' }))));
     expect((await story().get()).get('viewCount')).toBe(1);

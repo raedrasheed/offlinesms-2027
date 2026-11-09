@@ -16,6 +16,7 @@ const ADMIN_CAPABILITIES = [
   'view:broadcast_notifications', 'manage:broadcast_notifications',
   'view:organization_messaging', 'manage:organization_messaging',
   'view:clips', 'manage:clips',
+  'view:statuses', 'manage:statuses',
 ] as const;
 
 export type AdminCapability = (typeof ADMIN_CAPABILITIES)[number];
@@ -70,6 +71,7 @@ const ROLE_CAPABILITIES: Record<RoleKey, readonly AdminCapability[]> = {
     'view:broadcast_notifications', 'manage:broadcast_notifications',
     'view:organization_messaging', 'manage:organization_messaging',
     'view:clips', 'manage:clips',
+    'view:statuses', 'manage:statuses',
   ],
   bootstrap_admin: [
     'view:overview', 'view:users', 'manage:users',

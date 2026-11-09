@@ -55,6 +55,8 @@ import { getAdminClipPreview, moderateClip, resolveClipReport, saveClipSettings,
 import { getAdminClip, getClipAdminSettings, getClipAdminStats, listAdminClipReports, listAdminClips } from '../lib/clipAdminData';
 import { CLIP_CONFIG_DEFAULTS, hasPlatformClipClaims, parseClipAdminConfig, readClipAdminConfig, validateClipMediaPath } from '../lib/clipAdminPolicy';
 import { canDo } from '../lib/adminPermissions';
+import { getAdminStatusPreview, moderateStatus } from '../lib/statusAdminActions';
+import { getAdminStatus, listAdminStatuses } from '../lib/statusAdminData';
 
 function put(path: string, data: Record<string, any>, version = 1) { state.docs.set(path, { data, version }); }
 function configForm() {
@@ -144,6 +146,19 @@ describe('Clips settings and private media', () => {
 });
 
 describe('Clips moderation transactions', () => {
+  it('suspends a published clip without deleting media and restores its original publication time', async () => {
+    seedClip({ status: 'published', publishedAt: 'original' });
+    const suspend = { ...decision, action: 'suspend' as const };
+    expect(await moderateClip(suspend)).toEqual({ success: true });
+    expect(await moderateClip(suspend)).toEqual({ success: true });
+    expect(state.docs.get('clips/video')?.data).toMatchObject({
+      status: 'suspended', publishedAt: 'original', standardPath: 'clipMedia/creator/video/standard.mp4',
+    });
+    expect(state.docs.get('clips/video')?.data).not.toHaveProperty('removedAt');
+    expect(await moderateClip({ ...decision, action: 'restore', version: '2:0' })).toEqual({ success: true });
+    expect(state.docs.get('clips/video')?.data).toMatchObject({ status: 'published', publishedAt: 'original' });
+    expect(state.writes.filter(w => w.path.startsWith('auditLogs/')).map(w => w.data.action)).toEqual(['clips.suspend', 'clips.restore']);
+  });
   it('approves once, preserves first publication time and audits a retried request once', async () => {
     seedClip();
     expect(await moderateClip(decision)).toEqual({ success: true });
@@ -204,5 +219,60 @@ describe('Clips moderation transactions', () => {
     expect(await resolveClipReport({ ...reportDecision, action: 'none' })).toHaveProperty('error');
     expect(await moderateClip({ ...decision, reason: ' ' })).toHaveProperty('error');
     expect(state.writes).toHaveLength(0);
+  });
+});
+
+describe('Statuses administration', () => {
+  const change = { id: 'story', suspended: true, reason: 'Reported content reviewed', version: '' };
+
+  it('rejects unauthorized reads, media previews and changes before accessing Firestore', async () => {
+    state.session = { state: 'authorized', role: 'organization_admin', user: { uid: 'org', claims: { role: 'organization_admin' } } };
+    await expect(listAdminStatuses()).rejects.toThrow('Platform administrator');
+    await expect(getAdminStatus('story')).rejects.toThrow('Platform administrator');
+    expect(await getAdminStatusPreview('story')).toHaveProperty('error');
+    expect(await moderateStatus(change)).toHaveProperty('error');
+    expect(state.reads).toBe(0);
+    expect(state.signed).toEqual([]);
+    expect(state.writes).toEqual([]);
+  });
+
+  it('audits suspension once, rejects a stale restore, and keeps the original expiry', async () => {
+    state.session.user.claims = { roles: ['super_admin'] };
+    const expiresAt = { toMillis: () => Date.now() + 60_000 };
+    put('statuses/story', { authorId: 'creator', expiresAt, body: 'Status' });
+    expect(await moderateStatus(change)).toEqual({ success: true });
+    expect(await moderateStatus(change)).toEqual({ success: true });
+    const row = state.docs.get('statuses/story')!;
+    expect(row.data).toMatchObject({ moderationSuspended: true, expiresAt, body: 'Status' });
+    expect(row.data).not.toHaveProperty('moderationReason');
+    expect(row.data).not.toHaveProperty('moderatedBy');
+    row.data.moderatedAt = { seconds: 2, nanoseconds: 0 };
+    expect(await moderateStatus({ ...change, suspended: false })).toHaveProperty('error');
+    expect(await moderateStatus({ ...change, suspended: false, version: '2:0' })).toEqual({ success: true });
+    expect(state.docs.get('statuses/story')?.data).toMatchObject({ moderationSuspended: false, expiresAt });
+    expect(state.writes.filter(w => w.path.startsWith('auditLogs/')).map(w => w.data.action)).toEqual(['statuses.suspended', 'statuses.restored']);
+  });
+
+  it('leaves the status unchanged if the audit write fails and refuses to restore expired content', async () => {
+    const expiresAt = { toMillis: () => Date.now() + 60_000 };
+    put('statuses/story', { expiresAt });
+    state.failAudit = true;
+    expect(await moderateStatus(change)).toHaveProperty('error');
+    expect(state.docs.get('statuses/story')?.data).not.toHaveProperty('moderationSuspended');
+    put('statuses/story', { moderationSuspended: true, expiresAt: { toMillis: () => 0 } });
+    expect(await moderateStatus({ ...change, suspended: false })).toHaveProperty('error', 'This status has expired.');
+    expect(state.writes).toHaveLength(0);
+  });
+
+  it('signs only the story author’s validated media and records the preview', async () => {
+    for (const storagePath of ['statuses/other/file.jpg', 'statuses/creator/folder/file.jpg', 'https://evil.invalid/file.jpg']) {
+      put('statuses/story', { type: 'image', mimeType: 'image/jpeg', authorId: 'creator', storagePath });
+      expect(await getAdminStatusPreview('story')).toHaveProperty('error');
+    }
+    expect(state.signed).toHaveLength(0);
+    put('statuses/story', { type: 'image', mimeType: 'image/jpeg', authorId: 'creator', storagePath: 'statuses/creator/file.jpg' });
+    expect(await getAdminStatusPreview('story')).toHaveProperty('url');
+    expect(state.signed[0]).toMatchObject({ path: 'statuses/creator/file.jpg', options: { action: 'read', responseType: 'image/jpeg' } });
+    expect(state.writes[0].data.action).toBe('statuses.previewed');
   });
 });

@@ -53,11 +53,12 @@ export const getStatusFeed = onCall(async (request) => {
   const candidates = snap.docs.filter(d => {
     const s = d.data() as {
       authorId?: string;
+      moderationSuspended?: boolean;
       audienceType?: StatusAudience;
       allowedViewerUids?: string[];
       excludedViewerUids?: string[];
     };
-    if (s.authorId === uid) return false;            // own statuses excluded
+    if (s.authorId === uid || s.moderationSuspended === true) return false;
     return isStatusAudienceMember(s, uid);
   });
 
