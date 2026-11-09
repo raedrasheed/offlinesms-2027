@@ -100,7 +100,7 @@ describe('SMS metadata and price consistency', () => {
     expect((await db().collection('smsBatches').get()).empty).toBe(true);
     expect((await db().collection('relayJobs').get()).empty).toBe(true);
   });
-  it('uses original message sender phone for admin escalation; omits unverified phone and non-group name', async () => {
+  it('uses the original sender’s phone or public profile for group admin escalation', async () => {
     await db().doc('conversations/group').update({ participantUids: ['sender', 'r1', 'r2', 'admin'] });
     await db().doc('conversations/group/members/admin').set({ role: 'admin' });
     await db().doc('users/admin').set({ phoneVerified: true });
@@ -108,10 +108,23 @@ describe('SMS metadata and price consistency', () => {
     const p = await preview('admin');
     expect(p.finalSmsBody).toContain(num(1));
     expect(p.finalSmsBody).not.toContain(num(9));
-    await db().doc('users/sender').update({ phoneVerified: false });
+    await db().doc('users/sender').update({ phoneVerified: false, displayName: 'Original Sender', username: 'original.sender' });
+    const fallback = await preview('admin');
+    expect(fallback.finalSmsBody).toBe(`[OfflineSMS]\n[Team]\nOriginal Sender (@original.sender)\n\n${args.smsBody}`);
     await db().doc('conversations/group').update({ type: 'direct' });
     const direct = await preview();
-    expect(direct.finalSmsBody).toBe(`[OfflineSMS]\n\n${args.smsBody}`);
+    expect(direct.finalSmsBody).toBe(`[OfflineSMS]\nOriginal Sender (@original.sender)\n\n${args.smsBody}`);
+  });
+  it('sends and bills the displayed name and username for an email-only sender', async () => {
+    await db().doc('users/sender').set({ displayName: 'أحمد', username: 'ahmad' });
+    await db().doc('users/sender/userPrivate/profile').set({ email: 'sender@example.test' });
+    await db().doc('systemSettings/general').update({ smsShowSenderPhone: false });
+
+    const { quote, result, ref } = await send();
+    const expected = `[OfflineSMS]\n[Team]\nأحمد (@ahmad)\n\n${args.smsBody}`;
+    expect(quote).toMatchObject({ finalSmsBody: expected, smsSegments: 3, smsEncoding: 'UCS-2', pointsPerRecipient: 84, pointsCost: 168 });
+    expect((await ref.get()).data()).toMatchObject({ smsBody: expected, pointsReserved: 168 });
+    expect((await db().doc(`relayJobs/${result.batchId}:r1`).get()).get('messageBody')).toBe(expected);
   });
   it('handles empty editable draft and applies current relay coverage to preview', async () => {
     await db().doc('systemSettings/general').set({});
