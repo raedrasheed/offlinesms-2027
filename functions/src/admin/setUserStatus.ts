@@ -1,7 +1,7 @@
 // Admin callable: set a user's status (active / suspended).
 //
 // Safety rules enforced server-side:
-//   1. Caller must be authenticated and have admin=true claim.
+//   1. Caller must be a super admin or have the legacy admin claim.
 //   2. Caller cannot suspend themselves.
 //   3. Caller cannot suspend a super_admin (role claim).
 //   4. Only valid transitions: active→suspended, suspended→active.
@@ -11,6 +11,7 @@ import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { getAuth } from 'firebase-admin/auth';
 import { writeAuditLog } from '../lib/auditLog';
+import { hasSuperAdminRole } from '../lib/roles';
 
 const ALLOWED_STATUSES = new Set(['active', 'suspended']);
 
@@ -18,7 +19,7 @@ export const setUserStatus = onCall({ region: 'us-central1' }, async (request) =
   const callerUid = request.auth?.uid;
   const callerClaims = (request.auth?.token ?? {}) as Record<string, unknown>;
 
-  if (!callerUid || !callerClaims.admin) {
+  if (!callerUid || !(hasSuperAdminRole(callerClaims) || callerClaims.admin === true)) {
     await writeAuditLog({
       action: 'admin.user.setStatus',
       actor:  { uid: callerUid ?? 'anonymous' },
@@ -44,14 +45,13 @@ export const setUserStatus = onCall({ region: 'us-central1' }, async (request) =
 
   // Prevent suspending a super_admin.
   const targetAuth = await getAuth().getUser(targetUid);
-  const targetRole = (targetAuth.customClaims as Record<string, unknown> | undefined)?.role;
-  if (targetRole === 'super_admin') {
+  if (hasSuperAdminRole(targetAuth.customClaims ?? {})) {
     await writeAuditLog({
       action: 'admin.user.setStatus',
       actor:  { uid: callerUid },
       target: { type: 'user', id: targetUid },
       result: 'failure',
-      metadata: { reason: 'cannot-suspend-super-admin', targetRole },
+      metadata: { reason: 'cannot-suspend-super-admin', targetRole: 'super_admin' },
     });
     throw new HttpsError('permission-denied', 'cannot-suspend-super-admin');
   }

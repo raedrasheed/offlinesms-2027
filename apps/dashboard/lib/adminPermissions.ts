@@ -1,76 +1,29 @@
 import type { AdminRole } from './session';
 
-export type AdminCapability =
-  | 'view:overview'
-  | 'view:users'
-  | 'manage:users'
-  | 'view:organizations'
-  | 'manage:organizations'
-  | 'view:groups'
-  | 'manage:groups'
-  | 'view:calls'
-  | 'view:clips'
-  | 'manage:clips'
-  | 'view:sms'
-  | 'manage:sms'
-  | 'view:points'
-  | 'view:reports'
-  | 'view:support'
-  | 'view:roles'
-  | 'manage:roles'
-  | 'view:settings'
-  | 'view:audit'
-  | 'view:communities'
-  // Phase 15
-  | 'manage:wallets'
-  | 'manage:packages'
-  | 'retry:sms'
-  | 'manage:support'
-  | 'manage:settings'
-  // Phase 16
-  | 'export:audit'
-  | 'view:moderation'
-  // Phase 17
-  | 'search:global'
-  | 'export:users'
-  | 'export:groups'
-  | 'export:sms'
-  | 'export:points'
-  | 'export:support'
-  | 'view:reports'
-  // Phase 18
-  | 'view:notifications'
-  | 'manage:notifications'
-  // Phase 24 — SMS relay (OfflineSMS-Business devices)
-  | 'view:relay'
-  | 'manage:relay'
-  // Phase 28 — broadcast push notifications from the dashboard
-  | 'view:broadcast_notifications'
-  | 'manage:broadcast_notifications'
-  // Organization Messaging API (MVP) — org-scoped messaging + API key
-  | 'view:organization_messaging'
-  | 'manage:organization_messaging';
+const ADMIN_CAPABILITIES = [
+  'view:overview', 'view:users', 'manage:users',
+  'view:organizations', 'manage:organizations',
+  'view:groups', 'manage:groups',
+  'view:calls', 'view:sms', 'manage:sms',
+  'view:points', 'view:reports', 'view:support',
+  'view:roles', 'manage:roles',
+  'view:settings', 'view:audit', 'view:communities',
+  'manage:wallets', 'manage:packages', 'retry:sms', 'manage:support', 'manage:settings',
+  'export:audit', 'view:moderation',
+  'search:global', 'export:users', 'export:groups', 'export:sms', 'export:points', 'export:support',
+  'view:notifications', 'manage:notifications',
+  'view:relay', 'manage:relay',
+  'view:broadcast_notifications', 'manage:broadcast_notifications',
+  'view:organization_messaging', 'manage:organization_messaging',
+  'view:clips', 'manage:clips',
+] as const;
+
+export type AdminCapability = (typeof ADMIN_CAPABILITIES)[number];
 
 type RoleKey = AdminRole | 'legacy_admin' | 'bootstrap_admin';
 
 const ROLE_CAPABILITIES: Record<RoleKey, readonly AdminCapability[]> = {
-  super_admin: [
-    'view:overview', 'view:users', 'manage:users',
-    'view:organizations', 'manage:organizations',
-    'view:groups', 'manage:groups',
-    'view:calls', 'view:sms', 'manage:sms',
-    'view:points', 'view:reports', 'view:support',
-    'view:roles', 'manage:roles',
-    'view:settings', 'view:audit', 'view:communities',
-    'manage:wallets', 'manage:packages', 'retry:sms', 'manage:support', 'manage:settings',
-    'export:audit', 'view:moderation',
-    'search:global', 'export:users', 'export:groups', 'export:sms', 'export:points', 'export:support', 'view:reports',
-    'view:notifications', 'manage:notifications',
-    'view:relay', 'manage:relay',
-    'view:broadcast_notifications', 'manage:broadcast_notifications',
-    'view:organization_messaging', 'manage:organization_messaging',
-    'view:clips', 'manage:clips',
-  ],
+  super_admin: ADMIN_CAPABILITIES,
   organization_admin: [
     'view:overview', 'view:users',
     'view:organizations', 'manage:organizations',
