@@ -45,6 +45,13 @@ describe('trusted metadata format', () => {
     expect(composeSmsBody('a\nb', { appName: '  Example\nApp ', smsShowAppName: true, smsShowGroupName: true, smsShowSenderPhone: true }))
       .toBe('[Example App]\n\na\nb');
   });
+  it('uses safe public identity for a missing phone and keeps the phone setting independent', () => {
+    const sender = { senderDisplayName: 'First\nLast', senderUsername: 'first.last' };
+    expect(composeSmsBody('text', {}, sender)).toBe('First Last (@first.last)\n\ntext');
+    expect(composeSmsBody('text', {}, { senderUsername: 'first.last' })).toBe('@first.last\n\ntext');
+    expect(composeSmsBody('text', {}, { ...sender, senderUsername: 'bad\nheader' })).toBe('First Last\n\ntext');
+    expect(composeSmsBody('text', { smsShowSenderPhone: false }, { ...sender, senderPhone: '+970599123456' })).toBe('text');
+  });
   it('legacy batches retain old price while versioned batches use the snapshot', () => {
     expect(smsBatchUnitCost({})).toBe(28);
     expect(smsBatchUnitCost({ pointsPerRecipient: 84 })).toBe(28);

@@ -1,23 +1,30 @@
 import { createHash } from 'node:crypto';
 import type { Firestore } from 'firebase-admin/firestore';
 import { readUserPhone } from '../lib/userPrivate';
-import { calculateSmsMetrics, composeSmsBody, SMS_POINTS_PER_SEGMENT, type SmsFormatSettings } from './messageFormat';
+import { calculateSmsMetrics, composeSmsBody, SMS_POINTS_PER_SEGMENT, type SmsFormatSettings, type SmsMessageContext } from './messageFormat';
 
-export interface SmsContentContext {
-  settings: SmsFormatSettings; senderPhone: string | null; groupName?: string | null;
+export interface SmsContentContext extends SmsMessageContext {
+  settings: SmsFormatSettings;
 }
 
 /** Resolve one immutable policy/identity snapshot for a whole personalized batch. */
 export async function loadSmsContentContext(db: Firestore, context: {
-  senderUid?: string; groupName?: string | null;
+  senderUid?: string;
+  groupName?: string | null;
+  includeSenderIdentityFallback?: boolean;
 }): Promise<SmsContentContext> {
   const settings = (await db.doc('systemSettings/general').get()).data() ?? {};
-  let senderPhone: string | null = null;
-  if (settings.smsShowSenderPhone === true && context.senderUid) {
-    const sender = await db.collection('users').doc(context.senderUid).get();
-    if (sender.get('phoneVerified') === true) senderPhone = await readUserPhone(db, context.senderUid);
+  const { senderUid, groupName, includeSenderIdentityFallback } = context;
+  const content: SmsContentContext = { settings, groupName };
+  if (senderUid && (settings.smsShowSenderPhone === true || includeSenderIdentityFallback)) {
+    const sender = await db.collection('users').doc(senderUid).get();
+    if (sender.get('phoneVerified') === true) content.senderPhone = await readUserPhone(db, senderUid);
+    if (includeSenderIdentityFallback) {
+      content.senderDisplayName = sender.get('displayName');
+      content.senderUsername = sender.get('username') ?? sender.get('usernameLower');
+    }
   }
-  return { settings, senderPhone, groupName: context.groupName };
+  return content;
 }
 
 export function prepareSmsContentWithContext(body: string, context: SmsContentContext) {
@@ -34,7 +41,8 @@ export function prepareSmsContentWithContext(body: string, context: SmsContentCo
 export async function prepareSmsContent(db: Firestore, context: {
   body: string; senderUid?: string; groupName?: string | null;
 }) {
-  return prepareSmsContentWithContext(context.body, await loadSmsContentContext(db, context));
+  const metadata = await loadSmsContentContext(db, { ...context, includeSenderIdentityFallback: true });
+  return prepareSmsContentWithContext(context.body, metadata);
 }
 
 /** A change detector, not an authorization credential. Sending always rechecks

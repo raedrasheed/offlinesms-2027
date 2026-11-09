@@ -12,6 +12,13 @@ export interface SmsFormatSettings {
   smsShowSenderPhone?: unknown;
 }
 
+export interface SmsMessageContext {
+  groupName?: string | null;
+  senderPhone?: string | null;
+  senderDisplayName?: unknown;
+  senderUsername?: unknown;
+}
+
 export function calculateSmsMetrics(body: string): SmsMetrics {
   const characters = Array.from(body);
   const gsm = characters.every(c => GSM_BASIC.has(c) || GSM_EXTENDED.has(c));
@@ -36,14 +43,21 @@ function line(value: unknown, max: number): string {
   return typeof value === 'string' ? value.replace(/[\r\n\t\u0000-\u001f\u007f]/g, ' ').trim().slice(0, max) : '';
 }
 
-export function composeSmsBody(body: string, settings: SmsFormatSettings, context: {
-  groupName?: string | null; senderPhone?: string | null;
-} = {}): string {
+export function composeSmsBody(body: string, settings: SmsFormatSettings, context: SmsMessageContext = {}): string {
   const prefix: string[] = [];
   if (settings.smsShowAppName === true) prefix.push(`[${line(settings.appName, 60) || 'OfflineSMS'}]`);
   const group = line(context.groupName, 120);
   if (settings.smsShowGroupName === true && group) prefix.push(`[${group}]`);
-  if (settings.smsShowSenderPhone === true && /^\+[1-9]\d{6,14}$/.test(context.senderPhone ?? '')) prefix.push(context.senderPhone!);
+  const { senderPhone, senderUsername } = context;
+  if (typeof senderPhone === 'string' && /^\+[1-9]\d{6,14}$/.test(senderPhone)) {
+    if (settings.smsShowSenderPhone === true) prefix.push(senderPhone);
+  } else {
+    const name = line(context.senderDisplayName, 60);
+    const username = typeof senderUsername === 'string' && /^[a-z0-9][a-z0-9._]{1,18}[a-z0-9]$/.test(senderUsername)
+      ? `@${senderUsername}` : '';
+    if (name && username) prefix.push(`${name} (${username})`);
+    else if (name || username) prefix.push(name || username);
+  }
   return prefix.length ? `${prefix.join('\n')}\n\n${body}` : body;
 }
 
