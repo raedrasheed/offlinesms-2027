@@ -1,0 +1,19 @@
+.analytics-console{color:var(--c-text)}
+.analytics-console .analytics-muted{color:var(--c-text-2)}
+.analytics-console .analytics-text{color:var(--c-text)}
+.analytics-card{background:var(--c-card);border:1px solid var(--c-border);border-radius:20px;box-shadow:0 2px 5px #0b355003}
+.analytics-chip{padding:7px 12px;border-radius:9px;font-size:11px;font-weight:600;white-space:nowrap;color:var(--c-text-2)}
+.analytics-chip-active{background:#1f7ba8;color:#fff!important;box-shadow:0 2px 5px #1f7ba830}
+.analytics-section-link{background:var(--c-card);border:1px solid var(--c-border)}
+.analytics-action{display:inline-flex;align-items:center;justify-content:center;gap:7px;border:1px solid var(--c-border);background:var(--c-card);border-radius:11px;padding:11px 13px;font-size:11px;font-weight:600;min-height:38px}
+.analytics-action:disabled{opacity:.45;cursor:not-allowed}
+.analytics-live-card{background:var(--c-card);border:1px solid var(--c-border);border-radius:20px;padding:20px}
+.analytics-live-primary{background:linear-gradient(125deg,#0d4b68,#167a96);color:white;border-color:transparent;box-shadow:0 5px 18px #1f7ba820}
+.analytics-stat{background:var(--c-bg);border-radius:12px;padding:12px}
+.analytics-alert{border:1px solid #eeb75b;background:#fff5dc;color:#744a0b;border-radius:12px;padding:12px 16px;font-size:12px;line-height:1.6}
+.analytics-input{background:var(--c-bg);border:1px solid var(--c-border);border-radius:9px;color:var(--c-text);padding:9px 10px;font-size:11px}
+.analytics-map-button{border:1px solid var(--c-border);background:var(--c-card);color:var(--c-text);width:32px;height:32px;border-radius:8px;font-weight:700;box-shadow:0 1px 4px #0001}
+.analytics-console button:focus-visible,.analytics-console a:focus-visible,.analytics-console input:focus-visible,.analytics-console path:focus-visible{outline:3px solid #f59e0b;outline-offset:3px}
+.analytics-console path[role=button]:hover{stroke:#f59e0b;stroke-width:2;cursor:pointer}
+@media(prefers-color-scheme:dark){.analytics-console{--c-map-empty:#283d4b}}
+@media(max-width:640px){.analytics-live-card{padding:16px}.analytics-chip{padding:7px 9px}.analytics-stat{padding:10px}}
