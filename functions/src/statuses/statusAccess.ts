@@ -3,8 +3,12 @@ import type { Firestore } from 'firebase-admin/firestore';
 import { isStatusAudienceMember, type StatusAudienceFields } from './statusLogic';
 
 export type StatusRecord = StatusAudienceFields & {
-  authorId?: string; expiresAt?: { toMillis(): number }; body?: string;
+  authorId?: string; expiresAt?: { toMillis(): number }; body?: string; moderationSuspended?: boolean;
 };
+
+export function assertStatusNotSuspended(status: Pick<StatusRecord, 'moderationSuspended'>) {
+  if (status.moderationSuspended === true) throw new HttpsError('not-found', 'status-not-found');
+}
 
 export function statusIdInput(value: unknown): string {
   if (typeof value !== 'string' || !value || value.length > 200 || value.includes('/')) {
@@ -15,6 +19,7 @@ export function statusIdInput(value: unknown): string {
 
 /** Every server interaction rechecks expiry, audience, accounts and both blocks. */
 export async function assertStatusAccess(db: Firestore, uid: string, status: StatusRecord, ownerOnly = false) {
+  assertStatusNotSuspended(status);
   const owner = status.authorId;
   if (!owner || (ownerOnly && owner !== uid)) throw new HttpsError('permission-denied', 'status-owner-required');
   if ((status.expiresAt?.toMillis?.() ?? 0) <= Date.now()) throw new HttpsError('failed-precondition', 'status-expired');

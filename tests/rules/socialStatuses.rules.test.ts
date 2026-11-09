@@ -41,6 +41,15 @@ beforeEach(async () => {
 const mutate = async (path: string, data: Record<string, unknown>) => env.withSecurityRulesDisabled(async ctx => { await updateDoc(doc(ctx.firestore(), path), data); });
 
 describe('status document audience and trusted interactions', () => {
+  it('hides suspended statuses from the audience and keeps moderation server-owned', async () => {
+    const peer = env.authenticatedContext('peer').firestore();
+    const owner = env.authenticatedContext('owner').firestore();
+    await mutate('statuses/allowed', { moderationSuspended: true });
+    await assertFails(getDoc(doc(peer, 'statuses/allowed')));
+    await assertFails(updateDoc(doc(owner, 'statuses/allowed'), { moderationSuspended: false }));
+    await mutate('statuses/allowed', { moderationSuspended: false });
+    await assertSucceeds(getDoc(doc(peer, 'statuses/allowed')));
+  });
   it('preserves the owner query and live updates even when own stories expire', async () => {
     const db = env.authenticatedContext('owner').firestore();
     const own = query(collection(db, 'statuses'), where('authorId', '==', 'owner'));

@@ -72,6 +72,16 @@ describe('Clips validation and server configuration', () => {
 });
 
 describe('Clips access and privacy', () => {
+  it('hides a suspended clip from its creator and viewers until restored', async () => {
+    await seedClip('video', { status: 'suspended' });
+    await expectHttps(getClip.run(req('alice', { clipId: 'video' })), 'not-found');
+    await expectHttps(getClip.run(req('bob', { clipId: 'video' })), 'not-found');
+    await expectHttps(updateClip.run(req('alice', { clipId: 'video', caption: 'Edit' })), 'not-found');
+    expect((await getClipsFeed.run(req('bob', {}))).items).toHaveLength(0);
+    expect((await getClipsFeed.run(req('alice', { mode: 'profile' }))).items).toHaveLength(0);
+    await db().doc('clips/video').update({ status: 'published' });
+    expect((await getClip.run(req('bob', { clipId: 'video' }))).clip.id).toBe('video');
+  });
   it('hides unpublished, private, deleted-owner, and suspended-owner content', async () => {
     for (const status of ['uploading', 'processing', 'failed', 'pending_review', 'rejected']) {
       const c = await seedClip('video', { status });

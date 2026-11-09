@@ -9,7 +9,7 @@
 
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
-import { assertStatusAccess, statusIdInput } from './statusAccess';
+import { assertStatusAccess, assertStatusNotSuspended, statusIdInput } from './statusAccess';
 import { isStatusAudienceMember } from './statusLogic';
 
 export const markStatusViewed = onCall(async (request) => {
@@ -35,6 +35,7 @@ export const markStatusViewed = onCall(async (request) => {
   return db.runTransaction(async tx => {
     const [fresh, view] = await Promise.all([tx.get(statusRef), tx.get(viewRef)]);
     if (!fresh.exists) throw new HttpsError('not-found', 'status-not-found');
+    assertStatusNotSuspended(fresh.data()!);
     if ((fresh.get('expiresAt')?.toMillis?.() ?? 0) <= Date.now()) throw new HttpsError('failed-precondition', 'status-expired');
     if (fresh.get('authorId') !== s.authorId || !isStatusAudienceMember(fresh.data()!, uid)) throw new HttpsError('permission-denied', 'not-in-audience');
     if (view.exists) return { ok: true, applied: false, reason: 'already-viewed' };

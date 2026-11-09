@@ -3,7 +3,7 @@ import { getFirestore, FieldPath, FieldValue } from 'firebase-admin/firestore';
 import { publicNameFrom } from '../lib/displayName';
 import { getOrCreateDirectConversation } from '../chats/getOrCreateDirectConversation';
 import { sendTextMessage } from '../chats/sendTextMessage';
-import { assertStatusAccess, statusIdInput } from './statusAccess';
+import { assertStatusAccess, assertStatusNotSuspended, statusIdInput } from './statusAccess';
 import { socialActivityId, writeSocialActivity } from '../social/activityModel';
 import { isStatusAudienceMember } from './statusLogic';
 
@@ -42,6 +42,7 @@ export const setStatusLike = onCall(async request => {
   return db.runTransaction(async tx => {
     const [fresh, previous] = await Promise.all([tx.get(ref), tx.get(ref.collection('likes').doc(uid))]);
     if (!fresh.exists) throw new HttpsError('not-found', 'status-not-found');
+    assertStatusNotSuspended(fresh.data()!);
     if ((fresh.get('expiresAt')?.toMillis?.() ?? 0) <= Date.now()) throw new HttpsError('failed-precondition', 'status-expired');
     if (fresh.get('authorId') !== snapshot.get('authorId') || !isStatusAudienceMember(fresh.data()!, uid)) throw new HttpsError('permission-denied', 'not-in-audience');
     const count = Math.max(0, Number(fresh.get('likeCount') ?? 0));

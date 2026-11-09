@@ -9,12 +9,13 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { writeAuditLog } from '../lib/auditLog';
+import { hasSuperAdminRole } from '../lib/roles';
 
 export const adminLockGroup = onCall({ region: 'us-central1' }, async (request) => {
   const callerUid = request.auth?.uid;
   const callerClaims = (request.auth?.token ?? {}) as Record<string, unknown>;
 
-  if (!callerUid || !callerClaims.admin) {
+  if (!callerUid || !(hasSuperAdminRole(callerClaims) || callerClaims.admin === true)) {
     await writeAuditLog({
       action: 'admin.group.locked',
       actor:  { uid: callerUid ?? 'anonymous' },

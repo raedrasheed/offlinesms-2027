@@ -1,7 +1,7 @@
 import { HttpsError } from 'firebase-functions/v2/https';
 
 export type ClipAudience = 'public' | 'followers' | 'group' | 'private';
-export type ClipStatus = 'uploading' | 'processing' | 'failed' | 'pending_review' | 'published' | 'rejected' | 'removed';
+export type ClipStatus = 'uploading' | 'processing' | 'failed' | 'pending_review' | 'published' | 'suspended' | 'rejected' | 'removed';
 export interface ClipDoc extends Record<string, any> {
   ownerUid: string; status: ClipStatus; audience: ClipAudience; groupId?: string | null;
 }

@@ -25,7 +25,7 @@ export const acceptClipsTerms = onCall({ region: 'us-central1' }, async request 
 export const updateClip = onCall({ region: 'us-central1' }, async request => {
   const uid = requireClipUid(request), db = getFirestore(), config = await assertClipMutation(db, uid);
   const id = clipId(request.data?.clipId), ref = db.doc(`clips/${id}`), initial = await ref.get();
-  if (!initial.exists || initial.get('ownerUid') !== uid || ['removed', 'uploading', 'processing'].includes(initial.get('status')))
+  if (!initial.exists || initial.get('ownerUid') !== uid || ['removed', 'suspended', 'uploading', 'processing'].includes(initial.get('status')))
     throw new HttpsError('not-found', 'clip-unavailable');
   const current = initial.data() as ClipDoc;
   const edit = request.data ?? {};
@@ -39,7 +39,7 @@ export const updateClip = onCall({ region: 'us-central1' }, async request => {
   await db.runTransaction(async tx => {
     await assertActiveClipUser(db, uid, tx);
     const live = await tx.get(ref);
-    if (!live.exists || live.get('ownerUid') !== uid || ['removed', 'uploading', 'processing'].includes(live.get('status')))
+    if (!live.exists || live.get('ownerUid') !== uid || ['removed', 'suspended', 'uploading', 'processing'].includes(live.get('status')))
       throw new HttpsError('not-found', 'clip-unavailable');
     if (update.audience === 'group') await assertClipGroupMember(db, update.groupId!, uid, tx);
     // Review covers the actual caption and audience, not just the video binary.
