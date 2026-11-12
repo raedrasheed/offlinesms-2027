@@ -702,7 +702,7 @@ function showSettings() {
   const content = el('div', 'live-settings');
   content.append(el('h1', '', t('settings')));
   const identity = el('section', 'feature-card live-preferences');
-  const account = el('p', '', user.email || t('peer'));
+  const account = el('p', '', user.email || user.phoneNumber || t('peer'));
   account.dir = 'auto';
   const logout = button(t('signOut'), async () => {
     const generation = session;
@@ -794,6 +794,11 @@ const signIn = createSignInView({
   container: byId('web-sign-in'), getLanguage: () => language, setLanguage,
   requestCode: (email) => client.requestEmailOtp(email),
   verifyCode: (email, code) => client.verifyEmailOtp(email, code),
+  getPhoneAvailability: () => client.getPhoneAvailability(),
+  requestPhoneCode: (phone, options) => client.requestPhoneCode(phone, options),
+  verifyPhoneCode: (challengeId, code, options) => client.verifyPhoneCode(challengeId, code, options),
+  resetPhoneFlow: () => client?.resetPhoneFlow(),
+  phoneErrorInfo: (error) => client.phoneErrorInfo(error),
   signOut: () => client.signOut(),
 });
 const tools = createChatTools({

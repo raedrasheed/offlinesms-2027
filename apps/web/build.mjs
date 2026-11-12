@@ -11,6 +11,8 @@ const { outputFiles: [script] } = await build({
   absWorkingDir: source,
   entryPoints: ['app.js'],
   bundle: true,
+  // Pure TypeScript modules shared with mobile need no Expo build settings.
+  tsconfigRaw: { compilerOptions: {} },
   define: { __OFFLINESMS_WEB_APP_CHECK_SITE_KEY__: JSON.stringify(siteKey) },
   format: 'esm',
   target: 'es2022',

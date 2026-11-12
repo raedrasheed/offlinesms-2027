@@ -1,3 +1,5 @@
+import { createPhoneAuthClient } from './phone-auth-client.js';
+
 // The web client uses the same authenticated Firestore reads and callable writes as mobile.
 export const WATCH_LIMITS = Object.freeze({ conversations: 50, messages: 100 });
 
@@ -84,10 +86,17 @@ export function initializeFirebaseClient(sdk, config, { appCheckSiteKey } = {}) 
     if (currentUid() !== uid) throw clientError('account-changed');
   }
 
-  async function invoke(name, data) {
-    const result = await sdk.httpsCallable(functions, name)(data);
+  async function invoke(name, data, options) {
+    const result = await sdk.httpsCallable(functions, name, options)(data);
     return result.data;
   }
+
+  const phoneAuth = createPhoneAuthClient({
+    invoke,
+    signIn: customToken => sdk.signInWithCustomToken(auth, customToken),
+    isSignedIn: () => Boolean(auth.currentUser),
+    useAppCheck: Boolean(appCheckSiteKey),
+  });
 
   // The caller supplies literal names of existing public app callables. Firebase
   // attaches Auth/App Check and the callable remains the source of authorization.
@@ -230,7 +239,10 @@ export function initializeFirebaseClient(sdk, config, { appCheckSiteKey } = {}) 
 
   return Object.freeze({
     watchAuth(onUser, onError) {
-      return sdk.onAuthStateChanged(auth, user => onUser(user ? { uid: user.uid, email: user.email ?? null } : null), onError);
+      return sdk.onAuthStateChanged(auth, user => {
+        phoneAuth.resetPhoneFlow();
+        onUser(user ? { uid: user.uid, email: user.email ?? null, phoneNumber: user.phoneNumber ?? null } : null);
+      }, onError);
     },
     watchAccount(uid, onAccount, onError) {
       const source = sdk.doc(db, 'users', documentId(uid));
@@ -246,7 +258,11 @@ export function initializeFirebaseClient(sdk, config, { appCheckSiteKey } = {}) 
       if (typeof customToken !== 'string' || !customToken) throw clientError('signin-interrupted');
       await sdk.signInWithCustomToken(auth, customToken);
     },
-    signOut: () => sdk.signOut(auth),
+    ...phoneAuth,
+    signOut() {
+      phoneAuth.resetPhoneFlow();
+      return sdk.signOut(auth);
+    },
     watchConversations,
     watchThread,
     watchUserState,

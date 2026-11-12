@@ -13,7 +13,7 @@ npm --prefix apps/web run build
 if ($LASTEXITCODE -ne 0) { throw 'OfflineSMS Web build failed' }
 ```
 
-If App Check is configured for the Web App with reCAPTCHA Enterprise, set `$env:OFFLINESMS_WEB_APP_CHECK_SITE_KEY` to its public site key before building or deploying. Register the Firebase Hosting hostname and the custom hostname on that reCAPTCHA key. [Firebase App Check for Web](https://firebase.google.com/docs/app-check/web/recaptcha-enterprise-provider)
+If the backend requires App Check, register the Web App with reCAPTCHA Enterprise in Firebase App Check. Register the Firebase Hosting hostname and the custom hostname on the reCAPTCHA key, and set `$env:OFFLINESMS_WEB_APP_CHECK_SITE_KEY` to the public site key before building or deploying. The phone sign-in flow uses the existing OfflineSMS callables and their server-side availability and verification checks. [Firebase App Check for Web](https://firebase.google.com/docs/app-check/web/recaptcha-enterprise-provider)
 
 ## Configure the dedicated Hosting target
 
@@ -42,4 +42,6 @@ firebase deploy --only hosting:web --project offlinesms-prod-2027
 if ($LASTEXITCODE -ne 0) { throw 'OfflineSMS Web Hosting deployment failed' }
 ```
 
-Use the Hosting URL returned by the deploy command to verify that the sign-in screen appears and `/__/firebase/init.json` reports project ID `offlinesms-prod-2027`. Use an authorized test account to check email sign-in, the conversation list, and message exchange with another test account. In the project's Hosting console, open the dedicated site, select **Add custom domain**, and enter `web.offlinesms.com`. Use the records Firebase supplies in the DNS provider and wait for Hosting to verify the domain and provision HTTPS. Repeat the sign-in and conversation checks on the custom domain after it becomes active. [Firebase custom-domain setup](https://firebase.google.com/docs/hosting/custom-domain)
+Use the Hosting URL returned by the deploy command to verify that the sign-in screen appears and `/__/firebase/init.json` reports project ID `offlinesms-prod-2027`. Check email sign-in and, when phone sign-in is available, use an authorized test account with a number in a supported country to check code delivery and verification. Verify that the correct conversations appear and that two test accounts can exchange a message. Phone sign-in availability follows the project configuration and relay coverage.
+
+In the project's Hosting console, open the dedicated site, select **Add custom domain**, and enter `web.offlinesms.com`. Use the records Firebase supplies in the DNS provider and wait for Hosting to verify the domain and provision HTTPS. Repeat the sign-in and conversation checks on the custom domain after it becomes active. [Firebase custom-domain setup](https://firebase.google.com/docs/hosting/custom-domain)
