@@ -61,9 +61,9 @@ describe('organization SMS formatting and segment billing', () => {
       recipients: batch.get('recipientCount'), reserved: batch.get('pointsReserved'),
     }));
     expect(byEncodingAndCount).toEqual(expect.arrayContaining([
-      expect.objectContaining({ text: '[OfflineSMS]\nOrganization\n\nT: hello', encoding: 'GSM-7', segments: 1, unit: 28, recipients: 1, reserved: 28 }),
-      expect.objectContaining({ text: `[OfflineSMS]\nOrganization\n\nT: ${'x'.repeat(150)}`, encoding: 'GSM-7', segments: 2, unit: 56, recipients: 1, reserved: 56 }),
-      expect.objectContaining({ text: `[OfflineSMS]\nOrganization\n\nT: ${'ش'.repeat(60)}`, encoding: 'UCS-2', segments: 2, unit: 56, recipients: 2, reserved: 112 }),
+      expect.objectContaining({ text: '[OfflineSMS]\n[Organization]\n\nT: hello', encoding: 'GSM-7', segments: 1, unit: 28, recipients: 1, reserved: 28 }),
+      expect.objectContaining({ text: `[OfflineSMS]\n[Organization]\n\nT: ${'x'.repeat(150)}`, encoding: 'GSM-7', segments: 2, unit: 56, recipients: 1, reserved: 56 }),
+      expect.objectContaining({ text: `[OfflineSMS]\n[Organization]\n\nT: ${'ش'.repeat(60)}`, encoding: 'UCS-2', segments: 2, unit: 56, recipients: 2, reserved: 112 }),
     ]));
     expect(dispatch).toHaveBeenCalledTimes(3);
     for (const batch of batches) {
@@ -103,7 +103,7 @@ describe('organization SMS formatting and segment billing', () => {
     const jobs = await db().collection('relayJobs').where('recipientUid', '==', 'short-recipient').get();
     expect(jobs.size).toBe(1);
     const job = jobs.docs[0];
-    const smsBody = `${name}\n\nT: ${body}`;
+    const smsBody = `[${name}]\n\nT: ${body}`;
     expect(job.data()).toMatchObject({ assignedDeviceId: DEVICE, messageBody: smsBody });
     const batch = await db().collection('smsBatches').doc(job.get('batchId')).get();
     expect(batch.data()).toMatchObject({ smsBody, smsEncoding: 'UCS-2', smsSegments: 2, pointsPerRecipient: 56 });
@@ -128,7 +128,7 @@ describe('organization SMS formatting and segment billing', () => {
     expect(duplicateSnap.get('smsBatchId')).toBeUndefined();
     const smsBatch = db().collection('smsBatches').doc(firstSnap.get('smsBatchId'));
     expect((await smsBatch.collection('recipients').doc('short-recipient').get()).get('appReceiptStatus')).toBe('delivered');
-    expect(dispatch).toHaveBeenCalledWith(smsBatch.id, '[OfflineSMS]\nOrganization\n\nT: hello', [expect.objectContaining({ uid: 'short-recipient' })]);
+    expect(dispatch).toHaveBeenCalledWith(smsBatch.id, '[OfflineSMS]\n[Organization]\n\nT: hello', [expect.objectContaining({ uid: 'short-recipient' })]);
     expect((await sourceBatch().get()).data()).toMatchObject({ smsQueued: 3, smsFailed: 1, smsSkipped: 1, smsPointsReserved: 196 });
   });
 

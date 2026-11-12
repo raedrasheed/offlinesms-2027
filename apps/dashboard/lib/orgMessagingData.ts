@@ -10,7 +10,8 @@
 
 import { adminDb } from './firebase-admin';
 import {
-  usageMonthKey, resolveEscalationPolicy, type EscalationPolicy,
+  usageMonthKey, resolveEscalationPolicy, resolveOrgSmsIdentification,
+  type EscalationPolicy, type OrgSmsIdentification,
 } from './orgMessagingValidation';
 import { pickApiKeyStatusRow } from './orgMessagingKeys';
 import {
@@ -33,6 +34,7 @@ export type OrgMessagingOverview = {
   percentUsed:         number;            // 0–100
   monthKey:            string;            // 'YYYY-MM'
   escalation:          EscalationPolicy;  // org default (delay + SMS audience)
+  smsIdentification:   OrgSmsIdentification;
   smsWalletBalance:    number | null;     // org sender points wallet (escalation billing)
 };
 
@@ -70,6 +72,7 @@ export async function getOrgMessagingOverview(orgId: string): Promise<OrgMessagi
     percentUsed:         percentUsed(limit, used),
     monthKey:            month,
     escalation,
+    smsIdentification:   resolveOrgSmsIdentification(org.smsIdentification),
     smsWalletBalance,
   };
 }

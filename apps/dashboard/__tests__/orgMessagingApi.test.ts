@@ -172,7 +172,7 @@ describe('no raw API key leakage in error/response shapes', () => {
 
 import {
   actorForContext, createdByForContext, classifyRecipientResolution,
-  batchDocFields, messageDocFields, summarizeItems as _sum,
+  batchDocFields, messageDocFields, resolveSmsOnlyRecipient, summarizeItems as _sum,
   type SubmitContext, type ResolvedItem,
 } from '../lib/orgMessagingApi';
 
@@ -215,6 +215,29 @@ describe('classifyRecipientResolution — honest statuses', () => {
   it('unlinked phone → unsupported_recipient(phone_not_linked_to_user)', () => {
     expect(classifyRecipientResolution({ phone: '+970599999999' }, lookups))
       .toEqual({ status: 'unsupported_recipient', failureReason: 'phone_not_linked_to_user', resolvedUserId: null });
+  });
+  it('queues valid unlinked phones for SMS and records the phone-only path', () => {
+    const recipient = { phone: '+970599999999' };
+    const item = { recipient, title: 'Title', body: 'Body', ...classifyRecipientResolution(recipient, lookups) };
+    const resolved = resolveSmsOnlyRecipient(item, true);
+    expect(resolved).toMatchObject({ smsOnly: true, status: 'queued', resolvedUserId: null, failureReason: null });
+    expect(messageDocFields('org1', 'batch1', resolved)).toMatchObject({
+      recipientType: 'phone', recipientValue: recipient.phone, smsOnly: true, resolvedUserId: null,
+    });
+  });
+  it('keeps an unlinked number unsupported when SMS escalation is disabled', () => {
+    const recipient = { phone: '+970599999999' };
+    const item = { recipient, title: 'Title', body: 'Body', ...classifyRecipientResolution(recipient, lookups) };
+    expect(resolveSmsOnlyRecipient(item, false)).toMatchObject({
+      status: 'unsupported_recipient', failureReason: 'sms_escalation_disabled',
+    });
+  });
+  it('keeps invalid phone input outside the SMS-only queue', () => {
+    const recipient = { phone: '+1234567' };
+    const item = { recipient, title: 'Title', body: 'Body', ...classifyRecipientResolution(recipient, lookups) };
+    expect(resolveSmsOnlyRecipient(item, true)).toMatchObject({
+      status: 'unsupported_recipient', failureReason: 'invalid_phone_number',
+    });
   });
   it('never produces sent/delivered/seen', () => {
     const all = [
@@ -284,7 +307,7 @@ describe('mapBatchRow / mapMessageRow — allow-list read models', () => {
     });
     expect(Object.keys(row).sort()).toEqual([
       'batchId', 'body', 'createdAt', 'failureReason', 'id',
-      'recipientType', 'recipientValue', 'smsEscalation', 'status', 'title',
+      'recipientType', 'recipientValue', 'smsEscalation', 'smsOnly', 'smsSkipReason', 'status', 'title',
     ]);
     // The allow-list copies no secret material (keyHash / resolvedUserId).
     expect(JSON.stringify(row)).not.toContain('SECRET');

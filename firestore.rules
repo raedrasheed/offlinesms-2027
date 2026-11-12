@@ -460,12 +460,19 @@ service cloud.firestore {
     // ════════════════════════════════════════════════════════════
     // SMS BATCHES
     // ════════════════════════════════════════════════════════════
+    function canReadSmsBatch(batch) {
+      return isAuthed() && (isAdmin() || batch.senderId == request.auth.uid);
+    }
     match /smsBatches/{batchId} {
-      allow read:  if isAuthed() && (resource.data.senderId == request.auth.uid || isAdmin());
+      allow read:  if canReadSmsBatch(resource.data);
       allow write: if isAdmin();
 
       match /recipients/{recipientId} {
-        allow read:  if isAuthed();
+        function canReadRecipient() {
+          let batch = /databases/$(database)/documents/smsBatches/$(batchId);
+          return isAuthed() && exists(batch) && canReadSmsBatch(get(batch).data);
+        }
+        allow read:  if canReadRecipient();
         allow write: if isAdmin();
       }
     }

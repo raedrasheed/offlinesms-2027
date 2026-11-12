@@ -147,7 +147,9 @@ export default async function OrgMessagingPage({
           </span>
         </div>
         <EscalationSettings
+          key={orgId}
           initial={overview.escalation}
+          smsIdentification={overview.smsIdentification}
           action={updateOrgEscalationSettings.bind(null, orgId)}
         />
       </section>

@@ -92,6 +92,18 @@ export async function findUidsByPhoneNumbers(
   return out;
 }
 
+/** Find which of a set of E.164 numbers already belong to accounts. */
+export async function findLinkedPhoneNumbers(
+  db: FirebaseFirestore.Firestore,
+  phones: string[],
+): Promise<Set<string>> {
+  const lookups: Array<ReturnType<typeof findUidsByPhoneNumbers>> = [];
+  for (let offset = 0; offset < phones.length; offset += 10) {
+    lookups.push(findUidsByPhoneNumbers(db, phones.slice(offset, offset + 10)));
+  }
+  return new Set((await Promise.all(lookups)).flatMap(links => [...links.keys()]));
+}
+
 /** Single phone → uid (Phase B). Admin SDK only. */
 export async function findUidByPhoneNumber(
   db: FirebaseFirestore.Firestore,

@@ -5,6 +5,7 @@
 // the REAL in-app receipts (queued → delivered/read), then escalates the
 // recipients still matching the batch's audience (unread_only /
 // undelivered_only / everyone — exactly the app's escalation options) to SMS.
+// Phone-only recipients have no in-app receipt and are always SMS candidates.
 //
 // SMS sending REUSES the existing engine end-to-end: classifyRecipients
 // (phones, opt-out, verification), provider routing (HTTP gateway / relay /
@@ -14,7 +15,10 @@
 
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { getFirestore, FieldValue, Timestamp } from 'firebase-admin/firestore';
-import { classifyRecipients, MAX_RECIPIENTS_PER_BATCH } from '../sms/recipients';
+import {
+  classifyRecipients, externalRecipientId, isExternalRecipientId, maskPhone,
+  MAX_RECIPIENTS_PER_BATCH, type Eligible,
+} from '../sms/recipients';
 import { loadSmsContentContext, prepareSmsContentWithContext } from '../sms/messageContent';
 import { sendBatch } from '../sms/gateway';
 import { loadOrganizationRelayAssignment, partitionRecipientsByCoverage } from '../sms/countryRouting';
@@ -23,6 +27,8 @@ import { relayModeEngaged, isHybrid } from '../sms/relayLogic';
 import { dispatchBatchToRelay } from '../sms/relayDispatcher';
 import { maybeFinalizeRelayBatch } from '../sms/relaySettlement';
 import { writeAuditLog } from '../lib/auditLog';
+import { normalizePhoneAndCountry } from '../lib/phoneCountry';
+import { findLinkedPhoneNumbers } from '../lib/userPrivate';
 import {
   audienceIncludes, composeSmsText, groupBySmsText, receiptToRowStatus,
   type OrgEscalationAudience,
@@ -33,15 +39,30 @@ const ROWS_MAX = 600;
 
 type RowRef = {
   ref:            FirebaseFirestore.DocumentReference;
-  uid:            string;            // resolvedUserId
-  conversationId: string;
-  messageId:      string;
+  uid:            string;            // resolvedUserId or external recipient ID
   title:          string;
   body:           string;
   status:         string;            // queued | delivered | read
   receipt:        string | null;
   smsText:        string;
-};
+} & (
+  | { kind: 'app'; conversationId: string; messageId: string }
+  | { kind: 'sms-only'; phone: string }
+);
+
+type SmsSkip = { ref: FirebaseFirestore.DocumentReference; reason: string };
+
+async function markSmsRowsSkipped(db: FirebaseFirestore.Firestore, skips: SmsSkip[]) {
+  for (let offset = 0; offset < skips.length; offset += 400) {
+    const writes = db.batch();
+    for (const { ref, reason } of skips.slice(offset, offset + 400)) {
+      writes.update(ref, {
+        smsEscalation: 'skipped', smsSkipReason: reason, updatedAt: FieldValue.serverTimestamp(),
+      });
+    }
+    await writes.commit();
+  }
+}
 
 export const escalateOrgBatches = onSchedule(
   { schedule: 'every 1 minutes', timeZone: 'UTC' },
@@ -87,7 +108,7 @@ async function processBatch(
   batch: Record<string, unknown>,
 ) {
   const organizationId = (batch.organizationId as string) ?? '';
-  const escalation = (batch.escalation as { audience?: string } | undefined) ?? {};
+  const escalation = (batch.escalation as { audience?: string; enabled?: boolean } | undefined) ?? {};
   const audience = (['unread_only', 'undelivered_only', 'everyone'].includes(escalation.audience as string)
     ? escalation.audience : 'unread_only') as OrgEscalationAudience;
   const senderUid = `orgsender_${organizationId}`;
@@ -95,29 +116,44 @@ async function processBatch(
   const currentBatch = await batchRef.get();
   if (currentBatch.get('escalationStatus') !== 'processing' || currentBatch.get('smsReservationCommittedAt')) return;
 
-  // 1 — Load the batch's delivered rows (those with a real in-app message).
+  // 1 — Load rows backed by an in-app message or an explicitly accepted phone.
   const rowsSnap = await db.collection('organizationMessages')
     .where('batchId', '==', batchId).limit(ROWS_MAX).get();
   const rows: RowRef[] = [];
+  const skips: SmsSkip[] = [];
   for (const d of rowsSnap.docs) {
     const x = d.data() as Record<string, unknown>;
-    if (!x.resolvedUserId || !x.conversationId || !x.messageId) continue;
-    rows.push({
+    const row = {
       ref: d.ref,
-      uid: x.resolvedUserId as string,
-      conversationId: x.conversationId as string,
-      messageId: x.messageId as string,
       title: (x.title as string) ?? '',
       body: (x.body as string) ?? '',
       status: (x.status as string) ?? 'queued',
       receipt: null,
       smsText: '',
-    });
+    };
+    if (x.resolvedUserId && x.conversationId && x.messageId) {
+      rows.push({
+        ...row, kind: 'app', uid: x.resolvedUserId as string,
+        conversationId: x.conversationId as string, messageId: x.messageId as string,
+      });
+    } else if (escalation.enabled === true && x.smsOnly === true && x.status === 'queued'
+        && x.organizationId === organizationId && x.recipientType === 'phone') {
+      const value = typeof x.recipientValue === 'string' ? x.recipientValue : '';
+      const phone = normalizePhoneAndCountry(value);
+      if (!phone.isValid || phone.e164 !== value) {
+        skips.push({ ref: d.ref, reason: 'invalid_phone' });
+        continue;
+      }
+      rows.push({
+        ...row, kind: 'sms-only', uid: externalRecipientId(phone.e164.slice(1)), phone: phone.e164,
+      });
+    }
   }
 
   // 2 — Refresh receipt-backed statuses from the app's real receipts.
-  if (rows.length > 0) {
-    const receiptRefs = rows.map(r =>
+  const appRows = rows.filter(r => r.kind === 'app');
+  if (appRows.length > 0) {
+    const receiptRefs = appRows.map(r =>
       db.collection('conversations').doc(r.conversationId)
         .collection('messages').doc(r.messageId)
         .collection('receipts').doc(r.uid));
@@ -129,14 +165,14 @@ async function processBatch(
     const RANK: Record<string, number> = { queued: 0, delivered: 1, read: 2 };
     receiptSnaps.forEach((snap, i) => {
       const receipt = (snap.data()?.status as string | undefined) ?? null;
-      rows[i].receipt = receipt;
+      appRows[i].receipt = receipt;
       const next = receiptToRowStatus(receipt);
       if (next === 'read') read++;
       if (next === 'read' || next === 'delivered') delivered++;
       // Monotonic upgrade only: queued → delivered → read.
-      if ((RANK[next] ?? 0) > (RANK[rows[i].status] ?? 0)) {
-        statusWrites.update(rows[i].ref, { status: next, updatedAt: FieldValue.serverTimestamp() });
-        rows[i].status = next;
+      if ((RANK[next] ?? 0) > (RANK[appRows[i].status] ?? 0)) {
+        statusWrites.update(appRows[i].ref, { status: next, updatedAt: FieldValue.serverTimestamp() });
+        appRows[i].status = next;
         dirty++;
       }
     });
@@ -145,11 +181,12 @@ async function processBatch(
   }
 
   // 3 — Audience filter (the app's three options) → SMS candidates.
-  const targets = rows.filter(r => audienceIncludes(audience, r.receipt));
+  const targets = rows.filter(r => r.kind === 'sms-only' || audienceIncludes(audience, r.receipt));
   if (targets.length === 0) {
+    await markSmsRowsSkipped(db, skips);
     await batchRef.update({
       escalationStatus: 'completed', escalatedAt: FieldValue.serverTimestamp(),
-      smsQueued: 0, smsFailed: 0, smsSkipped: 0,
+      smsQueued: 0, smsFailed: 0, smsSkipped: skips.length,
     });
     return;
   }
@@ -163,21 +200,41 @@ async function processBatch(
     if (recipientRows) recipientRows.push(row);
     else rowsByUid.set(row.uid, [row]);
   }
-  const candidates = Array.from(rowsByUid.values(), ([row]) => ({ uid: row.uid, appReceiptStatus: row.receipt }));
-  const { eligible, excluded } = await classifyRecipients(db, candidates);
-  const exclusionByUid = new Map(excluded.map(e => [e.uid, e.skipReason]));
-  const skippedWrites = db.batch();
-  let classificationSkipped = 0;
+  const firstRows = Array.from(rowsByUid.values(), ([row]) => row);
+  const candidates = firstRows.filter(row => row.kind === 'app')
+    .map(row => ({ uid: row.uid, appReceiptStatus: row.receipt }));
+  const smsOnlyRows = firstRows.filter(row => row.kind === 'sms-only');
+  const externalPhones = smsOnlyRows.map(row => row.phone);
+  // Recheck at dispatch time so a number registered after submission cannot
+  // bypass the account's SMS preferences via the phone-only path.
+  const [linkedPhones, { eligible: appEligible, excluded }] = await Promise.all([
+    findLinkedPhoneNumbers(db, externalPhones),
+    classifyRecipients(db, candidates),
+  ]);
+  const appPhones = new Set(appEligible.map(recipient => normalizePhoneAndCountry(recipient.phone).e164));
+  const exclusionByUid = new Map<string, string>(excluded.map(e => [e.uid, e.skipReason]));
+  const smsOnlyEligible: Eligible[] = [];
+  for (const row of smsOnlyRows) {
+    if (linkedPhones.has(row.phone)) {
+      exclusionByUid.set(row.uid, 'phone_linked_to_user');
+      continue;
+    }
+    if (appPhones.has(row.phone)) {
+      exclusionByUid.set(row.uid, 'duplicate-phone');
+      continue;
+    }
+    smsOnlyEligible.push({
+      uid: row.uid, phone: row.phone, maskedPhone: maskPhone(row.phone), displayName: null, appReceiptStatus: null,
+    });
+  }
+  // Give the SMS-only recipients priority if the delivery batch is full.
+  const eligible = [...smsOnlyEligible, ...appEligible];
   for (const [uid, recipientRows] of rowsByUid) {
     const exclusion = exclusionByUid.get(uid);
     for (const row of exclusion ? recipientRows : recipientRows.slice(1)) {
-      skippedWrites.update(row.ref, {
-        smsEscalation: 'skipped', smsSkipReason: exclusion ?? 'duplicate-phone', updatedAt: FieldValue.serverTimestamp(),
-      });
-      classificationSkipped++;
+      skips.push({ ref: row.ref, reason: exclusion ?? 'duplicate-phone' });
     }
   }
-  if (classificationSkipped > 0) await skippedWrites.commit();
 
   // Country-based relay routing — enforced for EVERY provider mode (relay AND
   // HTTP). A recipient whose detected country has no eligible relay is NOT sent
@@ -188,23 +245,20 @@ async function processBatch(
   const organizationRelayDeviceId = await loadOrganizationRelayAssignment(organizationId);
   const { uncovered } = await partitionRecipientsByCoverage(
     organizationId, eligible.map(e => ({ id: e.uid, phoneE164: e.phone })), { organizationRelayDeviceId });
-  let noRelaySkipped = 0;
-  if (uncovered.length > 0) {
-    const uncoveredIds = new Set(uncovered.map(u => u.id));
-    const covWrites = db.batch();
-    for (const u of uncovered) {
-      const row = rowsByUid.get(u.id)?.[0];
-      if (row) covWrites.update(row.ref, { smsEscalation: 'skipped', smsSkipReason: u.reason, updatedAt: FieldValue.serverTimestamp() });
-    }
-    await covWrites.commit();
-    for (let i = eligible.length - 1; i >= 0; i--) {
-      if (uncoveredIds.has(eligible[i].uid)) eligible.splice(i, 1);
-    }
-    noRelaySkipped = uncovered.length;
+  const uncoveredIds = new Set(uncovered.map(u => u.id));
+  for (const { id, reason } of uncovered) {
+    const row = rowsByUid.get(id)?.[0];
+    if (row) skips.push({ ref: row.ref, reason });
   }
-  const smsSkipped = classificationSkipped + noRelaySkipped;
+  const covered = eligible.filter(e => !uncoveredIds.has(e.uid));
+  const sendable = covered.slice(0, MAX_RECIPIENTS_PER_BATCH);
+  for (const recipient of covered.slice(MAX_RECIPIENTS_PER_BATCH)) {
+    skips.push({ ref: rowsByUid.get(recipient.uid)![0].ref, reason: 'sms_batch_limit' });
+  }
+  await markSmsRowsSkipped(db, skips);
+  const smsSkipped = skips.length;
 
-  if (eligible.length === 0) {
+  if (sendable.length === 0) {
     await batchRef.update({
       escalationStatus: 'completed', escalatedAt: FieldValue.serverTimestamp(),
       smsQueued: 0, smsFailed: 0, smsSkipped,
@@ -212,14 +266,19 @@ async function processBatch(
     return;
   }
 
-  // 5 — Use the organization's current name and price the complete outgoing
-  // payload once, including the name, branding and separators.
-  const sendable = eligible.slice(0, MAX_RECIPIENTS_PER_BATCH);
+  // 5 — Price the complete payload, including the current organization name,
+  // the saved recipient group name from submission and any branding.
+  const showOrganizationName = currentBatch.get('smsIdentification.showOrganizationName') !== false;
+  const showRecipientGroupName = currentBatch.get('smsIdentification.showRecipientGroupName') !== false;
   const [formatContext, organization] = await Promise.all([
     loadSmsContentContext(db, { senderUid }),
-    db.collection('organizations').doc(organizationId).get(),
+    showOrganizationName ? db.collection('organizations').doc(organizationId).get() : null,
   ]);
-  const contentContext = { ...formatContext, organizationName: organization.get('name') };
+  const contentContext = {
+    ...formatContext,
+    organizationName: organization?.get('name'),
+    recipientGroupName: showRecipientGroupName ? currentBatch.get('recipientGroupName') : undefined,
+  };
   const contentByText = new Map<string, ReturnType<typeof prepareSmsContentWithContext>>();
   const sendRows = sendable.map(e => {
     const row = rowsByUid.get(e.uid)![0];
@@ -228,19 +287,29 @@ async function processBatch(
     contentByText.set(row.smsText, content);
     return row;
   });
-  const groups = groupBySmsText(sendRows);
   const cost = sendRows.reduce((total, row) => total + contentByText.get(row.smsText)!.pointsPerRecipient, 0);
   const eligByUid = new Map(sendable.map(e => [e.uid, e]));
-  const providerMode = organizationRelayDeviceId ? 'relay' : await resolveProvider(organizationId);
-  const plans = [...groups].map(([smsText, groupRows]) => {
-    const groupEligible = groupRows.map(r => eligByUid.get(r.uid)!);
-    const { finalSmsBody: _finalSmsBody, ...pricing } = contentByText.get(smsText)!;
-    return {
-      smsText, groupRows, groupEligible, pricing,
-      groupCost: groupEligible.length * pricing.pointsPerRecipient,
-      smsBatchRef: db.collection('smsBatches').doc(),
-    };
-  });
+  const defaultProvider = organizationRelayDeviceId || sendRows.every(row => row.kind === 'sms-only')
+    ? 'relay' : await resolveProvider(organizationId);
+  // The HTTP gateway is simulated. Phone-only SMS must use a real Relay,
+  // including when the organization has no explicitly assigned device.
+  const defaultRows = defaultProvider === 'relay' ? sendRows : sendRows.filter(row => row.kind === 'app');
+  const relayOnlyRows = defaultProvider === 'relay' ? [] : sendRows.filter(row => row.kind === 'sms-only');
+  const providerGroups = [
+    [defaultProvider, groupBySmsText(defaultRows)],
+    ['relay', groupBySmsText(relayOnlyRows)],
+  ] as const;
+  const plans = providerGroups.flatMap(([providerMode, groups]) =>
+    Array.from(groups, ([smsText, groupRows]) => {
+      const groupEligible = groupRows.map(r => eligByUid.get(r.uid)!);
+      const { finalSmsBody: _finalSmsBody, ...pricing } = contentByText.get(smsText)!;
+      return {
+        providerMode, smsText, groupRows, groupEligible, pricing,
+        groupCost: groupEligible.length * pricing.pointsPerRecipient,
+        smsBatchRef: db.collection('smsBatches').doc(),
+      };
+    }),
+  );
   // The wallet hold, all recoverable child batches/recipients, parent guard and
   // reservation ledger must commit together. At most 200 recipients means at
   // most 200 child batches + 200 rows + 3 other writes, below the batch limit.
@@ -254,9 +323,13 @@ async function processBatch(
     const balance = w.exists ? ((w.get('balance') as number) ?? 0) : 0;
     const now = FieldValue.serverTimestamp();
     if (balance < cost) {
+      const smsOnly = sendRows.filter(row => row.kind === 'sms-only');
+      for (const row of smsOnly) {
+        tx.update(row.ref, { smsEscalation: 'skipped', smsSkipReason: 'insufficient_points', updatedAt: now });
+      }
       tx.update(batchRef, {
         escalationStatus: 'insufficient_points', escalatedAt: now,
-        smsQueued: 0, smsFailed: 0, smsSkipped, smsCostNeeded: cost,
+        smsQueued: 0, smsFailed: 0, smsSkipped: smsSkipped + smsOnly.length, smsCostNeeded: cost,
       });
       return 'insufficient-points';
     }
@@ -279,13 +352,14 @@ async function processBatch(
         excludedCount: 0, totalCount: plan.groupEligible.length, queuedCount: plan.groupEligible.length,
         sentCount: 0, deliveredCount: 0, failedCount: 0,
         estimatedCost: plan.groupCost, pointsCost: plan.groupCost, pointsReserved: plan.groupCost,
-        pointsDeducted: null, pointsRefunded: null, status: 'sending', provider: providerMode,
+        pointsDeducted: null, pointsRefunded: null, status: 'sending', provider: plan.providerMode,
         gatewayBatchId: null, offlineSmsBatchId: null, retryOfBatchId: null,
         createdAt: now, updatedAt: now,
       });
       for (const e of plan.groupEligible) {
         tx.create(plan.smsBatchRef.collection('recipients').doc(e.uid), {
           userId: e.uid, maskedPhone: e.maskedPhone, appReceiptStatus: e.appReceiptStatus,
+          ...(isExternalRecipientId(e.uid) ? { isExternal: true, phoneE164: e.phone } : {}),
           smsStatus: 'queued', skipReason: null, reason: null, updatedAt: now,
         });
       }
@@ -304,12 +378,14 @@ async function processBatch(
     return;
   }
 
-  // 6 — Send. One smsBatches doc per distinct SMS text (shape B may carry a
-  //     different body per recipient), each settled by the existing trigger.
+  // 6 — Send. One smsBatches doc per provider and SMS text, each settled by
+  //     the existing trigger.
   let smsQueued = 0;
   let smsFailed = 0;
+  let relaySkipped = 0;
+  let relayCountrySkipped = 0;
 
-  for (const { smsText, groupRows, groupEligible, smsBatchRef } of plans) {
+  for (const { providerMode, smsText, groupRows, groupEligible, smsBatchRef } of plans) {
     if (relayModeEngaged(providerMode)) {
       // Relay path — recipients queued, dispatcher routes to org devices;
       // hybrid falls back to the HTTP gateway for unrouted recipients.
@@ -339,10 +415,26 @@ async function processBatch(
       }
       await smsBatchRef.update({ provider: providerMode, updatedAt: FieldValue.serverTimestamp() });
       if (dispatch.routed === 0) await maybeFinalizeRelayBatch(smsBatchRef.id);
-      smsQueued += groupEligible.length - groupFailed;
+      const groupSkipped = dispatch.summary.skippedRecipients;
+      smsQueued += groupEligible.length - groupFailed - groupSkipped;
       smsFailed += groupFailed;
+      relaySkipped += groupSkipped;
+      relayCountrySkipped += dispatch.summary.skippedByReason.no_relay_for_country ?? 0;
+      // Relay availability can change after the initial coverage check. Use
+      // the persisted recipient results to keep the organization log accurate.
+      const issues = groupFailed + groupSkipped > 0
+        ? (await smsBatchRef.collection('recipients').where('smsStatus', 'in', ['failed', 'skipped']).get()).docs
+        : [];
+      const issueByUid = new Map(issues.map(recipient => [recipient.id, recipient]));
       const rowWrites = db.batch();
-      for (const row of groupRows) rowWrites.update(row.ref, { smsEscalation: 'queued', smsBatchId: smsBatchRef.id, updatedAt: FieldValue.serverTimestamp() });
+      for (const row of groupRows) {
+        const issue = issueByUid.get(row.uid);
+        rowWrites.update(row.ref, {
+          smsEscalation: issue?.get('smsStatus') ?? 'queued',
+          smsSkipReason: issue?.get('skipReason') ?? issue?.get('reason') ?? null,
+          smsBatchId: smsBatchRef.id, updatedAt: FieldValue.serverTimestamp(),
+        });
+      }
       await rowWrites.commit();
       continue;
     }
@@ -364,7 +456,7 @@ async function processBatch(
           userId: e.uid, maskedPhone: e.maskedPhone, appReceiptStatus: e.appReceiptStatus,
           smsStatus: ok ? 'queued' : 'failed', skipReason: null,
           reason: ok ? null : 'gateway-error', updatedAt: FieldValue.serverTimestamp(),
-        });
+        }, { merge: true });
       }
       sends.update(smsBatchRef, {
         status: finalStatus,
@@ -403,7 +495,7 @@ async function processBatch(
   await batchRef.update({
     escalationStatus: 'completed',
     escalatedAt: FieldValue.serverTimestamp(),
-    smsQueued, smsFailed, smsSkipped,
+    smsQueued, smsFailed, smsSkipped: smsSkipped + relaySkipped,
     smsPointsReserved: cost,
   });
   await writeAuditLog({
@@ -414,8 +506,8 @@ async function processBatch(
     metadata: {
       batchId, audience,
       targeted: targets.length, eligible: sendable.length,
-      smsQueued, smsFailed, skipped: smsSkipped,
-      noRelayForCountry: noRelaySkipped, pointsReserved: cost,
+      smsQueued, smsFailed, skipped: smsSkipped + relaySkipped,
+      noRelayForCountry: uncovered.length + relayCountrySkipped, pointsReserved: cost,
     },
   });
 }

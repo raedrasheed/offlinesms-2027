@@ -11,11 +11,12 @@ import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { sendBatch } from './gateway';
 import { MAX_BATCHES_PER_DAY, maskPhone, todayKey, isExternalRecipientId } from './recipients';
 import { writeAuditLog } from '../lib/auditLog';
-import { readUserPhone } from '../lib/userPrivate';
+import { findLinkedPhoneNumbers, readUserPhone } from '../lib/userPrivate';
+import { normalizePhoneAndCountry } from '../lib/phoneCountry';
 import { smsBatchUnitCost } from './messageFormat';
 import { reserveSmsBatch } from './reserveBatch';
 import { resolveDefaultRelayBusiness, resolveProvider, type SmsProviderMode } from './provider';
-import { partitionRecipientsByCoverage } from './countryRouting';
+import { loadOrganizationRelayAssignment, partitionRecipientsByCoverage } from './countryRouting';
 import { relayModeEngaged, isHybrid } from './relayLogic';
 import { dispatchBatchToRelay } from './relayDispatcher';
 import { maybeFinalizeRelayBatch } from './relaySettlement';
@@ -37,6 +38,7 @@ export const retryFailedSmsRecipients = onCall({ region: 'us-central1' }, async 
   const source = sourceSnap.data() as {
     senderId?: string;
     organizationId?: string;
+    orgBatchId?: string;
     provider?: SmsProviderMode;
     conversationId?: string;
     messageId?: string;
@@ -58,6 +60,8 @@ export const retryFailedSmsRecipients = onCall({ region: 'us-central1' }, async 
   if (source.senderId !== uid && !senderIsAdmin) {
     throw new HttpsError('permission-denied', 'not-batch-owner');
   }
+  const businessOrganizationId = source.orgBatchId ? source.organizationId : undefined;
+  const billingUid = businessOrganizationId ? `orgsender_${businessOrganizationId}` : uid;
 
   // Daily-cap check still applies to retries.
   const day = todayKey();
@@ -80,7 +84,7 @@ export const retryFailedSmsRecipients = onCall({ region: 'us-central1' }, async 
   const alreadySent = new Set<string>();
   if (sourceMessageId) {
     const prior = await db.collection('smsBatches')
-      .where('senderId',  '==', uid)
+      .where('senderId',  '==', billingUid)
       .where('messageId', '==', sourceMessageId)
       .limit(50)
       .get();
@@ -97,7 +101,7 @@ export const retryFailedSmsRecipients = onCall({ region: 'us-central1' }, async 
   }
 
   type Failed = { uid: string; phone: string; maskedPhone: string; appReceiptStatus: string | null };
-  const failed: Failed[] = [];
+  let failed: Failed[] = [];
   const skippedByDedupe: string[] = [];
   for (const r of failedSnap.docs) {
     if (alreadySent.has(r.id)) {
@@ -105,10 +109,15 @@ export const retryFailedSmsRecipients = onCall({ region: 'us-central1' }, async 
       continue;
     }
     // F1 Phase C: read the phone from users/{uid}/userPrivate/profile (private only).
-    const phone = isExternalRecipientId(r.id) && r.get('isExternal') === true
+    const external = isExternalRecipientId(r.id) && r.get('isExternal') === true;
+    const phone = external
       ? r.get('phoneE164') as string | undefined
       : (await readUserPhone(db, r.id)) ?? undefined;
     if (!phone) continue;
+    if (businessOrganizationId && external) {
+      const normalized = normalizePhoneAndCountry(phone);
+      if (!normalized.isValid || normalized.e164 !== phone) continue;
+    }
     failed.push({
       uid: r.id,
       phone,
@@ -116,13 +125,28 @@ export const retryFailedSmsRecipients = onCall({ region: 'us-central1' }, async 
       appReceiptStatus: (r.data() as { appReceiptStatus?: string }).appReceiptStatus ?? null,
     });
   }
+  if (businessOrganizationId) {
+    // A number may have registered after the first attempt. Do not bypass its
+    // account preferences by retrying the original phone-only destination.
+    const linkedPhones = await findLinkedPhoneNumbers(
+      db, failed.filter(r => isExternalRecipientId(r.uid)).map(r => r.phone),
+    );
+    failed = failed.filter(r => !isExternalRecipientId(r.uid) || !linkedPhones.has(r.phone));
+  }
   if (failed.length === 0) throw new HttpsError('failed-precondition', 'no-eligible-failed-recipients');
 
   // Preserve the original provider/business and recheck country coverage
   // before charging. A relay retry must create relay jobs, not a mock HTTP send.
   const orgId = source.organizationId ?? await resolveDefaultRelayBusiness();
-  const providerMode = source.provider ?? await resolveProvider(orgId);
-  const coverage = orgId ? await partitionRecipientsByCoverage(orgId, failed.map(r => ({ id: r.uid, phoneE164: r.phone }))) : { covered: [] };
+  const organizationRelayDeviceId = businessOrganizationId
+    ? await loadOrganizationRelayAssignment(businessOrganizationId)
+    : undefined;
+  const requiresRelay = organizationRelayDeviceId
+    || (businessOrganizationId && failed.some(r => isExternalRecipientId(r.uid)));
+  const providerMode = requiresRelay ? 'relay' : source.provider ?? await resolveProvider(orgId);
+  const coverage = orgId
+    ? await partitionRecipientsByCoverage(orgId, failed.map(r => ({ id: r.uid, phoneE164: r.phone })), { organizationRelayDeviceId })
+    : { covered: [] };
   const coveredIds = new Set(coverage.covered.map(r => r.id));
   for (let i = failed.length - 1; i >= 0; i--) if (!coveredIds.has(failed[i].uid)) failed.splice(i, 1);
   if (!failed.length) throw new HttpsError('failed-precondition', 'no_relay_for_country');
@@ -132,11 +156,12 @@ export const retryFailedSmsRecipients = onCall({ region: 'us-central1' }, async 
   // Create the retry batch.
   const newRef = db.collection('smsBatches').doc();
   const now = FieldValue.serverTimestamp();
-  await reserveSmsBatch(db, uid, newRef, cost, {
+  await reserveSmsBatch(db, billingUid, newRef, cost, {
     messageId:         source.messageId ?? null,
     conversationId:    source.conversationId ?? null,
-    senderId:          uid,
+    senderId:          billingUid,
     organizationId:    orgId,
+    ...(businessOrganizationId ? { orgBatchId: source.orgBatchId } : {}),
     provider:          providerMode,
     audience:          source.audience ?? source.audienceCanonical ?? 'everyone',
     audienceCanonical: source.audienceCanonical ?? 'everyone',
@@ -189,7 +214,7 @@ export const retryFailedSmsRecipients = onCall({ region: 'us-central1' }, async 
     });
     await writes.commit();
     const hybrid = isHybrid(providerMode);
-    const dispatch = await dispatchBatchToRelay(newRef.id, orgId, { allowUnassignedQueue: !hybrid });
+    const dispatch = await dispatchBatchToRelay(newRef.id, orgId, { allowUnassignedQueue: !hybrid, organizationRelayDeviceId });
     if (hybrid && dispatch.unrouted.length) {
       const fallback = failed.filter(r => dispatch.unrouted.includes(r.uid));
       const fallbackWrites = db.batch();

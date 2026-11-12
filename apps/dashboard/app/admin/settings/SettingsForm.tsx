@@ -190,8 +190,8 @@ export default function SettingsForm({ action, initial }: Props) {
           initialValue={initial.smsShowAppName}
         />
         <Toggle
-          label="Show group name in OfflineSMS messages"
-          description="Include the group name for messages sent from a group. Direct messages have no group name."
+          label="Show chat group name in OfflineSMS messages"
+          description="Include the name for messages sent from a group chat. Business organizations manage their saved recipient group names in their SMS escalation settings."
           name="smsShowGroupName"
           initialValue={initial.smsShowGroupName}
         />

@@ -27,7 +27,9 @@ export default async function BusinessSend({ searchParams }: { searchParams: Pro
       <div className={styles.split}>
         <section className={styles.card} aria-labelledby="compose-message">
           <h2 id="compose-message">Compose</h2>
-          <p className={styles.cardIntro}>Messages reach registered recipients in the OfflineSMS app first.</p>
+          <p className={styles.cardIntro}>
+            Registered recipients get an in-app message first. Unregistered numbers are queued for SMS when auto SMS escalation is enabled and an eligible relay covers their country.
+          </p>
           {group !== undefined && !initialGroupId && (
             <p className={styles.cardIntro} role="alert">This group is unavailable or empty. Choose another group or enter recipients manually.</p>
           )}
@@ -45,7 +47,11 @@ export default async function BusinessSend({ searchParams }: { searchParams: Pro
             <a href="/points" className={styles.link}>Request points</a>
           </div>
           <p className={styles.cardIntro}>SMS wallet <span className={styles.wallet}>{overview.smsWalletBalance == null ? '—' : `${overview.smsWalletBalance.toLocaleString('en')} pts`}</span></p>
-          <EscalationSettings action={updateOrgEscalationSettings.bind(null, organizationId)} initial={overview.escalation} />
+          <EscalationSettings
+            initial={overview.escalation}
+            smsIdentification={overview.smsIdentification}
+            action={updateOrgEscalationSettings.bind(null, organizationId)}
+          />
         </section>
       </div>
     </div>
