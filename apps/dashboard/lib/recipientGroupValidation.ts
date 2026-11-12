@@ -2,6 +2,7 @@ import { normalizePhoneAndCountry } from './phoneCountry';
 import { ORG_MSG_MAX_RECIPIENTS } from './orgMessagingValidation';
 
 export const RECIPIENT_GROUP_MAX = ORG_MSG_MAX_RECIPIENTS;
+export const RECIPIENT_GROUP_NAME_MAX = 80;
 export const RECIPIENT_WORKBOOK_MAX_BYTES = 2 * 1024 * 1024;
 export const RECIPIENT_NAME_MAX = 120;
 
@@ -52,6 +53,11 @@ export function parseInternationalGroupRecipient(name: unknown, phone: unknown):
 
 export function isRecipientGroupId(value: unknown): value is string {
   return typeof value === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(value);
+}
+
+export function parseRecipientGroupName(value: unknown): string | null {
+  const name = typeof value === 'string' ? value.trim() : '';
+  return name && name.length <= RECIPIENT_GROUP_NAME_MAX ? name : null;
 }
 
 export function parseRecipientWorkbook(rows: readonly (readonly unknown[])[]): WorkbookPreview | { error: string } {

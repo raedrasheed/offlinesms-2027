@@ -1,5 +1,5 @@
 import RecipientGroups from '@/app/admin/organization-messaging/RecipientGroups';
-import { importOrganizationRecipients, manageOrganizationRecipients } from '@/lib/orgMessagingActions';
+import { importOrganizationRecipients, manageOrganizationRecipientGroup, manageOrganizationRecipients } from '@/lib/orgMessagingActions';
 import { getRecipientGroup, listRecipientGroups } from '@/lib/orgRecipientGroups';
 import { PageHeading } from '../WorkspaceContent';
 import { getBusinessOrganizationId } from '../workspaceSession';
@@ -18,7 +18,7 @@ export default async function BusinessGroups({ searchParams }: { searchParams: P
     <div className={styles.page}>
       <PageHeading
         title="Groups"
-        description="Select a saved group to manage its recipients or send a message."
+        description="Select a saved group to manage it, edit its recipients, or send a message."
         action={selected && selected.members.length > 0 && (
           <a
             className={styles.button}
@@ -35,6 +35,7 @@ export default async function BusinessGroups({ searchParams }: { searchParams: P
         selected={selected}
         action={importOrganizationRecipients.bind(null, organizationId)}
         manageAction={manageOrganizationRecipients.bind(null, organizationId)}
+        groupDefinitionAction={manageOrganizationRecipientGroup.bind(null, organizationId)}
         groupPath="/groups"
       />
     </div>

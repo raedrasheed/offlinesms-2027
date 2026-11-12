@@ -22,7 +22,10 @@ import {
 } from './orgMessagingValidation';
 import { generateApiKey } from './orgMessagingKeys';
 import { submitOrganizationMessageBatch, type SubmitFailureCode } from './orgMessagingService';
-import { getRecipientGroup, saveRecipientGroupChange, saveRecipientGroupImport, type RecipientGroupChange } from './orgRecipientGroups';
+import {
+  getRecipientGroup, saveRecipientGroupChange, saveRecipientGroupDefinitionChange, saveRecipientGroupImport,
+  type RecipientGroupChange, type RecipientGroupDefinitionChange,
+} from './orgRecipientGroups';
 import { isRecipientGroupId } from './recipientGroupValidation';
 import { organizationAccountDocument } from './organizationAccount';
 
@@ -269,6 +272,23 @@ export async function manageOrganizationRecipients(
     return result;
   } catch {
     return { error: 'Could not update recipients. Try again.' };
+  }
+}
+
+export async function manageOrganizationRecipientGroup(
+  organizationId: string,
+  groupId: string,
+  change: RecipientGroupDefinitionChange,
+): Promise<{ success: true } | { error: string }> {
+  const session = await recipientGroupManager(organizationId);
+  if (!session) return { error: 'Permission denied.' };
+  if (!isRecipientGroupId(organizationId)) return { error: 'Invalid organization.' };
+  try {
+    const result = await saveRecipientGroupDefinitionChange(organizationId, session.user.uid, groupId, change);
+    if ('success' in result) revalidateOrgMessaging('/business', '/business/groups', '/business/send');
+    return result;
+  } catch {
+    return { error: 'Could not update the group. Try again.' };
   }
 }
 

@@ -1,7 +1,8 @@
 import { FieldValue } from 'firebase-admin/firestore';
 import { adminDb } from './firebase-admin';
 import {
-  isRecipientGroupId, parseGroupRecipient, parseInternationalGroupRecipient, RECIPIENT_GROUP_MAX, type GroupRecipient,
+  isRecipientGroupId, parseGroupRecipient, parseInternationalGroupRecipient, parseRecipientGroupName,
+  RECIPIENT_GROUP_MAX, RECIPIENT_GROUP_NAME_MAX, type GroupRecipient,
 } from './recipientGroupValidation';
 
 export type RecipientGroupSummary = { id: string; name: string; memberCount: number };
@@ -9,6 +10,16 @@ export type RecipientGroupChange =
   | { type: 'edit'; original: GroupRecipient; recipient: GroupRecipient }
   | { type: 'delete'; recipients: GroupRecipient[] };
 type RecipientGroupChangeResult = { members: GroupRecipient[] } | { error: string };
+export type RecipientGroupDefinitionChange =
+  | { type: 'rename'; revision: string; name: string }
+  | { type: 'delete'; revision: string };
+
+const GROUP_NAME_ERROR = `Enter a group name of 1–${RECIPIENT_GROUP_NAME_MAX} characters.`;
+
+function groupRevision(doc: FirebaseFirestore.DocumentSnapshot): string | null {
+  const updateTime = doc.updateTime;
+  return updateTime ? `${updateTime.seconds}:${updateTime.nanoseconds}` : null;
+}
 
 function groupCollection(organizationId: string) {
   return adminDb.collection('organizations').doc(organizationId).collection('recipientGroups');
@@ -22,8 +33,9 @@ export async function listRecipientGroups(organizationId: string): Promise<Recip
 export async function getRecipientGroup(organizationId: string, groupId: unknown) {
   if (!isRecipientGroupId(groupId)) return null;
   const doc = await groupCollection(organizationId).doc(groupId).get();
-  if (!doc.exists) return null;
-  return { id: doc.id, name: doc.get('name') as string, members: (doc.get('members') ?? []) as GroupRecipient[] };
+  const revision = groupRevision(doc);
+  if (!doc.exists || revision === null) return null;
+  return { id: doc.id, name: doc.get('name') as string, members: (doc.get('members') ?? []) as GroupRecipient[], revision };
 }
 
 export async function saveRecipientGroupImport(
@@ -32,8 +44,8 @@ export async function saveRecipientGroupImport(
   input: { groupId: string; newGroupName?: string; recipients: unknown },
 ) {
   if (!isRecipientGroupId(input.groupId)) return { error: 'Select a valid group.' };
-  const name = typeof input.newGroupName === 'string' ? input.newGroupName.trim() : '';
-  if (input.newGroupName !== undefined && (!name || name.length > 80)) return { error: 'Enter a group name of 1–80 characters.' };
+  const name = parseRecipientGroupName(input.newGroupName);
+  if (input.newGroupName !== undefined && !name) return { error: GROUP_NAME_ERROR };
   if (!Array.isArray(input.recipients) || !input.recipients.length || input.recipients.length > RECIPIENT_GROUP_MAX) {
     return { error: `Import between 1 and ${RECIPIENT_GROUP_MAX} recipients.` };
   }
@@ -73,6 +85,48 @@ export async function saveRecipientGroupImport(
       });
     }
     return { groupId: group.id, added: added.length, skipped: recipients.length - added.length, memberCount };
+  });
+}
+
+export async function saveRecipientGroupDefinitionChange(
+  organizationId: string,
+  actorUid: string,
+  groupId: string,
+  change: RecipientGroupDefinitionChange,
+): Promise<{ success: true } | { error: string }> {
+  if (!isRecipientGroupId(groupId)) return { error: 'Select a valid group.' };
+  if (!change || (change.type !== 'rename' && change.type !== 'delete')
+      || typeof change.revision !== 'string' || !/^-?\d{1,12}:\d{1,9}$/.test(change.revision)) {
+    return { error: 'Refresh the group and try again.' };
+  }
+  const name = change.type === 'rename' ? parseRecipientGroupName(change.name) : null;
+  if (change.type === 'rename' && !name) return { error: GROUP_NAME_ERROR };
+
+  const org = adminDb.collection('organizations').doc(organizationId);
+  const group = groupCollection(organizationId).doc(groupId);
+  const audit = adminDb.collection('auditLogs').doc();
+
+  return adminDb.runTransaction(async tx => {
+    const [organization, current] = await tx.getAll(org, group);
+    if (!organization.exists) return { error: 'Organization not found.' };
+    if (organization.get('status') !== 'active') return { error: 'This organization is not active.' };
+    if (!current.exists) return { error: 'Group not found.' };
+    if (groupRevision(current) !== change.revision) return { error: 'The group changed. Refresh the group and try again.' };
+
+    const now = FieldValue.serverTimestamp();
+    if (name !== null) {
+      if (name === current.get('name')) return { success: true };
+      tx.update(group, { name, updatedAt: now });
+    } else {
+      tx.delete(group);
+    }
+    tx.create(audit, {
+      action: change.type === 'rename' ? 'organization.recipient_group.renamed' : 'organization.recipient_group.deleted',
+      actorUid, targetType: 'recipientGroup', targetId: group.id, result: 'success',
+      metadata: { organizationId },
+      createdAt: now,
+    });
+    return { success: true };
   });
 }
 
