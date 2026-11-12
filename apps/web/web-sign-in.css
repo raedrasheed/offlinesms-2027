@@ -1,0 +1,135 @@
+.web-sign-in-screen {
+  display: grid;
+  place-items: center;
+  min-height: 100dvh;
+  padding: max(24px, env(safe-area-inset-top)) 18px max(24px, env(safe-area-inset-bottom));
+  isolation: isolate;
+  position: relative;
+  background: var(--canvas);
+}
+
+.web-sign-in-screen::before {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  content: "";
+  background: center / 430px auto repeat url("./chat-bg-default.jpg");
+  filter: var(--wallpaper-filter);
+  opacity: .42;
+}
+
+.web-sign-in-card {
+  width: min(100%, 470px);
+  display: grid;
+  gap: 16px;
+  padding: clamp(22px, 6vw, 36px);
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 18px 55px var(--shadow);
+}
+
+.web-sign-in-header,
+.web-sign-in-brand,
+.web-sign-in-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.web-sign-in-header,
+.web-sign-in-actions { justify-content: space-between; }
+.web-sign-in-header { margin-block-end: 5px; }
+.web-sign-in-brand { font-size: 19px; font-weight: 800; }
+.web-sign-in-brand img { display: block; object-fit: contain; }
+.web-sign-in-card h1 { font-size: clamp(22px, 6vw, 29px); line-height: 1.3; }
+.web-sign-in-copy { font-size: 14px; line-height: 1.6; color: var(--muted); }
+.web-sign-in-address { font-weight: 700; color: var(--text); overflow-wrap: anywhere; }
+
+.web-sign-in-form {
+  display: grid;
+  gap: 12px;
+  margin-block-start: 5px;
+}
+
+.web-sign-in-form label { display: grid; gap: 8px; font-weight: 700; font-size: 14px; }
+
+.web-sign-in-form input,
+.web-sign-in-form select {
+  width: 100%;
+  min-height: 48px;
+  padding: 9px 13px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--soft);
+  color: var(--text);
+  font-size: 16px;
+}
+
+.web-sign-in-code { letter-spacing: .26em; font-variant-numeric: tabular-nums; }
+.web-sign-in-phone-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+.web-sign-in-phone-row select { padding-inline: 9px; text-overflow: ellipsis; }
+
+.web-sign-in-form .web-sign-in-otp {
+  position: relative;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: clamp(4px, 1.4vw, 9px);
+  cursor: text;
+}
+.web-sign-in-otp-box {
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--soft);
+  color: var(--text);
+  font-size: clamp(17px, 5vw, 26px);
+  font-variant-numeric: tabular-nums;
+}
+.web-sign-in-otp:focus-within .web-sign-in-otp-box[data-active] { outline: 2px solid var(--brand); outline-offset: -2px; }
+.web-sign-in-otp:focus-within { border-radius: 12px; outline: 1px solid var(--brand); outline-offset: 3px; }
+.web-sign-in-otp input {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  min-height: 0;
+  opacity: 0;
+  cursor: text;
+}
+.web-sign-in-otp input:disabled { cursor: wait; }
+
+.web-sign-in-error { font-size: 13px; line-height: 1.5; color: #ffabab; }
+[data-theme="light"] .web-sign-in-error { color: #a6282c; }
+
+.web-sign-in-primary,
+.web-sign-in-link {
+  min-height: 44px;
+  padding: 8px 14px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  font-weight: 750;
+  font-size: 14px;
+}
+
+.web-sign-in-primary { background: var(--deep); color: var(--on-action); }
+.web-sign-in-primary:hover:not(:disabled) { background: #186e97; }
+.web-sign-in-card:has(.web-sign-in-phone-primary:not([hidden])) .web-sign-in-form .web-sign-in-primary {
+  border-color: var(--line);
+  background: var(--soft);
+  color: var(--text);
+}
+.web-sign-in-card:has(.web-sign-in-phone-primary:not([hidden])) .web-sign-in-form .web-sign-in-primary:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+.web-sign-in-link { background: transparent; color: var(--brand); }
+.web-sign-in-link:hover:not(:disabled) { background: var(--accent-soft); }
+.web-sign-in-card button:disabled { opacity: .65; }
+
+@media (max-width: 370px) {
+  .web-sign-in-link { padding-inline: 7px; }
+  .web-sign-in-card { gap: 13px; }
+  .web-sign-in-phone-row { grid-template-columns: 1fr; }
+}
