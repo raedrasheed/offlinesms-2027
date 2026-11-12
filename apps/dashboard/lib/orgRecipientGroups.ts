@@ -5,7 +5,7 @@ import {
   RECIPIENT_GROUP_MAX, RECIPIENT_GROUP_NAME_MAX, type GroupRecipient,
 } from './recipientGroupValidation';
 
-export type RecipientGroupSummary = { id: string; name: string; memberCount: number };
+export type RecipientGroupSummary = { id: string; name: string; memberCount: number; personalizedCount?: number };
 export type RecipientGroupListEntry = RecipientGroupSummary & { revision: string };
 export type RecipientGroupChange =
   | { type: 'edit'; original: GroupRecipient; recipient: GroupRecipient }
@@ -25,12 +25,17 @@ function groupCollection(organizationId: string) {
   return adminDb.collection('organizations').doc(organizationId).collection('recipientGroups');
 }
 
+function countPersonalizedMembers(members: GroupRecipient[]): number {
+  return members.filter(member => typeof member.message === 'string' && member.message.length > 0).length;
+}
+
 export async function listRecipientGroups(organizationId: string): Promise<RecipientGroupListEntry[]> {
-  const rows = await groupCollection(organizationId).orderBy('name').select('name', 'memberCount').get();
+  const rows = await groupCollection(organizationId).orderBy('name').select('name', 'memberCount', 'personalizedCount').get();
   return rows.docs.map(doc => ({
     id: doc.id,
     name: doc.get('name'),
     memberCount: doc.get('memberCount'),
+    personalizedCount: doc.get('personalizedCount') ?? 0,
     revision: groupRevision(doc.updateTime),
   }));
 }
@@ -54,9 +59,19 @@ export async function saveRecipientGroupImport(
   if (!Array.isArray(input.recipients) || !input.recipients.length || input.recipients.length > RECIPIENT_GROUP_MAX) {
     return { error: `Import between 1 and ${RECIPIENT_GROUP_MAX} recipients.` };
   }
-  const parsed = input.recipients.map(parseGroupRecipient);
-  if (parsed.some(recipient => recipient === null)) return { error: 'The import contains invalid recipient data.' };
-  const recipients = parsed as GroupRecipient[];
+  const rowCount = input.recipients.length;
+  const recipientsByPhone = new Map<string, GroupRecipient>();
+  for (const row of input.recipients) {
+    const recipient = parseGroupRecipient(row);
+    if (!recipient) return { error: 'The import contains invalid recipient data.' };
+    const previous = recipientsByPhone.get(recipient.phone);
+    if (!previous) {
+      recipientsByPhone.set(recipient.phone, recipient);
+    } else if (recipient.message !== undefined) {
+      if (previous.message === undefined) recipientsByPhone.set(recipient.phone, { ...previous, message: recipient.message });
+      else if (previous.message !== recipient.message) return { error: 'Use the same message in every row with the same phone number.' };
+    }
+  }
   const org = adminDb.collection('organizations').doc(organizationId);
   const group = groupCollection(organizationId).doc(input.groupId);
   const audit = adminDb.collection('auditLogs').doc();
@@ -69,27 +84,33 @@ export async function saveRecipientGroupImport(
     if (current.exists && name && current.get('name') !== name) return { error: 'Choose an existing group or start a new import.' };
 
     const members = (current.get('members') ?? []) as GroupRecipient[];
-    const existingPhones = new Set(members.map(member => member.phone));
-    const added: GroupRecipient[] = [];
-    for (const recipient of recipients) {
-      if (existingPhones.has(recipient.phone)) continue;
-      existingPhones.add(recipient.phone);
-      added.push(recipient);
-    }
-    const memberCount = members.length + added.length;
+    const remaining = new Map(recipientsByPhone);
+    let updated = 0;
+    const updatedMembers = members.map(member => {
+      const incoming = remaining.get(member.phone);
+      remaining.delete(member.phone);
+      if (incoming?.message === undefined || incoming.message === member.message) return member;
+      updated++;
+      return { ...member, message: incoming.message };
+    });
+    const added = remaining.size;
+    const memberCount = members.length + added;
     if (memberCount > RECIPIENT_GROUP_MAX) return { error: `A group can contain up to ${RECIPIENT_GROUP_MAX} recipients.` };
-    if (added.length) {
+    const skipped = rowCount - added - updated;
+    const updates = updated > 0 ? { updated } : {};
+    if (added || updated) {
       const now = FieldValue.serverTimestamp();
-      const roster = { members: [...members, ...added], memberCount, updatedAt: now };
+      const nextMembers = [...updatedMembers, ...remaining.values()];
+      const roster = { members: nextMembers, memberCount, personalizedCount: countPersonalizedMembers(nextMembers), updatedAt: now };
       if (current.exists) tx.update(group, roster);
       else tx.create(group, { ...roster, name, createdAt: now, createdBy: actorUid });
       tx.create(audit, {
         action: 'organization.recipient_group.imported', actorUid, targetType: 'recipientGroup', targetId: group.id,
-        result: 'success', metadata: { organizationId, added: added.length, skipped: recipients.length - added.length },
+        result: 'success', metadata: { organizationId, added, skipped, ...updates },
         createdAt: now,
       });
     }
-    return { groupId: group.id, added: added.length, skipped: recipients.length - added.length, memberCount };
+    return { groupId: group.id, added, skipped, memberCount, ...updates };
   });
 }
 
@@ -198,13 +219,15 @@ export async function saveRecipientGroupChange(
       if (members.some(member => !isSelected(member) && member.phone === recipient.phone)) {
         return { error: 'This phone number is already in the group.' };
       }
-      updated = members.map(member => isSelected(member) ? recipient : member);
+      updated = members.map(member => isSelected(member) ? { ...member, ...recipient } : member);
     } else {
       updated = members.filter(member => !isSelected(member));
     }
 
     const now = FieldValue.serverTimestamp();
-    tx.update(group, { members: updated, memberCount: updated.length, updatedAt: now });
+    tx.update(group, {
+      members: updated, memberCount: updated.length, personalizedCount: countPersonalizedMembers(updated), updatedAt: now,
+    });
     tx.create(audit, {
       action: parsed.type === 'edit' ? 'organization.recipient_group.recipient_updated' : 'organization.recipient_group.recipients_removed',
       actorUid, targetType: 'recipientGroup', targetId: group.id, result: 'success',

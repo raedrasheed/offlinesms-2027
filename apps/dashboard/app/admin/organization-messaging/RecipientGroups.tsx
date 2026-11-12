@@ -102,7 +102,8 @@ export default function RecipientGroups({ groups, selected, organizationId, grou
       try {
         const result = await action({ groupId, ...(target ? {} : { newGroupName: name }), recipients: preview.recipients });
         if (!('groupId' in result) || !result.groupId) { setError(result.error ?? 'Could not save the group.'); return; }
-        setNotice(`${result.added} added · ${result.skipped} already in the group · ${result.memberCount} total`);
+        const updated = result.updated ?? 0;
+        setNotice(`${result.added} added${updated > 0 ? ` · ${updated} updated` : ''} · ${result.skipped} already in the group · ${result.memberCount} total`);
         setPreview(null);
         setTarget(result.groupId);
         setName('');
@@ -185,23 +186,24 @@ export default function RecipientGroups({ groups, selected, organizationId, grou
             <input id="org-recipient-workbook" ref={fileInput} type="file" accept=".xlsx" onChange={readFile} className="mt-2 block w-full text-sm" aria-describedby="org-recipient-workbook-hint" />
             <p id="org-recipient-workbook-hint" className="mt-2 text-xs" style={{ color: 'var(--c-text-3)' }}>
               Use Name and Phone columns (الاسم، رقم الهاتف) on the first sheet. Include the country code. The + is optional for numbers written as digits only. Up to {RECIPIENT_GROUP_MAX} recipients per group.
+              An optional Message column (الرسالة) saves text for each number. Blank Message cells use the common message when sending.
             </p>
           </div>
           {preview && <div className="space-y-2">
-            <p className="text-sm font-semibold">{preview.recipients.length} ready to add{preview.duplicateRows.length ? ` · ${preview.duplicateRows.length} duplicate rows omitted` : ''}</p>
+            <p className="text-sm font-semibold">{preview.recipients.length} ready to import{preview.duplicateRows.length ? ` · ${preview.duplicateRows.length} duplicate rows omitted` : ''}</p>
             {preview.invalidRows.length > 0 && <div role="alert" className="text-sm" style={{ color: 'var(--c-text)' }}>
               <strong>Fix {preview.invalidRows.length} invalid {preview.invalidRows.length === 1 ? 'row' : 'rows'} and select the file again.</strong>
               <ul className="mt-1 list-disc pl-5">
                 {preview.invalidRows.slice(0, 10).map(issue => <li key={issue.row}>Row {issue.row} · {issue.error}</li>)}
               </ul>
             </div>}
-            <RecipientTable recipients={preview.recipients} />
+            <RecipientTable recipients={preview.recipients} showMessage={preview.hasMessageColumn} />
           </div>}
         </fieldset>
         {error && <p role="alert" className="rounded-lg border px-3 py-2 text-sm" style={{ background: 'var(--c-error-bg)', borderColor: 'var(--c-error-border)' }}>{error}</p>}
         <button type="submit" disabled={pending || reading || !preview?.recipients.length || !!preview.invalidRows.length || (!target && !name.trim())}
           className="rounded-lg px-4 py-2 text-sm font-bold text-white disabled:opacity-50" style={{ background: '#176f96' }}>
-          {pending ? 'Saving…' : reading ? 'Reading workbook…' : 'Add to group'}
+          {pending ? 'Saving…' : reading ? 'Reading workbook…' : preview?.hasMessageColumn ? 'Save to group' : 'Add to group'}
         </button>
       </form>
     </section>
@@ -304,13 +306,23 @@ function RecipientGroupRow({ group, href, isSelected, action, onChanged }: {
   );
 }
 
-function RecipientTable({ recipients }: { recipients: GroupRecipient[] }) {
+function RecipientTable({ recipients, showMessage }: { recipients: GroupRecipient[]; showMessage?: boolean }) {
   if (!recipients.length) return null;
   return <div className="max-h-64 overflow-auto rounded-lg border" style={{ borderColor: 'var(--c-border)' }}>
-    <table className="w-full text-sm">
-      <thead style={{ background: 'var(--c-bg)' }}><tr><th scope="col" className="px-3 py-2 text-start">Name</th><th scope="col" className="px-3 py-2 text-start">Phone</th></tr></thead>
+    <table className="w-full text-sm" aria-label="Workbook recipient preview">
+      <thead style={{ background: 'var(--c-bg)' }}>
+        <tr>
+          <th scope="col" className="px-3 py-2 text-start">Name</th>
+          <th scope="col" className="px-3 py-2 text-start">Phone</th>
+          {showMessage && <th scope="col" className="px-3 py-2 text-start">Message</th>}
+        </tr>
+      </thead>
       <tbody>{recipients.map(row => <tr key={row.phone} className="border-t" style={{ borderColor: 'var(--c-border)' }}>
-        <td className="px-3 py-2 break-words" dir="auto">{row.name}</td><td className="px-3 py-2 whitespace-nowrap font-mono" dir="ltr">{row.phone}</td>
+        <td className="px-3 py-2 break-words align-top" dir="auto">{row.name}</td>
+        <td className="px-3 py-2 whitespace-nowrap align-top font-mono" dir="ltr">{row.phone}</td>
+        {showMessage && <td className="whitespace-pre-wrap px-3 py-2 align-top [overflow-wrap:anywhere]" dir="auto">
+          {row.message || <span style={{ color: 'var(--c-text-3)' }}>Uses the common message</span>}
+        </td>}
       </tr>)}</tbody>
     </table>
   </div>;
