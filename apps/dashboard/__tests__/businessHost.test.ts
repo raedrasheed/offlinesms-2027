@@ -6,6 +6,7 @@ describe('organization portal host routing', () => {
   it.each([
     ['/', '/business'],
     ['/login', '/business/login'],
+    ['/register', '/business/register'],
     ['/groups', '/business/groups'],
     ['/send', '/business/send'],
     ['/activity/batch123', '/business/activity/batch123'],
@@ -37,5 +38,7 @@ describe('organization portal host routing', () => {
     expect(getHostRoute('dash.offlinesms.com', '/api/business/session')).toEqual({ kind: 'notFound' });
     expect(getHostRoute('business.offlinesms.com.example.net', '/api/business/session')).toEqual({ kind: 'notFound' });
     expect(getHostRoute('business.offlinesms.com', '/api/business/session')).toEqual({ kind: 'pass' });
+    expect(getHostRoute('business.offlinesms.com', '/api/business/registration')).toEqual({ kind: 'pass' });
+    expect(getHostRoute('dash.offlinesms.com', '/api/business/registration')).toEqual({ kind: 'notFound' });
   });
 });

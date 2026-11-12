@@ -15,7 +15,7 @@ export function getHostRoute(host: string | null, path: string): HostRoute {
     return { kind: 'pass' };
   }
 
-  if (path === '/api/business/session' || path.startsWith('/api/v1/org/')
+  if (path === '/api/business/session' || path === '/api/business/registration' || path.startsWith('/api/v1/org/')
       || path === '/logo.png' || path === '/favicon.ico'
       || path === '/_next/image' || path.startsWith('/_next/static/')) {
     return { kind: 'pass' };

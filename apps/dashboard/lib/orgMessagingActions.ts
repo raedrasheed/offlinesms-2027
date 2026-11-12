@@ -18,12 +18,13 @@ import { canDo } from './adminPermissions';
 import { getAdminScope, canViewOrganization, isPlatformAdmin } from './adminScope';
 import {
   validateOrgAccountInput, deriveOrgSlug, validateOrgSendInput,
-  validateEscalationSettings, DEFAULT_ESCALATION,
+  validateEscalationSettings,
 } from './orgMessagingValidation';
 import { generateApiKey } from './orgMessagingKeys';
 import { submitOrganizationMessageBatch, type SubmitFailureCode } from './orgMessagingService';
 import { getRecipientGroup, saveRecipientGroupImport } from './orgRecipientGroups';
 import { isRecipientGroupId } from './recipientGroupValidation';
+import { organizationAccountDocument } from './organizationAccount';
 
 export type OrgAccountActionState =
   | { error: string }
@@ -75,27 +76,15 @@ export async function createOrganizationAccount(
   const orgRef = adminDb.collection('organizations').doc();
   const slug = deriveOrgSlug(parsed.name, orgRef.id.slice(0, 6).toLowerCase());
   try {
-    await orgRef.set({
-      name:                parsed.name,
-      slug,
-      status:              parsed.status,
-      ownerUid:            adminUid,
+    await orgRef.set(organizationAccountDocument({
+      organizationId: orgRef.id,
+      name: parsed.name,
+      status: parsed.status,
       adminUid,
-      adminEmail:          parsed.email,
+      adminEmail: parsed.email,
       monthlyMessageLimit: parsed.monthlyMessageLimit,
-      // SMS escalation default for org messaging (org admin can change it).
-      messagingEscalation: DEFAULT_ESCALATION,
-      // Keep the existing org settings shape so the rest of the dashboard reads it.
-      settings: {
-        smsEscalationEnabled: false,
-        pointsEnabled:        false,
-        defaultLanguage:      'en',
-        timezone:             'UTC',
-      },
-      createdAt: FieldValue.serverTimestamp(),
-      updatedAt: FieldValue.serverTimestamp(),
       createdBy: session.user.uid,
-    });
+    }));
   } catch {
     // Roll back the auth user so a failed org write doesn't orphan an account.
     try { await adminAuth.deleteUser(adminUid); } catch { /* best-effort */ }

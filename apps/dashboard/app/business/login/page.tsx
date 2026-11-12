@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import { inMemoryPersistence, setPersistence, signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { ArrowRight, FileSpreadsheet, FolderOpen, Send } from 'lucide-react';
 import { auth } from '@/lib/firebase';
@@ -14,6 +14,7 @@ const steps = [
 ];
 
 export default function BusinessLogin() {
+  const passwordInput = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -24,7 +25,7 @@ export default function BusinessLogin() {
     setError('');
     try {
       await setPersistence(auth, inMemoryPersistence);
-      const credential = await signInWithEmailAndPassword(auth, String(form.get('email')).trim(), String(form.get('password')));
+      const credential = await signInWithEmailAndPassword(auth, String(form.get('email')).trim(), passwordInput.current?.value ?? '');
       const idToken = await credential.user.getIdToken();
       const response = await fetch('/api/business/session', {
         method: 'POST',
@@ -60,14 +61,14 @@ export default function BusinessLogin() {
           <div className={styles.loginFormPanel}>
             <h1>Organization sign-in</h1>
             <p>Use your organization administrator account.</p>
-            <form className={styles.loginForm} onSubmit={signIn}>
+            <form method="post" className={styles.loginForm} onSubmit={signIn}>
               <label>
                 Email address
                 <input type="email" name="email" autoComplete="username" required />
               </label>
               <label>
                 Password
-                <input type="password" name="password" autoComplete="current-password" required />
+                <input ref={passwordInput} type="password" autoComplete="current-password" required />
               </label>
               {error && <p className={styles.error} role="alert">{error}</p>}
               <button type="submit" className={styles.primary} disabled={busy}>
@@ -75,6 +76,7 @@ export default function BusinessLogin() {
                 <ArrowRight size={18} aria-hidden />
               </button>
             </form>
+            <p>New to OfflineSMS Business? <a className="font-bold text-[#15628c] underline underline-offset-4" href="/register">Apply as an organization</a></p>
           </div>
         </section>
         <section className={styles.loginAside} aria-labelledby="login-aside-title">

@@ -46,3 +46,12 @@ curl -i -H 'Host: dash.offlinesms.com' http://localhost:3000/login
 ```
 
 The first request shows the Business login, the second returns 404, and the third shows the Admin login. Test an existing organization administrator on the Business domain before communicating the new sign-in URL to institutions.
+
+
+### Organization applications
+
+Add `business.offlinesms.com` to **Firebase Authentication → Settings → Authorized domains** before releasing the public application form. The verification email returns the applicant to `/register`. See [Firebase email verification](https://firebase.google.com/docs/auth/web/manage-users#send_a_user_a_verification_email).
+
+Applicants authenticate with a verified email and submit one application per account. A platform admin reviews it under **Organization Messaging → Registration requests**. Approval creates the organization, assigns the applicant its organization admin role, and records the decision. Applicants can check their status from the registration page.
+
+Deploy the dashboard and verify `https://business.offlinesms.com/register` before publishing the main website's **Join as an organization** link through the existing Firebase Hosting target.
