@@ -137,7 +137,7 @@ export default function RecipientGroups({ groups, selected, organizationId, grou
             <label htmlFor="org-recipient-workbook" className="flex items-center gap-2 text-sm font-semibold"><Upload size={16} aria-hidden /> Excel workbook</label>
             <input id="org-recipient-workbook" ref={fileInput} type="file" accept=".xlsx" onChange={readFile} className="mt-2 block w-full text-sm" aria-describedby="org-recipient-workbook-hint" />
             <p id="org-recipient-workbook-hint" className="mt-2 text-xs" style={{ color: 'var(--c-text-3)' }}>
-              Use Name and Phone columns (الاسم، رقم الهاتف) on the first sheet. Save international numbers as text with + and the country code. Up to {RECIPIENT_GROUP_MAX} recipients per group.
+              Use Name and Phone columns (الاسم، رقم الهاتف) on the first sheet. Include the country code. The + is optional for numbers written as digits only. Up to {RECIPIENT_GROUP_MAX} recipients per group.
             </p>
           </div>
           {preview && <div className="space-y-2">

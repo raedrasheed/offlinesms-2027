@@ -36,17 +36,35 @@ beforeEach(() => {
 });
 
 describe('Excel recipient import', () => {
-  it('reads Arabic columns and digits, ignores empty rows and reports duplicate and invalid row numbers', () => {
+  it('reads Arabic columns, accepts numeric cells and deduplicates normalized numbers', () => {
     expect(parseRecipientWorkbook([
       ['رقم الهاتف', 'الإسم'],
       ['+١ ٢٠٢-٥٥٥-٠١٢٣', 'First recipient'],
       [null, null],
-      ['+12025550123', 'Duplicate'],
-      [12025550124, 'Excel numeric cell'],
+      ['١٢٠٢٥٥٥٠١٢٣', 'Duplicate without plus'],
+      [12025550124, 'Second recipient'],
+      ['+12025550124', 'Duplicate of a numeric cell'],
+    ])).toEqual({
+      recipients: [first, second],
+      duplicateRows: [4, 6],
+      invalidRows: [],
+    });
+  });
+
+  it('adds plus to international digits without guessing a country or repairing digits', () => {
+    expect(parseRecipientWorkbook([
+      ['Name', 'Phone'],
+      ['First recipient', '12025550123'],
+      ['Local number', '0595550123'],
+      ['Fraction', 12025550124.5],
+      ['Negative', -12025550124],
+      ['Too long', 1202555012345678],
+      ['Scientific text', '1.2025550124E+10'],
+      ['Extra trunk digit', '4402079460123'],
     ])).toEqual({
       recipients: [first],
-      duplicateRows: [4],
-      invalidRows: [{ row: 5, error: expect.any(String) }],
+      duplicateRows: [],
+      invalidRows: [3, 4, 5, 6, 7, 8].map(row => ({ row, error: expect.any(String) })),
     });
   });
 
