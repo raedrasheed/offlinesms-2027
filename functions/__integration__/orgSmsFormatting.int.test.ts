@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { BUSINESS, db, num, resetEmulators, seedRelayDevice, Timestamp } from './harness';
+import { BUSINESS, DEVICE, db, num, resetEmulators, seedRelayDevice, Timestamp } from './harness';
 
 const dispatch = vi.hoisted(() => vi.fn(async (_batchId: string, _body: string, recipients: Array<{ uid: string }>) => ({
   gatewayBatchId: 'test-gateway',
@@ -21,7 +21,8 @@ async function seed(balance = 1000) {
   await db().doc('systemSettings/general').set({
     appName: 'OfflineSMS', smsShowAppName: true, smsShowGroupName: true, smsShowSenderPhone: true,
   });
-  await db().doc(`users/${senderUid}`).set({ isOrgSender: true, displayName: 'Organization' });
+  await db().doc(`organizations/${BUSINESS}`).set({ name: 'Organization' });
+  await db().doc(`users/${senderUid}`).set({ isOrgSender: true, displayName: 'Previous name' });
   await wallet().set({ balance, reserved: 0 });
   await sourceBatch().set({
     organizationId: BUSINESS, escalation: { audience: 'everyone' },
@@ -60,9 +61,9 @@ describe('organization SMS formatting and segment billing', () => {
       recipients: batch.get('recipientCount'), reserved: batch.get('pointsReserved'),
     }));
     expect(byEncodingAndCount).toEqual(expect.arrayContaining([
-      expect.objectContaining({ text: '[OfflineSMS]\n\nT: hello', encoding: 'GSM-7', segments: 1, unit: 28, recipients: 1, reserved: 28 }),
-      expect.objectContaining({ text: `[OfflineSMS]\n\nT: ${'x'.repeat(150)}`, encoding: 'GSM-7', segments: 2, unit: 56, recipients: 1, reserved: 56 }),
-      expect.objectContaining({ text: `[OfflineSMS]\n\nT: ${'ش'.repeat(60)}`, encoding: 'UCS-2', segments: 2, unit: 56, recipients: 2, reserved: 112 }),
+      expect.objectContaining({ text: '[OfflineSMS]\nOrganization\n\nT: hello', encoding: 'GSM-7', segments: 1, unit: 28, recipients: 1, reserved: 28 }),
+      expect.objectContaining({ text: `[OfflineSMS]\nOrganization\n\nT: ${'x'.repeat(150)}`, encoding: 'GSM-7', segments: 2, unit: 56, recipients: 1, reserved: 56 }),
+      expect.objectContaining({ text: `[OfflineSMS]\nOrganization\n\nT: ${'ش'.repeat(60)}`, encoding: 'UCS-2', segments: 2, unit: 56, recipients: 2, reserved: 112 }),
     ]));
     expect(dispatch).toHaveBeenCalledTimes(3);
     for (const batch of batches) {
@@ -86,6 +87,27 @@ describe('organization SMS formatting and segment billing', () => {
     expect(settled.reduce((n, row) => n + row.get('pointsRefunded'), 0)).toBe(56);
     expect((await sourceBatch().get()).get('smsQueued')).toBe(3);
     expect((await sourceBatch().get()).get('smsFailed')).toBe(1);
+  });
+
+  it('includes and prices the current Arabic organization name in relay jobs with branding off', async () => {
+    await seed();
+    const name = 'عائلة رشيد';
+    const body = 'x'.repeat(60);
+    await db().doc(`organizations/${BUSINESS}`).update({ name });
+    await db().doc(`organizationRelayAssignments/${BUSINESS}`).set({ relayDeviceId: DEVICE });
+    await db().doc('systemSettings/general').update({ smsShowAppName: false });
+    await db().doc('organizationMessages/short-recipient').update({ body });
+
+    await escalateOrgBatches.run({} as never);
+
+    const jobs = await db().collection('relayJobs').where('recipientUid', '==', 'short-recipient').get();
+    expect(jobs.size).toBe(1);
+    const job = jobs.docs[0];
+    const smsBody = `${name}\n\nT: ${body}`;
+    expect(job.data()).toMatchObject({ assignedDeviceId: DEVICE, messageBody: smsBody });
+    const batch = await db().collection('smsBatches').doc(job.get('batchId')).get();
+    expect(batch.data()).toMatchObject({ smsBody, smsEncoding: 'UCS-2', smsSegments: 2, pointsPerRecipient: 56 });
+    expect(dispatch).not.toHaveBeenCalled();
   });
 
   it('rejects insufficient balance using complete text pricing before queueing any SMS', async () => {
