@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { signOut } from 'firebase/auth';
-import { Building2, ChartNoAxesColumn, Code2, LayoutGrid, LogOut, Send, UsersRound } from 'lucide-react';
+import { Building2, ChartNoAxesColumn, Code2, LayoutGrid, LogOut, Send, UsersRound, Wallet } from 'lucide-react';
 import { auth } from '@/lib/firebase';
 import styles from './business.module.css';
 
@@ -12,6 +12,7 @@ const navigation = [
   { path: '/', label: 'Overview', icon: LayoutGrid },
   { path: '/groups', label: 'Recipient groups', icon: UsersRound },
   { path: '/send', label: 'Send message', icon: Send },
+  { path: '/points', label: 'OfflineSMS Points', icon: Wallet },
   { path: '/activity', label: 'Activity', icon: ChartNoAxesColumn },
   { path: '/integrations', label: 'API integration', icon: Code2 },
 ];

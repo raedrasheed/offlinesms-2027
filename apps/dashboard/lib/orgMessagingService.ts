@@ -63,28 +63,31 @@ export function orgSenderUid(organizationId: string): string {
 async function ensureOrgSender(organizationId: string, orgName: string): Promise<string> {
   const uid = orgSenderUid(organizationId);
   const userRef = adminDb.collection('users').doc(uid);
-  const snap = await userRef.get();
-  if (!snap.exists) {
-    await userRef.set({
-      displayName:      orgName,
-      photoURL:         null,
-      username:         null,
-      usernameLower:    null,
-      about:            'Official organization announcements',
-      profileCompleted: true,
-      status:           'active',
-      isOrgSender:      true,
-      organizationId,
-      createdAt:        FieldValue.serverTimestamp(),
-    });
-    // Escalation SMS is billed from this wallet (super admin funds it via the
-    // existing wallet tools). Created empty — no welcome credit for senders.
-    await adminDb.collection('wallets').doc(uid).set({
-      balance: 0, reserved: 0, createdAt: FieldValue.serverTimestamp(),
-    }, { merge: true });
-    await adminDb.collection('organizations').doc(organizationId)
-      .set({ senderUid: uid }, { merge: true });
-  }
+  const walletRef = adminDb.collection('wallets').doc(uid);
+  const orgRef = adminDb.collection('organizations').doc(organizationId);
+
+  await adminDb.runTransaction(async tx => {
+    const [user, wallet] = await tx.getAll(userRef, walletRef);
+    const now = FieldValue.serverTimestamp();
+    if (!user.exists) {
+      tx.create(userRef, {
+        displayName:      orgName,
+        photoURL:         null,
+        username:         null,
+        usernameLower:    null,
+        about:            'Official organization announcements',
+        profileCompleted: true,
+        status:           'active',
+        isOrgSender:      true,
+        organizationId,
+        createdAt:        now,
+      });
+      tx.update(orgRef, { senderUid: uid });
+    }
+    if (!wallet.exists) {
+      tx.create(walletRef, { balance: 0, reserved: 0, createdAt: now });
+    }
+  });
   return uid;
 }
 

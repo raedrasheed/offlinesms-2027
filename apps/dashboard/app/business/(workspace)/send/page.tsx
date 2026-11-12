@@ -28,7 +28,10 @@ export default async function BusinessSend() {
           <SendMessageForm action={sendOrganizationMessage.bind(null, organizationId)} groups={groups} batchPath="/activity" />
         </section>
         <section className={styles.card} aria-labelledby="sms-settings">
-          <h2 id="sms-settings">SMS escalation</h2>
+          <div className={styles.cardHeading}>
+            <h2 id="sms-settings">SMS escalation</h2>
+            <a href="/points" className={styles.link}>Request points</a>
+          </div>
           <p className={styles.cardIntro}>SMS wallet <span className={styles.wallet}>{overview.smsWalletBalance == null ? '—' : `${overview.smsWalletBalance.toLocaleString('en')} pts`}</span></p>
           <EscalationSettings action={updateOrgEscalationSettings.bind(null, organizationId)} initial={overview.escalation} />
         </section>

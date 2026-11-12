@@ -1,7 +1,6 @@
 // Admin points requests — server component.
 //
-// Users request a points package (no payment); admins approve (credits the
-// wallet with the requested points via an admin_adjustment) or reject.
+// Personal and organization points requests. Approval credits the corresponding wallet.
 
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
@@ -43,7 +42,7 @@ export default async function PointsRequestsPage({
   let fetchError: string | null = null;
   try { rows = await listPointsRequests(searchParams?.cursor, statusFilter || undefined); }
   catch (e: any) { fetchError = e?.message ?? 'Failed to load requests.'; }
-  const names = await resolveUserNames(rows.map(r => r.userId));
+  const names = await resolveUserNames(rows.map(r => r.organizationId ? r.requestedByUid : r.userId));
 
   const nextCursor = rows.length === 50 ? rows[rows.length - 1].id : null;
 
@@ -57,7 +56,7 @@ export default async function PointsRequestsPage({
         </div>
         <h1 className="text-[22px] font-extrabold tracking-tight">Points requests</h1>
         <p className="text-[13px] mt-0.5" style={{ color: 'var(--c-text-3)' }}>
-          Users request a package (no payment). Approving credits the wallet with the requested points.
+          Approving a request credits the user's or organization's wallet with the requested points.
         </p>
       </div>
 
@@ -85,7 +84,7 @@ export default async function PointsRequestsPage({
           <table className="w-full text-[12px] border-collapse">
             <thead>
               <tr style={{ borderBottom: `1px solid ${BORDER}` }}>
-                {['Request ID', 'User', 'Package', 'Points', 'Status', 'Created', ...(canManage ? ['Actions'] : [])].map((h, idx) => (
+                {['Request ID', 'Requester', 'Package', 'Points', 'Status', 'Created', ...(canManage ? ['Actions'] : [])].map((h, idx) => (
                   <th
                     key={h}
                     className={`px-4 py-3 text-[10px] font-semibold uppercase tracking-wider ${idx === 3 ? 'text-right' : h === 'Actions' ? 'text-right' : 'text-left'}`}
@@ -105,9 +104,18 @@ export default async function PointsRequestsPage({
                 >
                   <td className="px-4 py-3 font-mono text-[11px]" style={{ color: 'var(--c-text-4)' }}>{r.id.slice(0, 12)}…</td>
                   <td className="px-4 py-3">
-                    <UserName uid={r.userId} info={names[r.userId]} color="#5BB6DE" />
+                    {r.organizationId ? (
+                      <div className="flex flex-col gap-0.5" title={r.organizationId}>
+                        <span dir="auto" className="font-semibold" style={{ color: '#5BB6DE' }}>{r.organizationName || r.organizationId}</span>
+                        <span className="text-[10px]" style={{ color: 'var(--c-text-4)' }}>Organization</span>
+                        {r.requestedByUid && <UserName uid={r.requestedByUid} info={names[r.requestedByUid]} showUid={false} />}
+                      </div>
+                    ) : <UserName uid={r.userId} info={names[r.userId]} color="#5BB6DE" />}
                   </td>
-                  <td className="px-4 py-3 text-[11px]" style={{ color: 'var(--c-text-2)' }}>{r.packageName || '—'}</td>
+                  <td className="px-4 py-3 text-[11px]" style={{ color: 'var(--c-text-2)' }}>
+                    <span dir="auto">{r.packageName || '—'}</span>
+                    {r.note && <p dir="auto" className="mt-1 max-w-xs whitespace-pre-wrap break-words" style={{ color: 'var(--c-text-4)' }}>{r.note}</p>}
+                  </td>
                   <td className="px-4 py-3 text-right font-mono text-[11px] font-bold" style={{ color: '#22C55E' }}>{r.points.toLocaleString()}</td>
                   <td className="px-4 py-3"><StatusBadge status={r.status} /></td>
                   <td className="px-4 py-3 text-[11px] whitespace-nowrap" style={{ color: 'var(--c-text-4)' }}>{r.createdAt}</td>
