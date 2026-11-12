@@ -14,6 +14,7 @@ export interface SmsFormatSettings {
 
 export interface SmsMessageContext {
   groupName?: string | null;
+  organizationName?: unknown;
   senderPhone?: string | null;
   senderDisplayName?: unknown;
   senderUsername?: unknown;
@@ -48,6 +49,8 @@ export function composeSmsBody(body: string, settings: SmsFormatSettings, contex
   if (settings.smsShowAppName === true) prefix.push(`[${line(settings.appName, 60) || 'OfflineSMS'}]`);
   const group = line(context.groupName, 120);
   if (settings.smsShowGroupName === true && group) prefix.push(`[${group}]`);
+  const organization = line(context.organizationName, 120);
+  if (organization) prefix.push(organization);
   const { senderPhone, senderUsername } = context;
   if (typeof senderPhone === 'string' && /^\+[1-9]\d{6,14}$/.test(senderPhone)) {
     if (settings.smsShowSenderPhone === true) prefix.push(senderPhone);

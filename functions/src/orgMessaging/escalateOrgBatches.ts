@@ -198,13 +198,14 @@ async function processBatch(
     return;
   }
 
-  // 5 — Freeze one formatting/identity policy for the entire personalized
-  // batch. Compose the EXACT outgoing payload before pricing it: branding,
-  // separators and any verified sender number count toward its SMS segments.
-  // Organization messages are direct messages from the synthetic org sender;
-  // there is no group name or administrator phone to substitute here.
+  // 5 — Use the organization's current name and price the complete outgoing
+  // payload once, including the name, branding and separators.
   const sendable = eligible.slice(0, MAX_RECIPIENTS_PER_BATCH);
-  const contentContext = await loadSmsContentContext(db, { senderUid });
+  const [formatContext, organization] = await Promise.all([
+    loadSmsContentContext(db, { senderUid }),
+    db.collection('organizations').doc(organizationId).get(),
+  ]);
+  const contentContext = { ...formatContext, organizationName: organization.get('name') };
   const contentByText = new Map<string, ReturnType<typeof prepareSmsContentWithContext>>();
   const sendRows = sendable.map(e => {
     const row = rowByUid.get(e.uid)!;
