@@ -31,6 +31,21 @@ describe('verifySession and organization admins', () => {
     }
   });
 
+  it('requires a verified address for the bootstrap admin fallback', async () => {
+    vi.resetModules();
+    vi.stubEnv('BOOTSTRAP_ADMIN_EMAILS', 'bootstrap@example.test');
+    try {
+      const { verifySession: verifyBootstrap } = await import('../lib/session');
+      decoded.current = { uid: 'u1', email: 'bootstrap@example.test', email_verified: false };
+      expect(await verifyBootstrap('cookie')).toMatchObject({ state: 'forbidden' });
+      decoded.current.email_verified = true;
+      expect(await verifyBootstrap('cookie')).toMatchObject({ state: 'authorized', role: 'bootstrap_admin' });
+    } finally {
+      vi.unstubAllEnvs();
+      vi.resetModules();
+    }
+  });
+
   it('leaves platform roles unchanged', async () => {
     decoded.current = { uid: 'u1', role: 'super_admin' };
     expect(await verifySession('cookie')).toMatchObject({ state: 'authorized', role: 'super_admin' });

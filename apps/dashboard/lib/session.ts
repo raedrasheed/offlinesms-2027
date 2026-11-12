@@ -45,6 +45,10 @@ const BOOTSTRAP_EMAILS = (process.env.BOOTSTRAP_ADMIN_EMAILS ?? '')
   .map(s => s.trim().toLowerCase())
   .filter(Boolean);
 
+export function isBootstrapAdminEmail(email?: string): boolean {
+  return !!email && BOOTSTRAP_EMAILS.includes(email.toLowerCase());
+}
+
 export function isAdminClaims(claims: Record<string, unknown>): AdminRole | 'legacy_admin' | null {
   if (claims.admin === true) return 'legacy_admin';
 
@@ -88,7 +92,7 @@ export async function verifySession(sessionCookie?: string): Promise<SessionResu
   // Bootstrap allow-list: until a first real admin exists in the system, a
   // small list of emails can reach `/admin` to promote the first admin. This
   // is only consulted when no admin claim is present.
-  if (user.email && BOOTSTRAP_EMAILS.includes(user.email.toLowerCase())) {
+  if (decoded.email_verified === true && isBootstrapAdminEmail(user.email)) {
     return { state: 'authorized', user, role: 'bootstrap_admin' };
   }
 

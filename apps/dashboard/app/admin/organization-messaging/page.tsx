@@ -6,6 +6,7 @@
 //   • super_admin (unrestricted scope) → picks an organization via ?org=,
 //     with a picker list when none is selected.
 
+import type { Route } from 'next';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
@@ -228,7 +229,7 @@ function escalationAudienceLabel(a: string): string {
 
 function Header({ isPlatformAdmin, orgName }: { isPlatformAdmin: boolean; orgName?: string }) {
   return (
-    <div className="flex items-center justify-between">
+    <div className="flex flex-wrap items-center justify-between gap-3">
       <div>
         <p className="text-[12px] font-medium mb-0.5" style={{ color: 'var(--c-text-3)' }}>Admin / Organization messaging</p>
         <h1 className="text-[22px] font-extrabold tracking-tight">
@@ -236,7 +237,7 @@ function Header({ isPlatformAdmin, orgName }: { isPlatformAdmin: boolean; orgNam
         </h1>
       </div>
       {isPlatformAdmin && (
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {orgName ? (
             <Link
               href={'/admin/organization-messaging' as any}
@@ -246,6 +247,13 @@ function Header({ isPlatformAdmin, orgName }: { isPlatformAdmin: boolean; orgNam
               Switch organization
             </Link>
           ) : null}
+          <Link
+            href={'/admin/organization-messaging/registrations' as Route}
+            className="px-3 py-2 text-sm font-bold rounded-lg"
+            style={{ border: '1px solid var(--c-border)', color: 'var(--c-text-2)' }}
+          >
+            Registration requests
+          </Link>
           <Link
             href={'/admin/organization-messaging/new' as any}
             className="px-4 py-2 text-sm font-bold rounded-lg transition hover:brightness-110"
