@@ -52,6 +52,7 @@ export async function POST(request: Request) {
   try { body = await request.json(); }
   catch { return fail('invalid_payload', 'Body must be valid JSON.'); }
   let sendPayload = body;
+  let recipientGroupName: string | undefined;
   if (body && typeof body === 'object' && 'recipientGroupId' in body) {
     if (!isRecipientGroupId(body.recipientGroupId) || 'recipients' in body || 'messages' in body) {
       return fail('invalid_payload', 'Provide a recipientGroupId by itself as the recipient source.');
@@ -60,6 +61,7 @@ export async function POST(request: Request) {
       const group = await getRecipientGroup(organizationId, body.recipientGroupId);
       if (!group || !group.members.length) return fail('invalid_payload', 'Recipient group not found or empty.');
       sendPayload = { ...body, recipients: group.members.map(member => ({ phone: member.phone })) };
+      recipientGroupName = group.name;
     } catch { return fail('internal_error'); }
   }
   const parsed = parseSendRequest(sendPayload);
@@ -74,7 +76,7 @@ export async function POST(request: Request) {
   const result = await submitOrganizationMessageBatch(organizationId, parsed.items, {
     source: 'api',
     keyId,
-  }, { escalationOverride });
+  }, { escalationOverride, recipientGroupName });
   if (!result.ok) return fail(result.code, result.message);
 
   // 5 — lastUsedAt (soft-fail; key id only, never the raw key).

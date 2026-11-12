@@ -212,14 +212,20 @@ async function processBatch(
     return;
   }
 
-  // 5 — Use the organization's current name and price the complete outgoing
-  // payload once, including the name, branding and separators.
+  // 5 — Price the complete payload, including the current organization name,
+  // the saved recipient group name from submission and any branding.
   const sendable = eligible.slice(0, MAX_RECIPIENTS_PER_BATCH);
+  const showOrganizationName = currentBatch.get('smsIdentification.showOrganizationName') !== false;
+  const showRecipientGroupName = currentBatch.get('smsIdentification.showRecipientGroupName') !== false;
   const [formatContext, organization] = await Promise.all([
     loadSmsContentContext(db, { senderUid }),
-    db.collection('organizations').doc(organizationId).get(),
+    showOrganizationName ? db.collection('organizations').doc(organizationId).get() : null,
   ]);
-  const contentContext = { ...formatContext, organizationName: organization.get('name') };
+  const contentContext = {
+    ...formatContext,
+    organizationName: organization?.get('name'),
+    recipientGroupName: showRecipientGroupName ? currentBatch.get('recipientGroupName') : undefined,
+  };
   const contentByText = new Map<string, ReturnType<typeof prepareSmsContentWithContext>>();
   const sendRows = sendable.map(e => {
     const row = rowsByUid.get(e.uid)![0];

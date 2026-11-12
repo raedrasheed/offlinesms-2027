@@ -45,7 +45,11 @@ export default async function BusinessSend({ searchParams }: { searchParams: Pro
             <a href="/points" className={styles.link}>Request points</a>
           </div>
           <p className={styles.cardIntro}>SMS wallet <span className={styles.wallet}>{overview.smsWalletBalance == null ? '—' : `${overview.smsWalletBalance.toLocaleString('en')} pts`}</span></p>
-          <EscalationSettings action={updateOrgEscalationSettings.bind(null, organizationId)} initial={overview.escalation} />
+          <EscalationSettings
+            initial={overview.escalation}
+            smsIdentification={overview.smsIdentification}
+            action={updateOrgEscalationSettings.bind(null, organizationId)}
+          />
         </section>
       </div>
     </div>

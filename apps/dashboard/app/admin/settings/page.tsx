@@ -99,7 +99,7 @@ export default async function SettingsPage() {
           <Row label="Default timezone"  value={settings.defaultTimezone} />
           <Row label="SMS escalation"    value={settings.smsEscalationEnabled ? 'Enabled' : 'Disabled'} />
           <Row label="Show app name in SMS" value={settings.smsShowAppName ? 'Enabled' : 'Disabled'} />
-          <Row label="Show group name in SMS" value={settings.smsShowGroupName ? 'Enabled' : 'Disabled'} />
+          <Row label="Show chat group name in SMS" value={settings.smsShowGroupName ? 'Enabled' : 'Disabled'} />
           <Row label="Show sender phone in SMS" value={settings.smsShowSenderPhone ? 'Enabled' : 'Disabled'} />
           <Row label="Points system"     value={settings.pointsEnabled ? 'Enabled' : 'Disabled'} />
           <Row label="Maintenance mode"  value={settings.maintenanceMode ? 'On' : 'Off'} />

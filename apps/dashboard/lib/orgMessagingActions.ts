@@ -18,7 +18,7 @@ import { canDo } from './adminPermissions';
 import { getAdminScope, canViewOrganization, isPlatformAdmin, organizationClaim } from './adminScope';
 import {
   validateOrgAccountInput, deriveOrgSlug, validateOrgSendInput,
-  validateEscalationSettings,
+  validateEscalationSettings, type OrgSmsIdentification,
 } from './orgMessagingValidation';
 import { generateApiKey } from './orgMessagingKeys';
 import { submitOrganizationMessageBatch, type SubmitFailureCode } from './orgMessagingService';
@@ -185,6 +185,7 @@ export async function sendOrganizationMessage(
   }
 
   let recipientsText = data.get('recipients')?.toString() ?? '';
+  let recipientGroupName: string | undefined;
   const groupId = data.get('recipientGroupId');
   if (groupId) {
     if (recipientsText.trim() || !isRecipientGroupId(groupId)) return { error: 'Choose a group or enter recipients manually.' };
@@ -192,6 +193,7 @@ export async function sendOrganizationMessage(
       const group = await getRecipientGroup(organizationId, groupId);
       if (!group || !group.members.length) return { error: 'The selected group is missing or empty.' };
       recipientsText = group.members.map(member => member.phone).join('\n');
+      recipientGroupName = group.name;
     } catch { return { error: 'Could not load the selected group.' }; }
   }
 
@@ -212,7 +214,7 @@ export async function sendOrganizationMessage(
     source:    'dashboard',
     userUid:   session.user.uid,
     userEmail: session.user.email ?? null,
-  });
+  }, { recipientGroupName });
   if (!result.ok) return { error: result.message ?? SEND_FAILURE_COPY[result.code] };
   revalidateOrgMessaging('/business', '/business/activity', '/business/send');
 
@@ -299,9 +301,24 @@ export async function updateOrgEscalationSettings(
   });
   if ('error' in parsed) return parsed;
 
+  const organizationName = data.get('smsShowOrganizationName');
+  const recipientGroupName = data.get('smsShowRecipientGroupName');
+  let smsIdentification: OrgSmsIdentification | undefined;
+  if (organizationName !== null || recipientGroupName !== null) {
+    if ((organizationName !== 'true' && organizationName !== 'false')
+        || (recipientGroupName !== 'true' && recipientGroupName !== 'false')) {
+      return { error: 'Reload settings before saving the SMS identification options.' };
+    }
+    smsIdentification = {
+      showOrganizationName: organizationName === 'true',
+      showRecipientGroupName: recipientGroupName === 'true',
+    };
+  }
+  const settings = { messagingEscalation: parsed, ...(smsIdentification && { smsIdentification }) };
+
   try {
     await adminDb.collection('organizations').doc(organizationId)
-      .set({ messagingEscalation: parsed, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      .set({ ...settings, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   } catch {
     return { error: 'Could not save the escalation settings. Please try again.' };
   }
@@ -314,7 +331,7 @@ export async function updateOrgEscalationSettings(
       targetType: 'organization',
       targetId:   organizationId,
       result:     'success',
-      metadata:   { ...parsed },
+      metadata:   { ...parsed, ...(smsIdentification && { smsIdentification }) },
       createdAt:  FieldValue.serverTimestamp(),
     });
   } catch { /* soft-fail */ }

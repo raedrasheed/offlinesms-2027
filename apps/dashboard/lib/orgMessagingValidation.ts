@@ -119,6 +119,21 @@ export const DEFAULT_ESCALATION: EscalationPolicy = {
   enabled: true, delayMinutes: 5, audience: 'unread_only',
 };
 
+export type OrgSmsIdentification = {
+  showOrganizationName: boolean;
+  showRecipientGroupName: boolean;
+};
+
+export function resolveOrgSmsIdentification(value: unknown): OrgSmsIdentification {
+  const settings = value !== null && typeof value === 'object'
+    ? value as Partial<OrgSmsIdentification>
+    : undefined;
+  return {
+    showOrganizationName: settings?.showOrganizationName !== false,
+    showRecipientGroupName: settings?.showRecipientGroupName !== false,
+  };
+}
+
 /** Validate dashboard escalation settings (org default). */
 export function validateEscalationSettings(raw: {
   enabled?:      unknown;

@@ -22,7 +22,7 @@ import { adminDb } from './firebase-admin';
 import { loadOrgRelayCoverage, summarizeCoverage, type CoverageSummary, type SmsCoverageStatus } from './relayCoverage';
 import { normalizePhoneAndCountry } from './phoneCountry';
 import {
-  usageMonthKey, resolveEscalationPolicy, type EscalationPolicy,
+  usageMonthKey, resolveEscalationPolicy, resolveOrgSmsIdentification, type EscalationPolicy,
 } from './orgMessagingValidation';
 import {
   actorForContext, batchDocFields, classifyRecipientResolution, messageDocFields,
@@ -309,7 +309,7 @@ export async function submitOrganizationMessageBatch(
   organizationId: string,
   items: SendItem[],
   ctx: SubmitContext,
-  options?: { escalationOverride?: unknown },
+  options?: { escalationOverride?: unknown; recipientGroupName?: string },
 ): Promise<SubmitResult> {
   // 0 — Org pre-read: name + escalation default (status/quota re-checked in
   //     the transaction below).
@@ -376,6 +376,8 @@ export async function submitOrganizationMessageBatch(
 
       tx.set(batchRef, {
         ...batchDocFields(organizationId, summary, ctx),
+        ...(options?.recipientGroupName ? { recipientGroupName: options.recipientGroupName } : {}),
+        smsIdentification: resolveOrgSmsIdentification(org.smsIdentification),
         delivered:        0,                 // receipt-backed; sweeper updates
         read:             0,
         escalation:       { enabled: policy.enabled, delayMinutes: policy.delayMinutes, audience: policy.audience },
