@@ -112,7 +112,7 @@ export default function RecipientGroups({ groups, selected, organizationId, grou
   }
 
   return (
-    <section id="recipient-groups" className="scroll-mt-4 rounded-2xl border p-6 space-y-5" style={{ background: 'var(--c-card)', borderColor: 'var(--c-border)' }}>
+    <section id="recipient-groups" className="min-w-0 scroll-mt-4 rounded-2xl border p-6 space-y-5" style={{ background: 'var(--c-card)', borderColor: 'var(--c-border)' }}>
       <div className="flex items-start gap-3">
         <span className="grid size-10 shrink-0 place-items-center rounded-xl" style={{ background: 'rgba(31,123,168,.12)', color: 'var(--c-accent, #1F7BA8)' }}><FileSpreadsheet size={20} aria-hidden /></span>
         <div>
@@ -120,9 +120,41 @@ export default function RecipientGroups({ groups, selected, organizationId, grou
           <p className="text-sm" style={{ color: 'var(--c-text-3)' }}>Save recipients for later use in the send form or API.</p>
         </div>
       </div>
-      {groups.length > 0 && (
+      {groupPath && groups.length > 0 && (
+        <div className="overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--c-border)' }}>
+          <table className="w-full table-fixed text-sm" aria-label="Saved recipient groups">
+            <thead style={{ background: 'var(--c-bg)', color: 'var(--c-text-3)' }}>
+              <tr>
+                <th scope="col" className="px-3 py-2 text-start font-semibold">Group</th>
+                <th scope="col" className="w-24 px-3 py-2 text-end font-semibold sm:w-32">Recipients</th>
+              </tr>
+            </thead>
+            <tbody>
+              {groups.map(group => {
+                const isSelected = selectedId === group.id;
+                return (
+                  <tr key={group.id} className="border-t"
+                    style={{ borderColor: 'var(--c-border)', background: isSelected ? 'var(--c-bg)' : undefined }}>
+                    <th scope="row" className="text-start font-semibold">
+                      <Link href={groupLink(group.id)} prefetch={false} aria-current={isSelected ? 'true' : undefined}
+                        className="block break-words px-3 py-3 underline underline-offset-4 hover:decoration-2 focus-visible:outline focus-visible:-outline-offset-2">
+                        <bdi>{group.name}</bdi>
+                      </Link>
+                    </th>
+                    <td className="px-3 py-3 text-end tabular-nums" style={{ color: 'var(--c-text-3)' }}>{group.memberCount}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {groupPath && groups.length === 0 && (
+        <p className="text-sm" style={{ color: 'var(--c-text-3)' }}>No saved groups yet.</p>
+      )}
+      {!groupPath && groups.length > 0 && (
         <ul className="flex flex-wrap gap-2">
-          {groups.map(group => <li key={group.id}><Link href={groupLink(group.id)} prefetch={groupPath ? false : undefined} aria-current={selected?.id === group.id ? 'true' : undefined}
+          {groups.map(group => <li key={group.id}><Link href={groupLink(group.id)} aria-current={selected?.id === group.id ? 'true' : undefined}
             className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm hover:brightness-95" style={fieldStyle}>
             <span>{group.name}</span><span className="text-xs tabular-nums" style={{ color: 'var(--c-text-3)' }}>{group.memberCount}</span>
           </Link></li>)}
