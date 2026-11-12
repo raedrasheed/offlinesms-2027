@@ -5,9 +5,9 @@
 // create REAL in-app conversation messages from the organization's system
 // sender to each registered recipient (the existing onMessageCreate trigger
 // fans out receipts; the mobile app — unmodified — delivers and reports
-// delivered/read) → per-recipient logs → schedule SMS escalation per the
-// org's policy (the functions/ sweeper escalates unread/undelivered to SMS
-// after the configured delay, billed to the org's points wallet).
+// delivered/read) → per-recipient logs → schedule SMS per the org's policy.
+// The sweeper includes unlinked phone numbers and in-app recipients matching
+// the escalation audience. The organization's points wallet is billed.
 //
 // Statuses are receipt-backed truths: queued (created, receipt pending),
 // delivered / read (reported by the recipient's device), failed,
@@ -26,7 +26,7 @@ import {
 } from './orgMessagingValidation';
 import {
   actorForContext, batchDocFields, classifyRecipientResolution, messageDocFields,
-  quotaAllows, summarizeItems,
+  quotaAllows, resolveSmsOnlyRecipient, summarizeItems,
   type ApiErrorCode, type BatchSummary, type ResolvedItem, type SendItem, type SubmitContext,
 } from './orgMessagingApi';
 
@@ -36,7 +36,15 @@ export type SubmitFailureCode = Extract<
 >;
 
 export type SubmitResult =
-  | { ok: true; batchId: string; summary: BatchSummary; escalation: EscalationPolicy; escalationScheduled: boolean; smsCoverage: CoverageSummary }
+  | {
+      ok: true;
+      batchId: string;
+      summary: BatchSummary;
+      smsOnlyAccepted: number;
+      escalation: EscalationPolicy;
+      escalationScheduled: boolean;
+      smsCoverage: CoverageSummary;
+    }
   | { ok: false; code: SubmitFailureCode; message?: string };
 
 function chunk<T>(arr: T[], size: number): T[][] {
@@ -188,13 +196,19 @@ async function writeOrgMessage(
 
 // ─── Recipient resolution (backend-only lookups) ─────────────────────────────
 
-async function resolveItems(items: SendItem[]): Promise<ResolvedItem[]> {
+async function resolveItems(items: SendItem[], smsEnabled: boolean): Promise<ResolvedItem[]> {
   const userIds = [...new Set(items
     .map(i => (i.recipient as { userId?: string }).userId)
     .filter((v): v is string => typeof v === 'string'))];
   const phones = [...new Set(items
     .map(i => (i.recipient as { phone?: string }).phone)
     .filter((v): v is string => typeof v === 'string'))];
+
+  const canonicalPhones = new Map(phones.map(phone => {
+    const normalized = normalizePhoneAndCountry(phone);
+    return [phone, normalized.isValid ? normalized.e164 : phone];
+  }));
+  const lookupPhones = [...new Set([...phones, ...canonicalPhones.values()])];
 
   const existingUsers = new Set<string>();
   for (const ids of chunk(userIds, 100)) {
@@ -203,7 +217,7 @@ async function resolveItems(items: SendItem[]): Promise<ResolvedItem[]> {
   }
 
   const phoneToUid = new Map<string, string>();
-  for (const ph of chunk(phones, 10)) {
+  for (const ph of chunk(lookupPhones, 10)) {
     // F1 Phase B: resolve phone → uid via the owner-only userPrivate/profile
     // collection group (PII no longer on the public users doc).
     const snap = await adminDb.collectionGroup('userPrivate').where('phoneNumber', 'in', ph).get();
@@ -215,13 +229,16 @@ async function resolveItems(items: SendItem[]): Promise<ResolvedItem[]> {
     }
   }
 
-  return items.map((item): ResolvedItem => ({
-    ...item,
-    ...classifyRecipientResolution(item.recipient, {
+  return items.map(item => {
+    const inputPhone = item.recipient.phone;
+    const canonicalPhone = inputPhone ? canonicalPhones.get(inputPhone) : undefined;
+    const recipient = canonicalPhone ? { phone: canonicalPhone } : item.recipient;
+    const resolution = classifyRecipientResolution(recipient, {
       userExists: uid => existingUsers.has(uid),
-      phoneToUid: phone => phoneToUid.get(phone) ?? null,
-    }),
-  }));
+      phoneToUid: phone => phoneToUid.get(phone) ?? phoneToUid.get(inputPhone ?? phone) ?? null,
+    });
+    return resolveSmsOnlyRecipient({ ...item, recipient, ...resolution }, smsEnabled);
+  });
 }
 
 /**
@@ -330,7 +347,7 @@ export async function submitOrganizationMessageBatch(
 
   // 1 — Resolve recipients (userId existence + phone→user lookup).
   let resolved: ResolvedItem[];
-  try { resolved = await resolveItems(items); }
+  try { resolved = await resolveItems(items, policy.enabled); }
   catch { return { ok: false, code: 'internal_error' }; }
 
   // Country-based relay routing (synchronous, ENFORCING). Recipients whose
@@ -343,8 +360,7 @@ export async function submitOrganizationMessageBatch(
 
   const summary = summarizeItems(resolved);
 
-  const escalationScheduled = policy.enabled && summary.accepted > 0;
-  const escalateAt = escalationScheduled
+  const escalateAt = policy.enabled
     ? Timestamp.fromMillis(Date.now() + policy.delayMinutes * 60_000)
     : null;
 
@@ -381,8 +397,8 @@ export async function submitOrganizationMessageBatch(
         delivered:        0,                 // receipt-backed; sweeper updates
         read:             0,
         escalation:       { enabled: policy.enabled, delayMinutes: policy.delayMinutes, audience: policy.audience },
-        escalateAt,
-        escalationStatus: escalationScheduled ? 'scheduled' : 'none',
+        escalateAt:       null,
+        escalationStatus: 'none',
         createdAt:        FieldValue.serverTimestamp(),
         completedAt:      null,
       });
@@ -429,7 +445,7 @@ export async function submitOrganizationMessageBatch(
     }
   } else {
     for (const item of resolved) {
-      if (item.status === 'queued') {
+      if (item.status === 'queued' && item.resolvedUserId) {
         item.status = 'failed';
         item.failureReason = 'delivery_write_failed';
         deliveryFailures++;
@@ -440,6 +456,8 @@ export async function submitOrganizationMessageBatch(
   // Recount after delivery writes; release quota for any failed writes and
   // refresh the batch counts so the record stays truthful.
   const finalSummary = deliveryFailures > 0 ? summarizeItems(resolved) : summary;
+  const escalationScheduled = escalateAt !== null && finalSummary.accepted > 0;
+  const smsOnlyAccepted = resolved.filter(item => item.smsOnly && item.status === 'queued').length;
   if (deliveryFailures > 0) {
     try {
       await adminDb.runTransaction(async tx => {
@@ -452,7 +470,6 @@ export async function submitOrganizationMessageBatch(
         accepted: finalSummary.accepted,
         queued:   finalSummary.queued,
         failed:   finalSummary.failed,
-        ...(finalSummary.accepted === 0 ? { escalationStatus: 'none', escalateAt: null } : {}),
       });
     } catch { /* best-effort */ }
   }
@@ -473,7 +490,12 @@ export async function submitOrganizationMessageBatch(
       }
       await wb.commit();
     }
-    await batchRef.update({ completedAt: FieldValue.serverTimestamp() });
+    // Expose the batch to the sweeper only after every recipient row is durable.
+    await batchRef.update({
+      completedAt: FieldValue.serverTimestamp(),
+      escalateAt: escalationScheduled ? escalateAt : null,
+      escalationStatus: escalationScheduled ? 'scheduled' : 'none',
+    });
   } catch {
     try { await batchRef.update({ status: 'failed' }); } catch { /* best-effort */ }
     return { ok: false, code: 'internal_error' };
@@ -484,7 +506,8 @@ export async function submitOrganizationMessageBatch(
     batchId: batchRef.id, source: ctx.source,
     total: finalSummary.total, accepted: finalSummary.accepted,
     failed: finalSummary.failed, unsupported: finalSummary.unsupported,
-    escalationScheduled: escalationScheduled && finalSummary.accepted > 0,
+    smsOnlyAccepted,
+    escalationScheduled,
     escalationAudience: policy.audience,
     escalationDelayMinutes: policy.delayMinutes,
   }, 'success');
@@ -493,8 +516,9 @@ export async function submitOrganizationMessageBatch(
     ok: true,
     batchId: batchRef.id,
     summary: finalSummary,
+    smsOnlyAccepted,
     escalation: policy,
-    escalationScheduled: escalationScheduled && finalSummary.accepted > 0,
+    escalationScheduled,
     smsCoverage,
   };
 }

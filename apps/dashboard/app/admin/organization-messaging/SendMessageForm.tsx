@@ -54,11 +54,12 @@ export default function SendMessageForm({
           </p>
           <p>
             {ok.accepted}/{ok.total} accepted for delivery
+            {ok.smsOnlyAccepted > 0 ? ` · ${ok.smsOnlyAccepted} SMS only` : ''}
             {ok.failed > 0 ? ` · ${ok.failed} failed` : ''}
             {ok.unsupported > 0 ? ` · ${ok.unsupported} unsupported recipient${ok.unsupported === 1 ? '' : 's'}` : ''}.
           </p>
           {ok.escalationScheduled ? (
-            <p>SMS escalation scheduled in {ok.escalationDelayMinutes} min for {ok.escalationAudience.replace(/_/g, ' ')} users still pending.</p>
+            <p>SMS is scheduled in {ok.escalationDelayMinutes} min. The selected audience applies to registered recipients.</p>
           ) : null}
         </div>
       )}

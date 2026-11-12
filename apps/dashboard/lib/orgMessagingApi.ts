@@ -9,6 +9,7 @@ import {
   parseRecipientLine, type OrgRecipient, type OrgMessageStatus, type OrgBatchStatus,
 } from './orgMessagingValidation';
 import { isApiKeyFormat } from './orgMessagingKeys';
+import { normalizePhoneAndCountry } from './phoneCountry';
 
 // ─── Error codes → HTTP + message ────────────────────────────────────────────
 
@@ -164,6 +165,7 @@ export type ResolvedItem = SendItem & {
   status:         OrgMessageStatus;     // queued | failed | unsupported_recipient | no_relay_for_country (never sent/delivered)
   failureReason:  string | null;
   resolvedUserId: string | null;
+  smsOnly?:       true;
   // Country-based relay routing. A recipient whose detected country has no
   // eligible relay is HARD-BLOCKED: status becomes 'no_relay_for_country' and
   // the message is never delivered (in-app or SMS). 'covered' → normal delivery;
@@ -174,7 +176,7 @@ export type ResolvedItem = SendItem & {
 
 export type BatchSummary = {
   total:             number;
-  accepted:          number;   // recorded with a viable in-app target → 'queued'
+  accepted:          number;   // recorded with a viable in-app or SMS-only target → 'queued'
   queued:            number;
   failed:            number;
   unsupported:       number;
@@ -216,7 +218,7 @@ export function createdByForContext(ctx: SubmitContext): string {
  * Honest classification of one recipient given the backend-only lookups:
  *  • userId  → exists ? queued : failed(user_not_found)
  *  • phone   → linked user ? queued(resolvedUserId) : unsupported_recipient
- * Never returns sent/delivered — no delivery happens in this MVP.
+ * Only resolves account links and does not report delivery.
  */
 export function classifyRecipientResolution(
   recipient: OrgRecipient,
@@ -232,6 +234,19 @@ export function classifyRecipientResolution(
   return uid !== null
     ? { status: 'queued', failureReason: null, resolvedUserId: uid }
     : { status: 'unsupported_recipient', failureReason: 'phone_not_linked_to_user', resolvedUserId: null };
+}
+
+/** An unlinked phone can be queued for SMS when the batch has escalation enabled. */
+export function resolveSmsOnlyRecipient(item: ResolvedItem, smsEnabled: boolean): ResolvedItem {
+  const phone = item.recipient.phone;
+  if (item.failureReason !== 'phone_not_linked_to_user' || !phone) return item;
+
+  const normalized = normalizePhoneAndCountry(phone);
+  if (!normalized.isValid || normalized.e164 !== phone) {
+    return { ...item, failureReason: 'invalid_phone_number' };
+  }
+  if (!smsEnabled) return { ...item, failureReason: 'sms_escalation_disabled' };
+  return { ...item, status: 'queued', failureReason: null, smsOnly: true };
 }
 
 /** Batch doc fields minus server timestamps (the service adds those). */
@@ -259,6 +274,7 @@ export function messageDocFields(organizationId: string, batchId: string, item: 
     recipientType:  typeof r.userId === 'string' ? 'userId' : 'phone',
     recipientValue: typeof r.userId === 'string' ? r.userId : (r.phone ?? ''),
     resolvedUserId: item.resolvedUserId,
+    ...(item.smsOnly && { smsOnly: true }),
     title:          item.title,
     body:           item.body,
     status:         item.status,
@@ -331,7 +347,9 @@ export type OrgMessageRow = {
   body:           string;
   status:         string;          // queued | delivered | read | failed | unsupported_recipient
   failureReason:  string | null;
+  smsOnly:        boolean;
   smsEscalation:  string | null;   // queued | failed | skipped | null
+  smsSkipReason:  string | null;
   createdAt:      string;
 };
 
@@ -345,7 +363,9 @@ export function mapMessageRow(id: string, data: Record<string, unknown>): OrgMes
     body:           (data.body as string | undefined) ?? '',
     status:         (data.status as string | undefined) ?? '',
     failureReason:  (data.failureReason as string | null | undefined) ?? null,
+    smsOnly:        data.smsOnly === true,
     smsEscalation:  (data.smsEscalation as string | null | undefined) ?? null,
+    smsSkipReason:  typeof data.smsSkipReason === 'string' ? data.smsSkipReason : null,
     createdAt:      isoDate(data.createdAt),
   };
 }

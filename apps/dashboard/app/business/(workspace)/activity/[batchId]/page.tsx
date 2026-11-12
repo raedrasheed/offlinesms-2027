@@ -29,8 +29,8 @@ export default async function BusinessBatch({ params }: { params: Promise<{ batc
         <Metrics items={[
           { label: 'Recipients', value: batch.total },
           { label: 'Accepted', value: batch.accepted },
-          { label: 'Delivered', value: batch.delivered },
-          { label: 'Read', value: batch.read },
+          { label: 'In-app delivered', value: batch.delivered },
+          { label: 'In-app read', value: batch.read },
           { label: 'Failed', value: batch.failed },
           { label: 'Unsupported', value: batch.unsupported },
         ]} />
@@ -47,9 +47,9 @@ export default async function BusinessBatch({ params }: { params: Promise<{ batc
                   <tr key={message.id}>
                     <td>{message.recipientValue}</td>
                     <td className="min-w-40 max-w-80 break-words" dir="auto">{message.body}</td>
-                    <td><Status value={message.status} /></td>
+                    <td>{message.smsOnly ? 'SMS only' : <Status value={message.status} />}</td>
                     <td>{message.smsEscalation ? <Status value={message.smsEscalation} /> : '—'}</td>
-                    <td>{message.failureReason?.replaceAll('_', ' ') ?? '—'}</td>
+                    <td>{(message.failureReason ?? message.smsSkipReason)?.replace(/[_-]/g, ' ') ?? '—'}</td>
                     <td>{displayDate(message.createdAt)}</td>
                   </tr>
                 ))}

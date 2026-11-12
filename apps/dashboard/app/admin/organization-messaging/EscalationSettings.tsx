@@ -91,7 +91,7 @@ export default function EscalationSettings({
       <SettingSwitch
         name="escalationEnabled"
         label="Auto SMS escalation"
-        description="After the check period, recipients still matching the audience get the message by SMS. Each SMS segment is billed from the organization’s points wallet."
+        description="After the check period, unregistered numbers and registered recipients matching the audience can get the message by SMS. Each segment is billed from the organization’s points wallet."
         checked={enabled}
         onChange={setEnabled}
       />
