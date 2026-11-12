@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseRecipientWorkbook, RECIPIENT_GROUP_MAX } from '../lib/recipientGroupValidation';
-import { saveRecipientGroupImport, getRecipientGroup } from '../lib/orgRecipientGroups';
+import { saveRecipientGroupChange, saveRecipientGroupImport, getRecipientGroup } from '../lib/orgRecipientGroups';
 
 const memory = vi.hoisted(() => ({
   docs: new Map<string, Record<string, unknown>>(),
@@ -93,6 +93,61 @@ describe('Excel recipient import', () => {
       name: 'Parents', members: Array.from({ length: RECIPIENT_GROUP_MAX }, (_, index) => ({ name: 'Saved', phone: '+1202555' + String(1000 + index) })),
     });
     expect(await saveRecipientGroupImport('school', 'operator', { groupId: 'parents', recipients: [first] })).toHaveProperty('error');
+    expect(memory.writes).toEqual([]);
+  });
+});
+
+describe('saved recipient management', () => {
+  const groupPath = 'organizations/school/recipientGroups/parents';
+  const third = { name: 'Third recipient', phone: '+12025550125' };
+
+  beforeEach(() => {
+    memory.docs.set(groupPath, { name: 'Parents', memberCount: 3, members: [first, second, third] });
+  });
+
+  it('changes a name or phone number and retains the rest of the group', async () => {
+    const renamed = { ...first, name: 'الاسم الجديد' };
+    expect(await saveRecipientGroupChange('school', 'operator', 'parents', { type: 'edit', original: first, recipient: renamed }))
+      .toEqual({ members: [renamed, second, third] });
+    const changed = { ...renamed, phone: '+12025550126' };
+    expect(await saveRecipientGroupChange('school', 'operator', 'parents', {
+      type: 'edit', original: renamed, recipient: { ...changed, phone: '12025550126' },
+    })).toEqual({ members: [changed, second, third] });
+    expect(memory.docs.get(groupPath)).toMatchObject({ memberCount: 3, members: [changed, second, third] });
+    const audits = [...memory.docs.entries()].filter(([path]) => path.startsWith('auditLogs/')).map(([, doc]) => doc);
+    expect(audits).toHaveLength(2);
+    for (const audit of audits) {
+      expect(audit).toMatchObject({ action: 'organization.recipient_group.recipient_updated', targetId: 'parents' });
+      expect(audit.metadata).toEqual({ organizationId: 'school', updated: 1 });
+    }
+  });
+
+  it('removes selected recipients individually or in bulk and keeps the empty group', async () => {
+    expect(await saveRecipientGroupChange('school', 'operator', 'parents', { type: 'delete', recipients: [second] }))
+      .toEqual({ members: [first, third] });
+    expect(memory.docs.get(groupPath)).toMatchObject({ memberCount: 2 });
+    expect(await saveRecipientGroupChange('school', 'operator', 'parents', { type: 'delete', recipients: [first, first, third] }))
+      .toEqual({ members: [] });
+    expect(memory.docs.get(groupPath)).toMatchObject({ memberCount: 0 });
+    expect(await getRecipientGroup('school', 'parents')).toEqual({ id: 'parents', name: 'Parents', members: [] });
+    const audits = [...memory.docs.entries()].filter(([path]) => path.startsWith('auditLogs/')).map(([, doc]) => doc);
+    expect(audits.map(audit => audit.metadata)).toEqual([{ organizationId: 'school', removed: 1 }, { organizationId: 'school', removed: 2 }]);
+  });
+
+  it('rejects duplicate or invalid edits and applies no part of a stale bulk deletion', async () => {
+    const edit = { type: 'edit' as const, original: first };
+    expect(await saveRecipientGroupChange('school', 'operator', 'parents', { ...edit, recipient: { ...first, phone: second.phone } }))
+      .toEqual({ error: 'This phone number is already in the group.' });
+    expect(await saveRecipientGroupChange('school', 'operator', 'parents', { ...edit, recipient: { ...first, phone: '0595550123' } }))
+      .toHaveProperty('error');
+    const stale = { ...first, name: 'Previous name' };
+    expect(await saveRecipientGroupChange('school', 'operator', 'parents', { ...edit, original: stale, recipient: first }))
+      .toHaveProperty('error');
+    expect(await saveRecipientGroupChange('school', 'operator', 'parents', { type: 'delete', recipients: [second, stale] }))
+      .toHaveProperty('error');
+    expect(await saveRecipientGroupChange('other', 'operator', 'parents', { type: 'delete', recipients: [first] }))
+      .toEqual({ error: 'Group not found.' });
+    expect(memory.docs.get(groupPath)?.members).toEqual([first, second, third]);
     expect(memory.writes).toEqual([]);
   });
 });

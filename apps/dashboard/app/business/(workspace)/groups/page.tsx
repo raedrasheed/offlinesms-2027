@@ -1,5 +1,5 @@
 import RecipientGroups from '@/app/admin/organization-messaging/RecipientGroups';
-import { importOrganizationRecipients } from '@/lib/orgMessagingActions';
+import { importOrganizationRecipients, manageOrganizationRecipients } from '@/lib/orgMessagingActions';
 import { getRecipientGroup, listRecipientGroups } from '@/lib/orgRecipientGroups';
 import { PageHeading } from '../WorkspaceContent';
 import { getBusinessOrganizationId } from '../workspaceSession';
@@ -22,6 +22,7 @@ export default async function BusinessGroups({ searchParams }: { searchParams: P
         groups={groups}
         selected={selected}
         action={importOrganizationRecipients.bind(null, organizationId)}
+        manageAction={manageOrganizationRecipients.bind(null, organizationId)}
         groupPath="/groups"
       />
     </div>

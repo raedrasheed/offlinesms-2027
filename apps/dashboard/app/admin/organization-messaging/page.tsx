@@ -17,7 +17,10 @@ import { listOrganizations } from '@/lib/adminData';
 import {
   getOrgMessagingOverview, getOrgApiKeyStatus, listOrgMessageBatches,
 } from '@/lib/orgMessagingData';
-import { sendOrganizationMessage, generateOrgApiKey, revokeOrgApiKey, updateOrgEscalationSettings, importOrganizationRecipients } from '@/lib/orgMessagingActions';
+import {
+  sendOrganizationMessage, generateOrgApiKey, revokeOrgApiKey, updateOrgEscalationSettings,
+  importOrganizationRecipients, manageOrganizationRecipients,
+} from '@/lib/orgMessagingActions';
 import { getRecipientGroup, listRecipientGroups } from '@/lib/orgRecipientGroups';
 import { isRecipientGroupId } from '@/lib/recipientGroupValidation';
 import { PermissionState, EmptyState } from '@/components/state';
@@ -160,7 +163,8 @@ export default async function OrgMessagingPage({
       </section>
 
       <RecipientGroups key={orgId} organizationId={orgId} groups={groups} selected={selectedGroup}
-        action={importOrganizationRecipients.bind(null, orgId)} />
+        action={importOrganizationRecipients.bind(null, orgId)}
+        manageAction={manageOrganizationRecipients.bind(null, orgId)} />
 
       {/* 3 — Send message */}
       <section className="rounded-2xl p-6" style={{ background: CARD, border: `1px solid ${BORDER}` }}>

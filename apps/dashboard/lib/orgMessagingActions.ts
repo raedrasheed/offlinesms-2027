@@ -15,14 +15,14 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { adminAuth, adminDb } from './firebase-admin';
 import { verifySession } from './session';
 import { canDo } from './adminPermissions';
-import { getAdminScope, canViewOrganization, isPlatformAdmin } from './adminScope';
+import { getAdminScope, canViewOrganization, isPlatformAdmin, organizationClaim } from './adminScope';
 import {
   validateOrgAccountInput, deriveOrgSlug, validateOrgSendInput,
   validateEscalationSettings,
 } from './orgMessagingValidation';
 import { generateApiKey } from './orgMessagingKeys';
 import { submitOrganizationMessageBatch, type SubmitFailureCode } from './orgMessagingService';
-import { getRecipientGroup, saveRecipientGroupImport } from './orgRecipientGroups';
+import { getRecipientGroup, saveRecipientGroupChange, saveRecipientGroupImport, type RecipientGroupChange } from './orgRecipientGroups';
 import { isRecipientGroupId } from './recipientGroupValidation';
 import { organizationAccountDocument } from './organizationAccount';
 
@@ -230,14 +230,21 @@ export async function sendOrganizationMessage(
   };
 }
 
+async function recipientGroupManager(organizationId: string) {
+  const session = await verifySession((await cookies()).get('__session')?.value);
+  if (session.state !== 'authorized' || !canDo(session.role, 'manage:organization_messaging')
+      || (session.role !== 'organization_admin' && !isPlatformAdmin(session))
+      || (session.role === 'organization_admin' && !organizationClaim(session.user.claims))
+      || !canViewOrganization(session, organizationId)) return null;
+  return session;
+}
+
 export async function importOrganizationRecipients(
   organizationId: string,
   input: Parameters<typeof saveRecipientGroupImport>[2],
 ) {
-  const session = await verifySession((await cookies()).get('__session')?.value);
-  if (session.state !== 'authorized' || !canDo(session.role, 'manage:organization_messaging')
-      || (session.role !== 'organization_admin' && !isPlatformAdmin(session))
-      || !canViewOrganization(session, organizationId)) return { error: 'Permission denied.' };
+  const session = await recipientGroupManager(organizationId);
+  if (!session) return { error: 'Permission denied.' };
   if (!isRecipientGroupId(organizationId) || !input || typeof input !== 'object') return { error: 'Invalid import.' };
   try {
     const result = await saveRecipientGroupImport(organizationId, session.user.uid, input);
@@ -245,6 +252,23 @@ export async function importOrganizationRecipients(
     return result;
   } catch {
     return { error: 'Could not import recipients. Try again.' };
+  }
+}
+
+export async function manageOrganizationRecipients(
+  organizationId: string,
+  groupId: string,
+  change: RecipientGroupChange,
+) {
+  const session = await recipientGroupManager(organizationId);
+  if (!session) return { error: 'Permission denied.' };
+  if (!isRecipientGroupId(organizationId)) return { error: 'Invalid organization.' };
+  try {
+    const result = await saveRecipientGroupChange(organizationId, session.user.uid, groupId, change);
+    if ('members' in result) revalidateOrgMessaging('/business', '/business/groups', '/business/send');
+    return result;
+  } catch {
+    return { error: 'Could not update recipients. Try again.' };
   }
 }
 
