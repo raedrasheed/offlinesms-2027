@@ -42,6 +42,14 @@ active · heartbeat fresh (<90s) · `countryRoutingEnabled` · `allowedCountryCo
 - `claimRelayJobs` only returns jobs whose `recipientCountryCode` ∈ the device's `allowedCountryCodes` → relays can't pull unsupported-country jobs.
 - Country edits are validated server-side (ISO alpha-2 via libphonenumber) and audited (`relay.allowed_countries.updated`, `relay.country_routing.enabled/disabled`).
 
+## Relay assignment for organizations
+
+Platform admins can select an organization in **SMS Relay**, then select an existing device under **Assigned relay**. Multiple organizations can use one device. Each keeps its own SMS batches, points wallet, and delivery history. A selected device must be active, have a fresh heartbeat, and allow the recipient's country before the system queues work for it.
+
+For organization messaging, an explicit selection uses the selected relay for SMS. Clearing the assignment uses the organization's usual device pool and provider settings for future jobs. Jobs already queued keep their selected device through retries. The device keeps its original enrollment and uses its existing per-device send limits. Verification and phone-linking jobs use their existing verification sender policy.
+
+For rollout, deploy `claimRelayJobs`, `reportRelayDelivery`, and `escalateOrgBatches` from the same release revision before enabling the dashboard controls in production.
+
 ## Migration / backfill
 Existing relays have no country config → `isRelayConfiguredForRouting` returns **false** → excluded from sending (never default-all). Admins configure them via the dashboard editor / `setRelayCountries`. The dashboard shows a warning (AR + EN) listing unconfigured relays.
 

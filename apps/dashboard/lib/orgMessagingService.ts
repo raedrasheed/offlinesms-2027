@@ -234,14 +234,24 @@ async function resolveItems(items: SendItem[]): Promise<ResolvedItem[]> {
  * smsRelayCoverage/recipientCountryCode/status and returns the coverage summary.
  */
 async function applySmsCoverage(organizationId: string, resolved: ResolvedItem[]): Promise<CoverageSummary> {
-  const cov = await loadOrgRelayCoverage(organizationId);
+  const cov = await loadOrgRelayCoverage(organizationId, undefined, { useAssignedRelay: true });
   const uids = [...new Set(resolved.map(r => r.resolvedUserId).filter((v): v is string => !!v))];
   const uidPhone = new Map<string, string>();
   for (const ids of chunk(uids, 100)) {
-    const snaps = await adminDb.getAll(...ids.map(id => adminDb.collection('users').doc(id)));
-    for (const s of snaps) {
-      const p = s.get('phoneNumber') as string | undefined;
-      if (p) uidPhone.set(s.id, p);
+    const profiles = ids.map(id => adminDb.collection('users').doc(id).collection('userPrivate').doc('profile'));
+    const snaps = await adminDb.getAll(...profiles, { fieldMask: ['phoneNumber'] });
+    for (const snap of snaps) {
+      const uid = snap.ref.parent.parent?.id;
+      const phone = snap.get('phoneNumber');
+      if (uid && typeof phone === 'string' && phone) uidPhone.set(uid, phone);
+    }
+    const legacyIds = ids.filter(id => !uidPhone.has(id));
+    if (legacyIds.length > 0) {
+      const legacy = await adminDb.getAll(...legacyIds.map(id => adminDb.collection('users').doc(id)), { fieldMask: ['phoneNumber'] });
+      for (const snap of legacy) {
+        const phone = snap.get('phoneNumber');
+        if (typeof phone === 'string' && phone) uidPhone.set(snap.id, phone);
+      }
     }
   }
   const statuses: SmsCoverageStatus[] = [];

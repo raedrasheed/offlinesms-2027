@@ -13,26 +13,45 @@ import {
   type RouteDeviceCountry, type SkipReasonCode,
 } from './relayLogic';
 
-/** Load a business's active relays as routing candidates (one query). */
-export async function loadActiveRelayDevices(businessId: string): Promise<RouteDeviceCountry[]> {
-  const db = getFirestore();
-  const snap = await db.collection('relayDevices')
-    .where('businessId', '==', businessId)
-    .where('status', '==', 'active')
-    .limit(50)
-    .get();
-  return snap.docs.map(d => {
-    const caps = (d.get('caps') ?? { maxPerDay: 0 }) as { maxPerDay: number };
-    const counters = (d.get('counters') ?? {}) as { sentToday?: number };
-    return {
-      deviceId: d.id,
-      remaining: deviceRemaining(caps, counters),
-      status: (d.get('status') as string) ?? 'offline',
-      lastHeartbeatMs: (d.get('lastHeartbeatAt') as { toMillis?: () => number } | null)?.toMillis?.() ?? null,
-      countryRoutingEnabled: d.get('countryRoutingEnabled') === true,
-      allowedCountryCodes: (d.get('allowedCountryCodes') as string[] | undefined) ?? [],
-    };
-  });
+function routeDevice(snapshot: FirebaseFirestore.DocumentSnapshot): RouteDeviceCountry {
+  const caps = (snapshot.get('caps') ?? { maxPerDay: 0 }) as { maxPerDay: number };
+  const counters = (snapshot.get('counters') ?? {}) as { sentToday?: number };
+  return {
+    deviceId: snapshot.id,
+    remaining: deviceRemaining(caps, counters),
+    status: (snapshot.get('status') as string) ?? 'offline',
+    lastHeartbeatMs: (snapshot.get('lastHeartbeatAt') as { toMillis?: () => number } | null)?.toMillis?.() ?? null,
+    countryRoutingEnabled: snapshot.get('countryRoutingEnabled') === true,
+    allowedCountryCodes: (snapshot.get('allowedCountryCodes') as string[] | undefined) ?? [],
+  };
+}
+
+/** An explicit assignment is exclusive and is used only by organization messages. */
+export async function loadOrganizationRelayAssignment(businessId: string): Promise<string | null> {
+  const assignment = await getFirestore().collection('organizationRelayAssignments').doc(businessId).get();
+  if (!assignment.exists) return null;
+  const deviceId = assignment.get('relayDeviceId');
+  if (typeof deviceId !== 'string' || !deviceId.trim() || deviceId.includes('/') || deviceId === '.' || deviceId === '..') {
+    throw new Error('organization-relay-assignment-invalid');
+  }
+  return deviceId;
+}
+
+/** The normal pool is business-owned. Organization messaging may opt in to a
+ *  selected device, which replaces that pool even when it is unavailable. */
+export async function loadActiveRelayDevices(
+  businessId: string,
+  organizationRelayDeviceId?: string | null,
+): Promise<RouteDeviceCountry[]> {
+  const devices = getFirestore().collection('relayDevices');
+  if (organizationRelayDeviceId) {
+    const selected = await devices.doc(organizationRelayDeviceId).get();
+    const owner = selected.get('businessId');
+    if (!selected.exists || selected.get('status') !== 'active' || typeof owner !== 'string' || !owner) return [];
+    return [routeDevice(selected)];
+  }
+  const snapshot = await devices.where('businessId', '==', businessId).where('status', '==', 'active').limit(50).get();
+  return snapshot.docs.map(routeDevice);
 }
 
 export interface CoverageRecipient { id: string; phoneE164: string | null }
@@ -48,10 +67,10 @@ export interface UncoveredRecipient { id: string; e164: string | null; countryCo
 export async function partitionRecipientsByCoverage(
   businessId: string,
   recipients: CoverageRecipient[],
-  opts: { defaultCountry?: string; nowMs?: number } = {},
+  opts: { defaultCountry?: string; nowMs?: number; organizationRelayDeviceId?: string | null } = {},
 ): Promise<{ covered: CoveredRecipient[]; uncovered: UncoveredRecipient[] }> {
   const nowMs = opts.nowMs ?? Date.now();
-  const devices = await loadActiveRelayDevices(businessId);
+  const devices = await loadActiveRelayDevices(businessId, opts.organizationRelayDeviceId);
   const covered: CoveredRecipient[] = [];
   const uncovered: UncoveredRecipient[] = [];
   for (const r of recipients) {
@@ -89,26 +108,7 @@ export async function findEligibleRelayForCountry(
   params: FindEligibleRelayParams,
 ): Promise<RouteDeviceCountry | null> {
   const nowMs = params.nowMs ?? Date.now();
-  const db = getFirestore();
-  const snap = await db.collection('relayDevices')
-    .where('businessId', '==', params.businessId)
-    .where('status', '==', 'active')
-    .limit(50)
-    .get();
-
-  const devices: RouteDeviceCountry[] = snap.docs.map(d => {
-    const caps = (d.get('caps') ?? { maxPerDay: 0 }) as { maxPerDay: number };
-    const counters = (d.get('counters') ?? {}) as { sentToday?: number };
-    return {
-      deviceId: d.id,
-      remaining: deviceRemaining(caps, counters),
-      status: (d.get('status') as string) ?? 'offline',
-      lastHeartbeatMs: (d.get('lastHeartbeatAt') as { toMillis?: () => number } | null)?.toMillis?.() ?? null,
-      countryRoutingEnabled: d.get('countryRoutingEnabled') === true,
-      allowedCountryCodes: (d.get('allowedCountryCodes') as string[] | undefined) ?? [],
-    };
-  });
-
+  const devices = await loadActiveRelayDevices(params.businessId);
   return pickRelayForCountry(devices, params.countryCode, nowMs, params.excludeRelayIds);
 }
 

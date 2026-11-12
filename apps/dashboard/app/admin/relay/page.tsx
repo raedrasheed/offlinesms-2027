@@ -8,16 +8,19 @@ import { verifySession } from '@/lib/session';
 import { canDo } from '@/lib/adminPermissions';
 import { getAdminScope, isPlatformAdmin } from '@/lib/adminScope';
 import { adminDb } from '@/lib/firebase-admin';
-import { listOrganizations } from '@/lib/adminData';
 import { ADMIN_LABELS } from '@/lib/i18n';
 import { PermissionState } from '@/components/state';
 import { effectiveRelayCaps } from '@/lib/otpLimits';
-import RelayAdmin, { type RelayDeviceView, type RelayOrgStatus } from './RelayAdmin';
+import RelayAdmin, { type RelayAssignmentOption, type RelayDeviceView, type RelayOrgStatus } from './RelayAdmin';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 function ms(ts: any): number | null { return ts?.toMillis?.() ?? null; }
+
+function countryCodes(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((code): code is string => typeof code === 'string') : [];
+}
 
 async function resolveMode(businessId: string | null): Promise<RelayOrgStatus> {
   try {
@@ -41,15 +44,22 @@ export default async function RelayAdminPage({ searchParams: searchParamsPromise
   }
 
   const scope = getAdminScope(session);
-  const businessId = scope.organizationId ?? (searchParams?.org?.trim() || null);
+  const requestedOrg = typeof searchParams?.org === 'string' ? searchParams.org.trim() : '';
+  const businessId = scope.organizationId ?? (requestedOrg || null);
   const canManage = canDo(session.role, 'manage:relay');
+  const isPlatform = isPlatformAdmin(session);
 
   // Unrestricted (super/legacy/bootstrap) admins pick the org; org-scoped admins
   // are already bound to their own organization.
   const isUnrestricted = scope.organizationId === undefined;
   let orgOptions: { id: string; name: string }[] = [];
   if (isUnrestricted) {
-    try { orgOptions = (await listOrganizations()).map(o => ({ id: o.id ?? '', name: o.name })); }
+    try {
+      const orgs = await adminDb.collection('organizations').select('name').get();
+      orgOptions = orgs.docs.map(org => ({
+        id: org.id, name: typeof org.get('name') === 'string' ? org.get('name') : org.id,
+      })).sort((a, b) => a.name.localeCompare(b.name));
+    }
     catch { /* org list is best-effort */ }
   }
 
@@ -79,7 +89,7 @@ export default async function RelayAdminPage({ searchParams: searchParamsPromise
           failedToday: (x.counters?.failedToday as number) ?? 0,
           deliveredToday: (x.counters?.deliveredToday as number) ?? 0,
           lastError: (x.lastError as string) ?? null,
-          allowedCountryCodes: Array.isArray(x.allowedCountryCodes) ? (x.allowedCountryCodes as string[]) : [],
+          allowedCountryCodes: countryCodes(x.allowedCountryCodes),
           countryRoutingEnabled: x.countryRoutingEnabled === true,
           caps: effectiveRelayCaps(x.caps),
         };
@@ -92,14 +102,60 @@ export default async function RelayAdminPage({ searchParams: searchParamsPromise
   const orgStatus = await resolveMode(businessId);
 
   const now = Date.now();
-  const healthyDevices = devices.filter(
+  let assignedDeviceId: string | null = null;
+  let assignmentOptions: RelayAssignmentOption[] = [];
+  let assignmentError: string | null = null;
+  let coverageDevices: Pick<RelayDeviceView, 'status' | 'lastHeartbeatAt' | 'allowedCountryCodes' | 'countryRoutingEnabled'>[] = devices;
+  if (businessId) {
+    try {
+      const assignment = await adminDb.collection('organizationRelayAssignments').doc(businessId).get();
+      if (assignment.exists) {
+        const id = assignment.get('relayDeviceId');
+        if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) throw new Error('Invalid relay assignment.');
+        assignedDeviceId = id;
+        const relay = await adminDb.collection('relayDevices').doc(id).get();
+        coverageDevices = relay.exists ? [{
+          status: relay.get('status') ?? 'offline',
+          lastHeartbeatAt: ms(relay.get('lastHeartbeatAt')),
+          countryRoutingEnabled: relay.get('countryRoutingEnabled') === true,
+          allowedCountryCodes: countryCodes(relay.get('allowedCountryCodes')),
+        }] : [];
+      }
+    } catch {
+      coverageDevices = [];
+      assignmentError = 'Could not load the organization relay assignment.';
+    }
+    if (isPlatform && canManage && !assignmentError) {
+      try {
+        const ownerNames = new Map(orgOptions.map(org => [org.id, org.name]));
+        const relays = await adminDb.collection('relayDevices').where('status', 'in', ['active', 'paused', 'offline'])
+          .select('businessId', 'label', 'status', 'lastHeartbeatAt', 'countryRoutingEnabled', 'allowedCountryCodes').get();
+        assignmentOptions = relays.docs.flatMap(relay => {
+          const ownerId = relay.get('businessId');
+          if (typeof ownerId !== 'string' || !ownerId.trim()) return [];
+          const label = relay.get('label');
+          return [{
+            id: relay.id,
+            label: typeof label === 'string' && label.trim() ? label : relay.id,
+            owner: ownerNames.get(ownerId) ?? ownerId,
+            status: relay.get('status'),
+            lastHeartbeatAt: ms(relay.get('lastHeartbeatAt')),
+            countryCodes: relay.get('countryRoutingEnabled') === true ? countryCodes(relay.get('allowedCountryCodes')) : [],
+          }];
+        }).sort((a, b) => a.label.localeCompare(b.label) || a.id.localeCompare(b.id));
+      } catch {
+        assignmentError = 'Could not load relay devices for assignment.';
+      }
+    }
+  }
+  const healthyDevices = coverageDevices.filter(
     d => d.status === 'active' && d.lastHeartbeatAt != null && now - d.lastHeartbeatAt < 90_000,
   ).length;
 
   // Country coverage view: for each country a configured relay serves, how many
   // are currently active (online) vs offline. "Available" iff ≥1 active relay.
   const coverageMap = new Map<string, { active: number; offline: number }>();
-  for (const d of devices) {
+  for (const d of coverageDevices) {
     if (d.status === 'revoked' || !d.countryRoutingEnabled || d.allowedCountryCodes.length === 0) continue;
     const online = d.status === 'active' && d.lastHeartbeatAt != null && now - d.lastHeartbeatAt < 90_000;
     for (const cc of d.allowedCountryCodes) {
@@ -136,12 +192,15 @@ export default async function RelayAdminPage({ searchParams: searchParamsPromise
         orgStatus={orgStatus}
         businessId={businessId}
         canManage={canManage}
-        isPlatform={isPlatformAdmin(session)}
+        isPlatform={isPlatform}
         fetchError={fetchError}
         queueHealth={queueHealth}
         healthyDevices={healthyDevices}
         orgOptions={orgOptions}
         coverage={coverage}
+        assignedDeviceId={assignedDeviceId}
+        assignmentOptions={assignmentOptions}
+        assignmentError={assignmentError}
       />
     </div>
   );

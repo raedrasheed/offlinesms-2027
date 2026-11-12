@@ -13,6 +13,8 @@ import {
 import { claimRelayJobs, reportRelayDelivery, authorizeRelaySend } from '../src/sms/relayJobs';
 import { relayHeartbeat } from '../src/sms/relayDevices';
 import { relayReaper } from '../src/sms/relayReaper';
+import { loadOrganizationRelayAssignment, partitionRecipientsByCoverage } from '../src/sms/countryRouting';
+import { dispatchBatchToRelay } from '../src/sms/relayDispatcher';
 import { handleRequestPhoneLinkOtp } from '../src/phoneLink/requestPhoneLinkOtp';
 import { handleVerifyPhoneLinkOtp } from '../src/phoneLink/verifyPhoneLinkOtp';
 import { utcDayKey } from '../src/sms/relayLogic';
@@ -46,6 +48,88 @@ beforeEach(async () => {
   await resetEmulators();
   await seedPolicy();
   await seedRelayDevice();
+});
+
+describe('platform-assigned organization relay', () => {
+  const sender = 'sending-organization';
+  const otherDevice = 'sending-org-relay';
+
+  it('dispatches exclusively to the snapshot, retains the sender, and leaves ordinary coverage scoped', async () => {
+    const recipients = [{ id: 'recipient', phoneE164: num(901) }];
+    const settings = db().collection('organizationRelayAssignments').doc(sender);
+    await settings.set({ relayDeviceId: DEVICE });
+    const chosen = await loadOrganizationRelayAssignment(sender);
+    expect(chosen).toBe(DEVICE);
+    expect((await partitionRecipientsByCoverage(sender, recipients)).covered).toEqual([]);
+    expect((await partitionRecipientsByCoverage(sender, recipients, { organizationRelayDeviceId: chosen })).covered)
+      .toEqual([{ id: 'recipient', e164: num(901), countryCode: 'PS' }]);
+
+    const batch = db().collection('smsBatches').doc('organization-relay-batch');
+    await batch.set({ smsBody: 'organization message', status: 'sending' });
+    await batch.collection('recipients').doc('recipient').set({ smsStatus: 'queued', phoneE164: num(901) });
+    const dispatch = await dispatchBatchToRelay(batch.id, sender, { organizationRelayDeviceId: chosen });
+    expect(dispatch).toMatchObject({ routed: 1, assignedDeviceIds: [DEVICE] });
+    const jobs = await db().collection('relayJobs').where('batchId', '==', batch.id).get();
+    expect(jobs.docs[0].data()).toMatchObject({
+      businessId: sender, organizationRelayDeviceId: DEVICE, assignedDeviceId: DEVICE,
+    });
+    // Saved choices only affect later dispatches.
+    await settings.delete();
+    expect(await loadOrganizationRelayAssignment(sender)).toBeNull();
+    expect((await claim()).jobs).toMatchObject([{ jobId: jobs.docs[0].id }]);
+    expect(await report(jobs.docs[0].id, 'delivered', { attempt: 1 })).toMatchObject({ applied: true });
+    expect((await batch.collection('recipients').doc('recipient').get()).get('smsStatus')).toBe('delivered');
+  });
+
+  it('leases only the exact pinned ordinary job, and requires the authentic device and attempt on report', async () => {
+    const otherReq = (data: Record<string, unknown>) => req(otherDevice, { deviceId: otherDevice, ...data }, {
+      claims: { relayDevice: true, deviceId: otherDevice, businessId: sender },
+    });
+    await db().collection('relayDevices').doc(otherDevice).set({
+      ...(await db().collection('relayDevices').doc(DEVICE).get()).data(),
+      businessId: sender,
+    });
+    await businessJob('shared', { businessId: sender, organizationRelayDeviceId: DEVICE });
+    await businessJob('foreign-verification', {
+      businessId: sender, organizationRelayDeviceId: DEVICE, kind: 'phone_link_otp',
+    });
+
+    expect((await claimRelayJobs.run(otherReq({ capacity: 10 }))).jobs).toEqual([]);
+    await expectHttps(report('shared', 'sent', { attempt: 1 }), 'permission-denied', 'not-lease-owner');
+    expect((await claim()).jobs).toMatchObject([{ jobId: 'shared', attempt: 1 }]);
+    await expectHttps(reportRelayDelivery.run(otherReq({ jobId: 'shared', status: 'sent', attempt: 1 })),
+      'permission-denied', 'cross-business');
+    expect(await authorize('shared')).toEqual({ ok: false, reason: 'cross-business' });
+    expect(await report('shared', 'failed', { reason: 'no-service', androidResultCode: 4, attempt: 1 }))
+      .toMatchObject({ applied: true, requeued: true });
+    expect(await job('shared')).toMatchObject({ organizationRelayDeviceId: DEVICE, assignedDeviceId: null });
+    await db().collection('relayJobs').doc('shared').update({ nextAttemptAt: null });
+    expect((await claimRelayJobs.run(otherReq({ capacity: 10 }))).jobs).toEqual([]);
+    expect((await claim()).jobs).toMatchObject([{ jobId: 'shared', attempt: 2 }]);
+    await expectHttps(report('shared', 'delivered', { attempt: 3 }), 'permission-denied', 'not-lease-owner');
+    expect(await report('shared', 'delivered', { attempt: 2 })).toMatchObject({ applied: true });
+    expect((await job('foreign-verification'))?.status).toBe('queued');
+  });
+
+  it('does not fall back to an owned relay when the chosen relay cannot cover the country', async () => {
+    await db().collection('relayDevices').doc(otherDevice).set({
+      ...(await db().collection('relayDevices').doc(DEVICE).get()).data(),
+      businessId: sender,
+    });
+    const recipients = [{ id: 'recipient', phoneE164: num(902) }];
+    const chosen = { organizationRelayDeviceId: DEVICE };
+    const device = db().collection('relayDevices').doc(DEVICE);
+    await businessJob('shared-stale', { businessId: sender, organizationRelayDeviceId: DEVICE });
+    await device.update({ lastHeartbeatAt: Timestamp.fromMillis(Date.now() - 180_000) });
+    expect((await partitionRecipientsByCoverage(sender, recipients)).covered).toHaveLength(1);
+    expect((await partitionRecipientsByCoverage(sender, recipients, chosen)).uncovered[0].reason).toBe('no_relay_for_country');
+    expect((await claim()).jobs).toEqual([]);
+    await device.update({ lastHeartbeatAt: Timestamp.fromMillis(Date.now()), allowedCountryCodes: ['IL'] });
+    expect((await partitionRecipientsByCoverage(sender, recipients, chosen)).uncovered[0].reason).toBe('no_relay_for_country');
+    expect((await claim()).jobs).toEqual([]);
+    await device.update({ allowedCountryCodes: ['PS'], businessId: 'unexpected-owner' });
+    expect((await claim()).jobs).toEqual([]);
+  });
 });
 
 describe('E (R2) — heartbeats never touch enforcement counters', () => {
