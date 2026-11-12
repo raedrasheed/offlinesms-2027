@@ -11,8 +11,8 @@ import {
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { getDownloadURL, getStorage, ref } from 'firebase/storage';
 import { initializeFirebaseClient } from './firebase-client.js';
+import { isProductionFirebaseConfig } from './firebase-config.js';
 
-const projectId = 'offlinesms-prod-2027';
 const sdk = {
   initializeApp, initializeAppCheck, ReCaptchaEnterpriseProvider,
   browserSessionPersistence, initializeAuth, inMemoryPersistence,
@@ -22,14 +22,18 @@ const sdk = {
   getFunctions, httpsCallable, getDownloadURL, getStorage, ref,
 };
 
-export async function loadFirebaseClient() {
+async function loadHostingConfig() {
   const response = await fetch('/__/firebase/init.json', { cache: 'no-store', redirect: 'error' });
   if (!response.ok) throw new Error('Firebase Hosting configuration is unavailable.');
+  return response.json();
+}
 
-  const config = await response.json();
-  if (config?.projectId !== projectId || typeof config.apiKey !== 'string' || !config.apiKey.trim()
-      || typeof config.appId !== 'string' || !config.appId.trim()) {
-    throw new Error('Firebase Hosting is not configured for OfflineSMS production.');
+export async function loadFirebaseClient() {
+  const bundledConfig = typeof __OFFLINESMS_WEB_FIREBASE_CONFIG__ === 'object'
+    ? __OFFLINESMS_WEB_FIREBASE_CONFIG__ : null;
+  const config = bundledConfig ?? await loadHostingConfig();
+  if (!isProductionFirebaseConfig(config)) {
+    throw new Error('Firebase is not configured for OfflineSMS production.');
   }
 
   const appCheckSiteKey = typeof __OFFLINESMS_WEB_APP_CHECK_SITE_KEY__ === 'string'

@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node build.mjs"
+    "build": "node build.mjs",
+    "build:digitalocean": "node build.mjs --require-firebase-config"
   },
   "engines": {
     "node": ">=20"
