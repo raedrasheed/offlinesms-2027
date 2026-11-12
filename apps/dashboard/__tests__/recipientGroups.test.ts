@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseRecipientWorkbook, RECIPIENT_GROUP_MAX, RECIPIENT_GROUP_NAME_MAX } from '../lib/recipientGroupValidation';
+import { ORG_MSG_BODY_MAX } from '../lib/orgMessagingValidation';
 import {
   saveRecipientGroupChange, saveRecipientGroupDefinitionChange, saveRecipientGroupImport, getRecipientGroup, listRecipientGroups,
 } from '../lib/orgRecipientGroups';
@@ -99,6 +100,38 @@ describe('Excel recipient import', () => {
     expect(parseRecipientWorkbook([['name', 'phone'], ...Array.from({ length: RECIPIENT_GROUP_MAX + 1 }, () => [first.name, first.phone])])).toHaveProperty('error');
   });
 
+  it.each(['Message', 'الرسالة', 'نص الرسالة'])('reads optional %s with explicit blanks', heading => {
+    expect(parseRecipientWorkbook([
+      ['Name', 'Phone', heading],
+      [first.name, first.phone, ' موعد الاختبار\nغداً '],
+      [second.name, second.phone, null],
+      ['Third recipient', '+12025550125', 12345],
+    ])).toEqual({
+      recipients: [
+        { ...first, message: 'موعد الاختبار\nغداً' },
+        { ...second, message: null },
+        { name: 'Third recipient', phone: '+12025550125', message: '12345' },
+      ],
+      invalidRows: [], duplicateRows: [], hasMessageColumn: true,
+    });
+  });
+
+  it('rejects ambiguous headers, oversized text and conflicting duplicate phone messages', () => {
+    expect(parseRecipientWorkbook([['Name', 'Phone', 'Message', 'الرسالة']])).toHaveProperty('error');
+    const message = 'م'.repeat(ORG_MSG_BODY_MAX);
+    expect(parseRecipientWorkbook([
+      ['Name', 'Phone', 'Message'],
+      [first.name, first.phone, message],
+      ['Duplicate', 12025550123, message],
+      ['Conflict', first.phone, null],
+      [second.name, second.phone, `${message}!`],
+      [null, null, 'Message without recipient'],
+    ])).toEqual({
+      recipients: [{ ...first, message }], hasMessageColumn: true, duplicateRows: [3],
+      invalidRows: [4, 5, 6].map(row => ({ row, error: expect.any(String) })),
+    });
+  });
+
   it('creates a saved group, appends unique numbers, and treats repeated saves as no-ops', async () => {
     const input = { groupId: 'parents', newGroupName: 'Parents', recipients: [first, first] };
     expect(await saveRecipientGroupImport('school', 'operator', input)).toEqual({ groupId: 'parents', added: 1, skipped: 1, memberCount: 1 });
@@ -119,6 +152,45 @@ describe('Excel recipient import', () => {
       name: 'Parents', members: Array.from({ length: RECIPIENT_GROUP_MAX }, (_, index) => ({ name: 'Saved', phone: '+1202555' + String(1000 + index) })),
     });
     expect(await saveRecipientGroupImport('school', 'operator', { groupId: 'parents', recipients: [first] })).toHaveProperty('error');
+    expect(memory.writes).toEqual([]);
+  });
+
+  it('updates only saved messages on reimport, preserves omissions, and clears explicit blanks', async () => {
+    const groupId = 'parents';
+    await saveRecipientGroupImport('school', 'operator', {
+      groupId, newGroupName: 'Parents', recipients: [{ ...first, message: 'Old reminder' }],
+    });
+    expect(await saveRecipientGroupImport('school', 'operator', { groupId, recipients: [first, second] }))
+      .toEqual({ groupId, added: 1, skipped: 1, memberCount: 2 });
+    expect((await getRecipientGroup('school', groupId))?.members).toEqual([{ ...first, message: 'Old reminder' }, second]);
+
+    const firstUpdate = { name: 'A different name', phone: first.phone, message: ' تذكير جديد ' };
+    expect(await saveRecipientGroupImport('school', 'operator', { groupId, recipients: [firstUpdate, firstUpdate] }))
+      .toEqual({ groupId, added: 0, updated: 1, skipped: 1, memberCount: 2 });
+    expect((await getRecipientGroup('school', groupId))?.members).toEqual([{ ...first, message: 'تذكير جديد' }, second]);
+    expect((await listRecipientGroups('school'))[0].personalizedCount).toBe(1);
+
+    expect(await saveRecipientGroupImport('school', 'operator', { groupId, recipients: [{ ...first, message: null }] }))
+      .toEqual({ groupId, added: 0, updated: 1, skipped: 0, memberCount: 2 });
+    expect((await getRecipientGroup('school', groupId))?.members).toEqual([{ ...first, message: null }, second]);
+    expect((await listRecipientGroups('school'))[0].personalizedCount).toBe(0);
+    const audits = [...memory.docs.entries()].filter(([path]) => path.startsWith('auditLogs/')).map(([, doc]) => doc);
+    expect(audits[2].metadata).toEqual({ organizationId: 'school', added: 0, skipped: 1, updated: 1 });
+    expect(JSON.stringify(audits)).not.toContain('تذكير جديد');
+  });
+
+  it('rejects conflicting duplicate messages and invalid text in direct import requests', async () => {
+    const groupId = 'parents';
+    const input = { groupId, newGroupName: 'Parents' };
+    const text = { ...first, message: 'Reminder' };
+    for (const recipients of [
+      [text, { ...first, message: null }],
+      [text, { ...first, message: 'Different reminder' }],
+      [{ ...first, message: 'x'.repeat(ORG_MSG_BODY_MAX + 1) }],
+      [{ ...first, message: { unexpected: true } }],
+    ]) {
+      expect(await saveRecipientGroupImport('school', 'operator', { ...input, recipients })).toHaveProperty('error');
+    }
     expect(memory.writes).toEqual([]);
   });
 });
@@ -160,6 +232,17 @@ describe('saved recipient management', () => {
     expect(audits.map(audit => audit.metadata)).toEqual([{ organizationId: 'school', removed: 1 }, { organizationId: 'school', removed: 2 }]);
   });
 
+  it('retains a saved message when editing a recipient and updates the group count when removing them', async () => {
+    await saveRecipientGroupImport('school', 'operator', { groupId: 'parents', recipients: [{ ...first, message: 'Reminder' }] });
+    const edited = { name: 'New name', phone: '+12025550126' };
+    expect(await saveRecipientGroupChange('school', 'operator', 'parents', { type: 'edit', original: first, recipient: edited }))
+      .toEqual({ members: [{ ...edited, message: 'Reminder' }, second, third] });
+    expect((await listRecipientGroups('school'))[0].personalizedCount).toBe(1);
+    expect(await saveRecipientGroupChange('school', 'operator', 'parents', { type: 'delete', recipients: [edited] }))
+      .toEqual({ members: [second, third] });
+    expect((await listRecipientGroups('school'))[0].personalizedCount).toBe(0);
+  });
+
   it('rejects duplicate or invalid edits and applies no part of a stale bulk deletion', async () => {
     const edit = { type: 'edit' as const, original: first };
     expect(await saveRecipientGroupChange('school', 'operator', 'parents', { ...edit, recipient: { ...first, phone: second.phone } }))
@@ -190,16 +273,16 @@ describe('saved recipient group definition management', () => {
 
   it('lists scoped group metadata with a revision that can be used to rename directly', async () => {
     const groups = await listRecipientGroups('school');
-    expect(groups).toEqual([{ id: 'parents', name: 'Parents', memberCount: 1, revision }]);
+    expect(groups).toEqual([{ id: 'parents', name: 'Parents', memberCount: 1, personalizedCount: 0, revision }]);
     expect(memory.queries).toEqual([
-      { path: 'organizations/school/recipientGroups', order: 'name', fields: ['name', 'memberCount'] },
+      { path: 'organizations/school/recipientGroups', order: 'name', fields: ['name', 'memberCount', 'personalizedCount'] },
     ]);
     const [group] = groups;
     expect(await saveRecipientGroupDefinitionChange('school', 'operator', group.id, {
       type: 'rename', revision: group.revision, name: 'Staff',
     })).toEqual({ success: true });
     expect(await listRecipientGroups('school')).toEqual([
-      { id: 'parents', name: 'Staff', memberCount: 1, revision: '1700000000:1' },
+      { id: 'parents', name: 'Staff', memberCount: 1, personalizedCount: 0, revision: '1700000000:1' },
     ]);
   });
 

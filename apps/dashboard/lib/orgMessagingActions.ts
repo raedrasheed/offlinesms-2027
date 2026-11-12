@@ -18,15 +18,16 @@ import { canDo } from './adminPermissions';
 import { getAdminScope, canViewOrganization, isPlatformAdmin, organizationClaim } from './adminScope';
 import {
   validateOrgAccountInput, deriveOrgSlug, validateOrgSendInput,
-  validateEscalationSettings, type OrgSmsIdentification,
+  validateEscalationSettings, ORG_MSG_MAX_RECIPIENTS, type OrgSmsIdentification,
 } from './orgMessagingValidation';
+import { API_ERRORS, parseSendRequest, type SendItem } from './orgMessagingApi';
 import { generateApiKey } from './orgMessagingKeys';
 import { submitOrganizationMessageBatch, type SubmitFailureCode } from './orgMessagingService';
 import {
   getRecipientGroup, saveRecipientGroupChange, saveRecipientGroupDefinitionChange, saveRecipientGroupImport,
   type RecipientGroupChange, type RecipientGroupDefinitionChange,
 } from './orgRecipientGroups';
-import { isRecipientGroupId } from './recipientGroupValidation';
+import { isRecipientGroupId, parseGroupRecipient, type GroupRecipient } from './recipientGroupValidation';
 import { organizationAccountDocument } from './organizationAccount';
 
 export type OrgAccountActionState =
@@ -172,14 +173,61 @@ export type OrgSendActionState =
     }
   | null;
 
+export type OrgGroupMessagePreview = { revision: string; members: GroupRecipient[] } | { error: string };
+
+function groupMessagePreview(group: { revision: string; members: GroupRecipient[] }): OrgGroupMessagePreview {
+  if (!Array.isArray(group.members) || !group.members.length) {
+    return { error: 'The selected group is missing or empty.' };
+  }
+
+  const membersByPhone = new Map<string, GroupRecipient>();
+  for (const member of group.members) {
+    const parsed = parseGroupRecipient(member);
+    if (!parsed) return { error: 'The selected group contains invalid recipient data.' };
+    const { name, phone, message } = parsed;
+    const existing = membersByPhone.get(phone);
+    if (existing) {
+      if (existing.message !== (message || undefined)) {
+        return { error: 'The selected group has different messages for the same phone number.' };
+      }
+      continue;
+    }
+    membersByPhone.set(phone, { name, phone, ...(message && { message }) });
+  }
+
+  if (membersByPhone.size > ORG_MSG_MAX_RECIPIENTS) {
+    return { error: `At most ${ORG_MSG_MAX_RECIPIENTS} recipients per send.` };
+  }
+  const members = [...membersByPhone.values()];
+  if (!members.some(member => member.message)) return { error: 'The selected group has no saved Excel messages.' };
+  return { revision: group.revision, members };
+}
+
+export async function previewOrganizationRecipientGroupMessages(
+  organizationId: string,
+  groupId: string,
+): Promise<OrgGroupMessagePreview> {
+  if (!(await recipientGroupManager(organizationId))) return { error: 'Permission denied.' };
+  if (!isRecipientGroupId(organizationId) || !isRecipientGroupId(groupId)) {
+    return { error: 'Select a valid group.' };
+  }
+  try {
+    const group = await getRecipientGroup(organizationId, groupId);
+    if (!group) return { error: 'The selected group is missing or empty.' };
+    return groupMessagePreview(group);
+  } catch { return { error: 'Could not load the selected group.' }; }
+}
+
 export async function sendOrganizationMessage(
   organizationId: string,
   _prev: OrgSendActionState,
   data: FormData,
 ): Promise<OrgSendActionState> {
-  const cookie = (await cookies()).get('__session')?.value;
-  const session = await verifySession(cookie);
-  if (session.state !== 'authorized' || !canDo(session.role, 'manage:organization_messaging')) {
+  const useGroupMessages = data.get('useGroupMessages') === 'true';
+  const session = useGroupMessages
+    ? await recipientGroupManager(organizationId)
+    : await verifySession((await cookies()).get('__session')?.value);
+  if (session?.state !== 'authorized' || !canDo(session.role, 'manage:organization_messaging')) {
     return { error: 'Permission denied.' };
   }
   // organization_admin may only send for their own organization; super_admin
@@ -189,36 +237,48 @@ export async function sendOrganizationMessage(
   }
 
   let recipientsText = data.get('recipients')?.toString() ?? '';
-  let recipientGroupName: string | undefined;
+  const title = data.get('title')?.toString() ?? null;
+  const body = data.get('body')?.toString() ?? null;
+  let group: Awaited<ReturnType<typeof getRecipientGroup>> = null;
   const groupId = data.get('recipientGroupId');
+  if (useGroupMessages && (!isRecipientGroupId(organizationId) || !isRecipientGroupId(groupId))) {
+    return { error: 'Choose a group to use its saved Excel messages.' };
+  }
   if (groupId) {
     if (recipientsText.trim() || !isRecipientGroupId(groupId)) return { error: 'Choose a group or enter recipients manually.' };
     try {
-      const group = await getRecipientGroup(organizationId, groupId);
-      if (!group || !group.members.length) return { error: 'The selected group is missing or empty.' };
-      recipientsText = group.members.map(member => member.phone).join('\n');
-      recipientGroupName = group.name;
+      group = await getRecipientGroup(organizationId, groupId);
+      if (!group?.members.length) return { error: 'The selected group is missing or empty.' };
+      if (!useGroupMessages) recipientsText = group.members.map(member => member.phone).join('\n');
     } catch { return { error: 'Could not load the selected group.' }; }
   }
 
-  const parsed = validateOrgSendInput({
-    title:          data.get('title')?.toString() ?? null,
-    body:           data.get('body')?.toString() ?? null,
-    recipientsText,
-  });
-  if ('error' in parsed) return parsed;
-
-  const items = parsed.recipients.map(recipient => ({
-    recipient,
-    title: parsed.title,
-    body:  parsed.body,
-  }));
+  let items: SendItem[];
+  if (useGroupMessages && group) {
+    if (data.get('recipientGroupRevision') !== group.revision) {
+      return { error: 'The group changed. Reload the Excel message preview before sending.' };
+    }
+    const preview = groupMessagePreview(group);
+    if ('error' in preview) return preview;
+    if (!body?.trim() && preview.members.some(member => !member.message)) {
+      return { error: 'Enter a common message for recipients without an Excel message.' };
+    }
+    const parsed = parseSendRequest({
+      messages: preview.members.map(member => ({ phone: member.phone, title, body: member.message ?? body })),
+    });
+    if ('errorCode' in parsed) return { error: parsed.message ?? API_ERRORS[parsed.errorCode].message };
+    items = parsed.items;
+  } else {
+    const parsed = validateOrgSendInput({ title, body, recipientsText });
+    if ('error' in parsed) return parsed;
+    items = parsed.recipients.map(recipient => ({ recipient, title: parsed.title, body: parsed.body }));
+  }
 
   const result = await submitOrganizationMessageBatch(organizationId, items, {
     source:    'dashboard',
     userUid:   session.user.uid,
     userEmail: session.user.email ?? null,
-  }, { recipientGroupName });
+  }, { recipientGroupName: group?.name });
   if (!result.ok) return { error: result.message ?? SEND_FAILURE_COPY[result.code] };
   revalidateOrgMessaging('/business', '/business/activity', '/business/send');
 

@@ -1,7 +1,7 @@
 import { notFound } from 'next/navigation';
 import SendMessageForm from '@/app/admin/organization-messaging/SendMessageForm';
 import EscalationSettings from '@/app/admin/organization-messaging/EscalationSettings';
-import { sendOrganizationMessage, updateOrgEscalationSettings } from '@/lib/orgMessagingActions';
+import { previewOrganizationRecipientGroupMessages, sendOrganizationMessage, updateOrgEscalationSettings } from '@/lib/orgMessagingActions';
 import { getOrgMessagingOverview } from '@/lib/orgMessagingData';
 import { listRecipientGroups } from '@/lib/orgRecipientGroups';
 import { PageHeading } from '../WorkspaceContent';
@@ -36,6 +36,7 @@ export default async function BusinessSend({ searchParams }: { searchParams: Pro
           <SendMessageForm
             key={typeof group === 'string' ? group : ''}
             action={sendOrganizationMessage.bind(null, organizationId)}
+            previewGroupMessages={previewOrganizationRecipientGroupMessages.bind(null, organizationId)}
             groups={availableGroups}
             initialGroupId={initialGroupId}
             batchPath="/activity"
