@@ -16,11 +16,14 @@ import { listOrganizations } from '@/lib/adminData';
 import {
   getOrgMessagingOverview, getOrgApiKeyStatus, listOrgMessageBatches,
 } from '@/lib/orgMessagingData';
-import { sendOrganizationMessage, generateOrgApiKey, revokeOrgApiKey, updateOrgEscalationSettings } from '@/lib/orgMessagingActions';
+import { sendOrganizationMessage, generateOrgApiKey, revokeOrgApiKey, updateOrgEscalationSettings, importOrganizationRecipients } from '@/lib/orgMessagingActions';
+import { getRecipientGroup, listRecipientGroups } from '@/lib/orgRecipientGroups';
+import { isRecipientGroupId } from '@/lib/recipientGroupValidation';
 import { PermissionState, EmptyState } from '@/components/state';
 import SendMessageForm from './SendMessageForm';
 import ApiKeySection from './ApiKeySection';
 import EscalationSettings from './EscalationSettings';
+import RecipientGroups from './RecipientGroups';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -35,7 +38,7 @@ function fmt(iso: string): string {
 export default async function OrgMessagingPage({
   searchParams: searchParamsPromise,
 }: {
-  searchParams?: Promise<{ org?: string }>;
+  searchParams?: Promise<{ org?: string; group?: string }>;
 }) {
   const searchParams = await searchParamsPromise;
   const cookie = (await cookies()).get('__session')?.value;
@@ -47,6 +50,9 @@ export default async function OrgMessagingPage({
 
   const scope = getAdminScope(session);
   const isPlatformAdmin = isPlatformRole(session);
+  if (!scope.organizationId && !isPlatformAdmin) {
+    return <div className="p-8"><PermissionState title="Organization messaging access required" /></div>;
+  }
   // org_admin: always their own org. Platform admin: ?org= selection.
   const orgId = scope.organizationId ?? searchParams?.org ?? null;
 
@@ -81,13 +87,15 @@ export default async function OrgMessagingPage({
     );
   }
 
-  const overview = await getOrgMessagingOverview(orgId);
+  const overview = isRecipientGroupId(orgId) ? await getOrgMessagingOverview(orgId) : null;
   if (!overview) {
     return <div className="p-8"><PermissionState title="Organization not found" /></div>;
   }
-  const [apiKey, batches] = await Promise.all([
+  const [apiKey, batches, groups, selectedGroup] = await Promise.all([
     getOrgApiKeyStatus(orgId),
     listOrgMessageBatches(orgId),
+    listRecipientGroups(orgId),
+    getRecipientGroup(orgId, searchParams?.group),
   ]);
 
   const sendAction = sendOrganizationMessage.bind(null, orgId);
@@ -150,6 +158,9 @@ export default async function OrgMessagingPage({
         />
       </section>
 
+      <RecipientGroups key={orgId} organizationId={orgId} groups={groups} selected={selectedGroup}
+        action={importOrganizationRecipients.bind(null, orgId)} />
+
       {/* 3 — Send message */}
       <section className="rounded-2xl p-6" style={{ background: CARD, border: `1px solid ${BORDER}` }}>
         <h2 className="text-sm font-extrabold tracking-tight mb-1">Send message</h2>
@@ -159,7 +170,7 @@ export default async function OrgMessagingPage({
             ? ` After ${overview.escalation.delayMinutes} min, ${escalationAudienceLabel(overview.escalation.audience)} are escalated to SMS.`
             : ' Auto SMS escalation is currently off.'}
         </p>
-        <SendMessageForm action={sendAction} />
+        <SendMessageForm key={orgId} action={sendAction} groups={groups} />
       </section>
 
       {/* 4 — Message logs */}

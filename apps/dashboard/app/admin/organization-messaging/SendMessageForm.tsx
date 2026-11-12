@@ -2,8 +2,9 @@
 
 import { useFormState, useFormStatus } from 'react-dom';
 import { useRouter } from 'next/navigation';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import type { OrgSendActionState } from '@/lib/orgMessagingActions';
+import type { RecipientGroupSummary } from '@/lib/orgRecipientGroups';
 
 const inputCls = 'w-full rounded-lg px-3 py-2 text-sm outline-none';
 const inputStyle = { background: 'var(--c-bg)', border: '1px solid var(--c-border)', color: 'var(--c-text)' };
@@ -23,13 +24,15 @@ function SubmitButton() {
 }
 
 export default function SendMessageForm({
-  action,
+  action, groups,
 }: {
   action: (prev: OrgSendActionState, data: FormData) => Promise<OrgSendActionState>;
+  groups: RecipientGroupSummary[];
 }) {
   const router = useRouter();
   const [state, formAction] = useFormState(action, null);
   const ok = state && 'success' in state ? state : null;
+  const [groupId, setGroupId] = useState('');
 
   // Refresh server-rendered usage + logs after a successful send.
   useEffect(() => { if (ok) router.refresh(); }, [ok, router]);
@@ -74,11 +77,19 @@ export default function SendMessageForm({
         </p>
       </div>
 
-      <div>
-        <label className="block text-xs font-bold mb-1" style={{ color: 'var(--c-text-2)' }}>
+      {groups.length > 0 && <div>
+        <label htmlFor="org-send-group" className="block text-xs font-bold mb-1" style={{ color: 'var(--c-text-2)' }}>Recipient group</label>
+        <select id="org-send-group" name="recipientGroupId" value={groupId} onChange={event => setGroupId(event.target.value)} className={inputCls} style={inputStyle}>
+          <option value="">Enter recipients manually</option>
+          {groups.map(group => <option key={group.id} value={group.id}>{group.name} ({group.memberCount})</option>)}
+        </select>
+      </div>}
+      {!groupId && <div>
+        <label htmlFor="org-send-recipients" className="block text-xs font-bold mb-1" style={{ color: 'var(--c-text-2)' }}>
           Recipients <span style={{ color: '#EF4444' }}>*</span>
         </label>
         <textarea
+          id="org-send-recipients"
           name="recipients"
           required
           rows={6}
@@ -89,7 +100,7 @@ export default function SendMessageForm({
         <p className="text-[11px] mt-1" style={{ color: 'var(--c-text-3)' }}>
           One recipient per line: a phone in +E.164 form or an OfflineSMS user ID. Max 500 per send.
         </p>
-      </div>
+      </div>}
 
       <SubmitButton />
     </form>

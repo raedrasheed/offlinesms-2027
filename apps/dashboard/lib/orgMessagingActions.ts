@@ -10,6 +10,7 @@
 // settings page and relay caps.
 
 import { cookies } from 'next/headers';
+import { revalidatePath } from 'next/cache';
 import { FieldValue } from 'firebase-admin/firestore';
 import { adminAuth, adminDb } from './firebase-admin';
 import { verifySession } from './session';
@@ -21,6 +22,8 @@ import {
 } from './orgMessagingValidation';
 import { generateApiKey } from './orgMessagingKeys';
 import { submitOrganizationMessageBatch, type SubmitFailureCode } from './orgMessagingService';
+import { getRecipientGroup, saveRecipientGroupImport } from './orgRecipientGroups';
+import { isRecipientGroupId } from './recipientGroupValidation';
 
 export type OrgAccountActionState =
   | { error: string }
@@ -187,10 +190,21 @@ export async function sendOrganizationMessage(
     return { error: 'You can only send messages for your own organization.' };
   }
 
+  let recipientsText = data.get('recipients')?.toString() ?? '';
+  const groupId = data.get('recipientGroupId');
+  if (groupId) {
+    if (recipientsText.trim() || !isRecipientGroupId(groupId)) return { error: 'Choose a group or enter recipients manually.' };
+    try {
+      const group = await getRecipientGroup(organizationId, groupId);
+      if (!group || !group.members.length) return { error: 'The selected group is missing or empty.' };
+      recipientsText = group.members.map(member => member.phone).join('\n');
+    } catch { return { error: 'Could not load the selected group.' }; }
+  }
+
   const parsed = validateOrgSendInput({
     title:          data.get('title')?.toString() ?? null,
     body:           data.get('body')?.toString() ?? null,
-    recipientsText: data.get('recipients')?.toString() ?? null,
+    recipientsText,
   });
   if ('error' in parsed) return parsed;
 
@@ -219,6 +233,24 @@ export async function sendOrganizationMessage(
     escalationDelayMinutes: result.escalation.delayMinutes,
     escalationAudience:     result.escalation.audience,
   };
+}
+
+export async function importOrganizationRecipients(
+  organizationId: string,
+  input: Parameters<typeof saveRecipientGroupImport>[2],
+) {
+  const session = await verifySession((await cookies()).get('__session')?.value);
+  if (session.state !== 'authorized' || !canDo(session.role, 'manage:organization_messaging')
+      || (session.role !== 'organization_admin' && !isPlatformAdmin(session))
+      || !canViewOrganization(session, organizationId)) return { error: 'Permission denied.' };
+  if (!isRecipientGroupId(organizationId) || !input || typeof input !== 'object') return { error: 'Invalid import.' };
+  try {
+    const result = await saveRecipientGroupImport(organizationId, session.user.uid, input);
+    if ('groupId' in result) revalidatePath('/admin/organization-messaging');
+    return result;
+  } catch {
+    return { error: 'Could not import recipients. Try again.' };
+  }
 }
 
 // ─── Escalation settings (org default: delay + SMS audience) ─────────────────
