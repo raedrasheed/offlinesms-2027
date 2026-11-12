@@ -79,7 +79,7 @@ export default function ApiKeySection({
       )}
 
       {status ? (
-        <div className="grid grid-cols-4 gap-4 text-sm">
+        <div className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
           <KeyStat label="Status" value={status.status} highlight={hasActive} />
           <KeyStat label="Created" value={fmt(status.createdAt)} />
           <KeyStat label="Last used" value={fmt(status.lastUsedAt)} />
@@ -91,7 +91,7 @@ export default function ApiKeySection({
         </p>
       )}
 
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
           disabled={pending}
@@ -126,7 +126,7 @@ function KeyStat({ label, value, highlight }: { label: string; value: string; hi
   return (
     <div>
       <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--c-text-4)' }}>{label}</p>
-      <p className="text-sm font-extrabold mt-0.5 capitalize" style={highlight ? { color: '#22C55E' } : undefined}>{value}</p>
+      <p className="text-sm font-extrabold mt-0.5 capitalize" style={highlight ? { color: 'var(--c-text)' } : undefined}>{value}</p>
     </div>
   );
 }

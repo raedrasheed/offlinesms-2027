@@ -6,6 +6,7 @@ import { signInWithEmailAndPassword, GoogleAuthProvider, signInWithPopup } from 
 import { auth } from '@/lib/firebase';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { safeNextPath } from '@/lib/safeNext';
+import { BUSINESS_URL } from '@/lib/businessHost';
 
 // The login page initialises the Firebase client SDK, which is unsafe to
 // prerender without a complete set of NEXT_PUBLIC_FIREBASE_* env vars.
@@ -66,13 +67,16 @@ function LoginForm() {
         type="email" value={email} onChange={e => setEmail(e.target.value)} required />
       <input className="mt-2 w-full px-3 py-2.5 rounded-lg border border-ink-200 focus:border-primary outline-none text-sm" placeholder="Password"
         type="password" value={password} onChange={e => setPassword(e.target.value)} required />
-      {err && <p className="text-xs text-red-600 mt-2">{err}</p>}
+      {err && <p className="text-xs text-red-600 mt-2" role="alert">
+        {err === 'organization_portal_required' ? 'Use OfflineSMS Business to sign in with your organization account.' : err}
+      </p>}
       <button className="mt-4 w-full py-2.5 rounded-lg bg-primary text-white font-bold text-sm disabled:opacity-50" disabled={busy}>
         {busy ? 'Signing in…' : 'Sign in'}
       </button>
       <button type="button" onClick={google} className="mt-2 w-full py-2.5 rounded-lg border border-ink-200 font-semibold text-sm text-ink-700">
         Continue with Google
       </button>
+      <a href={BUSINESS_URL} className="mt-4 block text-center text-sm font-semibold text-primary hover:underline">OfflineSMS Business sign-in</a>
     </form>
   );
 }

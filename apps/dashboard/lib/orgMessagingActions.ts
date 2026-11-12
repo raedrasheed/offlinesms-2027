@@ -10,6 +10,7 @@
 // settings page and relay caps.
 
 import { cookies } from 'next/headers';
+import { revalidatePath } from 'next/cache';
 import { FieldValue } from 'firebase-admin/firestore';
 import { adminAuth, adminDb } from './firebase-admin';
 import { verifySession } from './session';
@@ -21,6 +22,8 @@ import {
 } from './orgMessagingValidation';
 import { generateApiKey } from './orgMessagingKeys';
 import { submitOrganizationMessageBatch, type SubmitFailureCode } from './orgMessagingService';
+import { getRecipientGroup, saveRecipientGroupImport } from './orgRecipientGroups';
+import { isRecipientGroupId } from './recipientGroupValidation';
 
 export type OrgAccountActionState =
   | { error: string }
@@ -147,6 +150,11 @@ export async function createOrganizationAccount(
 // regardless of what the page already verified, and the client-provided
 // organizationId is never trusted on its own.
 
+function revalidateOrgMessaging(...businessPages: string[]) {
+  revalidatePath('/admin/organization-messaging');
+  businessPages.forEach(path => revalidatePath(path));
+}
+
 const SEND_FAILURE_COPY: Record<SubmitFailureCode, string> = {
   organization_not_found: 'Organization not found.',
   organization_suspended: 'Organization is suspended — sending is disabled.',
@@ -187,10 +195,21 @@ export async function sendOrganizationMessage(
     return { error: 'You can only send messages for your own organization.' };
   }
 
+  let recipientsText = data.get('recipients')?.toString() ?? '';
+  const groupId = data.get('recipientGroupId');
+  if (groupId) {
+    if (recipientsText.trim() || !isRecipientGroupId(groupId)) return { error: 'Choose a group or enter recipients manually.' };
+    try {
+      const group = await getRecipientGroup(organizationId, groupId);
+      if (!group || !group.members.length) return { error: 'The selected group is missing or empty.' };
+      recipientsText = group.members.map(member => member.phone).join('\n');
+    } catch { return { error: 'Could not load the selected group.' }; }
+  }
+
   const parsed = validateOrgSendInput({
     title:          data.get('title')?.toString() ?? null,
     body:           data.get('body')?.toString() ?? null,
-    recipientsText: data.get('recipients')?.toString() ?? null,
+    recipientsText,
   });
   if ('error' in parsed) return parsed;
 
@@ -206,6 +225,7 @@ export async function sendOrganizationMessage(
     userEmail: session.user.email ?? null,
   });
   if (!result.ok) return { error: result.message ?? SEND_FAILURE_COPY[result.code] };
+  revalidateOrgMessaging('/business', '/business/activity', '/business/send');
 
   return {
     success:     true,
@@ -219,6 +239,24 @@ export async function sendOrganizationMessage(
     escalationDelayMinutes: result.escalation.delayMinutes,
     escalationAudience:     result.escalation.audience,
   };
+}
+
+export async function importOrganizationRecipients(
+  organizationId: string,
+  input: Parameters<typeof saveRecipientGroupImport>[2],
+) {
+  const session = await verifySession((await cookies()).get('__session')?.value);
+  if (session.state !== 'authorized' || !canDo(session.role, 'manage:organization_messaging')
+      || (session.role !== 'organization_admin' && !isPlatformAdmin(session))
+      || !canViewOrganization(session, organizationId)) return { error: 'Permission denied.' };
+  if (!isRecipientGroupId(organizationId) || !input || typeof input !== 'object') return { error: 'Invalid import.' };
+  try {
+    const result = await saveRecipientGroupImport(organizationId, session.user.uid, input);
+    if ('groupId' in result) revalidateOrgMessaging('/business', '/business/groups', '/business/send');
+    return result;
+  } catch {
+    return { error: 'Could not import recipients. Try again.' };
+  }
 }
 
 // ─── Escalation settings (org default: delay + SMS audience) ─────────────────
@@ -268,6 +306,7 @@ export async function updateOrgEscalationSettings(
     });
   } catch { /* soft-fail */ }
 
+  revalidateOrgMessaging('/business/send');
   return { success: true };
 }
 
@@ -366,6 +405,7 @@ export async function generateOrgApiKey(
   await writeApiKeyAudit('organization_api_key_created', session.user.uid, session.user.email,
     organizationId, { keyId: newRef.id });
 
+  revalidateOrgMessaging('/business/integrations');
   // The ONLY place the raw key ever leaves the server.
   return { success: true, rawKey: raw };
 }
@@ -403,5 +443,6 @@ export async function revokeOrgApiKey(
   await writeApiKeyAudit('organization_api_key_revoked', session.user.uid, session.user.email,
     organizationId, { keyIds: revokedIds });
 
+  revalidateOrgMessaging('/business/integrations');
   return { success: true };
 }

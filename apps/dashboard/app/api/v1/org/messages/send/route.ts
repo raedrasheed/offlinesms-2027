@@ -15,6 +15,8 @@ import { adminDb } from '@/lib/firebase-admin';
 import { hashApiKey } from '@/lib/orgMessagingKeys';
 import { apiError, parseAuthHeader, parseSendRequest, type ApiErrorCode } from '@/lib/orgMessagingApi';
 import { submitOrganizationMessageBatch } from '@/lib/orgMessagingService';
+import { getRecipientGroup } from '@/lib/orgRecipientGroups';
+import { isRecipientGroupId } from '@/lib/recipientGroupValidation';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -49,7 +51,18 @@ export async function POST(request: Request) {
   let body: unknown;
   try { body = await request.json(); }
   catch { return fail('invalid_payload', 'Body must be valid JSON.'); }
-  const parsed = parseSendRequest(body);
+  let sendPayload = body;
+  if (body && typeof body === 'object' && 'recipientGroupId' in body) {
+    if (!isRecipientGroupId(body.recipientGroupId) || 'recipients' in body || 'messages' in body) {
+      return fail('invalid_payload', 'Provide a recipientGroupId by itself as the recipient source.');
+    }
+    try {
+      const group = await getRecipientGroup(organizationId, body.recipientGroupId);
+      if (!group || !group.members.length) return fail('invalid_payload', 'Recipient group not found or empty.');
+      sendPayload = { ...body, recipients: group.members.map(member => ({ phone: member.phone })) };
+    } catch { return fail('internal_error'); }
+  }
+  const parsed = parseSendRequest(sendPayload);
   if ('errorCode' in parsed) return fail(parsed.errorCode, parsed.message);
   // Optional per-request escalation override (delayMinutes / audience /
   // enabled) — validated against the org default inside the service.

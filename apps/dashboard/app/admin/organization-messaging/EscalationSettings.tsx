@@ -54,7 +54,7 @@ export default function EscalationSettings({
         </div>
       )}
 
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <div>
           <p className="text-sm font-semibold" style={{ color: 'var(--c-text)' }}>Auto SMS escalation</p>
           <p className="text-xs mt-0.5" style={{ color: 'var(--c-text-3)' }}>
@@ -66,6 +66,7 @@ export default function EscalationSettings({
           <button
             type="button"
             role="switch"
+            aria-label="Auto SMS escalation"
             aria-checked={enabled}
             onClick={() => setEnabled(v => !v)}
             className="w-11 h-6 rounded-full transition-colors"
@@ -79,12 +80,13 @@ export default function EscalationSettings({
         </label>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid gap-4 sm:grid-cols-2">
         <div>
-          <label className="block text-xs font-bold mb-1" style={{ color: 'var(--c-text-2)' }}>
+          <label htmlFor="org-escalation-delay" className="block text-xs font-bold mb-1" style={{ color: 'var(--c-text-2)' }}>
             Check period (minutes)
           </label>
           <input
+            id="org-escalation-delay"
             name="delayMinutes"
             type="number"
             min={1}
@@ -100,10 +102,10 @@ export default function EscalationSettings({
           </p>
         </div>
         <div>
-          <label className="block text-xs font-bold mb-1" style={{ color: 'var(--c-text-2)' }}>
+          <label htmlFor="org-escalation-audience" className="block text-xs font-bold mb-1" style={{ color: 'var(--c-text-2)' }}>
             Send SMS to
           </label>
-          <select name="audience" defaultValue={initial.audience} className={inputCls} style={inputStyle}>
+          <select id="org-escalation-audience" name="audience" defaultValue={initial.audience} className={inputCls} style={inputStyle}>
             <option value="unread_only">Unread users only</option>
             <option value="undelivered_only">Undelivered users only</option>
             <option value="everyone">All users</option>

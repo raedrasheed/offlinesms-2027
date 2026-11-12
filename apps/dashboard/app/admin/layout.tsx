@@ -10,6 +10,7 @@ import AdminTopbar from '@/components/AdminTopbar';
 import { PermissionState } from '@/components/state';
 import { verifySession } from '@/lib/session';
 import { getAdminWorkspace } from '@/lib/adminWorkspace';
+import { BUSINESS_URL } from '@/lib/businessHost';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -41,6 +42,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   }
 
   const { user, role } = session;
+  if (role === 'organization_admin') redirect(`${BUSINESS_URL}/login`);
   const workspace = await getAdminWorkspace(session);
 
   return (
