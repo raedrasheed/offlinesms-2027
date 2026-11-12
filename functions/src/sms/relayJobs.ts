@@ -1,12 +1,12 @@
 // Relay job callables (Phase 24).
 //
-//   claimRelayJobs     — device leases queued jobs for its business (caps + TTL)
+//   claimRelayJobs     — device leases eligible queued jobs (caps + TTL)
 //   reportRelayDelivery — device reports sent/delivered/failed; idempotent;
 //                         maps to the existing recipient smsStatus vocabulary.
 //
-// All writes are Admin-SDK (rules keep relayJobs write-locked). A device may
-// only ever touch jobs for its OWN business (enforced via its custom-token
-// claims), never another business's.
+// All writes are Admin-SDK (rules keep relayJobs write-locked). Devices access
+// their own business's jobs and ordinary organization jobs explicitly pinned
+// to them at dispatch. Verification work remains within the device's business.
 
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore, FieldValue, Timestamp } from 'firebase-admin/firestore';
@@ -14,7 +14,7 @@ import { writeAuditLog } from '../lib/auditLog';
 import {
   leaseExpiryMs, isClaimable, canDeviceClaimJobCountry,
   normalizeReportStatus, recipientStatusFor, shouldApplyReport,
-  classifyFailure, failureOutcome, backoffMs, utcDayKey,
+  classifyFailure, failureOutcome, backoffMs, utcDayKey, isHeartbeatStale,
   isVerificationJobKind, verificationClaimDecision, verificationPurposeOf, PUBLIC_OTP_JOB_KIND,
   relayCapacityCheck, reserveRelayUsage, type CapsLike, type RelayUsage,
   type RelayJobStatus, reportBinding, isPossiblySentReport, isTerminalJobStatus, ATTEMPT_CAPABILITY,
@@ -35,6 +35,18 @@ function deviceCtx(request: { auth?: { token?: Record<string, unknown> } }, devi
   }
   if (typeof token.businessId !== 'string') throw new HttpsError('permission-denied', 'no-business');
   return { deviceId, businessId: token.businessId };
+}
+
+/** A dispatch-time pin takes precedence over the device's business pool.
+ *  It survives transient assignments, so an older lease can still settle. */
+function relayJobRouteAllows(job: FirebaseFirestore.DocumentSnapshot, ctx: DeviceCtx): boolean {
+  const businessId = job.get('businessId');
+  if (typeof businessId !== 'string' || !businessId) return false;
+  const pin = job.get('organizationRelayDeviceId');
+  if (pin == null) return businessId === ctx.businessId;
+  const country = job.get('recipientCountryCode');
+  return pin === ctx.deviceId && !isVerificationJobKind(job.get('kind'))
+    && typeof country === 'string' && country.length > 0;
 }
 
 /** Capability a relay app declares when it calls authorizeRelaySend right
@@ -86,15 +98,22 @@ export const claimRelayJobs = onCall({ region: REGION }, async (request) => {
   const status = devSnap.get('status') as string;
   if (status === 'revoked' || status === 'paused') throw new HttpsError('permission-denied', `device-${status}`);
 
-  // Candidate queued jobs for THIS business (assigned to this device or unassigned).
-  const candSnap = await db.collection('relayJobs')
-    .where('businessId', '==', ctx.businessId)
-    .where('status', '==', 'queued')
-    .limit(want * 3)
-    .get();
+  const queued = db.collection('relayJobs').where('status', '==', 'queued');
+  const [businessJobs, pinnedJobs] = await Promise.all([
+    queued.where('businessId', '==', ctx.businessId).limit(want * 3).get(),
+    queued.where('organizationRelayDeviceId', '==', ctx.deviceId).limit(want * 3).get(),
+  ]);
+  // A pinned job for this device's business can be in both queries.
+  const candidates = [...new Map(
+    [...businessJobs.docs, ...pinnedJobs.docs].map(doc => [doc.id, doc]),
+  ).values()].sort((a, b) => (
+    ((a.get('createdAt') as Timestamp | undefined)?.toMillis?.() ?? 0)
+    - ((b.get('createdAt') as Timestamp | undefined)?.toMillis?.() ?? 0)
+  ));
 
   const now = Date.now();
   const claimed: ClaimedRelayJob[] = [];
+  const sendingBusinessIds = new Set<string>();
 
   // Current verification policy, read at most once per claim. An unreadable
   // policy means verification work is SKIPPED (left queued; it expires) —
@@ -110,8 +129,9 @@ export const claimRelayJobs = onCall({ region: REGION }, async (request) => {
   let capacityExhausted: string | null = null;
   const expiries = new Map<string, number | null>();
 
-  for (const doc of candSnap.docs) {
+  for (const doc of candidates) {
     if (claimed.length >= want) break;
+    if (!relayJobRouteAllows(doc, ctx)) continue;
     const assigned = doc.get('assignedDeviceId') as string | undefined;
     if (assigned && assigned !== ctx.deviceId) continue;
     const kind = doc.get('kind');
@@ -125,10 +145,14 @@ export const claimRelayJobs = onCall({ region: REGION }, async (request) => {
     // the capacity reservation commits atomically with the lease.
     const ok = await db.runTransaction(async tx => {
       const [fresh, dev] = await tx.getAll(doc.ref, devRef);
-      if (!fresh.exists || fresh.get('status') !== 'queued') return null;
+      if (!fresh.exists || fresh.get('status') !== 'queued' || !relayJobRouteAllows(fresh, ctx)) return null;
       if (!dev.exists) return null;
       const devStatus = dev.get('status') as string;
       if (devStatus === 'revoked' || devStatus === 'paused') return 'device-blocked' as const;
+      if (fresh.get('organizationRelayDeviceId') != null) {
+        const heartbeat = (dev.get('lastHeartbeatAt') as Timestamp | undefined)?.toMillis?.() ?? null;
+        if (dev.get('businessId') !== ctx.businessId || devStatus !== 'active' || isHeartbeatStale(heartbeat, Date.now())) return null;
+      }
 
       // Verification jobs: cancel (never deliver) legacy public OTPs and any job
       // that is expired or no longer matches the current sender/policy.
@@ -189,12 +213,16 @@ export const claimRelayJobs = onCall({ region: REGION }, async (request) => {
         sendWithinMs: null, // filled right before the response is sent
         attempt: ((fresh.get('attempts') as number | undefined) ?? 0) + 1,
       };
-      return { job, expiresAtMs: verification ? expiresAtMs : null };
+      return { job, businessId: fresh.get('businessId') as string, expiresAtMs: verification ? expiresAtMs : null };
     });
     if (ok === 'device-blocked') break;
     if (ok === 'cancelled') { cancelledVerification++; continue; }
     if (ok && 'capacity' in ok) { capacityExhausted = ok.capacity ?? null; break; }
-    if (ok && 'job' in ok) { claimed.push(ok.job); expiries.set(ok.job.jobId, ok.expiresAtMs); }
+    if (ok && 'job' in ok) {
+      claimed.push(ok.job);
+      expiries.set(ok.job.jobId, ok.expiresAtMs);
+      sendingBusinessIds.add(ok.businessId);
+    }
   }
 
   if (cancelledVerification > 0) {
@@ -209,7 +237,7 @@ export const claimRelayJobs = onCall({ region: REGION }, async (request) => {
     await writeAuditLog({
       action: 'relay.jobs.claimed', actor: { uid: ctx.deviceId },
       target: { type: 'relayDevice', id: ctx.deviceId }, result: 'success',
-      metadata: { businessId: ctx.businessId, count: claimed.length, capacityExhausted },
+      metadata: { businessId: ctx.businessId, sendingBusinessIds: [...sendingBusinessIds], count: claimed.length, capacityExhausted },
     });
   }
   // Remaining lifetime computed as late as possible (after every transaction
@@ -339,13 +367,18 @@ export const reportRelayDelivery = onCall({ region: REGION }, async (request) =>
   const applied = await db.runTransaction(async tx => {
     const snap = await tx.get(jobRef);
     if (!snap.exists) throw new HttpsError('not-found', 'job-not-found');
-    if (snap.get('businessId') !== ctx.businessId) throw new HttpsError('permission-denied', 'cross-business');
+    if (!relayJobRouteAllows(snap, ctx)) throw new HttpsError('permission-denied', 'cross-business');
+    const pinned = snap.get('organizationRelayDeviceId') != null;
+    const pinnedDevice = pinned ? await tx.get(devRef) : null;
+    if (pinned && (!pinnedDevice?.exists || pinnedDevice.get('businessId') !== ctx.businessId)) {
+      throw new HttpsError('permission-denied', 'cross-business');
+    }
 
     const attempts = (snap.get('attempts') as number | undefined) ?? 0;
     const current = (snap.get('status') ?? 'queued') as RelayJobStatus;
     const base = {
       changed: false, requeued: false, finalStatus: report as RelayJobStatus, stale: null as string | null,
-      jobAttempt: attempts, batchId: snap.get('batchId'), recipientUid: snap.get('recipientUid'),
+      jobAttempt: attempts, businessId: snap.get('businessId'), batchId: snap.get('batchId'), recipientUid: snap.get('recipientUid'),
     };
     // M2: a report describes ONE attempt. It is applied only to that attempt,
     // and only if it is still the job's current one.
@@ -354,7 +387,9 @@ export const reportRelayDelivery = onCall({ region: REGION }, async (request) =>
       attemptOwners: (snap.get('attemptOwners') as Record<string, unknown> | undefined) ?? null,
       attemptDeviceId: snap.get('attemptDeviceId') ?? null, leaseOwnerDeviceId: snap.get('leaseOwnerDeviceId') ?? null,
     });
-    if (binding === 'foreign') throw new HttpsError('permission-denied', 'not-lease-owner');
+    if (binding === 'foreign' || (pinned && binding !== 'current' && binding !== 'stale')) {
+      throw new HttpsError('permission-denied', 'not-lease-owner');
+    }
 
     // `settle` = this report ends the job now, never re-queues it.
     let settle = false;
@@ -400,7 +435,7 @@ export const reportRelayDelivery = onCall({ region: REGION }, async (request) =>
 
     // Firestore transactions require ALL reads before ANY writes — so read the
     // device doc (for terminal counters) up front, before updating the job.
-    const devSnap = !requeued ? await tx.get(devRef) : null;
+    const devSnap = !requeued ? pinnedDevice ?? await tx.get(devRef) : null;
 
     const patch: Record<string, unknown> = { status: finalStatus, updatedAt: FieldValue.serverTimestamp() };
     if (requeued) {
@@ -450,14 +485,14 @@ export const reportRelayDelivery = onCall({ region: REGION }, async (request) =>
     await writeAuditLog({
       action: 'relay.report.notApplied', actor: { uid: ctx.deviceId },
       target: { type: 'relayJob', id: data.jobId }, result: 'success',
-      metadata: { businessId: ctx.businessId, why: applied.stale, status: report, reportedAttempt: typeof data.attempt === 'number' ? data.attempt : null, currentAttempt: applied.jobAttempt },
+      metadata: { businessId: applied.businessId, why: applied.stale, status: report, reportedAttempt: typeof data.attempt === 'number' ? data.attempt : null, currentAttempt: applied.jobAttempt },
     });
   }
   if (applied.changed && applied.requeued) {
     await writeAuditLog({
       action: 'relay.job.requeued', actor: { uid: ctx.deviceId },
       target: { type: 'relayJob', id: data.jobId }, result: 'success',
-      metadata: { businessId: ctx.businessId, reasonCode: String(data.androidResultCode ?? '') },
+      metadata: { businessId: applied.businessId, reasonCode: String(data.androidResultCode ?? '') },
     });
   } else if (applied.changed && applied.batchId && applied.recipientUid) {
     // Mirror terminal status to the batch recipient so receipts/refunds keep working.
@@ -468,7 +503,7 @@ export const reportRelayDelivery = onCall({ region: REGION }, async (request) =>
     await writeAuditLog({
       action: `relay.job.${report}`, actor: { uid: ctx.deviceId },
       target: { type: 'relayJob', id: data.jobId }, result: report === 'failed' ? 'failure' : 'success',
-      metadata: { businessId: ctx.businessId, status: report },
+      metadata: { businessId: applied.businessId, status: report },
     });
     // Finalize the batch once all relay jobs are terminal → existing settlement.
     if (applied.batchId) { try { await maybeFinalizeRelayBatch(applied.batchId); } catch { /* reaper retries */ } }

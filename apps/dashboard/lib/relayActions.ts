@@ -95,6 +95,58 @@ export async function setRelayModeAction(mode: 'http' | 'relay' | 'hybrid', targ
   return { success: true };
 }
 
+/** Assign an existing relay without changing its enrollment or credentials. */
+export async function setAssignedRelayDeviceAction(businessId: string, deviceId: string | null): Promise<RelayActionState> {
+  const session = await authorize();
+  if ('error' in session) return session;
+  if (!isPlatformAdmin(session)) return { error: 'Only a platform admin can assign relay devices to organizations.' };
+  if (typeof businessId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(businessId)) {
+    return { error: 'Select a valid organization.' };
+  }
+  if (deviceId !== null && (typeof deviceId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(deviceId))) {
+    return { error: 'Select a valid relay device.' };
+  }
+
+  const organization = adminDb.collection('organizations').doc(businessId);
+  const assignment = adminDb.collection('organizationRelayAssignments').doc(businessId);
+  const device = deviceId === null ? null : adminDb.collection('relayDevices').doc(deviceId);
+  const auditRef = adminDb.collection('auditLogs').doc();
+  try {
+    const error = await adminDb.runTransaction(async tx => {
+      const [org, current] = await tx.getAll(organization, assignment);
+      if (!org.exists) return 'Organization not found.';
+      const previous = current.get('relayDeviceId');
+      if (deviceId === null ? !current.exists : previous === deviceId) return null;
+      if (device) {
+        const relay = await tx.get(device);
+        const owner = relay.get('businessId');
+        if (!relay.exists || !['active', 'paused', 'offline'].includes(relay.get('status')) || typeof owner !== 'string' || !owner.trim()) {
+          return 'Select a relay device that has not been revoked.';
+        }
+      }
+
+      if (deviceId) tx.set(assignment, { relayDeviceId: deviceId, updatedAt: FieldValue.serverTimestamp(), updatedByUid: session.user.uid });
+      else tx.delete(assignment);
+      tx.create(auditRef, {
+        action: deviceId ? 'relay.assignment.set' : 'relay.assignment.cleared',
+        actorUid: session.user.uid,
+        actorEmail: session.user.email ?? null,
+        targetType: 'organization',
+        targetId: businessId,
+        result: 'success',
+        metadata: { businessId, previousDeviceId: typeof previous === 'string' ? previous : null, assignedRelayDeviceId: deviceId },
+        createdAt: FieldValue.serverTimestamp(),
+      });
+      return null;
+    });
+    if (error) return { error };
+  } catch {
+    return { error: 'Could not save the assigned relay. Try again.' };
+  }
+  revalidatePath('/admin/relay');
+  return { success: true };
+}
+
 const E164 = /^\+[1-9]\d{6,14}$/;
 
 /**
@@ -234,7 +286,9 @@ export async function sendRelayTestAction(phoneE164: string, body: string, targe
   // must respect coverage — don't send to a country no relay serves.
   const { countryCode } = normalizePhoneAndCountry(to);
   if (!countryCode) return { error: 'Could not detect the country for this number.' };
-  const coverage = await loadOrgRelayCoverage(businessId);
+  // Only a platform administrator may test a shared device without the
+  // organization-message billing path. Other managers keep their native pool.
+  const coverage = await loadOrgRelayCoverage(businessId, undefined, { useAssignedRelay: isPlatformAdmin(session) });
   if (!coverage.has(countryCode)) {
     return { error: 'No relay is available for this country (لا يوجد relay لهذه البلد).' };
   }
@@ -245,7 +299,8 @@ export async function sendRelayTestAction(phoneE164: string, body: string, targe
       jobId, businessId,
       batchId: null, recipientUid: null,   // no billing batch → no Points/settlement
       phoneE164: to, recipientCountryCode: countryCode, messageBody: text,
-      assignedDeviceId: null, assignedSimSubscriptionId: null,
+      assignedDeviceId: coverage.assignedRelayDeviceId, assignedSimSubscriptionId: null,
+      ...(coverage.assignedRelayDeviceId ? { organizationRelayDeviceId: coverage.assignedRelayDeviceId } : {}),
       status: 'queued', attempts: 0, maxAttempts: 3,
       leaseOwnerDeviceId: null, leaseExpiresAt: null, nextAttemptAt: null,
       traceId: jobId,

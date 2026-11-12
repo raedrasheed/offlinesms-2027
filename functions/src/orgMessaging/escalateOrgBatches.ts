@@ -17,7 +17,7 @@ import { getFirestore, FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { classifyRecipients, MAX_RECIPIENTS_PER_BATCH } from '../sms/recipients';
 import { loadSmsContentContext, prepareSmsContentWithContext } from '../sms/messageContent';
 import { sendBatch } from '../sms/gateway';
-import { partitionRecipientsByCoverage } from '../sms/countryRouting';
+import { loadOrganizationRelayAssignment, partitionRecipientsByCoverage } from '../sms/countryRouting';
 import { resolveProvider } from '../sms/provider';
 import { relayModeEngaged, isHybrid } from '../sms/relayLogic';
 import { dispatchBatchToRelay } from '../sms/relayDispatcher';
@@ -170,8 +170,11 @@ async function processBatch(
   // HTTP). A recipient whose detected country has no eligible relay is NOT sent
   // to (the relay dispatcher re-checks too, but this also gates the HTTP path
   // and avoids reserving points for recipients we won't send to).
+  // Snapshot the choice for the batch. Each queued job keeps its explicit
+  // device pin across retries, including after a new choice is saved.
+  const organizationRelayDeviceId = await loadOrganizationRelayAssignment(organizationId);
   const { uncovered } = await partitionRecipientsByCoverage(
-    organizationId, eligible.map(e => ({ id: e.uid, phoneE164: e.phone })));
+    organizationId, eligible.map(e => ({ id: e.uid, phoneE164: e.phone })), { organizationRelayDeviceId });
   let noRelaySkipped = 0;
   if (uncovered.length > 0) {
     const uncoveredIds = new Set(uncovered.map(u => u.id));
@@ -213,7 +216,7 @@ async function processBatch(
   const groups = groupBySmsText(sendRows);
   const cost = sendRows.reduce((total, row) => total + contentByText.get(row.smsText)!.pointsPerRecipient, 0);
   const eligByUid = new Map(sendable.map(e => [e.uid, e]));
-  const providerMode = await resolveProvider(organizationId);
+  const providerMode = organizationRelayDeviceId ? 'relay' : await resolveProvider(organizationId);
   const plans = [...groups].map(([smsText, groupRows]) => {
     const groupEligible = groupRows.map(r => eligByUid.get(r.uid)!);
     const { finalSmsBody: _finalSmsBody, ...pricing } = contentByText.get(smsText)!;
@@ -296,7 +299,10 @@ async function processBatch(
       // Relay path — recipients queued, dispatcher routes to org devices;
       // hybrid falls back to the HTTP gateway for unrouted recipients.
       const hybrid = isHybrid(providerMode);
-      const dispatch = await dispatchBatchToRelay(smsBatchRef.id, organizationId, { allowUnassignedQueue: !hybrid });
+      const dispatch = await dispatchBatchToRelay(smsBatchRef.id, organizationId, {
+        allowUnassignedQueue: !hybrid,
+        organizationRelayDeviceId,
+      });
       let groupFailed = 0;
       if (hybrid && dispatch.unrouted.length > 0) {
         const fb = groupEligible.filter(e => dispatch.unrouted.includes(e.uid));

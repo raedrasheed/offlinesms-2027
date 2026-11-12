@@ -16,22 +16,38 @@ interface RelayLite {
   allowedCountryCodes: string[];
 }
 
-/** Loads an org's active relays once and returns a country-coverage checker. */
+/** Loads live country coverage for the native pool or the selected Business relay. */
 export async function loadOrgRelayCoverage(
   organizationId: string,
   nowMs: number = Date.now(),
-): Promise<{ has: (countryCode: string) => boolean }> {
-  const snap = await adminDb.collection("relayDevices")
-    .where("businessId", "==", organizationId)
-    .where("status", "==", "active")
-    .limit(50)
-    .get();
+  options: { useAssignedRelay?: boolean } = {},
+): Promise<{ has: (countryCode: string) => boolean; assignedRelayDeviceId: string | null }> {
+  const devices = adminDb.collection("relayDevices");
+  const assignment = options.useAssignedRelay
+    ? await adminDb.collection("organizationRelayAssignments").doc(organizationId).get()
+    : null;
+  let assignedRelayDeviceId: string | null = null;
+  let candidates: FirebaseFirestore.DocumentSnapshot[];
+  if (assignment?.exists) {
+    const id: unknown = assignment.get("relayDeviceId");
+    if (typeof id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) {
+      return { has: () => false, assignedRelayDeviceId: null };
+    }
+    assignedRelayDeviceId = id;
+    const device = await devices.doc(id).get();
+    const owner = device.get("businessId");
+    candidates = device.exists && typeof owner === "string" && owner.trim() ? [device] : [];
+  } else {
+    const snap = await devices.where("businessId", "==", organizationId)
+      .where("status", "==", "active").limit(50).get();
+    candidates = snap.docs;
+  }
 
-  const relays: RelayLite[] = snap.docs.map(d => ({
+  const relays: RelayLite[] = candidates.map(d => ({
     status: (d.get("status") as string) ?? "offline",
     lastHeartbeatMs: (d.get("lastHeartbeatAt") as { toMillis?: () => number } | null)?.toMillis?.() ?? null,
     countryRoutingEnabled: d.get("countryRoutingEnabled") === true,
-    allowedCountryCodes: (d.get("allowedCountryCodes") as string[] | undefined) ?? [],
+    allowedCountryCodes: Array.isArray(d.get("allowedCountryCodes")) ? d.get("allowedCountryCodes") as string[] : [],
   }));
 
   const has = (countryCode: string): boolean => relays.some(r =>
@@ -41,7 +57,7 @@ export async function loadOrgRelayCoverage(
     && r.allowedCountryCodes.length > 0
     && r.allowedCountryCodes.includes(countryCode));
 
-  return { has };
+  return { has, assignedRelayDeviceId };
 }
 
 export interface CoverageSummary { covered: number; noRelay: number; unknown: number }

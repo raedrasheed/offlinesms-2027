@@ -6,8 +6,9 @@
 // least-loaded first. This is the defensive backend chokepoint: NO relayJob is
 // created without an eligible relay for the recipient's country. Recipients whose
 // country has no live relay are skipped (no_relay_for_country) — never sent via
-// another country's relay, never HTTP-fallen-back. Cross-business is impossible:
-// only the given businessId's devices/jobs are touched. Stable jobId → idempotent.
+// another country's relay, never HTTP-fallen-back. A platform-assigned device
+// can carry organization jobs while their businessId remains the sending tenant.
+// Stable jobId → idempotent.
 
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { getMessaging } from 'firebase-admin/messaging';
@@ -29,6 +30,7 @@ export interface DispatchResult {
 interface CreateJobParams {
   batchId: string; businessId: string; recipientUid: string;
   phoneE164: string; country: string; smsBody: string; assignedDeviceId: string | null;
+  organizationRelayDeviceId?: string | null;
 }
 
 async function createRelayJob(db: FirebaseFirestore.Firestore, p: CreateJobParams): Promise<boolean> {
@@ -38,6 +40,8 @@ async function createRelayJob(db: FirebaseFirestore.Firestore, p: CreateJobParam
       jobId, businessId: p.businessId, batchId: p.batchId, recipientUid: p.recipientUid,
       phoneE164: p.phoneE164, recipientCountryCode: p.country, messageBody: p.smsBody,
       assignedDeviceId: p.assignedDeviceId, assignedSimSubscriptionId: null,
+      // Keep this separate from the transient assignment cleared on retry.
+      ...(p.organizationRelayDeviceId ? { organizationRelayDeviceId: p.organizationRelayDeviceId } : {}),
       status: 'queued', attempts: 0, maxAttempts: DEFAULT_MAX_ATTEMPTS,
       leaseOwnerDeviceId: null, leaseExpiresAt: null, nextAttemptAt: null,
       traceId: jobId,
@@ -68,9 +72,10 @@ async function markRecipientSkipped(
 export async function dispatchBatchToRelay(
   batchId: string,
   businessId: string,
-  opts: { allowUnassignedQueue?: boolean } = {},
+  opts: { allowUnassignedQueue?: boolean; organizationRelayDeviceId?: string | null } = {},
 ): Promise<DispatchResult> {
   const allowUnassignedQueue = opts.allowUnassignedQueue ?? true;
+  const { organizationRelayDeviceId } = opts;
   const db = getFirestore();
   const now = Date.now();
 
@@ -86,7 +91,7 @@ export async function dispatchBatchToRelay(
   );
 
   // In-memory device pool (capacity decremented as we assign → least-loaded).
-  const pool: RouteDeviceCountry[] = await loadActiveRelayDevices(businessId);
+  const pool: RouteDeviceCountry[] = await loadActiveRelayDevices(businessId, organizationRelayDeviceId);
 
   const assignedDeviceIds = new Set<string>();
   const outcomes: RecipientOutcome[] = [];
@@ -114,7 +119,7 @@ export async function dispatchBatchToRelay(
     if (picked) {
       const ok = await createRelayJob(db, {
         batchId, businessId, recipientUid, phoneE164: norm.e164, country, smsBody,
-        assignedDeviceId: picked.deviceId,
+        assignedDeviceId: picked.deviceId, organizationRelayDeviceId,
       });
       if (ok) { picked.remaining -= 1; assignedDeviceIds.add(picked.deviceId); routed++; }
       outcomes.push({ countryCode: country, queued: true });
@@ -126,9 +131,13 @@ export async function dispatchBatchToRelay(
       if (allowUnassignedQueue) {
         const ok = await createRelayJob(db, {
           batchId, businessId, recipientUid, phoneE164: norm.e164, country, smsBody,
-          assignedDeviceId: null,   // claimed later by a country-serving device
+          assignedDeviceId: organizationRelayDeviceId ?? null,
+          organizationRelayDeviceId,
         });
-        if (ok) routed++;
+        if (ok) {
+          if (organizationRelayDeviceId) assignedDeviceIds.add(organizationRelayDeviceId);
+          routed++;
+        }
         outcomes.push({ countryCode: country, queued: true });
       } else {
         trulyUnrouted.push(recipientUid);       // hybrid: HTTP-fallback (country IS covered)

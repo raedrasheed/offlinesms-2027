@@ -6,7 +6,7 @@ import { ADMIN_LABELS as L } from '@/lib/i18n';
 import { COUNTRY_OPTIONS, flagEmoji } from '@/lib/phoneCountry';
 import {
   createRelayPairingCodeAction, setRelayDeviceStatusAction, revokeRelayDeviceAction,
-  setRelayModeAction, sendRelayTestAction, setRelayCountriesAction, setRelayCapsAction,
+  setRelayModeAction, sendRelayTestAction, setRelayCountriesAction, setRelayCapsAction, setAssignedRelayDeviceAction,
 } from '@/lib/relayActions';
 import { RELAY_CAP_BOUNDS, type RelayCaps } from '@/lib/otpLimits';
 
@@ -31,10 +31,14 @@ export type RelayDeviceView = {
 };
 export type RelayOrgStatus = { mode: 'http' | 'relay' | 'hybrid'; relayEnabled: boolean };
 export type CoverageRow = { country: string; active: number; offline: number; available: boolean };
+export type RelayAssignmentOption = Pick<RelayDeviceView, 'status' | 'lastHeartbeatAt'> & {
+  id: string; label: string; owner: string; countryCodes: string[];
+};
 
 const ONLINE_WINDOW_MS = 90_000;
 const CARD = 'var(--c-card)';
 const BORDER = 'var(--c-border)';
+const box = { background: CARD, border: `1px solid ${BORDER}`, borderRadius: 12, padding: 16 };
 
 function relativeTime(ms: number | null, now: number | null): string {
   if (!ms) return L.relay.never;
@@ -47,10 +51,10 @@ function relativeTime(ms: number | null, now: number | null): string {
 }
 
 type Live = { key: 'online' | 'offline' | 'revoked' | 'paused'; text: string; color: string };
-function liveStatus(d: RelayDeviceView, now: number | null): Live {
+function liveStatus(d: Pick<RelayDeviceView, 'status' | 'lastHeartbeatAt'>, now: number | null): Live {
   if (d.status === 'revoked') return { key: 'revoked', text: L.relay.revoked, color: '#991B1B' };
   if (d.status === 'paused') return { key: 'paused', text: L.relay.paused, color: '#92400E' };
-  const online = now != null && d.lastHeartbeatAt != null && now - d.lastHeartbeatAt < ONLINE_WINDOW_MS;
+  const online = d.status === 'active' && now != null && d.lastHeartbeatAt != null && now - d.lastHeartbeatAt < ONLINE_WINDOW_MS;
   return online
     ? { key: 'online', text: L.relay.online, color: '#166534' }
     : { key: 'offline', text: L.relay.offline, color: '#6B7280' };
@@ -82,20 +86,93 @@ function CountryPicker({ value, onChange }: { value: string[]; onChange: (v: str
   );
 }
 
+function RelayAssignmentCard({ businessId, assignedDeviceId, options, now }: {
+  businessId: string;
+  assignedDeviceId: string | null;
+  options: RelayAssignmentOption[];
+  now: number | null;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [selection, setSelection] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const current = assignedDeviceId ?? '';
+  const selected = selection ?? current;
+
+  function saveAssignment() {
+    setError(null);
+    startTransition(async () => {
+      const result = await setAssignedRelayDeviceAction(businessId, selected || null);
+      if (result.error) {
+        setError(result.error);
+        return;
+      }
+      setSelection(null);
+      setSaved(true);
+      router.refresh();
+    });
+  }
+
+  return (
+    <div style={box} className="space-y-2">
+      <label htmlFor="assigned-relay-device" className="block font-medium">Assigned SMS relay</label>
+      <p className="text-xs" style={{ color: 'var(--c-text-muted)' }}>
+        A device can serve several organizations. New organization messages use the assigned device’s countries and send limits.
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          id="assigned-relay-device"
+          value={selected}
+          disabled={pending}
+          onChange={event => { setSelection(event.target.value); setError(null); setSaved(false); }}
+          className="max-w-full px-3 py-2 rounded-md text-sm"
+          style={{ border: `1px solid ${BORDER}`, background: 'var(--c-bg, transparent)', color: 'inherit' }}
+        >
+          <option value="">Use organization relay settings</option>
+          {current && !options.some(device => device.id === current) && (
+            <option value={current} disabled>Current device unavailable ({current})</option>
+          )}
+          {options.map(device => (
+            <option key={device.id} value={device.id}>
+              {device.label} — {device.owner} · {liveStatus(device, now).text} · {device.countryCodes.join(', ') || 'No enabled countries'}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={saveAssignment}
+          disabled={pending || selected === current}
+          className="px-3 py-2 rounded-md text-sm font-medium disabled:opacity-60"
+          style={{ background: 'var(--c-accent, #1D6E92)', color: '#fff' }}
+        >
+          {pending ? 'Saving…' : 'Save assignment'}
+        </button>
+      </div>
+      {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
+      {saved && <p role="status" className="text-sm" style={{ color: 'var(--c-text-muted)' }}>Assignment saved.</p>}
+    </div>
+  );
+}
+
 export default function RelayAdmin({
   devices, orgStatus, businessId, canManage, isPlatform, fetchError, queueHealth, healthyDevices, orgOptions, coverage,
+  assignedDeviceId, assignmentOptions, assignmentError,
 }: {
   devices: RelayDeviceView[];
   orgStatus: RelayOrgStatus;
   businessId: string | null;
   canManage: boolean;
-  /** Platform admins (no organization scope) may change send caps. */
+  /** Platform admins may change send caps and assign devices. */
   isPlatform: boolean;
   fetchError: string | null;
   queueHealth: Record<string, number>;
   healthyDevices: number;
   orgOptions: { id: string; name: string }[];
   coverage: CoverageRow[];
+  assignedDeviceId: string | null;
+  assignmentOptions: RelayAssignmentOption[];
+  assignmentError: string | null;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -133,6 +210,7 @@ export default function RelayAdmin({
     });
   }
 
+  const relayEnabled = orgStatus.relayEnabled || assignedDeviceId !== null;
   const modeLabel = orgStatus.mode === 'relay' ? L.relay.modeRelay
     : orgStatus.mode === 'hybrid' ? L.relay.modeHybrid : L.relay.modeHttp;
 
@@ -199,16 +277,15 @@ export default function RelayAdmin({
     });
   }
 
-  const box = { background: CARD, border: `1px solid ${BORDER}`, borderRadius: 12, padding: 16 };
   const currentMode: 'http' | 'relay' | 'hybrid' = orgStatus.mode;
-  const showNoDevicesWarning = orgStatus.relayEnabled && healthyDevices === 0;
+  const showNoDevicesWarning = relayEnabled && healthyDevices === 0 && !assignmentError;
   const qh = [
     ['qQueued', queueHealth.queued], ['qClaimed', queueHealth.claimed], ['qSending', queueHealth.sending],
     ['qSent', queueHealth.sent], ['qDelivered', queueHealth.delivered], ['qFailed', queueHealth.failed],
     ['qExpired', queueHealth.expired],
   ] as const;
 
-  const noCountryCount = devices.filter(d => !d.countryRoutingEnabled || d.allowedCountryCodes.length === 0).length;
+  const noCountryCount = assignedDeviceId ? 0 : devices.filter(d => !d.countryRoutingEnabled || d.allowedCountryCodes.length === 0).length;
   const countriesWithoutCoverage = coverage.filter(c => !c.available).map(c => c.country);
 
   // Apply filters.
@@ -249,10 +326,17 @@ export default function RelayAdmin({
         <div>
           <div className="text-sm" style={{ color: 'var(--c-text-muted)' }}>{L.relay.orgStatus}</div>
           <div className="font-medium">
-            {orgStatus.relayEnabled ? L.relay.enabled : L.relay.disabled} · {L.relay.mode}: {modeLabel}
+            {assignedDeviceId
+              ? 'Organization messages · Assigned relay'
+              : `${orgStatus.relayEnabled ? L.relay.enabled : L.relay.disabled} · ${L.relay.mode}: ${modeLabel}`}
           </div>
         </div>
       </div>
+
+      {assignmentError && <p role="alert" className="text-sm text-red-700">{assignmentError}</p>}
+      {isPlatform && canManage && businessId && !assignmentError && (
+        <RelayAssignmentCard key={businessId} businessId={businessId} assignedDeviceId={assignedDeviceId} options={assignmentOptions} now={now} />
+      )}
 
       {/* Create pairing code — requires selecting the relay's countries. */}
       {canManage && businessId && (
@@ -276,7 +360,9 @@ export default function RelayAdmin({
 
       {canManage && businessId && (
         <div style={box} className="flex flex-wrap items-center gap-2">
-          <span className="text-sm" style={{ color: 'var(--c-text-muted)' }}>{L.relay.setMode}:</span>
+          <span className="text-sm" style={{ color: 'var(--c-text-muted)' }}>
+            {assignedDeviceId ? 'Mode for other SMS flows' : L.relay.setMode}:
+          </span>
           {([['http', L.relay.modeHttpOpt], ['relay', L.relay.modeRelayOpt], ['hybrid', L.relay.modeHybridOpt]] as const).map(([m, lbl]) => (
             <button key={m} onClick={() => setMode(m as 'http' | 'relay' | 'hybrid')} disabled={pending}
               className="px-3 py-1.5 rounded-md text-sm"
@@ -288,7 +374,14 @@ export default function RelayAdmin({
       )}
 
       {showNoDevicesWarning && (
-        <div style={{ ...box, borderColor: '#FCD34D', background: '#FEF3C7', color: '#92400E' }}>{L.relay.noHealthyDevices}</div>
+        <div style={{ ...box, borderColor: '#FCD34D', background: '#FEF3C7', color: '#92400E' }}>
+          {assignedDeviceId ? 'The assigned relay is unavailable. Bring it online or select a different device.' : L.relay.noHealthyDevices}
+        </div>
+      )}
+      {assignedDeviceId && healthyDevices > 0 && coverage.length === 0 && (
+        <div style={{ ...box, borderColor: '#FCD34D', background: '#FEF3C7', color: '#92400E' }}>
+          Enable country routing and add destination countries on the assigned relay to send organization messages.
+        </div>
       )}
 
       {/* Migration warning: relays without configured countries are blocked. */}
@@ -302,7 +395,7 @@ export default function RelayAdmin({
       {/* Coverage view */}
       {businessId && coverage.length > 0 && (
         <div style={box}>
-          <div className="text-sm font-medium mb-2">Relay coverage by country</div>
+          <div className="text-sm font-medium mb-2">{assignedDeviceId ? 'Assigned relay coverage by country' : 'Relay coverage by country'}</div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
