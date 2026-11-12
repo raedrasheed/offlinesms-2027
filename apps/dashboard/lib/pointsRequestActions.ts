@@ -1,6 +1,6 @@
 'use server';
 
-// Admin review of user points requests (NO payment).
+// Admin review of personal and organization points requests.
 //
 // A user submits a pointsRequests/{id} (status='pending') asking for a package.
 // An admin approves — which credits the wallet with the requested points and
@@ -10,11 +10,9 @@
 
 import { cookies } from 'next/headers';
 import { revalidatePath } from 'next/cache';
-import { FieldValue } from 'firebase-admin/firestore';
-import { adminDb } from './firebase-admin';
 import { verifySession } from './session';
 import { canDo } from './adminPermissions';
-import { decideReview } from './pointsRequestLogic';
+import { reviewPointsRequest } from './pointsRequestReview';
 
 export type PointsRequestActionState = { error?: string; success?: boolean };
 
@@ -28,79 +26,25 @@ export async function reviewPointsRequestAction(
   if (session.state !== 'authorized' || !canDo(session.role, 'manage:wallets')) {
     return { error: 'Permission denied.' };
   }
-  if (outcome !== 'approved' && outcome !== 'rejected') return { error: 'Invalid outcome.' };
-  if (!requestId) return { error: 'Missing request.' };
-
-  const reqRef = adminDb.collection('pointsRequests').doc(requestId);
-  const note = reviewNote?.trim().slice(0, 300) || null;
-
-  let credited = 0;
-  let userId: string | undefined;
+  let organizationId: string | null;
   try {
-    const result = await adminDb.runTransaction(async tx => {
-      const snap = await tx.get(reqRef);
-      if (!snap.exists) throw new Error('request-not-found');
-      const r = snap.data() as { userId?: string; status?: string; points?: number };
-
-      const decision = decideReview({
-        status: r.status ?? '', outcome, points: r.points ?? 0, userId: r.userId,
-      });
-      if (decision.kind === 'noop') return { applied: false, userId: r.userId, points: 0 };
-      if (decision.kind === 'error') {
-        throw new Error(decision.code === 'unexpected-status' ? `unexpected-status:${r.status}` : 'request-misconfigured');
-      }
-
-      const now = FieldValue.serverTimestamp();
-      const review = {
-        status: outcome, updatedAt: now, reviewedAt: now,
-        reviewedByUid: session.user.uid, reviewNote: note,
-      };
-
-      if (decision.kind === 'reject') {
-        tx.update(reqRef, review);
-        return { applied: true, userId: r.userId, points: 0 };
-      }
-
-      // decision.kind === 'credit'
-      const points = decision.points;
-      const walletRef = adminDb.collection('wallets').doc(r.userId!);
-      const wSnap = await tx.get(walletRef);
-      const balance = wSnap.exists ? ((wSnap.get('balance') as number) ?? 0) : 0;
-      tx.set(walletRef, { balance: balance + points, updatedAt: now }, { merge: true });
-
-      const txRef = adminDb.collection('transactions').doc();
-      tx.set(txRef, {
-        userId: r.userId, type: 'admin_adjustment', direction: 'credit',
-        amount: points, status: 'completed',
-        relatedPaymentId: null, relatedTransferId: null, relatedSmsBatchId: null,
-        note: 'Points request approved', createdAt: now, completedAt: now,
-      });
-
-      tx.update(reqRef, review);
-      return { applied: true, userId: r.userId, points };
-    });
-
-    credited = result.points;
-    userId = result.userId;
-  } catch (e: any) {
-    const code = (e?.message as string) ?? 'error';
+    ({ organizationId } = await reviewPointsRequest(requestId, outcome, session.user, reviewNote));
+  } catch (e: unknown) {
+    const code = e instanceof Error ? e.message : 'error';
+    if (code === 'invalid-outcome')          return { error: 'Invalid outcome.' };
+    if (code === 'invalid-request')          return { error: 'Invalid request.' };
     if (code === 'request-not-found')       return { error: 'Request not found.' };
-    if (code === 'request-misconfigured')   return { error: 'Request is misconfigured (no points/user).' };
+    if (code === 'request-misconfigured')   return { error: 'Request has invalid points or wallet information.' };
+    if (code === 'organization-inactive')   return { error: 'The organization must be active to receive points.' };
+    if (code === 'wallet-misconfigured')    return { error: 'The wallet balance is invalid.' };
     if (code.startsWith('unexpected-status:')) return { error: `Request is ${code.split(':')[1]} and can’t be changed.` };
     return { error: 'Could not update the request.' };
   }
 
-  try {
-    await adminDb.collection('auditLogs').add({
-      action: outcome === 'approved' ? 'points.request.approved' : 'points.request.rejected',
-      actorUid: session.user.uid, actorEmail: session.user.email ?? null,
-      targetType: 'pointsRequest', targetId: requestId,
-      result: outcome === 'approved' ? 'success' : 'failure',
-      metadata: { requestId, userId: userId ?? null, credited },
-      createdAt: FieldValue.serverTimestamp(),
-    });
-  } catch { /* soft-fail */ }
-
   revalidatePath('/admin/points/requests');
+  if (organizationId) {
+    revalidatePath('/business/points');
+    revalidatePath('/points');
+  }
   return { success: true };
 }

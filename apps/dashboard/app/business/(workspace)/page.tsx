@@ -38,6 +38,9 @@ export default async function BusinessOverview() {
           { label: 'Remaining', value: overview.remainingThisMonth },
           { label: 'SMS wallet', value: overview.smsWalletBalance == null ? '—' : `${overview.smsWalletBalance.toLocaleString('en')} pts` },
         ]} />
+        <p className="mt-3 text-right">
+          <a href="/points" className={styles.link}>Request points <ArrowRight size={14} className="inline" aria-hidden="true" /></a>
+        </p>
       </section>
 
       <section className={styles.card}>

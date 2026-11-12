@@ -1,0 +1,93 @@
+.fields {
+  display: grid;
+  gap: 14px;
+}
+
+.fields label {
+  display: grid;
+  gap: 6px;
+  color: var(--c-text-2);
+  font-size: .875rem;
+  font-weight: 700;
+}
+
+.fields select,
+.fields textarea {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid #cbd8e2;
+  border-radius: 9px;
+  background: var(--c-card);
+  color: var(--c-text);
+  font-size: 1rem;
+  font-weight: 400;
+}
+
+.fields select {
+  min-height: 45px;
+}
+
+.fields textarea {
+  resize: vertical;
+}
+
+.fields button {
+  width: fit-content;
+}
+
+.fields:disabled button {
+  opacity: .6;
+  cursor: wait;
+}
+
+.error {
+  padding: 10px 12px;
+  border: 1px solid var(--c-error-border);
+  border-radius: 9px;
+  background: var(--c-error-bg);
+  color: #991b1b;
+  font-size: .875rem;
+}
+
+.requests li {
+  padding-block: 14px;
+  border-bottom: 1px solid var(--c-border);
+}
+
+.requests li:first-child {
+  padding-top: 0;
+}
+
+.requests li:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.requestHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.requestHeader h3 {
+  font-weight: 750;
+  overflow-wrap: anywhere;
+}
+
+.requestHeader p,
+.requestNote {
+  color: var(--c-text-3);
+  font-size: .875rem;
+}
+
+.requestNote {
+  margin-top: 8px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.requestNote strong {
+  margin-inline-end: 5px;
+  color: var(--c-text-2);
+}

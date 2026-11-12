@@ -9,6 +9,7 @@ describe('organization portal host routing', () => {
     ['/register', '/business/register'],
     ['/groups', '/business/groups'],
     ['/send', '/business/send'],
+    ['/points', '/business/points'],
     ['/activity/batch123', '/business/activity/batch123'],
     ['/integrations', '/business/integrations'],
   ])('serves %s through %s on the Business domain', (path, destination) => {

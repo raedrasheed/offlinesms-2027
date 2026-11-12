@@ -636,6 +636,9 @@ export async function listTransactions(cursor?: string, uid?: string, type?: str
 export type AdminPointsRequestRow = {
   id: string;
   userId: string;
+  organizationId: string | null;
+  organizationName: string | null;
+  requestedByUid: string | null;
   packageId: string | null;
   packageName: string;
   points: number;
@@ -646,7 +649,7 @@ export type AdminPointsRequestRow = {
   updatedAt: string;
 };
 
-/** Points requests (user asks an admin to assign a package — no payment). */
+/** Personal and organization requests for a points package. */
 export async function listPointsRequests(cursor?: string, status?: string): Promise<AdminPointsRequestRow[]> {
   let q = adminDb.collection('pointsRequests').orderBy('createdAt', 'desc').limit(50) as FirebaseFirestore.Query;
   if (status) q = q.where('status', '==', status);
@@ -660,6 +663,9 @@ export async function listPointsRequests(cursor?: string, status?: string): Prom
     return {
       id:          d.id,
       userId:      (data.userId as string) ?? '—',
+      organizationId: typeof data.organizationId === 'string' ? data.organizationId : null,
+      organizationName: typeof data.organizationName === 'string' ? data.organizationName : null,
+      requestedByUid: typeof data.requestedByUid === 'string' ? data.requestedByUid : null,
       packageId:   (data.packageId as string | null) ?? null,
       packageName: (data.packageName as string) ?? '',
       points:      (data.points as number) ?? 0,
