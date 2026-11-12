@@ -259,14 +259,14 @@ describe('mapBatchRow / mapMessageRow — allow-list read models', () => {
   it('maps the batch fields and IGNORES anything else (keyHash can never leak)', () => {
     const row = mapBatchRow('b1', {
       organizationId: 'org1', source: 'api', createdBy: 'key_1', status: 'partial',
-      total: 3, accepted: 1, queued: 1, delivered: 1, read: 0, failed: 1, unsupported: 1,
+      total: 4, accepted: 1, queued: 1, delivered: 1, read: 0, failed: 1, unsupported: 1, noRelayForCountry: 1,
       escalationStatus: 'scheduled',
       createdAt: ts, completedAt: ts,
       keyHash: 'SECRET_HASH', authorization: 'Bearer offmsg_live_xyz', extra: 'junk',
     });
     expect(row).toEqual({
       id: 'b1', organizationId: 'org1', source: 'api', createdBy: 'key_1', status: 'partial',
-      total: 3, accepted: 1, queued: 1, delivered: 1, read: 0, failed: 1, unsupported: 1,
+      total: 4, accepted: 1, queued: 1, delivered: 1, read: 0, failed: 1, unsupported: 1, noRelayForCountry: 1,
       escalationStatus: 'scheduled',
       createdAt: new Date(1700000000000).toISOString(),
       completedAt: new Date(1700000000000).toISOString(),
@@ -279,13 +279,16 @@ describe('mapBatchRow / mapMessageRow — allow-list read models', () => {
     const row = mapMessageRow('m1', {
       batchId: 'b1', recipientType: 'phone', recipientValue: '+970591111111',
       title: 'T', body: 'B', status: 'unsupported_recipient',
-      failureReason: 'phone_not_linked_to_user', createdAt: ts,
+      failureReason: 'phone_not_linked_to_user', recipientCountryCode: 'PS', createdAt: ts,
       keyHash: 'SECRET', resolvedUserId: 'u1',
     });
     expect(Object.keys(row).sort()).toEqual([
       'batchId', 'body', 'createdAt', 'failureReason', 'id',
-      'recipientType', 'recipientValue', 'smsEscalation', 'status', 'title',
+      'recipientCountryCode', 'recipientType', 'recipientValue', 'smsEscalation', 'status', 'title',
     ]);
+    expect(row.recipientCountryCode).toBe('PS');
+    expect(mapMessageRow('legacy', {}).recipientCountryCode).toBeNull();
+    expect(mapBatchRow('legacy', {}).noRelayForCountry).toBe(0);
     // The allow-list copies no secret material (keyHash / resolvedUserId).
     expect(JSON.stringify(row)).not.toContain('SECRET');
     expect(JSON.stringify(row)).not.toContain('u1');

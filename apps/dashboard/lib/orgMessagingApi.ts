@@ -297,6 +297,7 @@ export type OrgBatchRow = {
   read:             number;          // receipt-backed
   failed:           number;
   unsupported:      number;
+  noRelayForCountry: number;
   escalationStatus: string;          // none | scheduled | processing | completed | insufficient_points | failed
   createdAt:        string;
   completedAt:      string;
@@ -316,6 +317,7 @@ export function mapBatchRow(id: string, data: Record<string, unknown>): OrgBatch
     read:             (data.read as number | undefined) ?? 0,
     failed:           (data.failed as number | undefined) ?? 0,
     unsupported:      (data.unsupported as number | undefined) ?? 0,
+    noRelayForCountry: (data.noRelayForCountry as number | undefined) ?? 0,
     escalationStatus: (data.escalationStatus as string | undefined) ?? 'none',
     createdAt:        isoDate(data.createdAt),
     completedAt:      isoDate(data.completedAt),
@@ -331,6 +333,7 @@ export type OrgMessageRow = {
   body:           string;
   status:         string;          // queued | delivered | read | failed | unsupported_recipient
   failureReason:  string | null;
+  recipientCountryCode: string | null;
   smsEscalation:  string | null;   // queued | failed | skipped | null
   createdAt:      string;
 };
@@ -345,6 +348,7 @@ export function mapMessageRow(id: string, data: Record<string, unknown>): OrgMes
     body:           (data.body as string | undefined) ?? '',
     status:         (data.status as string | undefined) ?? '',
     failureReason:  (data.failureReason as string | null | undefined) ?? null,
+    recipientCountryCode: typeof data.recipientCountryCode === 'string' ? data.recipientCountryCode : null,
     smsEscalation:  (data.smsEscalation as string | null | undefined) ?? null,
     createdAt:      isoDate(data.createdAt),
   };

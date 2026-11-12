@@ -161,6 +161,7 @@ export type OrgSendActionState =
       accepted: number;
       failed: number;
       unsupported: number;
+      noRelayForCountry: number;
       status: string;
       escalationScheduled: boolean;
       escalationDelayMinutes: number;
@@ -223,6 +224,7 @@ export async function sendOrganizationMessage(
     accepted:    result.summary.accepted,
     failed:      result.summary.failed,
     unsupported: result.summary.unsupported,
+    noRelayForCountry: result.summary.noRelayForCountry,
     status:      result.summary.batchStatus,
     escalationScheduled:    result.escalationScheduled,
     escalationDelayMinutes: result.escalation.delayMinutes,

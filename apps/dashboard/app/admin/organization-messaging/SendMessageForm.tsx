@@ -8,6 +8,7 @@ import type { RecipientGroupSummary } from '@/lib/orgRecipientGroups';
 
 const inputCls = 'w-full rounded-lg px-3 py-2 text-sm outline-none';
 const inputStyle = { background: 'var(--c-bg)', border: '1px solid var(--c-border)', color: 'var(--c-text)' };
+const emptyDraft = { title: '', body: '', recipients: '' };
 
 function SubmitButton() {
   const { pending } = useFormStatus();
@@ -32,11 +33,16 @@ export default function SendMessageForm({
 }) {
   const router = useRouter();
   const [state, formAction] = useFormState(action, null);
-  const ok = state && 'success' in state ? state : null;
+  const result = state && 'success' in state ? state : null;
+  const tone = result?.status === 'failed' ? 'error' : result?.status === 'partial' ? 'warning' : 'success';
   const [groupId, setGroupId] = useState('');
+  const [draft, setDraft] = useState(emptyDraft);
 
-  // Refresh server-rendered usage + logs after a successful send.
-  useEffect(() => { if (ok) router.refresh(); }, [ok, router]);
+  useEffect(() => {
+    if (!result) return;
+    if (result.accepted > 0) setDraft(emptyDraft);
+    router.refresh();
+  }, [result, router]);
 
   return (
     <form action={formAction} className="space-y-4">
@@ -45,18 +51,26 @@ export default function SendMessageForm({
           {state.error}
         </div>
       )}
-      {ok && (
-        <div className="rounded-lg px-4 py-3 text-sm space-y-0.5" style={{ background: 'var(--c-success-bg)', border: '1px solid var(--c-success-border)', color: 'var(--c-text)' }} role="status">
+      {result && (
+        <div
+          className="rounded-lg border px-4 py-3 text-sm space-y-0.5"
+          style={{ background: `var(--c-${tone}-bg)`, borderColor: `var(--c-${tone}-border)`, color: 'var(--c-text)' }}
+          role={tone === 'error' ? 'alert' : 'status'}
+        >
           <p>
-            Batch {batchPath ? <a className="font-mono underline" href={`${batchPath}/${encodeURIComponent(ok.batchId)}`}>{ok.batchId}</a> : <span className="font-mono">{ok.batchId}</span>} — status: <span className="font-bold capitalize">{ok.status}</span>.
+            Batch {batchPath ? <a className="font-mono underline" href={`${batchPath}/${encodeURIComponent(result.batchId)}`}>{result.batchId}</a> : <span className="font-mono">{result.batchId}</span>} — status: <span className="font-bold capitalize">{result.status}</span>.
           </p>
           <p>
-            {ok.accepted}/{ok.total} accepted for delivery
-            {ok.failed > 0 ? ` · ${ok.failed} failed` : ''}
-            {ok.unsupported > 0 ? ` · ${ok.unsupported} unsupported recipient${ok.unsupported === 1 ? '' : 's'}` : ''}.
+            {result.accepted}/{result.total} accepted for delivery
+            {result.failed > 0 ? ` · ${result.failed} failed` : ''}
+            {result.unsupported > 0 ? ` · ${result.unsupported} unsupported recipient${result.unsupported === 1 ? '' : 's'}` : ''}
+            {result.noRelayForCountry > 0 ? ` · ${result.noRelayForCountry} blocked by relay coverage` : ''}.
           </p>
-          {ok.escalationScheduled ? (
-            <p>SMS escalation scheduled in {ok.escalationDelayMinutes} min for {ok.escalationAudience.replace(/_/g, ' ')} users still pending.</p>
+          {result.noRelayForCountry > 0 && (
+            <p>Ask a platform administrator to enable country routing on an active relay for this organization and add the affected destination countries.</p>
+          )}
+          {result.escalationScheduled ? (
+            <p>SMS escalation scheduled in {result.escalationDelayMinutes} min for {result.escalationAudience.replace(/_/g, ' ')} users still pending.</p>
           ) : null}
         </div>
       )}
@@ -65,14 +79,35 @@ export default function SendMessageForm({
         <label htmlFor="org-send-title" className="block text-xs font-bold mb-1" style={{ color: 'var(--c-text-2)' }}>
           Title <span style={{ color: '#EF4444' }}>*</span>
         </label>
-        <input id="org-send-title" name="title" required maxLength={80} className={inputCls} style={inputStyle} placeholder="Important notice" />
+        <input
+          id="org-send-title"
+          name="title"
+          required
+          maxLength={80}
+          value={draft.title}
+          onChange={event => setDraft({ ...draft, title: event.target.value })}
+          className={inputCls}
+          style={inputStyle}
+          placeholder="Important notice"
+        />
       </div>
 
       <div>
         <label htmlFor="org-send-body" className="block text-xs font-bold mb-1" style={{ color: 'var(--c-text-2)' }}>
           Body <span style={{ color: '#EF4444' }}>*</span>
         </label>
-        <textarea id="org-send-body" name="body" required maxLength={500} rows={4} className={inputCls} style={inputStyle} placeholder="Message body (max 500 characters)" />
+        <textarea
+          id="org-send-body"
+          name="body"
+          required
+          maxLength={500}
+          rows={4}
+          value={draft.body}
+          onChange={event => setDraft({ ...draft, body: event.target.value })}
+          className={inputCls}
+          style={inputStyle}
+          placeholder="Message body (max 500 characters)"
+        />
         <p className="text-[11px] mt-1" style={{ color: 'var(--c-text-3)' }}>
           If auto SMS escalation is enabled, the title and body are shortened to 320 characters before sender information is added. The complete SMS, including enabled sender information, is billed per segment; longer or Unicode text may cost more.
         </p>
@@ -94,6 +129,8 @@ export default function SendMessageForm({
           name="recipients"
           required
           rows={6}
+          value={draft.recipients}
+          onChange={event => setDraft({ ...draft, recipients: event.target.value })}
           className={`${inputCls} font-mono`}
           style={inputStyle}
           placeholder={'+970591234567\nuserId-abc123\none per line — +E.164 phone or user ID (max 500)'}

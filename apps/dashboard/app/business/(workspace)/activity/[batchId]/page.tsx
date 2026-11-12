@@ -33,7 +33,13 @@ export default async function BusinessBatch({ params }: { params: Promise<{ batc
           { label: 'Read', value: batch.read },
           { label: 'Failed', value: batch.failed },
           { label: 'Unsupported', value: batch.unsupported },
+          ...(batch.noRelayForCountry > 0 ? [{ label: 'No relay coverage', value: batch.noRelayForCountry }] : []),
         ]} />
+        {batch.noRelayForCountry > 0 && (
+          <p className={`${styles.note} mt-4`}>
+            Ask a platform administrator to enable country routing on an active relay for this organization and add the affected destination countries before retrying.
+          </p>
+        )}
       </section>
       <section className={styles.card} aria-labelledby="message-recipients">
         <div className={styles.cardHeading}><h2 id="message-recipients">Recipient activity</h2></div>
@@ -49,7 +55,11 @@ export default async function BusinessBatch({ params }: { params: Promise<{ batc
                     <td className="min-w-40 max-w-80 break-words" dir="auto">{message.body}</td>
                     <td><Status value={message.status} /></td>
                     <td>{message.smsEscalation ? <Status value={message.smsEscalation} /> : '—'}</td>
-                    <td>{message.failureReason?.replaceAll('_', ' ') ?? '—'}</td>
+                    <td>
+                      {message.status === 'no_relay_for_country'
+                        ? <>No active organization relay covers this destination{message.recipientCountryCode ? ` (${message.recipientCountryCode})` : ''}.</>
+                        : message.failureReason?.replaceAll('_', ' ') ?? '—'}
+                    </td>
                     <td>{displayDate(message.createdAt)}</td>
                   </tr>
                 ))}
