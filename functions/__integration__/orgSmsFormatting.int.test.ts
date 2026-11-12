@@ -110,6 +110,28 @@ describe('organization SMS formatting and segment billing', () => {
     expect(dispatch).not.toHaveBeenCalled();
   });
 
+  it('uses the same receipt, text and row when multiple messages resolve to one SMS recipient', async () => {
+    await seed();
+    await sourceBatch().update({ escalation: { audience: 'unread_only' } });
+    const first = db().doc('organizationMessages/short-recipient');
+    const duplicate = db().doc('organizationMessages/short-recipient-duplicate');
+    await duplicate.set({ ...(await first.get()).data(), messageId: 'duplicate-message', body: 'Different content' });
+    await db().doc('conversations/direct-short-recipient/messages/message-short-recipient/receipts/short-recipient')
+      .set({ status: 'delivered' });
+
+    await escalateOrgBatches.run({} as never);
+
+    const firstSnap = await first.get();
+    const duplicateSnap = await duplicate.get();
+    expect(firstSnap.data()).toMatchObject({ status: 'delivered', smsEscalation: 'queued', smsBatchId: expect.any(String) });
+    expect(duplicateSnap.data()).toMatchObject({ smsEscalation: 'skipped', smsSkipReason: 'duplicate-phone' });
+    expect(duplicateSnap.get('smsBatchId')).toBeUndefined();
+    const smsBatch = db().collection('smsBatches').doc(firstSnap.get('smsBatchId'));
+    expect((await smsBatch.collection('recipients').doc('short-recipient').get()).get('appReceiptStatus')).toBe('delivered');
+    expect(dispatch).toHaveBeenCalledWith(smsBatch.id, '[OfflineSMS]\nOrganization\n\nT: hello', [expect.objectContaining({ uid: 'short-recipient' })]);
+    expect((await sourceBatch().get()).data()).toMatchObject({ smsQueued: 3, smsFailed: 1, smsSkipped: 1, smsPointsReserved: 196 });
+  });
+
   it('rejects insufficient balance using complete text pricing before queueing any SMS', async () => {
     // Flat per-recipient pricing would incorrectly permit 4 × 28 = 112.
     await seed(150);

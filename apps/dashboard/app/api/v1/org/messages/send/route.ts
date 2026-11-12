@@ -11,12 +11,12 @@
 
 import { NextResponse } from 'next/server';
 import { FieldValue } from 'firebase-admin/firestore';
-import { adminDb } from '@/lib/firebase-admin';
-import { hashApiKey } from '@/lib/orgMessagingKeys';
-import { apiError, parseAuthHeader, parseSendRequest, type ApiErrorCode } from '@/lib/orgMessagingApi';
-import { submitOrganizationMessageBatch } from '@/lib/orgMessagingService';
-import { getRecipientGroup } from '@/lib/orgRecipientGroups';
-import { isRecipientGroupId } from '@/lib/recipientGroupValidation';
+import { adminDb } from '../../../../../../lib/firebase-admin';
+import { hashApiKey } from '../../../../../../lib/orgMessagingKeys';
+import { apiError, parseAuthHeader, parseSendRequest, type ApiErrorCode } from '../../../../../../lib/orgMessagingApi';
+import { submitOrganizationMessageBatch } from '../../../../../../lib/orgMessagingService';
+import { getRecipientGroup } from '../../../../../../lib/orgRecipientGroups';
+import { isRecipientGroupId } from '../../../../../../lib/recipientGroupValidation';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
