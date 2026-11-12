@@ -5,24 +5,30 @@ import Link from 'next/link';
 import type { Route } from 'next';
 import { useRouter } from 'next/navigation';
 import { FileSpreadsheet, Upload } from 'lucide-react';
-import type { importOrganizationRecipients } from '@/lib/orgMessagingActions';
-import type { RecipientGroupChange, RecipientGroupSummary } from '@/lib/orgRecipientGroups';
-import { parseRecipientWorkbook, RECIPIENT_GROUP_MAX, RECIPIENT_WORKBOOK_MAX_BYTES, type GroupRecipient, type WorkbookPreview } from '@/lib/recipientGroupValidation';
+import type { importOrganizationRecipients, manageOrganizationRecipientGroup } from '@/lib/orgMessagingActions';
+import type { RecipientGroupChange, RecipientGroupDefinitionChange, RecipientGroupSummary } from '@/lib/orgRecipientGroups';
+import { parseRecipientWorkbook, RECIPIENT_GROUP_MAX, RECIPIENT_GROUP_NAME_MAX, RECIPIENT_WORKBOOK_MAX_BYTES, type GroupRecipient, type WorkbookPreview } from '@/lib/recipientGroupValidation';
 import RecipientGroupMembers from './RecipientGroupMembers';
 
 const field = 'w-full rounded-lg border px-3 py-2 text-sm';
 const fieldStyle = { borderColor: 'var(--c-border)', background: 'var(--c-bg)', color: 'var(--c-text)' };
+const dangerStyle = { borderColor: 'var(--c-error-border)', background: 'var(--c-error-bg)', color: 'var(--c-text)' };
+const button = 'rounded-lg border px-3 py-1.5 text-sm font-semibold disabled:opacity-50';
+
+type SelectedGroup = { id: string; name: string; revision: string; members: GroupRecipient[] };
+type GroupDefinitionAction = (groupId: string, change: RecipientGroupDefinitionChange) => ReturnType<typeof manageOrganizationRecipientGroup>;
 
 type Props = {
   groups: RecipientGroupSummary[];
-  selected: { id: string; name: string; members: GroupRecipient[] } | null;
+  selected: SelectedGroup | null;
   organizationId: string;
   groupPath?: '/groups';
   action: (input: Parameters<typeof importOrganizationRecipients>[1]) => ReturnType<typeof importOrganizationRecipients>;
   manageAction: (groupId: string, change: RecipientGroupChange) => Promise<{ members: GroupRecipient[] } | { error: string }>;
+  groupDefinitionAction?: GroupDefinitionAction;
 };
 
-export default function RecipientGroups({ groups, selected, organizationId, groupPath, action, manageAction }: Props) {
+export default function RecipientGroups({ groups, selected, organizationId, groupPath, action, manageAction, groupDefinitionAction }: Props) {
   const router = useRouter();
   const [target, setTarget] = useState(selected?.id ?? '');
   const [name, setName] = useState('');
@@ -40,9 +46,22 @@ export default function RecipientGroups({ groups, selected, organizationId, grou
     if (selectedId) setTarget(selectedId);
   }, [selectedId]);
 
-  function groupLink(id: string): Route {
-    if (groupPath) return `${groupPath}?${new URLSearchParams({ group: id })}#recipient-groups` as Route;
-    return `/admin/organization-messaging?${new URLSearchParams({ org: organizationId, group: id })}#recipient-groups` as Route;
+  function groupLink(id?: string): Route {
+    const query = new URLSearchParams(groupPath ? {} : { org: organizationId });
+    if (id) query.set('group', id);
+    const search = query.size ? `?${query}` : '';
+    return `${groupPath ?? '/admin/organization-messaging'}${search}#recipient-groups` as Route;
+  }
+
+  function onGroupChanged(groupId: string, type: RecipientGroupDefinitionChange['type']) {
+    if (type === 'rename') {
+      setNotice('Group renamed.');
+      router.refresh();
+      return;
+    }
+    setTarget(current => current === groupId ? '' : current);
+    setNotice('Group deleted.');
+    router.replace(groupLink(), { scroll: false });
   }
 
   async function readFile(event: ChangeEvent<HTMLInputElement>) {
@@ -109,6 +128,9 @@ export default function RecipientGroups({ groups, selected, organizationId, grou
           </Link></li>)}
         </ul>
       )}
+      {selected && groupDefinitionAction && (
+        <GroupDefinitionControls key={selected.id} group={selected} action={groupDefinitionAction} onChanged={onGroupChanged} />
+      )}
       {selected && (
         <details className="rounded-lg border px-4 py-3" style={{ borderColor: 'var(--c-border)' }}>
           <summary className="cursor-pointer text-sm font-semibold">{selected.name} · {selected.members.length} saved recipients</summary>
@@ -122,6 +144,7 @@ export default function RecipientGroups({ groups, selected, organizationId, grou
           </details>
         </details>
       )}
+      {notice && <p role="status" className="text-sm font-medium">{notice}</p>}
       <form onSubmit={save} className="space-y-4">
         <fieldset disabled={pending} className="min-w-0 space-y-4">
           <div className="grid gap-3 sm:grid-cols-2">
@@ -133,7 +156,7 @@ export default function RecipientGroups({ groups, selected, organizationId, grou
               </select>
             </label>
             {!target && <label className="text-sm font-medium">Group name
-              <input value={name} onChange={event => { setName(event.target.value); newGroupId.current = ''; }} required maxLength={80} className={`${field} mt-1`} style={fieldStyle} />
+              <input value={name} onChange={event => { setName(event.target.value); newGroupId.current = ''; }} required maxLength={RECIPIENT_GROUP_NAME_MAX} className={`${field} mt-1`} style={fieldStyle} />
             </label>}
           </div>
           <div className="rounded-xl border border-dashed p-4" style={{ borderColor: 'var(--c-border)', background: 'var(--c-bg)' }}>
@@ -155,13 +178,89 @@ export default function RecipientGroups({ groups, selected, organizationId, grou
           </div>}
         </fieldset>
         {error && <p role="alert" className="rounded-lg border px-3 py-2 text-sm" style={{ background: 'var(--c-error-bg)', borderColor: 'var(--c-error-border)' }}>{error}</p>}
-        {notice && <p role="status" className="text-sm font-medium">{notice}</p>}
         <button type="submit" disabled={pending || reading || !preview?.recipients.length || !!preview.invalidRows.length || (!target && !name.trim())}
           className="rounded-lg px-4 py-2 text-sm font-bold text-white disabled:opacity-50" style={{ background: '#176f96' }}>
           {pending ? 'Saving…' : reading ? 'Reading workbook…' : 'Add to group'}
         </button>
       </form>
     </section>
+  );
+}
+
+function GroupDefinitionControls({ group, action, onChanged }: {
+  group: SelectedGroup;
+  action: GroupDefinitionAction;
+  onChanged: (groupId: string, type: RecipientGroupDefinitionChange['type']) => void;
+}) {
+  const [draft, setDraft] = useState<{ name: string; revision: string } | null>(null);
+  const [error, setError] = useState('');
+  const [pending, startTransition] = useTransition();
+  const nameInput = useRef<HTMLInputElement>(null);
+  const editing = draft !== null;
+
+  useEffect(() => {
+    if (editing) nameInput.current?.focus();
+  }, [editing]);
+
+  function changeGroup(change: RecipientGroupDefinitionChange) {
+    if (pending) return;
+    setError('');
+    startTransition(async () => {
+      try {
+        const result = await action(group.id, change);
+        if ('error' in result) {
+          setError(result.error);
+          return;
+        }
+        setDraft(null);
+        onChanged(group.id, change.type);
+      } catch {
+        setError('Could not update the group. Try again.');
+      }
+    });
+  }
+
+  function saveName(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (draft?.name.trim()) changeGroup({ type: 'rename', name: draft.name, revision: draft.revision });
+  }
+
+  function deleteGroup() {
+    const count = group.members.length;
+    const recipients = count === 1 ? 'recipient' : 'recipients';
+    if (window.confirm(`Delete “${group.name}”? This permanently deletes the group and its saved list of ${count} ${recipients}.`)) {
+      changeGroup({ type: 'delete', revision: group.revision });
+    }
+  }
+
+  return (
+    <div className="space-y-3" aria-busy={pending}>
+      {draft ? (
+        <form onSubmit={saveName} className="space-y-3 rounded-lg border p-3" style={fieldStyle}>
+          <label className="block text-sm font-medium">
+            Group name
+            <input ref={nameInput} required dir="auto" maxLength={RECIPIENT_GROUP_NAME_MAX} value={draft.name}
+              disabled={pending} className={`${field} mt-1`} style={fieldStyle}
+              onChange={event => setDraft({ ...draft, name: event.target.value })} />
+          </label>
+          <div className="flex flex-wrap gap-2">
+            <button type="submit" disabled={pending || !draft.name.trim()} className={`${button} text-white`}
+              style={{ background: '#176f96', borderColor: '#176f96' }}>{pending ? 'Saving…' : 'Save group name'}</button>
+            <button type="button" disabled={pending} className={button} style={fieldStyle}
+              onClick={() => { setDraft(null); setError(''); }}>Cancel</button>
+          </div>
+        </form>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          <button type="button" disabled={pending} className={button} style={fieldStyle}
+            onClick={() => { setDraft({ name: group.name, revision: group.revision }); setError(''); }}>Rename group</button>
+          <button type="button" disabled={pending} className={button} style={dangerStyle} onClick={deleteGroup}>
+            {pending ? 'Deleting…' : 'Delete group'}
+          </button>
+        </div>
+      )}
+      {error && <p role="alert" className="rounded-lg border px-3 py-2 text-sm" style={dangerStyle}>{error}</p>}
+    </div>
   );
 }
 

@@ -1,16 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { parseRecipientWorkbook, RECIPIENT_GROUP_MAX } from '../lib/recipientGroupValidation';
-import { saveRecipientGroupChange, saveRecipientGroupImport, getRecipientGroup } from '../lib/orgRecipientGroups';
+import { parseRecipientWorkbook, RECIPIENT_GROUP_MAX, RECIPIENT_GROUP_NAME_MAX } from '../lib/recipientGroupValidation';
+import {
+  saveRecipientGroupChange, saveRecipientGroupDefinitionChange, saveRecipientGroupImport, getRecipientGroup,
+} from '../lib/orgRecipientGroups';
 
 const memory = vi.hoisted(() => ({
   docs: new Map<string, Record<string, unknown>>(),
+  revisions: new Map<string, number>(),
   writes: [] as string[],
   id: 0,
 }));
 
 vi.mock('../lib/firebase-admin', () => {
   function doc(path: string) {
-    const snapshot = () => ({ id: path.split('/').at(-1), exists: memory.docs.has(path), get: (key: string) => memory.docs.get(path)?.[key] });
+    const snapshot = () => ({
+      id: path.split('/').at(-1),
+      exists: memory.docs.has(path),
+      updateTime: memory.docs.has(path) ? { seconds: 1_700_000_000, nanoseconds: memory.revisions.get(path) ?? 0 } : undefined,
+      get: (key: string) => memory.docs.get(path)?.[key],
+    });
     return { path, id: path.split('/').at(-1), snapshot, get: async () => snapshot(),
       collection: (name: string) => collection(path + '/' + name) };
   }
@@ -20,9 +28,14 @@ vi.mock('../lib/firebase-admin', () => {
   function write(ref: ReturnType<typeof doc>, data: Record<string, unknown>) {
     memory.writes.push(ref.path);
     memory.docs.set(ref.path, { ...memory.docs.get(ref.path), ...data });
+    memory.revisions.set(ref.path, (memory.revisions.get(ref.path) ?? 0) + 1);
+  }
+  function remove(ref: ReturnType<typeof doc>) {
+    memory.writes.push(ref.path);
+    memory.docs.delete(ref.path);
   }
   return { adminDb: { collection, runTransaction: async (callback: (tx: unknown) => unknown) =>
-    callback({ getAll: async (...refs: ReturnType<typeof doc>[]) => refs.map(ref => ref.snapshot()), create: write, update: write }) } };
+    callback({ getAll: async (...refs: ReturnType<typeof doc>[]) => refs.map(ref => ref.snapshot()), create: write, update: write, delete: remove }) } };
 });
 
 const first = { name: 'First recipient', phone: '+12025550123' };
@@ -30,6 +43,7 @@ const second = { name: 'Second recipient', phone: '+12025550124' };
 
 beforeEach(() => {
   memory.docs.clear();
+  memory.revisions.clear();
   memory.writes.length = 0;
   memory.docs.set('organizations/school', { status: 'active' });
   memory.docs.set('organizations/other', { status: 'active' });
@@ -78,7 +92,7 @@ describe('Excel recipient import', () => {
     expect(await saveRecipientGroupImport('school', 'operator', input)).toEqual({ groupId: 'parents', added: 1, skipped: 1, memberCount: 1 });
     expect(await saveRecipientGroupImport('school', 'operator', input)).toMatchObject({ added: 0, skipped: 2, memberCount: 1 });
     expect(await saveRecipientGroupImport('school', 'operator', { groupId: 'parents', recipients: [first, second] })).toMatchObject({ added: 1, skipped: 1, memberCount: 2 });
-    expect(await getRecipientGroup('school', 'parents')).toEqual({ id: 'parents', name: 'Parents', members: [first, second] });
+    expect(await getRecipientGroup('school', 'parents')).toEqual({ id: 'parents', name: 'Parents', members: [first, second], revision: '1700000000:2' });
     expect(await getRecipientGroup('other', 'parents')).toBeNull();
     expect(await saveRecipientGroupImport('other', 'operator', { groupId: 'parents', recipients: [first] })).toHaveProperty('error');
     expect(memory.writes).toHaveLength(4);
@@ -129,7 +143,7 @@ describe('saved recipient management', () => {
     expect(await saveRecipientGroupChange('school', 'operator', 'parents', { type: 'delete', recipients: [first, first, third] }))
       .toEqual({ members: [] });
     expect(memory.docs.get(groupPath)).toMatchObject({ memberCount: 0 });
-    expect(await getRecipientGroup('school', 'parents')).toEqual({ id: 'parents', name: 'Parents', members: [] });
+    expect(await getRecipientGroup('school', 'parents')).toEqual({ id: 'parents', name: 'Parents', members: [], revision: '1700000000:2' });
     const audits = [...memory.docs.entries()].filter(([path]) => path.startsWith('auditLogs/')).map(([, doc]) => doc);
     expect(audits.map(audit => audit.metadata)).toEqual([{ organizationId: 'school', removed: 1 }, { organizationId: 'school', removed: 2 }]);
   });
@@ -149,5 +163,68 @@ describe('saved recipient management', () => {
       .toEqual({ error: 'Group not found.' });
     expect(memory.docs.get(groupPath)?.members).toEqual([first, second, third]);
     expect(memory.writes).toEqual([]);
+  });
+});
+
+describe('saved recipient group definition management', () => {
+  const groupPath = 'organizations/school/recipientGroups/parents';
+  const otherGroupPath = 'organizations/other/recipientGroups/parents';
+  const revision = '1700000000:0';
+
+  beforeEach(() => {
+    memory.docs.set(groupPath, { name: 'Parents', memberCount: 1, members: [first], createdBy: 'creator' });
+    memory.docs.set(otherGroupPath, { name: 'Other group', memberCount: 1, members: [second] });
+  });
+
+  it('renames a group in place and rejects a deletion based on its previous revision', async () => {
+    expect(await saveRecipientGroupDefinitionChange('school', 'operator', 'parents', {
+      type: 'rename', revision, name: ' أولياء الأمور ',
+    })).toEqual({ success: true });
+    expect(await getRecipientGroup('school', 'parents')).toEqual({
+      id: 'parents', name: 'أولياء الأمور', members: [first], revision: '1700000000:1',
+    });
+    expect(memory.docs.get(groupPath)).toMatchObject({ memberCount: 1, createdBy: 'creator' });
+    expect(await saveRecipientGroupDefinitionChange('school', 'operator', 'parents', { type: 'delete', revision }))
+      .toEqual({ error: 'The group changed. Refresh the group and try again.' });
+    expect(memory.docs.get(otherGroupPath)?.name).toBe('Other group');
+    const audits = [...memory.docs.entries()].filter(([path]) => path.startsWith('auditLogs/')).map(([, doc]) => doc);
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({ action: 'organization.recipient_group.renamed', targetId: 'parents', actorUid: 'operator' });
+    expect(audits[0].metadata).toEqual({ organizationId: 'school' });
+  });
+
+  it('deletes only the selected group and keeps message history and other organizations’ groups', async () => {
+    const historyPath = 'organizationMessageBatches/old-send';
+    const history = { organizationId: 'school', recipientGroupName: 'Parents' };
+    memory.docs.set(historyPath, history);
+
+    expect(await saveRecipientGroupDefinitionChange('school', 'operator', 'parents', { type: 'delete', revision }))
+      .toEqual({ success: true });
+    expect(await getRecipientGroup('school', 'parents')).toBeNull();
+    expect(memory.docs.get(otherGroupPath)?.members).toEqual([second]);
+    expect(memory.docs.get(historyPath)).toEqual(history);
+    expect(await saveRecipientGroupDefinitionChange('school', 'operator', 'parents', { type: 'delete', revision }))
+      .toEqual({ error: 'Group not found.' });
+    const audits = [...memory.docs.entries()].filter(([path]) => path.startsWith('auditLogs/')).map(([, doc]) => doc);
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({ action: 'organization.recipient_group.deleted', targetId: 'parents' });
+    expect(audits[0].metadata).toEqual({ organizationId: 'school' });
+  });
+
+  it('rejects invalid names, stale roster revisions and inactive organizations', async () => {
+    for (const name of ['  ', 'x'.repeat(RECIPIENT_GROUP_NAME_MAX + 1)]) {
+      expect(await saveRecipientGroupDefinitionChange('school', 'operator', 'parents', { type: 'rename', revision, name }))
+        .toHaveProperty('error');
+    }
+    expect(await saveRecipientGroupDefinitionChange('school', 'operator', 'parents', { type: 'delete', revision: '' }))
+      .toHaveProperty('error');
+    await saveRecipientGroupImport('school', 'operator', { groupId: 'parents', recipients: [second] });
+    const writes = [...memory.writes];
+    expect(await saveRecipientGroupDefinitionChange('school', 'operator', 'parents', { type: 'delete', revision }))
+      .toEqual({ error: 'The group changed. Refresh the group and try again.' });
+    memory.docs.set('organizations/other', { status: 'suspended' });
+    expect(await saveRecipientGroupDefinitionChange('other', 'operator', 'parents', { type: 'delete', revision }))
+      .toEqual({ error: 'This organization is not active.' });
+    expect(memory.writes).toEqual(writes);
   });
 });
