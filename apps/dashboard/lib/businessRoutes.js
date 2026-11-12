@@ -1,0 +1,8 @@
+const BUSINESS_HOST = 'business.offlinesms.com';
+const BUSINESS_PAGES = ['/', '/login', '/groups', '/send', '/activity', '/activity/:batchId', '/integrations'];
+
+function businessDestination(path) {
+  return path === '/' ? '/business' : `/business${path}`;
+}
+
+module.exports = { BUSINESS_HOST, BUSINESS_PAGES, businessDestination };

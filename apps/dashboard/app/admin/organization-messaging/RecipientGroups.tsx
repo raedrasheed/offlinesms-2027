@@ -16,10 +16,11 @@ type Props = {
   groups: RecipientGroupSummary[];
   selected: { id: string; name: string; members: GroupRecipient[] } | null;
   organizationId: string;
+  groupPath?: '/groups';
   action: (input: Parameters<typeof importOrganizationRecipients>[1]) => ReturnType<typeof importOrganizationRecipients>;
 };
 
-export default function RecipientGroups({ groups, selected, organizationId, action }: Props) {
+export default function RecipientGroups({ groups, selected, organizationId, groupPath, action }: Props) {
   const router = useRouter();
   const [target, setTarget] = useState(selected?.id ?? '');
   const [name, setName] = useState('');
@@ -38,6 +39,7 @@ export default function RecipientGroups({ groups, selected, organizationId, acti
   }, [selectedId]);
 
   function groupLink(id: string): Route {
+    if (groupPath) return `${groupPath}?${new URLSearchParams({ group: id })}#recipient-groups` as Route;
     return `/admin/organization-messaging?${new URLSearchParams({ org: organizationId, group: id })}#recipient-groups` as Route;
   }
 
@@ -99,7 +101,7 @@ export default function RecipientGroups({ groups, selected, organizationId, acti
       </div>
       {groups.length > 0 && (
         <ul className="flex flex-wrap gap-2">
-          {groups.map(group => <li key={group.id}><Link href={groupLink(group.id)} aria-current={selected?.id === group.id ? 'true' : undefined}
+          {groups.map(group => <li key={group.id}><Link href={groupLink(group.id)} prefetch={groupPath ? false : undefined} aria-current={selected?.id === group.id ? 'true' : undefined}
             className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm hover:brightness-95" style={fieldStyle}>
             <span>{group.name}</span><span className="text-xs tabular-nums" style={{ color: 'var(--c-text-3)' }}>{group.memberCount}</span>
           </Link></li>)}

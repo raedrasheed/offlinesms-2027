@@ -150,6 +150,11 @@ export async function createOrganizationAccount(
 // regardless of what the page already verified, and the client-provided
 // organizationId is never trusted on its own.
 
+function revalidateOrgMessaging(...businessPages: string[]) {
+  revalidatePath('/admin/organization-messaging');
+  businessPages.forEach(path => revalidatePath(path));
+}
+
 const SEND_FAILURE_COPY: Record<SubmitFailureCode, string> = {
   organization_not_found: 'Organization not found.',
   organization_suspended: 'Organization is suspended — sending is disabled.',
@@ -220,6 +225,7 @@ export async function sendOrganizationMessage(
     userEmail: session.user.email ?? null,
   });
   if (!result.ok) return { error: result.message ?? SEND_FAILURE_COPY[result.code] };
+  revalidateOrgMessaging('/business', '/business/activity', '/business/send');
 
   return {
     success:     true,
@@ -246,7 +252,7 @@ export async function importOrganizationRecipients(
   if (!isRecipientGroupId(organizationId) || !input || typeof input !== 'object') return { error: 'Invalid import.' };
   try {
     const result = await saveRecipientGroupImport(organizationId, session.user.uid, input);
-    if ('groupId' in result) revalidatePath('/admin/organization-messaging');
+    if ('groupId' in result) revalidateOrgMessaging('/business', '/business/groups', '/business/send');
     return result;
   } catch {
     return { error: 'Could not import recipients. Try again.' };
@@ -300,6 +306,7 @@ export async function updateOrgEscalationSettings(
     });
   } catch { /* soft-fail */ }
 
+  revalidateOrgMessaging('/business/send');
   return { success: true };
 }
 
@@ -398,6 +405,7 @@ export async function generateOrgApiKey(
   await writeApiKeyAudit('organization_api_key_created', session.user.uid, session.user.email,
     organizationId, { keyId: newRef.id });
 
+  revalidateOrgMessaging('/business/integrations');
   // The ONLY place the raw key ever leaves the server.
   return { success: true, rawKey: raw };
 }
@@ -435,5 +443,6 @@ export async function revokeOrgApiKey(
   await writeApiKeyAudit('organization_api_key_revoked', session.user.uid, session.user.email,
     organizationId, { keyIds: revokedIds });
 
+  revalidateOrgMessaging('/business/integrations');
   return { success: true };
 }
