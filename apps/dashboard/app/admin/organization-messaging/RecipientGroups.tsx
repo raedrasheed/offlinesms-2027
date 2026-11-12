@@ -6,7 +6,7 @@ import type { Route } from 'next';
 import { useRouter } from 'next/navigation';
 import { FileSpreadsheet, Upload } from 'lucide-react';
 import type { importOrganizationRecipients, manageOrganizationRecipientGroup } from '@/lib/orgMessagingActions';
-import type { RecipientGroupChange, RecipientGroupDefinitionChange, RecipientGroupSummary } from '@/lib/orgRecipientGroups';
+import type { RecipientGroupChange, RecipientGroupDefinitionChange, RecipientGroupListEntry } from '@/lib/orgRecipientGroups';
 import { parseRecipientWorkbook, RECIPIENT_GROUP_MAX, RECIPIENT_GROUP_NAME_MAX, RECIPIENT_WORKBOOK_MAX_BYTES, type GroupRecipient, type WorkbookPreview } from '@/lib/recipientGroupValidation';
 import RecipientGroupMembers from './RecipientGroupMembers';
 
@@ -19,14 +19,15 @@ type SelectedGroup = { id: string; name: string; revision: string; members: Grou
 type GroupDefinitionAction = (groupId: string, change: RecipientGroupDefinitionChange) => ReturnType<typeof manageOrganizationRecipientGroup>;
 
 type Props = {
-  groups: RecipientGroupSummary[];
+  groups: RecipientGroupListEntry[];
   selected: SelectedGroup | null;
   organizationId: string;
-  groupPath?: '/groups';
   action: (input: Parameters<typeof importOrganizationRecipients>[1]) => ReturnType<typeof importOrganizationRecipients>;
   manageAction: (groupId: string, change: RecipientGroupChange) => Promise<{ members: GroupRecipient[] } | { error: string }>;
-  groupDefinitionAction?: GroupDefinitionAction;
-};
+} & (
+  | { groupPath: '/groups'; groupDefinitionAction: GroupDefinitionAction }
+  | { groupPath?: never; groupDefinitionAction?: never }
+);
 
 export default function RecipientGroups({ groups, selected, organizationId, groupPath, action, manageAction, groupDefinitionAction }: Props) {
   const router = useRouter();
@@ -61,7 +62,8 @@ export default function RecipientGroups({ groups, selected, organizationId, grou
     }
     setTarget(current => current === groupId ? '' : current);
     setNotice('Group deleted.');
-    router.replace(groupLink(), { scroll: false });
+    if (selectedId === groupId) router.replace(groupLink(), { scroll: false });
+    else router.refresh();
   }
 
   async function readFile(event: ChangeEvent<HTMLInputElement>) {
@@ -126,25 +128,15 @@ export default function RecipientGroups({ groups, selected, organizationId, grou
             <thead style={{ background: 'var(--c-bg)', color: 'var(--c-text-3)' }}>
               <tr>
                 <th scope="col" className="px-3 py-2 text-start font-semibold">Group</th>
-                <th scope="col" className="w-24 px-3 py-2 text-end font-semibold sm:w-32">Recipients</th>
+                <th scope="col" className="w-20 px-2 py-2 text-end font-semibold sm:w-32 sm:px-3">Recipients</th>
+                <th scope="col" className="w-24 px-2 py-2 text-start font-semibold sm:w-40 sm:px-3">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {groups.map(group => {
-                const isSelected = selectedId === group.id;
-                return (
-                  <tr key={group.id} className="border-t"
-                    style={{ borderColor: 'var(--c-border)', background: isSelected ? 'var(--c-bg)' : undefined }}>
-                    <th scope="row" className="text-start font-semibold">
-                      <Link href={groupLink(group.id)} prefetch={false} aria-current={isSelected ? 'true' : undefined}
-                        className="block break-words px-3 py-3 underline underline-offset-4 hover:decoration-2 focus-visible:outline focus-visible:-outline-offset-2">
-                        <bdi>{group.name}</bdi>
-                      </Link>
-                    </th>
-                    <td className="px-3 py-3 text-end tabular-nums" style={{ color: 'var(--c-text-3)' }}>{group.memberCount}</td>
-                  </tr>
-                );
-              })}
+              {groups.map(group => (
+                <RecipientGroupRow key={group.id} group={group} href={groupLink(group.id)}
+                  isSelected={selectedId === group.id} action={groupDefinitionAction} onChanged={onGroupChanged} />
+              ))}
             </tbody>
           </table>
         </div>
@@ -159,9 +151,6 @@ export default function RecipientGroups({ groups, selected, organizationId, grou
             <span>{group.name}</span><span className="text-xs tabular-nums" style={{ color: 'var(--c-text-3)' }}>{group.memberCount}</span>
           </Link></li>)}
         </ul>
-      )}
-      {selected && groupDefinitionAction && (
-        <GroupDefinitionControls key={selected.id} group={selected} action={groupDefinitionAction} onChanged={onGroupChanged} />
       )}
       {selected && (
         <details className="rounded-lg border px-4 py-3" style={{ borderColor: 'var(--c-border)' }}>
@@ -219,8 +208,10 @@ export default function RecipientGroups({ groups, selected, organizationId, grou
   );
 }
 
-function GroupDefinitionControls({ group, action, onChanged }: {
-  group: SelectedGroup;
+function RecipientGroupRow({ group, href, isSelected, action, onChanged }: {
+  group: RecipientGroupListEntry;
+  href: Route;
+  isSelected: boolean;
   action: GroupDefinitionAction;
   onChanged: (groupId: string, type: RecipientGroupDefinitionChange['type']) => void;
 }) {
@@ -258,7 +249,7 @@ function GroupDefinitionControls({ group, action, onChanged }: {
   }
 
   function deleteGroup() {
-    const count = group.members.length;
+    const count = group.memberCount;
     const recipients = count === 1 ? 'recipient' : 'recipients';
     if (window.confirm(`Delete “${group.name}”? This permanently deletes the group and its saved list of ${count} ${recipients}.`)) {
       changeGroup({ type: 'delete', revision: group.revision });
@@ -266,33 +257,50 @@ function GroupDefinitionControls({ group, action, onChanged }: {
   }
 
   return (
-    <div className="space-y-3" aria-busy={pending}>
-      {draft ? (
-        <form onSubmit={saveName} className="space-y-3 rounded-lg border p-3" style={fieldStyle}>
-          <label className="block text-sm font-medium">
-            Group name
-            <input ref={nameInput} required dir="auto" maxLength={RECIPIENT_GROUP_NAME_MAX} value={draft.name}
-              disabled={pending} className={`${field} mt-1`} style={fieldStyle}
-              onChange={event => setDraft({ ...draft, name: event.target.value })} />
-          </label>
-          <div className="flex flex-wrap gap-2">
-            <button type="submit" disabled={pending || !draft.name.trim()} className={`${button} text-white`}
-              style={{ background: '#176f96', borderColor: '#176f96' }}>{pending ? 'Saving…' : 'Save group name'}</button>
-            <button type="button" disabled={pending} className={button} style={fieldStyle}
-              onClick={() => { setDraft(null); setError(''); }}>Cancel</button>
+    <>
+      <tr className="border-t" aria-busy={pending}
+        style={{ borderColor: 'var(--c-border)', background: isSelected ? 'var(--c-bg)' : undefined }}>
+        <th scope="row" className="text-start font-semibold">
+          <Link href={href} prefetch={false} aria-current={isSelected ? 'true' : undefined}
+            className="block break-words px-3 py-3 underline underline-offset-4 hover:decoration-2 focus-visible:outline focus-visible:-outline-offset-2">
+            <bdi>{group.name}</bdi>
+          </Link>
+        </th>
+        <td className="px-2 py-3 text-end tabular-nums sm:px-3" style={{ color: 'var(--c-text-3)' }}>{group.memberCount}</td>
+        <td className="px-2 py-2 sm:px-3">
+          <div className="flex flex-wrap gap-1.5">
+            <button type="button" aria-label={`Edit ${group.name}`} aria-expanded={editing} disabled={pending || editing}
+              className={button} style={fieldStyle}
+              onClick={() => { setDraft({ name: group.name, revision: group.revision }); setError(''); }}>Edit</button>
+            <button type="button" aria-label={`Delete ${group.name}`} disabled={pending || editing}
+              className={button} style={dangerStyle} onClick={deleteGroup}>Delete</button>
           </div>
-        </form>
-      ) : (
-        <div className="flex flex-wrap gap-2">
-          <button type="button" disabled={pending} className={button} style={fieldStyle}
-            onClick={() => { setDraft({ name: group.name, revision: group.revision }); setError(''); }}>Rename group</button>
-          <button type="button" disabled={pending} className={button} style={dangerStyle} onClick={deleteGroup}>
-            {pending ? 'Deleting…' : 'Delete group'}
-          </button>
-        </div>
+        </td>
+      </tr>
+      {(draft || error) && (
+        <tr>
+          <td colSpan={3} className="space-y-2 px-3 pb-3">
+            {draft && (
+              <form onSubmit={saveName} className="space-y-3 rounded-lg border p-3" style={fieldStyle}>
+                <label className="block text-sm font-medium">
+                  Group name
+                  <input ref={nameInput} required dir="auto" maxLength={RECIPIENT_GROUP_NAME_MAX} value={draft.name}
+                    disabled={pending} className={`${field} mt-1`} style={fieldStyle}
+                    onChange={event => setDraft({ ...draft, name: event.target.value })} />
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  <button type="submit" disabled={pending || !draft.name.trim()} className={`${button} text-white`}
+                    style={{ background: '#176f96', borderColor: '#176f96' }}>{pending ? 'Saving…' : 'Save group name'}</button>
+                  <button type="button" disabled={pending} className={button} style={fieldStyle}
+                    onClick={() => { setDraft(null); setError(''); }}>Cancel</button>
+                </div>
+              </form>
+            )}
+            {error && <p role="alert" className="rounded-lg border px-3 py-2 text-sm" style={dangerStyle}>{error}</p>}
+          </td>
+        </tr>
       )}
-      {error && <p role="alert" className="rounded-lg border px-3 py-2 text-sm" style={dangerStyle}>{error}</p>}
-    </div>
+    </>
   );
 }
 
