@@ -6,8 +6,9 @@ import type { Route } from 'next';
 import { useRouter } from 'next/navigation';
 import { FileSpreadsheet, Upload } from 'lucide-react';
 import type { importOrganizationRecipients } from '@/lib/orgMessagingActions';
-import type { RecipientGroupSummary } from '@/lib/orgRecipientGroups';
+import type { RecipientGroupChange, RecipientGroupSummary } from '@/lib/orgRecipientGroups';
 import { parseRecipientWorkbook, RECIPIENT_GROUP_MAX, RECIPIENT_WORKBOOK_MAX_BYTES, type GroupRecipient, type WorkbookPreview } from '@/lib/recipientGroupValidation';
+import RecipientGroupMembers from './RecipientGroupMembers';
 
 const field = 'w-full rounded-lg border px-3 py-2 text-sm';
 const fieldStyle = { borderColor: 'var(--c-border)', background: 'var(--c-bg)', color: 'var(--c-text)' };
@@ -18,9 +19,10 @@ type Props = {
   organizationId: string;
   groupPath?: '/groups';
   action: (input: Parameters<typeof importOrganizationRecipients>[1]) => ReturnType<typeof importOrganizationRecipients>;
+  manageAction: (groupId: string, change: RecipientGroupChange) => Promise<{ members: GroupRecipient[] } | { error: string }>;
 };
 
-export default function RecipientGroups({ groups, selected, organizationId, groupPath, action }: Props) {
+export default function RecipientGroups({ groups, selected, organizationId, groupPath, action, manageAction }: Props) {
   const router = useRouter();
   const [target, setTarget] = useState(selected?.id ?? '');
   const [name, setName] = useState('');
@@ -111,7 +113,8 @@ export default function RecipientGroups({ groups, selected, organizationId, grou
         <details className="rounded-lg border px-4 py-3" style={{ borderColor: 'var(--c-border)' }}>
           <summary className="cursor-pointer text-sm font-semibold">{selected.name} · {selected.members.length} saved recipients</summary>
           <p className="my-2 text-xs break-all" style={{ color: 'var(--c-text-3)' }}>API group ID <code className="ml-1">{selected.id}</code></p>
-          <RecipientTable recipients={selected.members} />
+          <RecipientGroupMembers key={selected.id} groupId={selected.id} members={selected.members} manageAction={manageAction}
+            onMembersChanged={() => router.refresh()} />
           <details className="mt-3 text-xs">
             <summary className="cursor-pointer font-medium">Use this group with the API</summary>
             <p className="my-2">POST <code>/api/v1/org/messages/send</code> with your organization API key as a Bearer token. The existing in-app delivery and SMS escalation policy applies.</p>

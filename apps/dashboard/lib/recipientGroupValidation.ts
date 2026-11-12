@@ -38,7 +38,7 @@ export function parseGroupRecipient(value: unknown): GroupRecipient | null {
   return normalized.isValid ? { name: cleanedName, phone: normalized.e164 } : null;
 }
 
-function parseWorkbookRecipient(name: unknown, phone: unknown): GroupRecipient | null {
+export function parseInternationalGroupRecipient(name: unknown, phone: unknown): GroupRecipient | null {
   let rawPhone: string;
   if (typeof phone === 'string') rawPhone = digits(phone.trim());
   else if (typeof phone === 'number' && Number.isSafeInteger(phone)) rawPhone = String(phone);
@@ -78,7 +78,7 @@ export function parseRecipientWorkbook(rows: readonly (readonly unknown[])[]): W
       return { error: `Import at most ${RECIPIENT_GROUP_MAX} rows at a time.` };
     }
     const rowNumber = index + 1;
-    const parsed = parseWorkbookRecipient(name, phone);
+    const parsed = parseInternationalGroupRecipient(name, phone);
     if (!parsed) {
       invalidRows.push({ row: rowNumber, error: 'Enter a name and a valid international phone number with its country code.' });
       continue;
