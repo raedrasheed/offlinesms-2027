@@ -10,13 +10,16 @@ import styles from '../workspace.module.css';
 
 export const metadata = { title: 'New message' };
 
-export default async function BusinessSend() {
+export default async function BusinessSend({ searchParams }: { searchParams: Promise<{ group?: string | string[] }> }) {
   const organizationId = await getBusinessOrganizationId();
-  const [overview, groups] = await Promise.all([
+  const [overview, groups, { group }] = await Promise.all([
     getOrgMessagingOverview(organizationId),
     listRecipientGroups(organizationId),
+    searchParams,
   ]);
   if (!overview) notFound();
+  const availableGroups = groups.filter(({ memberCount }) => memberCount > 0);
+  const initialGroupId = availableGroups.find(({ id }) => id === group)?.id;
 
   return (
     <div className={styles.page}>
@@ -25,7 +28,16 @@ export default async function BusinessSend() {
         <section className={styles.card} aria-labelledby="compose-message">
           <h2 id="compose-message">Compose</h2>
           <p className={styles.cardIntro}>Messages reach registered recipients in the OfflineSMS app first.</p>
-          <SendMessageForm action={sendOrganizationMessage.bind(null, organizationId)} groups={groups} batchPath="/activity" />
+          {group !== undefined && !initialGroupId && (
+            <p className={styles.cardIntro} role="alert">This group is unavailable or empty. Choose another group or enter recipients manually.</p>
+          )}
+          <SendMessageForm
+            key={typeof group === 'string' ? group : ''}
+            action={sendOrganizationMessage.bind(null, organizationId)}
+            groups={availableGroups}
+            initialGroupId={initialGroupId}
+            batchPath="/activity"
+          />
         </section>
         <section className={styles.card} aria-labelledby="sms-settings">
           <div className={styles.cardHeading}>

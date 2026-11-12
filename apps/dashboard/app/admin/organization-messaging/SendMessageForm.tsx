@@ -24,16 +24,18 @@ function SubmitButton() {
 }
 
 export default function SendMessageForm({
-  action, groups, batchPath,
+  action, groups, batchPath, initialGroupId = '',
 }: {
   action: (prev: OrgSendActionState, data: FormData) => Promise<OrgSendActionState>;
   groups: RecipientGroupSummary[];
   batchPath?: '/activity';
+  initialGroupId?: string;
 }) {
   const router = useRouter();
   const [state, formAction] = useFormState(action, null);
   const ok = state && 'success' in state ? state : null;
-  const [groupId, setGroupId] = useState('');
+  const [selectedGroupId, setGroupId] = useState(initialGroupId);
+  const groupId = groups.some(({ id }) => id === selectedGroupId) ? selectedGroupId : '';
 
   // Refresh server-rendered usage + logs after a successful send.
   useEffect(() => { if (ok) router.refresh(); }, [ok, router]);

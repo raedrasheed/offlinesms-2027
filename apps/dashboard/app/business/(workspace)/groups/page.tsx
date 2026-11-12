@@ -16,7 +16,19 @@ export default async function BusinessGroups({ searchParams }: { searchParams: P
   ]);
   return (
     <div className={styles.page}>
-      <PageHeading title="Groups" description="Import contacts from Excel and organize them into lists you can message later." />
+      <PageHeading
+        title="Groups"
+        description="Select a saved group to manage its recipients or send a message."
+        action={selected && selected.members.length > 0 && (
+          <a
+            className={styles.button}
+            href={`/send?${new URLSearchParams({ group: selected.id })}`}
+            aria-label={`Send message to group ${selected.name}`}
+          >
+            Send message to group
+          </a>
+        )}
+      />
       <RecipientGroups
         organizationId={organizationId}
         groups={groups}
