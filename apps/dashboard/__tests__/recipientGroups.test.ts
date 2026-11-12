@@ -1,13 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseRecipientWorkbook, RECIPIENT_GROUP_MAX, RECIPIENT_GROUP_NAME_MAX } from '../lib/recipientGroupValidation';
 import {
-  saveRecipientGroupChange, saveRecipientGroupDefinitionChange, saveRecipientGroupImport, getRecipientGroup,
+  saveRecipientGroupChange, saveRecipientGroupDefinitionChange, saveRecipientGroupImport, getRecipientGroup, listRecipientGroups,
 } from '../lib/orgRecipientGroups';
 
 const memory = vi.hoisted(() => ({
   docs: new Map<string, Record<string, unknown>>(),
   revisions: new Map<string, number>(),
   writes: [] as string[],
+  queries: [] as { path: string; order: string; fields: string[] }[],
   id: 0,
 }));
 
@@ -23,7 +24,17 @@ vi.mock('../lib/firebase-admin', () => {
       collection: (name: string) => collection(path + '/' + name) };
   }
   function collection(path: string) {
-    return { doc: (id = String(++memory.id)) => doc(path + '/' + id) };
+    return {
+      doc: (id = String(++memory.id)) => doc(path + '/' + id),
+      orderBy: (order: string) => ({ select: (...fields: string[]) => ({ get: async () => {
+        memory.queries.push({ path, order, fields });
+        const prefix = `${path}/`;
+        const docs = [...memory.docs.keys()]
+          .filter(key => key.startsWith(prefix) && !key.slice(prefix.length).includes('/'))
+          .map(key => doc(key).snapshot());
+        return { docs };
+      } }) }),
+    };
   }
   function write(ref: ReturnType<typeof doc>, data: Record<string, unknown>) {
     memory.writes.push(ref.path);
@@ -45,6 +56,7 @@ beforeEach(() => {
   memory.docs.clear();
   memory.revisions.clear();
   memory.writes.length = 0;
+  memory.queries.length = 0;
   memory.docs.set('organizations/school', { status: 'active' });
   memory.docs.set('organizations/other', { status: 'active' });
 });
@@ -174,6 +186,21 @@ describe('saved recipient group definition management', () => {
   beforeEach(() => {
     memory.docs.set(groupPath, { name: 'Parents', memberCount: 1, members: [first], createdBy: 'creator' });
     memory.docs.set(otherGroupPath, { name: 'Other group', memberCount: 1, members: [second] });
+  });
+
+  it('lists scoped group metadata with a revision that can be used to rename directly', async () => {
+    const groups = await listRecipientGroups('school');
+    expect(groups).toEqual([{ id: 'parents', name: 'Parents', memberCount: 1, revision }]);
+    expect(memory.queries).toEqual([
+      { path: 'organizations/school/recipientGroups', order: 'name', fields: ['name', 'memberCount'] },
+    ]);
+    const [group] = groups;
+    expect(await saveRecipientGroupDefinitionChange('school', 'operator', group.id, {
+      type: 'rename', revision: group.revision, name: 'Staff',
+    })).toEqual({ success: true });
+    expect(await listRecipientGroups('school')).toEqual([
+      { id: 'parents', name: 'Staff', memberCount: 1, revision: '1700000000:1' },
+    ]);
   });
 
   it('renames a group in place and rejects a deletion based on its previous revision', async () => {

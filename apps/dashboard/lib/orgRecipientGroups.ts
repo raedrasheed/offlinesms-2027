@@ -6,6 +6,7 @@ import {
 } from './recipientGroupValidation';
 
 export type RecipientGroupSummary = { id: string; name: string; memberCount: number };
+export type RecipientGroupListEntry = RecipientGroupSummary & { revision: string };
 export type RecipientGroupChange =
   | { type: 'edit'; original: GroupRecipient; recipient: GroupRecipient }
   | { type: 'delete'; recipients: GroupRecipient[] };
@@ -16,25 +17,29 @@ export type RecipientGroupDefinitionChange =
 
 const GROUP_NAME_ERROR = `Enter a group name of 1–${RECIPIENT_GROUP_NAME_MAX} characters.`;
 
-function groupRevision(doc: FirebaseFirestore.DocumentSnapshot): string | null {
-  const updateTime = doc.updateTime;
-  return updateTime ? `${updateTime.seconds}:${updateTime.nanoseconds}` : null;
+function groupRevision(updateTime: FirebaseFirestore.Timestamp): string {
+  return `${updateTime.seconds}:${updateTime.nanoseconds}`;
 }
 
 function groupCollection(organizationId: string) {
   return adminDb.collection('organizations').doc(organizationId).collection('recipientGroups');
 }
 
-export async function listRecipientGroups(organizationId: string): Promise<RecipientGroupSummary[]> {
+export async function listRecipientGroups(organizationId: string): Promise<RecipientGroupListEntry[]> {
   const rows = await groupCollection(organizationId).orderBy('name').select('name', 'memberCount').get();
-  return rows.docs.map(doc => ({ id: doc.id, name: doc.get('name'), memberCount: doc.get('memberCount') }));
+  return rows.docs.map(doc => ({
+    id: doc.id,
+    name: doc.get('name'),
+    memberCount: doc.get('memberCount'),
+    revision: groupRevision(doc.updateTime),
+  }));
 }
 
 export async function getRecipientGroup(organizationId: string, groupId: unknown) {
   if (!isRecipientGroupId(groupId)) return null;
   const doc = await groupCollection(organizationId).doc(groupId).get();
-  const revision = groupRevision(doc);
-  if (!doc.exists || revision === null) return null;
+  if (!doc.exists || !doc.updateTime) return null;
+  const revision = groupRevision(doc.updateTime);
   return { id: doc.id, name: doc.get('name') as string, members: (doc.get('members') ?? []) as GroupRecipient[], revision };
 }
 
@@ -111,7 +116,9 @@ export async function saveRecipientGroupDefinitionChange(
     if (!organization.exists) return { error: 'Organization not found.' };
     if (organization.get('status') !== 'active') return { error: 'This organization is not active.' };
     if (!current.exists) return { error: 'Group not found.' };
-    if (groupRevision(current) !== change.revision) return { error: 'The group changed. Refresh the group and try again.' };
+    if (!current.updateTime || groupRevision(current.updateTime) !== change.revision) {
+      return { error: 'The group changed. Refresh the group and try again.' };
+    }
 
     const now = FieldValue.serverTimestamp();
     if (name !== null) {
