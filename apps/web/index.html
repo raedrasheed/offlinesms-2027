@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="ar" dir="rtl" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#191a1a">
+  <meta name="description" content="استخدم حساب OfflineSMS للمحادثات والحالات والمقاطع على الويب.">
+  <meta property="og:title" content="OfflineSMS Web">
+  <meta property="og:description" content="Sign in to OfflineSMS Web.">
+  <meta property="og:image" content="/logo.png">
+  <link rel="icon" href="./logo.png" type="image/png">
+  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./features.css">
+  <link rel="stylesheet" href="./live-feeds.css">
+  <link rel="stylesheet" href="./web-sign-in.css">
+  <link rel="stylesheet" href="./live.css">
+  <link rel="stylesheet" href="./chat-tools.css">
+  <script type="module" src="./app.js"></script>
+  <title>OfflineSMS Web</title>
+</head>
+<body>
+  <div id="web-sign-in"><p class="live-boot" role="status">OfflineSMS Web</p></div>
+  <div class="workspace" id="workspace" data-mobile-view="list" hidden>
+    <header class="app-header">
+      <span class="demo-label"><span aria-hidden="true"></span><span dir="ltr">OfflineSMS Web</span></span>
+    </header>
+
+    <main class="app-main" id="app-main" data-section="chats">
+      <nav class="navigation" data-label="navigation" aria-label="التنقل">
+        <button type="button" class="nav-tab" data-section="chats" aria-current="page">
+          <span class="nav-icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 11a3 3 0 0 1-3 3H8l-4 4v-6a3 3 0 0 1-2-3V6a3 3 0 0 1 3-3h11a3 3 0 0 1 3 3z"/><path d="M21 9a3 3 0 0 1 1 2v4a3 3 0 0 1-3 3h-2l-3 3v-3"/></svg>
+            <span class="nav-unread" id="nav-unread" aria-hidden="true" hidden></span>
+          </span>
+          <span data-copy="chats">المحادثات</span>
+        </button>
+        <button type="button" class="nav-tab" data-section="status">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="2"/><path d="M8.5 8.5a5 5 0 0 0 0 7m7-7a5 5 0 0 1 0 7M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14"/></svg>
+          <span data-copy="status">الحالات</span>
+        </button>
+        <button type="button" class="nav-tab" data-section="clips">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m10 8 6 4-6 4z"/></svg>
+          <span data-copy="clips">المقاطع</span>
+        </button>
+        <button type="button" class="nav-tab" data-section="settings">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .3 1.8l.1.1-1.8 1.8-.1-.1a1.65 1.65 0 0 0-1.8-.3 1.65 1.65 0 0 0-1 1.5v.2h-2.6v-.2a1.65 1.65 0 0 0-1-1.5 1.65 1.65 0 0 0-1.8.3l-.1.1-1.8-1.8.1-.1a1.65 1.65 0 0 0 .3-1.8 1.65 1.65 0 0 0-1.5-1h-.2v-2.6h.2a1.65 1.65 0 0 0 1.5-1 1.65 1.65 0 0 0-.3-1.8l-.1-.1 1.8-1.8.1.1a1.65 1.65 0 0 0 1.8.3 1.65 1.65 0 0 0 1-1.5v-.2h2.6v.2a1.65 1.65 0 0 0 1 1.5 1.65 1.65 0 0 0 1.8-.3l.1-.1 1.8 1.8-.1.1a1.65 1.65 0 0 0-.3 1.8 1.65 1.65 0 0 0 1.5 1h.2V14h-.2a1.65 1.65 0 0 0-1.5 1Z" transform="translate(-1 -1)"/></svg>
+          <span data-copy="settings">الإعدادات</span>
+        </button>
+      </nav>
+
+      <aside class="sidebar" data-label="conversations" aria-label="المحادثات">
+        <div class="sidebar-controls">
+          <div class="sidebar-heading">
+            <h1 dir="ltr">OfflineSMS</h1>
+            <button class="icon-button chat-settings" id="chat-settings" type="button" data-label="settings" aria-label="الإعدادات">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5h.01M12 12h.01M12 19h.01" stroke-width="3.4"/></svg>
+            </button>
+          </div>
+          <label class="search">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>
+            <input id="search" type="search" data-label="search" data-placeholder="search" aria-label="ابحث في المحادثات" placeholder="ابحث في المحادثات" autocomplete="off">
+          </label>
+          <div class="filters" role="group" data-label="filters" aria-label="فلترة المحادثات">
+            <button type="button" data-filter="all" aria-pressed="true"><span data-copy="all">الكل</span><span class="filter-unread" hidden></span></button>
+            <button type="button" data-filter="unread" aria-pressed="false"><span data-copy="unread">غير مقروءة</span><span class="filter-unread" hidden></span></button>
+            <button type="button" data-filter="favorites" aria-pressed="false"><span data-copy="favorites">المفضلة</span><span class="filter-unread" hidden></span></button>
+            <button type="button" data-filter="groups" aria-pressed="false"><span data-copy="groups">المجموعات</span><span class="filter-unread" hidden></span></button>
+          </div>
+        </div>
+        <ul class="threads" id="threads"></ul>
+        <button class="icon-button new-chat" id="new-chat" type="button" data-label="newChat" aria-label="محادثة جديدة">
+          <svg class="compose-desktop" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14V7a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v12l4-3h10a2 2 0 0 0 2-2ZM12 8v5m-2.5-2.5h5"/></svg>
+          <svg class="compose-mobile" viewBox="0 0 24 24" aria-hidden="true"><path d="m4 20 1-4 11-11a2.8 2.8 0 0 1 4 4L9 20l-5 1ZM14.5 6.5l4 4"/></svg>
+        </button>
+        <div class="sidebar-footer"><img src="./logo.png" alt="" width="26" height="26"><span dir="ltr">OfflineSMS Web</span></div>
+      </aside>
+
+      <section class="conversation" aria-labelledby="chat-title">
+        <header class="conversation-header">
+          <button class="icon-button back" id="back" type="button" data-label="back" aria-label="العودة إلى المحادثات">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
+          </button>
+          <div class="chat-identity">
+            <div id="chat-avatar"></div>
+            <div class="chat-heading">
+              <h2 id="chat-title" tabindex="-1"></h2>
+              <p id="chat-description"></p>
+            </div>
+          </div>
+          <button class="icon-button wallpaper-button" id="wallpaper" type="button" data-label="wallpaper" aria-label="خلفية المحادثة">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="8.3" cy="9" r="1.3"/><path d="m4 17 4-4 3 3 4-5 5 6"/></svg>
+          </button>
+          <button class="icon-button conversation-search" id="conversation-search" type="button" data-label="findMessages" aria-label="البحث في الرسائل">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/></svg>
+          </button>
+          <button class="icon-button details-button" id="details" type="button" data-label="details" aria-label="تفاصيل المحادثة">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5h.01M12 12h.01M12 19h.01" stroke-width="3.4"/></svg>
+          </button>
+        </header>
+        <div id="pinned-message" class="pinned-message" hidden></div>
+        <div class="conversation-body" id="chat-scroll" tabindex="0" data-label="history" aria-label="سجل الرسائل">
+          <div class="message-flow" id="message-flow"></div>
+        </div>
+        <footer class="composer-area">
+          <button class="icon-button latest-button" id="latest" type="button" data-label="latest" aria-label="الانتقال إلى أحدث الرسائل" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+          <div id="reply-preview" class="reply-preview" hidden></div>
+          <form id="composer" class="composer">
+            <div class="composer-input">
+              <button class="icon-button" id="extras" type="button" data-label="composerOptions" aria-label="خيارات الرسالة">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 13.5a4.2 4.2 0 0 0 7 0m-7-4h.01m7 0h.01"/></svg>
+              </button>
+              <label for="message" class="sr-only" data-copy="message">الرسالة</label>
+              <textarea id="message" data-placeholder="typeMessage" placeholder="اكتب رسالة" maxlength="4000" rows="1" dir="auto"></textarea>
+            </div>
+            <button id="send" class="composer-action" type="submit" data-label="send" aria-label="إرسال" hidden disabled>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6" stroke-width="2.5"/></svg>
+            </button>
+          </form>
+          <p id="send-feedback" class="live-feedback" role="status" hidden></p>
+        </footer>
+        <div class="chat-blocked" id="chat-blocked" hidden><p data-copy="sendRestricted">الإرسال مقيّد في هذه المحادثة.</p></div>
+      </section>
+      <section id="feature-panel" class="feature-panel" hidden></section>
+    </main>
+  </div>
+
+  <dialog id="dialog" aria-labelledby="dialog-title">
+    <div class="dialog-heading">
+      <h2 id="dialog-title"></h2>
+      <form method="dialog">
+        <button class="icon-button" data-label="close" aria-label="إغلاق">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
+        </button>
+      </form>
+    </div>
+    <div id="dialog-content"></div>
+  </dialog>
+  <div id="announcement" class="live-announcement" role="status" aria-live="polite"></div>
+  <noscript>OfflineSMS Web requires JavaScript.</noscript>
+</body>
+</html>

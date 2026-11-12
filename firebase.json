@@ -51,6 +51,29 @@
           "destination": "/clips.html"
         }
       ]
+    },
+    {
+      "target": "web",
+      "public": "apps/web/dist",
+      "predeploy": [
+        "npm --prefix apps/web run build"
+      ],
+      "headers": [
+        {
+          "source": "**",
+          "headers": [
+            { "key": "X-Content-Type-Options", "value": "nosniff" },
+            { "key": "Referrer-Policy", "value": "no-referrer" },
+            { "key": "Content-Security-Policy", "value": "frame-ancestors 'none'; object-src 'none'; base-uri 'self'" }
+          ]
+        },
+        {
+          "regex": "^/(index\\.html|app\\.js)?$",
+          "headers": [
+            { "key": "Cache-Control", "value": "no-cache" }
+          ]
+        }
+      ]
     }
   ],
   "emulators": {
