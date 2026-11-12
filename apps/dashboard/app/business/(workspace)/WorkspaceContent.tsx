@@ -34,7 +34,7 @@ export function displayDate(iso: string) {
 const statusKinds: Record<string, string> = {
   active: 'good', accepted: 'good', delivered: 'good', read: 'good', sent: 'good',
   partial: 'warning', unsupported_recipient: 'warning',
-  failed: 'bad', suspended: 'bad', disabled: 'bad',
+  failed: 'bad', no_relay_for_country: 'bad', suspended: 'bad', disabled: 'bad',
 };
 
 export function Status({ value }: { value: string }) {
