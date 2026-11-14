@@ -538,10 +538,12 @@ function closeMedia() {
 const mediaSource = createChatMediaSource({ getClient: () => client, isActive: isActiveMedia });
 const chatMedia = createChatMedia({
   t, locale: () => language, getMedia: mediaSource.getMedia, isActive: isActiveMedia, stickerSource: bundledSticker,
+  getDownloadInfo: mediaSource.getDownloadInfo,
   showDialog: (title, content, item) => { showDialog(title, content); viewingMedia = item; },
   downloadMedia(item, data, { signal, isActive }) {
     return downloadChatMedia({ url: data.src, fileName: data.fileName, mimeType: data.contentType, expectedSize: data.sizeBytes,
       type: item.isSticker ? 'sticker' : item.type, signal, isActive,
+      getUrl: data.path ? () => mediaSource.getDownloadUrl(item, data.path) : undefined,
       getBlob: data.path ? (maxBytes) => client.getMediaBlob(data.path, maxBytes) : undefined });
   },
 });

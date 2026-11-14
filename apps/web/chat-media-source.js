@@ -83,22 +83,39 @@ export function createChatMediaSource({ getClient, isActive }) {
     } finally { pendingThumbnails--; }
   }
 
-  function getMedia(item, { refresh = false } = {}) {
+  function getDownloadInfo(item) {
     const client = getClient();
     const media = item.media;
     const ready = media && (media.uploadStatus === 'uploaded' || media.uploadStatus == null);
-    if (!client || !ready || !isActive(item)) return Promise.reject(new Error('media-unavailable'));
+    if (!client || !ready || !isActive(item)) throw new Error('media-unavailable');
     const path = sourcePath(media.storagePath, media.downloadURL, item, client.storageBucket);
-    if (!path) return Promise.reject(new Error('media-unavailable'));
+    if (!path) throw new Error('media-unavailable');
     const fileName = media.fileName || path.split('/').at(-1);
     const type = item.type === 'sticker' ? 'image' : item.type;
     const mime = inferAttachmentMime(fileName, media.mimeType);
     const contentType = attachmentMimeAllowed(type, mime) ? mime : 'application/octet-stream';
+    return { path, fileName, type, contentType, sizeBytes: media.sizeBytes };
+  }
+
+  async function getDownloadUrl(item, path) {
+    const client = getClient();
+    if (getDownloadInfo(item).path !== path) throw new Error('media-unavailable');
+    const url = authorizedUrl(await client.getMediaUrl(path), client.storageBucket);
+    if (!isActive(item) || url?.path !== path || !new URL(url.src).searchParams.get('token')) {
+      throw new Error('media-unavailable');
+    }
+    return url.src;
+  }
+
+  async function getMedia(item, { refresh = false } = {}) {
+    const client = getClient();
+    const media = item.media;
+    const { path, fileName, type, contentType, sizeBytes } = getDownloadInfo(item);
     const key = JSON.stringify([path, type, fileName, contentType, media.thumbnailPath, media.thumbnailURL]);
     if (!refresh && sources.has(key)) return sources.get(key);
     const result = loadUrl(client, item, path, contentType, attachmentLimit(type)).then(async (src) => {
       if (!isActive(item)) throw new Error('media-unavailable');
-      const info = { src, path, fileName, contentType, sizeBytes: media.sizeBytes };
+      const info = { src, path, fileName, contentType, sizeBytes };
       const thumbnail = !item.isSticker && sourcePath(media.thumbnailPath, media.thumbnailURL, item, client.storageBucket);
       const savedPoster = thumbnail && thumbnail !== path
         ? () => loadUrl(client, item, thumbnail, 'image/jpeg', thumbnailLimit) : undefined;
@@ -114,5 +131,5 @@ export function createChatMediaSource({ getClient, isActive }) {
     return result;
   }
 
-  return { getMedia, clear };
+  return { getMedia, getDownloadInfo, getDownloadUrl, clear };
 }

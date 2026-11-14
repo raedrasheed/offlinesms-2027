@@ -40,8 +40,9 @@ function safeMime(blobType, declaredType, fileName, attachmentType) {
 }
 
 async function fetchBlob(url, limit, signal) {
-  const response = await fetch(url, { credentials: 'omit', redirect: 'error', referrerPolicy: 'no-referrer', signal });
-  if (!response.ok) throw new Error('media-download-unavailable');
+  const response = await fetch(url, { cache: 'no-store', credentials: 'omit', redirect: 'error', referrerPolicy: 'no-referrer', signal });
+  if (response.status >= 500 || response.status === 429) return null;
+  if (response.status !== 200 || (response.url && response.url !== url)) throw new Error('media-download-unavailable');
   if (Number(response.headers.get('content-length')) > limit) throw new Error('media-download-too-large');
   if (!response.body?.getReader) return response.blob();
 
@@ -65,7 +66,7 @@ async function fetchBlob(url, limit, signal) {
   return new Blob(chunks, { type: response.headers.get('content-type') ?? '' });
 }
 
-export async function downloadChatMedia({ url, getBlob, fileName, type, mimeType, expectedSize, signal, isActive = () => true }) {
+export async function downloadChatMedia({ url, getUrl, getBlob, fileName, type, mimeType, expectedSize, signal, isActive = () => true }) {
   const attachmentType = type === 'sticker' ? 'image' : type;
   if (!isBinaryAttachment(attachmentType)) throw new Error('invalid-media-download-type');
   const limit = attachmentLimit(attachmentType);
@@ -75,9 +76,22 @@ export async function downloadChatMedia({ url, getBlob, fileName, type, mimeType
   checkActive();
 
   let blob;
-  if (typeof getBlob === 'function') {
-    // Firebase's max-length argument can truncate an object. Read one more byte to detect it.
-    blob = await getBlob(limit + 1);
+  if (getUrl) {
+    // Resolve the original object through Firebase authorization on each click.
+    const authorized = await getUrl().catch((error) => {
+      if (error?.code !== 'storage/no-download-url') throw error;
+      return null;
+    });
+    checkActive();
+    if (authorized) {
+      blob = await fetchBlob(authorized, limit, signal).catch((error) => {
+        if (error?.name !== 'TypeError') throw error;
+        return null;
+      });
+    }
+    checkActive();
+    // The SDK can truncate an object at maxBytes. Read one extra byte to detect oversize files.
+    if (!blob) blob = await getBlob(limit + 1);
   } else {
     const trusted = trustedDownloadUrl(url, type);
     if (!trusted) throw new Error('media-download-url-invalid');

@@ -45,7 +45,7 @@ function image(src, alt) {
   return node;
 }
 
-export function createChatMedia({ t, locale, showDialog, getMedia, downloadMedia, isActive, stickerSource }) {
+export function createChatMedia({ t, locale, showDialog, getMedia, getDownloadInfo, downloadMedia, isActive, stickerSource }) {
   const labels = () => copy[locale?.()] ?? copy.en;
   const isSticker = (item) => item.type === 'sticker' || isStickerImage(item);
   const handles = (item) => mediaTypes.has(item.type);
@@ -106,9 +106,7 @@ export function createChatMedia({ t, locale, showDialog, getMedia, downloadMedia
     downloads.add(request);
     try {
       const local = isSticker(item) && stickerSource?.(item.sticker);
-      const data = local?.src ? local : await getMedia(item);
-      if (request.signal.aborted || !isActive(item)) return;
-      if (!data?.src) throw new Error('media-unavailable');
+      const data = local?.src ? local : getDownloadInfo(item);
       return await downloadMedia(item, data, { signal: request.signal, isActive: () => isActive(item) });
     } catch (error) {
       if (!request.signal.aborted && isActive(item)) throw error;
