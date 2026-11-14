@@ -1,5 +1,6 @@
 import { createPhoneAuthClient } from './phone-auth-client.js';
 import { createGroupAvatarUploader } from './group-avatar-upload.js';
+import { createChatAttachmentUploader } from './chat-attachment-upload.js';
 
 // The web client uses the same authenticated Firestore reads and callable writes as mobile.
 export const WATCH_LIMITS = Object.freeze({ conversations: 50, messages: 100 });
@@ -292,9 +293,12 @@ export function initializeFirebaseClient(sdk, config, { appCheckSiteKey } = {}) 
     return blob;
   }
 
+  const { sendAttachment, cancelUploads } = createChatAttachmentUploader({ sdk, mediaRef, currentUid, requireSession, documentId, call });
+
   return Object.freeze({
     watchAuth(onUser, onError) {
       return sdk.onAuthStateChanged(auth, user => {
+        cancelUploads(user?.uid);
         phoneAuth.resetPhoneFlow();
         onUser(user ? { uid: user.uid, email: user.email ?? null, phoneNumber: user.phoneNumber ?? null } : null);
       }, onError);
@@ -315,6 +319,7 @@ export function initializeFirebaseClient(sdk, config, { appCheckSiteKey } = {}) 
     },
     ...phoneAuth,
     signOut() {
+      cancelUploads();
       phoneAuth.resetPhoneFlow();
       return sdk.signOut(auth);
     },
@@ -331,6 +336,7 @@ export function initializeFirebaseClient(sdk, config, { appCheckSiteKey } = {}) 
     storageBucket: config.storageBucket,
     getMediaUrl,
     getMediaBlob,
+    sendAttachment,
     uploadGroupAvatar: createGroupAvatarUploader({ sdk, storage, currentUid, requireSession }),
     async completeInviteProfile({ username, displayName }) {
       const uid = currentUid();
@@ -348,6 +354,17 @@ export function initializeFirebaseClient(sdk, config, { appCheckSiteKey } = {}) 
       if (!value || value.length > 4000) throw clientError(!value ? 'text-empty' : 'text-too-long');
       if (typeof localId !== 'string' || !localId || localId.length > 128) throw clientError('local-id-required');
       return call('sendTextMessage', { conversationId: documentId(conversationId), text: value, localId, replyTo, mentions });
+    },
+    async getPollBallot(conversationId, messageId) {
+      const uid = currentUid();
+      const source = sdk.doc(db, 'conversations', documentId(conversationId), 'messages', documentId(messageId), 'pollVoters', documentId(uid));
+      const snapshot = await sdk.getDocFromServer(source);
+      requireSession(uid);
+      if (!snapshot.exists()) return null;
+      const { optionIds, seq } = snapshot.data();
+      if (!Array.isArray(optionIds) || !optionIds.every(id => typeof id === 'string' && id)
+          || !Number.isSafeInteger(seq) || seq < 0) throw clientError('invalid-poll-ballot');
+      return { optionIds, seq };
     },
     markRead: conversationId => call('markRead', { conversationId: documentId(conversationId) }),
     call,
