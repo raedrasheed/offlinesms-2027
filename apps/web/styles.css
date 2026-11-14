@@ -220,6 +220,7 @@ button.reply-quote:hover { color: var(--text); }
 .reply-preview button { border: 0; background: transparent; color: var(--text); font-size: 17px; }
 .reactions { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 5px; }
 .reaction { background: var(--soft); border: 1px solid var(--line); border-radius: 14px; color: var(--text); padding: 2px 7px; font-size: 11px; }
+.reactions .reaction:hover { background: var(--accent-soft); border-color: var(--brand); }
 .message-media { display: block; width: auto; max-width: 100%; max-height: 240px; border-radius: 9px; margin-bottom: 5px; }
 .message-media-featured { width: min(280px, 100%); aspect-ratio: 2.25; object-fit: cover; background: #0c141c; }
 .message-audio { max-width: 100%; margin-bottom: 5px; }
@@ -367,3 +368,21 @@ dialog::backdrop { background: #050a12aa; }
 .group-member .dialog-item small { color: var(--muted); margin-inline-start: auto; }
 .group-member-actions { display: flex; flex-wrap: wrap; gap: 5px; margin-block-start: 5px; }
 .group-member-actions .dialog-action { width: auto; margin: 0; font-size: 12px; }
+
+.reaction-details { display: grid; gap: 8px; }
+.reaction-details-filters { display: flex; flex-wrap: wrap; gap: 6px; padding: 3px; }
+.reaction-details-filter {
+  min-height: 34px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px;
+  background: var(--soft); color: var(--text); font-size: 13px; font-weight: 650;
+}
+.reaction-details-filter:hover, .reaction-details-filter[aria-pressed="true"] {
+  background: var(--accent-soft); border-color: var(--brand); color: var(--brand);
+}
+.reaction-details-list { max-block-size: min(390px, 55dvh); overflow-y: auto; margin: 0; padding: 0; list-style: none; }
+.reaction-details-row { display: flex; align-items: center; gap: 10px; padding: 8px 4px; }
+.reaction-details-row + .reaction-details-row { border-block-start: 1px solid var(--line); }
+.reaction-details-avatar .avatar { width: 34px; height: 34px; font-size: 12px; }
+.reaction-details-name { min-width: 0; flex: 1; font-size: 14px; font-weight: 650; overflow-wrap: anywhere; }
+.reaction-details-row[aria-busy="true"] .reaction-details-name, .reaction-details-empty { color: var(--muted); }
+.reaction-details-emoji { flex: none; font-size: 20px; }
+.reaction-details-empty { padding: 8px 4px; font-size: 13px; }

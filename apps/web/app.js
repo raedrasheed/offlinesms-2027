@@ -2,6 +2,7 @@ import { loadFirebaseClient } from './firebase-bootstrap.js';
 import { createSignInView } from './web-sign-in.js';
 import { createLiveFeeds } from './live-feeds.js';
 import { createChatTools } from './chat-tools.js';
+import { createReactionDetails } from './reaction-details.js';
 import { createGroupInviteView } from './group-invite.js';
 import { createMessageInfo } from './message-info.js';
 import { messageReceiptTotals } from './message-receipts.js';
@@ -26,6 +27,7 @@ const words = {
   latest: ['الانتقال إلى أحدث الرسائل', 'Scroll to latest messages'], close: ['إغلاق', 'Close'],
   composerOptions: ['خيارات الرسالة', 'Message options'], actions: ['إجراءات الرسالة', 'Message actions'],
   quickReaction: ['تفاعل سريع', 'Quick reaction'], direct: ['محادثة فردية', 'Direct conversation'], group: ['مجموعة', 'Group'],
+  reactions: ['التفاعلات', 'Reactions'], viewReactions: ['عرض المتفاعلين', 'View reactions'],
   members: ['أعضاء', 'members'], peer: ['مستخدم OfflineSMS', 'OfflineSMS user'], you: ['أنت', 'You'],
   replyTo: ['الرد على', 'Replying to'], cancelReply: ['إلغاء الرد', 'Cancel reply'], forwarded: ['معاد توجيهها', 'Forwarded'],
   edited: ['تم التعديل', 'Edited'], pinned: ['رسالة مثبّتة', 'Pinned message'], unpin: ['إلغاء تثبيت الرسالة', 'Unpin message'],
@@ -220,6 +222,7 @@ function setLanguage(next) {
 
 function showDialog(title, content) {
   viewingMedia = undefined;
+  viewingReactions = undefined;
   byId('dialog-title').textContent = title;
   byId('dialog-content').replaceChildren(content);
   if (!dialog.open) dialog.showModal();
@@ -228,6 +231,7 @@ function showDialog(title, content) {
 
 function closeDialog() {
   viewingMedia = undefined;
+  viewingReactions = undefined;
   if (dialog.open) dialog.close();
   byId('dialog-content').replaceChildren();
   byId('dialog-title').textContent = '';
@@ -408,6 +412,7 @@ function subscribeList() {
 
 function openThread(id, focus = true) {
   if (!user) return;
+  if (viewingReactions) closeDialog();
   closeMedia();
   closeMessageInfo();
   closeGroupInfo();
@@ -429,6 +434,7 @@ function openThread(id, focus = true) {
     const previous = currentThread;
     currentThread = value;
     if (viewingMedia && !isActiveMedia(viewingMedia)) closeDialog();
+    if (viewingReactions) updateReactionDetails();
     if (groupInfo) {
       if (!value.role || value.conversation.type !== 'group') closeGroupInfo();
       else {
@@ -469,6 +475,47 @@ function maybeMarkRead() {
 }
 
 let viewingMedia;
+let viewingReactions;
+
+function messageReactions(item) {
+  if (!item?.reactions || item.deletedForEveryone || item.retentionDeleting) return [];
+  return Object.entries(item.reactions).flatMap(([emoji, users]) => {
+    const uids = Array.isArray(users) ? [...new Set(users.filter((uid) => typeof uid === 'string' && uid))] : [];
+    return emoji && uids.length ? [{ emoji, uids }] : [];
+  });
+}
+
+function updateReactionDetails() {
+  const reactions = messageReactions(currentThread.messages.find((item) => item.id === viewingReactions.messageId));
+  if (!reactions.length) { closeDialog(); return; }
+  const key = JSON.stringify(reactions);
+  if (key === viewingReactions.key) return;
+  viewingReactions.key = key;
+  viewingReactions.update(reactions);
+}
+
+function openReactionDetails(messageId, emoji, trigger) {
+  if (!user || section !== 'chats' || !trigger.isConnected) return;
+  const reactions = messageReactions(currentThread?.messages.find((item) => item.id === messageId));
+  if (!reactions.length) return;
+  const uid = user.uid;
+  const generation = threadGeneration;
+  const { view, update } = createReactionDetails({
+    locale: language, reactions, initialEmoji: emoji, makeAvatar: avatar,
+    isActive: () => user?.uid === uid && threadGeneration === generation && dialog.open && view.isConnected,
+    async resolveProfile(reactorUid) {
+      if (reactorUid === uid) return { name: t('you') };
+      const profile = profiles.get(reactorUid) ?? await client.getPublicProfile(reactorUid).catch(() => null);
+      const snapshot = generation === threadGeneration ? currentThread?.messages.findLast((item) =>
+        (item.senderUid ?? item.senderId) === reactorUid && item.senderDisplayName) : undefined;
+      const name = profile?.displayName?.trim() || profile?.username?.trim() || snapshot?.senderDisplayName?.trim();
+      return name ? { name, photoURL: profile?.photoURL || snapshot?.senderPhotoURL } : null;
+    },
+  });
+  tools.dismiss();
+  showDialog(t('reactions'), view);
+  viewingReactions = { messageId, key: JSON.stringify(reactions), update };
+}
 
 function mediaIdentity(item) {
   const { media, sticker } = item;
@@ -608,17 +655,23 @@ function renderMessage(item, existingMedia) {
       });
       bubble.append(options);
     }
-    if (item.reactions && typeof item.reactions === 'object') {
+    const entries = messageReactions(item);
+    if (entries.length) {
       const reactions = el('div', 'reactions');
-      for (const [emoji, users] of Object.entries(item.reactions)) {
-        if (Array.isArray(users) && users.length) reactions.append(el('span', 'reaction', `${emoji} ${numeral(users.length)}`));
+      for (const { emoji, uids } of entries) {
+        const label = `${emoji} ${numeral(uids.length)}`;
+        const chip = button(label, () => openReactionDetails(item.id, emoji, chip), 'reaction');
+        chip.title = t('viewReactions');
+        chip.setAttribute('aria-label', `${t('viewReactions')} · ${label}`);
+        chip.setAttribute('aria-haspopup', 'dialog');
+        reactions.append(chip);
       }
-      if (reactions.childElementCount) bubble.append(reactions);
+      bubble.append(reactions);
     }
     const menuMessage = {
       ...item, conversationId: activeId, session, author: own ? 'you' : 'other', authorLabel: sender,
       text: messageText(item), timeLabel: formatTime(item.createdAt),
-      myReactions: Object.entries(item.reactions || {}).filter(([, users]) => Array.isArray(users) && users.includes(user.uid)).map(([emoji]) => emoji),
+      myReactions: entries.filter(({ uids }) => uids.includes(user.uid)).map(({ emoji }) => emoji),
       pinned: currentThread.conversation.pinnedMessage?.messageId === item.id,
       starred: currentThread.userState?.starredMessageIds?.includes(item.id) ?? false,
       canReply: ['text', 'image', 'voice'].includes(item.type) && !sendingRestricted(),
@@ -1267,7 +1320,10 @@ window.addEventListener('pagehide', (event) => {
   if (!event.persisted) { stopAccount?.(); unsubscribeAuth?.(); }
 });
 dialog.addEventListener('close', () => {
-  if (!dialog.open) { viewingMedia = undefined; byId('dialog-content').replaceChildren(); }
+  if (!dialog.open) {
+    viewingMedia = viewingReactions = undefined;
+    byId('dialog-content').replaceChildren();
+  }
 });
 
 applyTheme();
