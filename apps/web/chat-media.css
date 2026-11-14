@@ -34,23 +34,27 @@
 }
 
 .chat-media-video { background: #10151a; }
-.chat-media--image {
-  --chat-image-height-limit: min(420px, 65dvh);
-  inline-size: min(var(--chat-media-inline-limit), var(--chat-image-width, var(--chat-media-inline-limit)),
-    calc(var(--chat-image-height-limit) * var(--chat-image-ratio, 1.3333)));
+.chat-media:is(.chat-media--image, .chat-media--video) {
+  --chat-visual-height-limit: min(420px, 65dvh);
+  inline-size: min(var(--chat-media-inline-limit), var(--chat-visual-width, var(--chat-media-inline-limit)),
+    calc(var(--chat-visual-height-limit) * var(--chat-visual-ratio, 1.3333)));
   margin-block-start: 0;
   margin-block-end: 2px;
 }
 .chat-media--image .chat-media-preview { background: transparent; }
-.chat-media--image .chat-media-image {
+.chat-media--video { --chat-visual-ratio: 1.7778; }
+.chat-media--image .chat-media-image,
+.chat-media--video .chat-media-video:not(:fullscreen) {
   block-size: auto;
-  max-block-size: var(--chat-image-height-limit);
+  max-block-size: var(--chat-visual-height-limit);
   aspect-ratio: auto var(--chat-media-aspect, 4 / 3);
   border-radius: 7px;
-  background: transparent;
 }
-.message-row .bubble:has(> .chat-media--image) { padding-inline: 3px; }
-.message-row .bubble:has(> .chat-media--image:first-child) { padding-block-start: 3px; }
+.chat-media--image .chat-media-image { background: transparent; }
+.chat-media--video .chat-media-video:not(:fullscreen) { aspect-ratio: auto var(--chat-media-aspect, 16 / 9); }
+.chat-media-video:fullscreen { inline-size: 100%; block-size: 100%; max-block-size: none; border-radius: 0; }
+.message-row .bubble:has(> :is(.chat-media--image, .chat-media--video)) { padding-inline: 3px; }
+.message-row .bubble:has(> :is(.chat-media--image, .chat-media--video):first-child) { padding-block-start: 3px; }
 .chat-media-audio { display: block; inline-size: 100%; min-inline-size: 0; }
 .chat-media-file { color: var(--text); font-size: 13px; overflow-wrap: anywhere; }
 
@@ -162,16 +166,13 @@
 
 .chat-media-viewer { display: grid; justify-items: center; gap: 10px; min-inline-size: 0; }
 
-.chat-media-viewer :is(.chat-media-image, .chat-media-video) {
+.chat-media-viewer .chat-media-image {
   inline-size: auto;
   max-inline-size: 100%;
   max-block-size: min(74dvh, calc(100dvh - 142px));
   aspect-ratio: auto;
   object-fit: contain;
 }
-
-.chat-media-viewer .chat-media-video { inline-size: min(100%, 800px); }
-.chat-media-viewer .chat-media-audio { inline-size: min(100%, 400px); }
 
 .chat-media-viewer--sticker .chat-media-image {
   max-inline-size: min(100%, 360px);
