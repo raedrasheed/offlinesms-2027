@@ -20,6 +20,9 @@
   <link rel="stylesheet" href="./message-info.css">
   <link rel="stylesheet" href="./group-info.css">
   <link rel="stylesheet" href="./chat-media.css">
+  <link rel="stylesheet" href="./chat-attachments.css">
+  <link rel="stylesheet" href="./chat-attachments-structured.css">
+  <link rel="stylesheet" href="./chat-rich-message.css">
   <script type="module" src="./app.js"></script>
   <title>OfflineSMS Web</title>
 </head>
@@ -119,6 +122,9 @@
               </button>
               <label for="message" class="sr-only" data-copy="message">الرسالة</label>
               <textarea id="message" data-placeholder="typeMessage" placeholder="اكتب رسالة" maxlength="4000" rows="1" dir="auto"></textarea>
+              <button class="icon-button" id="attach" type="button" data-label="attach" aria-label="إرفاق" aria-haspopup="dialog">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5 12 19.6a5 5 0 0 1-7.1-7.1l9.3-9.3a3.3 3.3 0 0 1 4.7 4.7l-9.2 9.2a1.6 1.6 0 0 1-2.2-2.2l7.7-7.7"/></svg>
+              </button>
             </div>
             <button id="send" class="composer-action" type="submit" data-label="send" aria-label="إرسال" hidden disabled>
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6" stroke-width="2.5"/></svg>

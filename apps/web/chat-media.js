@@ -183,8 +183,17 @@ export function createChatMedia({ t, locale, showDialog, getMedia, getDownloadIn
     const container = element('div', `chat-media chat-media--${kind}`);
     container.dataset.mediaKind = kind;
     const active = () => container.isConnected && isActive(item);
+    function setDimensions(dimensions, sourceWidth = dimensions?.width) {
+      if (!dimensions) return;
+      const { width, height } = dimensions;
+      container.style.setProperty('--chat-media-aspect', `${width} / ${height}`);
+      if (kind === 'image') {
+        container.style.setProperty('--chat-image-ratio', String(width / height));
+        container.style.setProperty('--chat-image-width', `${sourceWidth}px`);
+      }
+    }
     const dimensions = validMediaDimensions(item.media?.width, item.media?.height);
-    if (dimensions) container.style.setProperty('--chat-media-aspect', `${dimensions.width} / ${dimensions.height}`);
+    setDimensions(dimensions);
 
     let busy = false;
     const missing = () => {
@@ -207,6 +216,10 @@ export function createChatMedia({ t, locale, showDialog, getMedia, getDownloadIn
         preview.setAttribute('aria-label', labels()[kind]);
         const node = image(data.preview || data.src, alt);
         let triedOriginal = !data.preview || data.preview === data.src;
+        if (kind === 'image') node.addEventListener('load', () => {
+          if (active()) setDimensions(validMediaDimensions(node.naturalWidth, node.naturalHeight),
+            triedOriginal ? node.naturalWidth : dimensions?.width ?? node.naturalWidth);
+        });
         node.addEventListener('error', () => {
           if (!active()) return;
           if (!triedOriginal) { triedOriginal = true; node.src = data.src; return; }

@@ -10,6 +10,9 @@ import { createGroupInfo } from './group-info.js';
 import { createChatMedia } from './chat-media.js';
 import { bundledSticker, createChatMediaSource } from './chat-media-source.js';
 import { downloadChatMedia } from './chat-media-download.js';
+import { createChatAttachments } from './chat-attachments.js';
+import { openStructuredAttachment } from './chat-attachments-structured.js';
+import { renderRichMessage } from './chat-rich-message.js';
 
 const words = {
   navigation: ['التنقل', 'Navigation'], chats: ['المحادثات', 'Chats'], status: ['الحالات', 'Status'],
@@ -26,6 +29,7 @@ const words = {
   message: ['الرسالة', 'Message'], typeMessage: ['اكتب رسالة', 'Type a message'], send: ['إرسال', 'Send'],
   latest: ['الانتقال إلى أحدث الرسائل', 'Scroll to latest messages'], close: ['إغلاق', 'Close'],
   composerOptions: ['خيارات الرسالة', 'Message options'], actions: ['إجراءات الرسالة', 'Message actions'],
+  attach: ['إرفاق', 'Attach'],
   quickReaction: ['تفاعل سريع', 'Quick reaction'], direct: ['محادثة فردية', 'Direct conversation'], group: ['مجموعة', 'Group'],
   reactions: ['التفاعلات', 'Reactions'], viewReactions: ['عرض المتفاعلين', 'View reactions'],
   members: ['أعضاء', 'members'], peer: ['مستخدم OfflineSMS', 'OfflineSMS user'], you: ['أنت', 'You'],
@@ -109,13 +113,17 @@ let unsubscribeAuth;
 let pendingRead;
 let announcementTimer;
 let renderedThread;
+let attachments;
+let lastPollVoteSeq = 0;
 const profiles = new Map();
 const userStates = new Map();
 const stopStates = new Map();
 const drafts = new Map();
 const replies = new Map();
 const sends = new Map();
+const attachmentSends = new Map();
 const mediaRenderKeys = new WeakMap();
+const richRenderKeys = new WeakMap();
 
 const t = (key) => words[key]?.[language === 'ar' ? 0 : 1] ?? words.message[language === 'ar' ? 0 : 1];
 const numeral = (value) => new Intl.NumberFormat(language).format(value);
@@ -220,7 +228,13 @@ function setLanguage(next) {
   else renderSection();
 }
 
-function showDialog(title, content) {
+function disposeAttachments() {
+  attachments?.close();
+  attachments = undefined;
+}
+
+function showDialog(title, content, attachmentDialog = false) {
+  if (!attachmentDialog) disposeAttachments();
   viewingMedia = undefined;
   viewingReactions = undefined;
   byId('dialog-title').textContent = title;
@@ -230,6 +244,7 @@ function showDialog(title, content) {
 }
 
 function closeDialog() {
+  disposeAttachments();
   viewingMedia = undefined;
   viewingReactions = undefined;
   if (dialog.open) dialog.close();
@@ -412,7 +427,7 @@ function subscribeList() {
 
 function openThread(id, focus = true) {
   if (!user) return;
-  if (viewingReactions) closeDialog();
+  if (viewingReactions || attachments) closeDialog();
   closeMedia();
   closeMessageInfo();
   closeGroupInfo();
@@ -433,6 +448,7 @@ function openThread(id, focus = true) {
     if (generation !== threadGeneration) return;
     const previous = currentThread;
     currentThread = value;
+    if (attachments && sendingRestricted()) closeDialog();
     if (viewingMedia && !isActiveMedia(viewingMedia)) closeDialog();
     if (viewingReactions) updateReactionDetails();
     if (groupInfo) {
@@ -619,7 +635,33 @@ function groupReceiptCounters(item) {
   return counters;
 }
 
-function renderMessage(item, existingMedia) {
+function richMessage(item, existing) {
+  if (!['location', 'contact', 'poll'].includes(item.type)) return null;
+  const generation = threadGeneration;
+  const conversationId = activeId;
+  const uid = user.uid;
+  const isActive = () => generation === threadGeneration && section === 'chats' && user?.uid === uid
+    && currentThread?.messages.some((message) => message.id === item.id && !message.deletedForEveryone && !message.retentionDeleting);
+  const conversation = currentThread.conversation;
+  const canVote = conversation.status !== 'disabled' && (conversation.type !== 'group' || Boolean(currentThread.role));
+  const key = JSON.stringify([generation, language, item.type, item[item.type], item.senderUid ?? item.senderId, canVote]);
+  if (richRenderKeys.get(existing) === key) return existing;
+  const card = renderRichMessage(item, {
+    locale: language, uid, isActive,
+    canVote,
+    async votePoll(optionIds, afterSeq = 0) {
+      if (!isActive()) throw new Error('message-unavailable');
+      lastPollVoteSeq = Math.max(Date.now(), lastPollVoteSeq + 1, afterSeq + 1);
+      return call('votePoll', { conversationId, messageId: item.id, optionIds, seq: lastPollVoteSeq, voterUid: uid });
+    },
+    getBallot: () => isActive() ? client.getPollBallot(conversationId, item.id) : Promise.resolve(null),
+    closePoll: () => isActive() ? call('closePoll', { conversationId, messageId: item.id }) : Promise.reject(new Error('message-unavailable')),
+  });
+  if (card) richRenderKeys.set(card, key);
+  return card;
+}
+
+function renderMessage(item, existingRow) {
   const own = (item.senderUid ?? item.senderId) === user.uid;
   const group = currentThread.conversation.type !== 'direct';
   const row = el('div', 'message-row' + (own ? ' outgoing' : ''));
@@ -641,21 +683,27 @@ function renderMessage(item, existingMedia) {
       bubble.append(button(`${author} · ${item.replyTo.preview || t('message')}`, () => jumpTo(item.replyTo.messageId), 'reply-quote'));
     }
     if (mediaItem) {
+      const existingMedia = existingRow?.querySelector('.chat-media');
       const key = JSON.stringify([threadGeneration, language, mediaItem.identity, sticker, item.media]);
       const attachment = mediaRenderKeys.get(existingMedia) === key ? existingMedia
         : chatMedia.render(mediaItem);
       mediaRenderKeys.set(attachment, key);
       bubble.append(attachment);
     }
-    const body = messageBody(item);
-    if (body) bubble.append(renderMessageText(body));
-    if (item.type === 'poll' && Array.isArray(item.poll?.options)) {
-      const options = el('ul', 'live-poll');
-      item.poll.options.forEach((option) => {
-        const text = typeof option === 'string' ? option : option?.text;
-        if (typeof text === 'string') options.append(el('li', '', text));
-      });
-      bubble.append(options);
+    const rich = richMessage(item, existingRow?.querySelector('.chat-rich-message'));
+    if (rich) bubble.append(rich);
+    else {
+      const body = messageBody(item);
+      if (body) bubble.append(renderMessageText(body));
+      // Older polls can carry labels without option IDs.
+      if (item.type === 'poll' && Array.isArray(item.poll?.options)) {
+        const options = el('ul', 'live-poll');
+        for (const option of item.poll.options) {
+          const label = typeof option === 'string' ? option : option?.text;
+          if (typeof label === 'string') options.append(el('li', '', label));
+        }
+        bubble.append(options);
+      }
     }
     const entries = messageReactions(item);
     if (entries.length) {
@@ -736,13 +784,14 @@ function sendingRestricted() {
 }
 
 function updateComposer() {
-  const sending = sends.get(activeId)?.busy === true;
+  const sending = sends.get(activeId)?.busy === true || attachmentSends.has(activeId);
   const canSend = Boolean(currentThread && !sendingRestricted());
   composerArea.hidden = !canSend;
   byId('chat-blocked').hidden = !currentThread || !sendingRestricted();
   byId('send').hidden = false;
   byId('send').disabled = !canSend || sending || !messageInput.value.trim();
   byId('extras').disabled = sending;
+  byId('attach').disabled = !canSend || sending;
   messageInput.readOnly = sending;
   const error = sends.get(activeId)?.error;
   feedback.hidden = !error;
@@ -789,9 +838,9 @@ function renderThread(follow = false) {
   if (renderedThread === rowsState) { updateLatest(); return; }
   renderedThread = rowsState;
   tools.dismiss();
-  const mediaByMessage = new Map([...flow.children].map((row) => [row.dataset.message, row.querySelector('.chat-media')]));
+  const existingRows = new Map([...flow.children].map((row) => [row.dataset.message, row]));
   const previousTop = scroll.scrollTop;
-  const rows = currentThread.messages.map((item) => renderMessage(item, mediaByMessage.get(item.id)));
+  const rows = currentThread.messages.map((item) => renderMessage(item, existingRows.get(item.id)));
   flow.replaceChildren(...(rows.length ? rows : [el('p', 'live-thread-empty', t('noMessages'))]));
   chatMedia.prune();
   scroll.scrollTop = follow ? scroll.scrollHeight : previousTop;
@@ -1176,12 +1225,54 @@ function showComposerOptions() {
   showDialog(t('composerOptions'), grid);
 }
 
+function showAttachments() {
+  const conversationId = activeId;
+  if (!user || section !== 'chats' || sendingRestricted() || sends.get(conversationId)?.busy || attachmentSends.has(conversationId)) return;
+  disposeAttachments();
+  const generation = threadGeneration;
+  const owner = session;
+  const replyTo = replies.get(conversationId) ?? null;
+  const isActive = () => owner === session && generation === threadGeneration && section === 'chats' && !sendingRestricted();
+  async function sendAttachment(operation, includeReply = true) {
+    if (!isActive() || attachmentSends.has(conversationId)) throw new Error('conversation-unavailable');
+    const attempt = {};
+    attachmentSends.set(conversationId, attempt);
+    updateComposer();
+    try {
+      await operation();
+      if (includeReply && owner === session && replies.get(conversationId) === replyTo) replies.delete(conversationId);
+      if (generation === threadGeneration) renderReply();
+    } finally {
+      if (attachmentSends.get(conversationId) === attempt) attachmentSends.delete(conversationId);
+      if (activeId === conversationId && owner === session) updateComposer();
+    }
+  }
+
+  const context = {
+    locale: language, isActive, closeDialog,
+    showDialog: (title, content) => showDialog(title, content, true),
+  };
+  attachments = createChatAttachments({
+    ...context,
+    sendAttachment: (payload) => sendAttachment(() => client.sendAttachment({ ...payload, conversationId, replyTo })),
+    openStructured: (kind) => openStructuredAttachment(kind, {
+      ...context,
+      call: (name, data) => isActive() ? call(name, data) : Promise.reject(new Error('conversation-unavailable')),
+      sendRich: (rich, localId) => sendAttachment(() => call(
+        rich.kind === 'poll' && rich.poll.anonymous ? 'sendPollMessage' : 'sendTextMessage',
+        { ...rich, conversationId, localId, ...(rich.kind !== 'poll' && replyTo ? { replyTo } : {}) },
+      ), rich.kind !== 'poll'),
+    }),
+  });
+  attachments.open();
+}
+
 async function send(event) {
   event.preventDefault();
   const text = messageInput.value.trim();
   const id = activeId;
   const replyTo = replies.get(id) || null;
-  if (!id || !text || !currentThread || sends.get(id)?.busy || sendingRestricted()) return;
+  if (!id || !text || !currentThread || sends.get(id)?.busy || attachmentSends.has(id) || sendingRestricted()) return;
   const generation = session;
   const previous = sends.get(id);
   const attempt = previous?.text === text && previous?.replyTo?.messageId === replyTo?.messageId
@@ -1225,6 +1316,7 @@ function clearSession() {
   drafts.clear();
   replies.clear();
   sends.clear();
+  attachmentSends.clear();
   conversations = [];
   listState = 'loading';
   activeId = currentThread = pendingRead = undefined;
@@ -1300,7 +1392,9 @@ byId('wallpaper').addEventListener('click', () => {
   showDialog(t('wallpaper'), choice(t('wallpaper'), [['default', 'defaultWallpaper'], ['plain', 'plainWallpaper']], wallpaper, chooseWallpaper));
 });
 byId('extras').addEventListener('click', showComposerOptions);
+byId('attach').addEventListener('click', showAttachments);
 byId('back').addEventListener('click', () => {
+  if (attachments) closeDialog();
   closeGroupInfo();
   workspace.dataset.mobileView = 'list';
   [...list.querySelectorAll('[data-thread]')].find((item) => item.dataset.thread === activeId)?.focus({ preventScroll: true });
@@ -1319,10 +1413,12 @@ document.addEventListener('visibilitychange', maybeMarkRead);
 window.addEventListener('focus', maybeMarkRead);
 darkMode.addEventListener('change', applyTheme);
 window.addEventListener('pagehide', (event) => {
+  if (attachments) closeDialog();
   if (!event.persisted) { stopAccount?.(); unsubscribeAuth?.(); }
 });
 dialog.addEventListener('close', () => {
   if (!dialog.open) {
+    disposeAttachments();
     viewingMedia = viewingReactions = undefined;
     byId('dialog-content').replaceChildren();
   }

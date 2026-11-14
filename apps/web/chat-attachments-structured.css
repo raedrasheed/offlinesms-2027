@@ -1,0 +1,22 @@
+.chat-structured-attachment { gap: 12px; }
+.chat-structured-fields {
+  display: grid; gap: 10px; min-inline-size: 0; margin: 0; padding: 0; border: 0;
+}
+.chat-structured-fields > .feature-button { justify-self: start; }
+.chat-structured-coordinates {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px;
+}
+.chat-structured-option { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px; }
+.chat-structured-option .feature-button { min-inline-size: 38px; font-size: 16px; }
+.chat-structured-check { display: flex; align-items: center; gap: 8px; min-block-size: 32px; font-size: 13px; }
+.chat-structured-check input { accent-color: var(--brand); margin: 0; inline-size: 17px; block-size: 17px; }
+.chat-structured-notice { color: var(--muted); font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
+.chat-structured-notice:empty, .chat-structured-contacts:empty { display: none; }
+.chat-structured-contacts {
+  display: grid; gap: 6px; min-inline-size: 0; max-block-size: min(36dvh, 270px); overflow: auto;
+  margin: 0; padding: 3px; list-style: none;
+}
+.chat-structured-contact { inline-size: 100%; text-align: start; }
+.chat-structured-contact-copy { display: grid; gap: 3px; overflow-wrap: anywhere; }
+.chat-structured-contact-copy > span { color: var(--muted); font-size: 12px; }
+#dialog:has(.chat-structured-attachment) { max-block-size: calc(100dvh - 24px); overflow: auto; overscroll-behavior: contain; }

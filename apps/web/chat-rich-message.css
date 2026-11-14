@@ -1,0 +1,44 @@
+.chat-rich-message {
+  display: grid;
+  gap: 6px;
+  inline-size: min(270px, 55vw);
+  max-inline-size: 100%;
+  padding: 4px 0;
+  overflow-wrap: anywhere;
+}
+
+.chat-rich-header { display: flex; align-items: center; gap: 7px; }
+.chat-rich-header svg { color: var(--brand); }
+.chat-rich-title { display: block; color: var(--text); font-size: 14px; font-weight: 750; }
+.chat-rich-contact-fields { margin: 0; padding: 0; list-style: none; color: var(--muted); font-size: 13px; }
+.chat-rich-contact-fields li { text-align: match-parent; unicode-bidi: isolate; }
+.chat-rich-link { justify-self: start; font-size: 13px; font-weight: 650; }
+.chat-rich-hint { color: var(--muted); font-size: 12px; }
+.chat-rich-poll-options { display: grid; gap: 4px; }
+.chat-rich-poll-option {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 5px 9px;
+  align-items: center;
+  min-block-size: 40px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  text-align: start;
+}
+
+.chat-rich-poll-option:hover:not(:disabled), .chat-rich-poll-option[aria-pressed="true"] {
+  border-color: var(--brand);
+  background: var(--accent-soft);
+}
+
+.chat-rich-poll-option-count { color: var(--muted); font-variant-numeric: tabular-nums; }
+.chat-rich-poll-track, .chat-rich-poll-bar { display: block; block-size: 4px; border-radius: 4px; }
+.chat-rich-poll-track { grid-column: 1 / -1; background: var(--line); overflow: hidden; }
+.chat-rich-poll-bar { background: var(--brand); }
+.chat-rich-poll-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+.chat-rich-poll-actions:not(:has(> :not([hidden]))) { display: none; }
+.chat-rich-poll-actions .feature-button { padding: 4px 7px; min-block-size: 26px; font-size: 12px; }
