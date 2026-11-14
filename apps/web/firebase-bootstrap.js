@@ -1,7 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-check';
 import {
-  browserSessionPersistence, initializeAuth, inMemoryPersistence,
+  browserLocalPersistence, indexedDBLocalPersistence, initializeAuth, inMemoryPersistence,
   onAuthStateChanged, signInWithCustomToken, signOut,
 } from 'firebase/auth';
 import {
@@ -15,7 +15,7 @@ import { isProductionFirebaseConfig } from './firebase-config.js';
 
 const sdk = {
   initializeApp, initializeAppCheck, ReCaptchaEnterpriseProvider,
-  browserSessionPersistence, initializeAuth, inMemoryPersistence,
+  browserLocalPersistence, indexedDBLocalPersistence, initializeAuth, inMemoryPersistence,
   onAuthStateChanged, signInWithCustomToken, signOut,
   collection, doc, documentId, getDocFromServer, getDocsFromServer, initializeFirestore, limit,
   memoryLocalCache, onSnapshot, orderBy, query, where,
