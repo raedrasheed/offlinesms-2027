@@ -4,12 +4,12 @@ import { validMediaDimensions } from '../mobile/src/media/mediaDimensions.ts';
 const mediaTypes = new Set(['image', 'video', 'voice', 'audio', 'file', 'sticker']);
 const copy = {
   ar: {
-    image: 'فتح الصورة', video: 'فتح الفيديو', sticker: 'فتح الملصق', download: 'تنزيل',
+    image: 'فتح الصورة', sticker: 'فتح الملصق', download: 'تنزيل',
     downloading: 'جارٍ التنزيل…', downloadFailed: 'تعذّر التنزيل. حاول مرة أخرى.',
     waiting: 'بانتظار اكتمال رفع المرفق.', uploadFailed: 'تعذّر رفع المرفق.',
   },
   en: {
-    image: 'Open image', video: 'Open video', sticker: 'Open sticker', download: 'Download',
+    image: 'Open image', sticker: 'Open sticker', download: 'Download',
     downloading: 'Downloading…', downloadFailed: 'Could not download. Try again.',
     waiting: 'Waiting for the attachment to finish uploading.', uploadFailed: 'The attachment could not be uploaded.',
   },
@@ -63,14 +63,19 @@ export function createChatMedia({ t, locale, showDialog, getMedia, getDownloadIn
     }
   }, { rootMargin: '160px 0px' }) : null;
 
-  function mediaPlayer(kind, data, active) {
+  function mediaPlayer(kind, data, active, onDimensions) {
     const node = element(kind === 'video' ? 'video' : 'audio', `chat-media-player chat-media-${kind}`);
     node.controls = true;
     node.setAttribute('controlslist', 'nodownload');
-    node.preload = kind === 'video' && !data.poster ? 'metadata' : 'none';
+    node.preload = kind === 'video' ? 'metadata' : 'none';
     node.setAttribute('aria-label', t(kind));
     if (kind === 'video') {
       node.playsInline = true;
+      const updateDimensions = () => {
+        if (active()) onDimensions(validMediaDimensions(node.videoWidth, node.videoHeight));
+      };
+      node.addEventListener('loadedmetadata', updateDimensions);
+      node.addEventListener('resize', updateDimensions);
       if (data.poster) node.poster = data.poster;
       else if (data.posterPromise) {
         data.posterPromise.then((poster) => {
@@ -155,7 +160,7 @@ export function createChatMedia({ t, locale, showDialog, getMedia, getDownloadIn
     const active = () => viewer.isConnected && viewer.closest('dialog')?.open === true && isActive(item);
     const download = createViewerDownload(item, data, active, controllers);
     controls.append(download.action);
-    const node = kind === 'video' ? mediaPlayer(kind, data, active) : image(data.src, alt);
+    const node = image(data.src, alt);
     node.addEventListener('error', () => {
       if (!active()) return;
       node.replaceWith(mediaNote(t('mediaUnavailable')));
@@ -167,7 +172,6 @@ export function createChatMedia({ t, locale, showDialog, getMedia, getDownloadIn
     if (!dialog || !parent) return;
     const detached = new MutationObserver(() => { if (!active()) dispose(); });
     function dispose() {
-      if (kind === 'video') stopPlayer(node);
       for (const controller of controllers) controller.abort();
       controllers.clear();
       dialog.removeEventListener('close', dispose);
@@ -187,9 +191,9 @@ export function createChatMedia({ t, locale, showDialog, getMedia, getDownloadIn
       if (!dimensions) return;
       const { width, height } = dimensions;
       container.style.setProperty('--chat-media-aspect', `${width} / ${height}`);
-      if (kind === 'image') {
-        container.style.setProperty('--chat-image-ratio', String(width / height));
-        container.style.setProperty('--chat-image-width', `${sourceWidth}px`);
+      if (kind === 'image' || kind === 'video') {
+        container.style.setProperty('--chat-visual-ratio', String(width / height));
+        container.style.setProperty('--chat-visual-width', `${sourceWidth}px`);
       }
     }
     const dimensions = validMediaDimensions(item.media?.width, item.media?.height);
@@ -229,16 +233,13 @@ export function createChatMedia({ t, locale, showDialog, getMedia, getDownloadIn
         preview.append(node);
         content.append(preview);
       } else if (kind === 'video' || kind === 'voice' || kind === 'audio') {
-        const node = mediaPlayer(kind, data, active);
+        const node = mediaPlayer(kind, data, active, setDimensions);
         players.add(node);
         node.addEventListener('error', () => {
           if (!active()) return;
           node.replaceWith(mediaNote(t('mediaUnavailable')));
         }, { once: true });
         content.append(node);
-        if (kind === 'video') actions.append(button('feature-button chat-media-open', labels().video, () => {
-          if (active()) showViewer(item, kind, data, alt);
-        }));
       } else {
         const file = element('p', 'chat-media-file', data.fileName || item.media?.fileName || t('file'));
         file.dir = 'auto';
