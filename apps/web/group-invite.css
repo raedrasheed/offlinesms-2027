@@ -1,0 +1,15 @@
+.group-invite { display: grid; gap: 12px; }
+.group-invite-summary {
+  display: grid;
+  gap: 5px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--soft);
+}
+.group-invite-name { margin: 0; font-size: 17px; overflow-wrap: anywhere; }
+.group-invite-meta, .group-invite-notice { color: var(--muted); font-size: 13px; line-height: 1.55; }
+.group-invite-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.group-invite-actions:empty { display: none; }
+.group-invite-profile { width: 100%; }
+.group-invite-shortcut { width: 100%; margin-block-end: 8px; }

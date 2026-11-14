@@ -269,6 +269,17 @@ export function initializeFirebaseClient(sdk, config, { appCheckSiteKey } = {}) 
     getPublicProfile,
     findByUsername,
     getMediaUrl,
+    async completeInviteProfile({ username, displayName }) {
+      const uid = currentUid();
+      const snapshot = await sdk.getDocFromServer(sdk.doc(db, 'users', documentId(uid)));
+      requireSession(uid);
+      const profile = snapshot.data();
+      if (!profile || (profile.status ?? 'active') !== 'active') throw clientError('permission-denied');
+      if (typeof profile.username === 'string' && profile.username.trim()) return;
+      const savedName = typeof profile.displayName === 'string' ? profile.displayName.trim() : '';
+      const about = typeof profile.about === 'string' ? profile.about : null;
+      await call('claimUsername', { username, displayName: savedName || displayName, about });
+    },
     async sendText({ conversationId, text, localId, replyTo = null, mentions = null }) {
       const value = typeof text === 'string' ? text.trim() : '';
       if (!value || value.length > 4000) throw clientError(!value ? 'text-empty' : 'text-too-long');

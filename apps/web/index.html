@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#191a1a">
+  <meta name="referrer" content="no-referrer">
   <meta name="description" content="استخدم حساب OfflineSMS للمحادثات والحالات والمقاطع على الويب.">
   <meta property="og:title" content="OfflineSMS Web">
   <meta property="og:description" content="Sign in to OfflineSMS Web.">
@@ -15,6 +16,7 @@
   <link rel="stylesheet" href="./web-sign-in.css">
   <link rel="stylesheet" href="./live.css">
   <link rel="stylesheet" href="./chat-tools.css">
+  <link rel="stylesheet" href="./group-invite.css">
   <script type="module" src="./app.js"></script>
   <title>OfflineSMS Web</title>
 </head>
@@ -56,6 +58,7 @@
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5h.01M12 12h.01M12 19h.01" stroke-width="3.4"/></svg>
             </button>
           </div>
+          <button class="feature-button group-invite-shortcut" id="group-invite-shortcut" type="button" data-copy="groupInvite" hidden>دعوة المجموعة</button>
           <label class="search">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>
             <input id="search" type="search" data-label="search" data-placeholder="search" aria-label="ابحث في المحادثات" placeholder="ابحث في المحادثات" autocomplete="off">

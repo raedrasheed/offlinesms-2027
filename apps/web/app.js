@@ -2,6 +2,7 @@ import { loadFirebaseClient } from './firebase-bootstrap.js';
 import { createSignInView } from './web-sign-in.js';
 import { createLiveFeeds } from './live-feeds.js';
 import { createChatTools } from './chat-tools.js';
+import { createGroupInviteView } from './group-invite.js';
 
 const words = {
   navigation: ['التنقل', 'Navigation'], chats: ['المحادثات', 'Chats'], status: ['الحالات', 'Status'],
@@ -38,6 +39,7 @@ const words = {
   signOutFailed: ['تعذّر تسجيل الخروج. حاول مرة أخرى.', 'Could not sign out. Try again.'],
   privacy: ['سياسة الخصوصية', 'Privacy policy'], terms: ['شروط الاستخدام', 'Terms of service'],
   recent: ['المحادثات الأخيرة', 'Recent conversations'],
+  groupInvite: ['دعوة المجموعة', 'Group invitation'],
 };
 
 const byId = (id) => document.getElementById(id);
@@ -54,6 +56,7 @@ const feedback = byId('send-feedback');
 const latest = byId('latest');
 const featurePanel = byId('feature-panel');
 const dialog = byId('dialog');
+const inviteShortcut = byId('group-invite-shortcut');
 const mobile = window.matchMedia('(max-width: 670px)');
 const darkMode = window.matchMedia('(prefers-color-scheme: dark)');
 const navigation = [...document.querySelectorAll('.nav-tab')];
@@ -102,6 +105,28 @@ const sends = new Map();
 
 const t = (key) => words[key]?.[language === 'ar' ? 0 : 1] ?? words.message[language === 'ar' ? 0 : 1];
 const numeral = (value) => new Intl.NumberFormat(language).format(value);
+
+function inviteCodeFromLocation() {
+  if (!location.hash.startsWith('#join=')) return undefined;
+  const code = location.hash.slice('#join='.length);
+  return /^[ABCDEFGHJKMNPQRSTVWXYZ0123456789]{8,40}$/.test(code) ? code : null;
+}
+
+function showGroupInvite() {
+  const code = inviteCodeFromLocation();
+  inviteShortcut.hidden = code === undefined;
+  if (!user) { signIn.render(); return; }
+  if (code !== undefined) inviteView.open(code);
+  else if (dialog.querySelector('.group-invite')) closeDialog();
+}
+
+function clearInvite(code) {
+  if (code !== inviteCodeFromLocation()) return;
+  const url = new URL(location.href);
+  url.hash = '';
+  history.replaceState(history.state, '', url);
+  inviteShortcut.hidden = true;
+}
 
 function el(tag, className = '', text = '') {
   const node = document.createElement(tag);
@@ -792,6 +817,7 @@ function chatMessageAction(name, message, payload = {}) {
 const feeds = createLiveFeeds({ panel: featurePanel, getLanguage: () => language, call, formatTime });
 const signIn = createSignInView({
   container: byId('web-sign-in'), getLanguage: () => language, setLanguage,
+  hasGroupInvite: () => Boolean(inviteCodeFromLocation()),
   requestCode: (email) => client.requestEmailOtp(email),
   verifyCode: (email, code) => client.verifyEmailOtp(email, code),
   getPhoneAvailability: () => client.getPhoneAvailability(),
@@ -800,6 +826,16 @@ const signIn = createSignInView({
   resetPhoneFlow: () => client?.resetPhoneFlow(),
   phoneErrorInfo: (error) => client.phoneErrorInfo(error),
   signOut: () => client.signOut(),
+});
+const inviteView = createGroupInviteView({
+  getClient: () => client, getUser: () => user, getLocale: () => language, showDialog, closeDialog, clearInvite,
+  isCurrentInvite: (code) => code === inviteCodeFromLocation(),
+  openGroup(id) {
+    navigate('chats');
+    filter = 'all';
+    search.value = '';
+    openThread(id);
+  },
 });
 const tools = createChatTools({
   getLanguage: () => language, showDialog, closeDialog, announce,
@@ -930,12 +966,13 @@ function authChanged(next) {
       return;
     }
     if (user?.uid === next.uid) return;
-    user = next;
+    user = { ...next, displayName: profile.displayName };
     signIn.hide();
     filter = 'all';
     navigate('chats');
     workspace.hidden = false;
     subscribeList();
+    showGroupInvite();
   }, () => {
     if (generation !== accountWatch) return;
     workspace.hidden = true;
@@ -950,6 +987,8 @@ filters.forEach((item) => item.addEventListener('click', () => { filter = item.d
 search.addEventListener('input', renderList);
 byId('chat-settings').addEventListener('click', () => navigate('settings'));
 byId('new-chat').addEventListener('click', showNewChat);
+inviteShortcut.addEventListener('click', showGroupInvite);
+window.addEventListener('hashchange', showGroupInvite);
 byId('details').addEventListener('click', showDetails);
 byId('conversation-search').addEventListener('click', showMessageSearch);
 byId('wallpaper').addEventListener('click', () => showDialog(t('wallpaper'),

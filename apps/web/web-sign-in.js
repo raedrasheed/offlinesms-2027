@@ -2,6 +2,7 @@ const copy = {
   ar: {
     heading: 'الدخول إلى OfflineSMS',
     introduction: 'استخدم البريد المرتبط بحسابك لفتح محادثاتك على الويب. إذا كان البريد جديدًا، يُنشأ حساب بعد التحقق منه.',
+    groupInvite: 'سجّل الدخول لمعاينة دعوة المجموعة والمتابعة.',
     email: 'البريد الإلكتروني',
     send: 'إرسال رمز التحقق',
     sending: 'جارٍ إرسال الرمز…',
@@ -48,6 +49,7 @@ const copy = {
   en: {
     heading: 'Sign in to OfflineSMS',
     introduction: 'Use your OfflineSMS email to open your chats on the web. A new email creates an account after verification.',
+    groupInvite: 'Sign in to review the group invitation and continue.',
     email: 'Email address',
     send: 'Send verification code',
     sending: 'Sending code…',
@@ -181,7 +183,7 @@ function errorKey(error, verifying) {
 }
 
 export function createSignInView({
-  container, getLanguage, setLanguage, requestCode, verifyCode, signOut,
+  container, getLanguage, setLanguage, requestCode, verifyCode, signOut, hasGroupInvite,
   getPhoneAvailability, requestPhoneCode, verifyPhoneCode, resetPhoneFlow, phoneErrorInfo,
 }) {
   let view = 'loading';
@@ -540,6 +542,9 @@ export function createSignInView({
     title.id = 'web-sign-in-heading';
     if (view === 'loading') title.setAttribute('role', 'status');
     card.append(title);
+    if (hasGroupInvite?.() && ['email', 'code', 'phone', 'phoneCode'].includes(view)) {
+      card.append(node('p', 'web-sign-in-copy', t.groupInvite));
+    }
 
     let input;
     if (view === 'blocked') {
