@@ -190,6 +190,8 @@ h1 { font-size: 23px; font-weight: 790; letter-spacing: -.45px; line-height: 1.2
 .message-invite-link:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 2px; }
 .message-meta { display: flex; justify-content: flex-end; gap: 5px; align-items: center; color: var(--muted); font-size: 10px; margin-top: 3px; }
 .message-meta .checks { color: var(--brand); font-size: 11px; }
+.message-receipt-counts, .message-receipt-count { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.message-receipt-count svg { width: 13px; height: 13px; color: var(--brand); }
 .message-star { color: #f5a91e; }
 .message-action {
   width: 30px; height: 30px; display: grid; place-items: center; flex-shrink: 0;

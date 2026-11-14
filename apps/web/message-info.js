@@ -174,9 +174,10 @@ export function createMessageInfo({ message, title, memberCount, locale, formatT
   }
 
   function showSms(trigger) {
+    if (leaveSms || !isActive()) return;
     const previousScroll = content.scrollTop;
     let sms;
-    leaveSms = () => {
+    leaveSms = trigger ? () => {
       sms.remove();
       leaveSms = undefined;
       menu.hidden = details.hidden = false;
@@ -184,13 +185,13 @@ export function createMessageInfo({ message, title, memberCount, locale, formatT
       back.setAttribute('aria-label', text.back);
       content.scrollTop = previousScroll;
       trigger.focus({ preventScroll: true });
-    };
+    } : onBack;
     sms = createMessageInfoSms({ message, locale, call,
       isActive: () => isActive() && sms?.isConnected, onBusyChange: (busy) => { back.disabled = busy; } });
     menu.open = false;
     menu.hidden = details.hidden = true;
     headingTitle.textContent = text.sms;
-    back.setAttribute('aria-label', text.title);
+    back.setAttribute('aria-label', trigger ? text.title : text.back);
     content.append(sms);
     content.scrollTop = 0;
     headingTitle.focus();
@@ -250,5 +251,5 @@ export function createMessageInfo({ message, title, memberCount, locale, formatT
     }
   }
 
-  return { view, load, focus: () => headingTitle.focus() };
+  return { view, load, focus: () => headingTitle.focus(), openSms: () => showSms() };
 }

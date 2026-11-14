@@ -29,6 +29,7 @@ const words = {
   replyTo: ['الرد على', 'Replying to'], cancelReply: ['إلغاء الرد', 'Cancel reply'], forwarded: ['معاد توجيهها', 'Forwarded'],
   edited: ['تم التعديل', 'Edited'], pinned: ['رسالة مثبّتة', 'Pinned message'], unpin: ['إلغاء تثبيت الرسالة', 'Unpin message'],
   removed: ['حُذفت هذه الرسالة.', 'This message was deleted.'], sent: ['أُرسلت', 'Sent'],
+  deliveredUnread: ['وصلت ولم تُشاهد', 'Delivered but unread'], seen: ['شاهدوا الرسالة', 'Seen'],
   delivered: ['وصلت', 'Delivered'], read: ['قُرئت', 'Read'], sendRestricted: ['الإرسال مقيّد في هذه المحادثة.', 'Sending is restricted in this conversation.'],
   sendError: ['تعذّر الإرسال. بقيت رسالتك في حقل الكتابة.', 'Could not send. Your message is still in the composer.'],
   actionFailed: ['تعذّر تنفيذ الإجراء. حاول مرة أخرى.', 'Could not complete the action. Try again.'],
@@ -172,6 +173,11 @@ function button(text, run, className = 'dialog-action') {
 function iconButton(path, title, run, className) {
   const node = button('', run, className);
   node.setAttribute('aria-label', title);
+  node.append(outlineIcon(path));
+  return node;
+}
+
+function outlineIcon(path) {
   const ns = 'http://www.w3.org/2000/svg';
   const icon = document.createElementNS(ns, 'svg');
   const line = document.createElementNS(ns, 'path');
@@ -179,8 +185,7 @@ function iconButton(path, title, run, className) {
   icon.setAttribute('aria-hidden', 'true');
   line.setAttribute('d', path);
   icon.append(line);
-  node.append(icon);
-  return node;
+  return icon;
 }
 
 function applyTheme() {
@@ -539,6 +544,35 @@ function renderMessageText(value) {
   return body;
 }
 
+function canSendViaOfflineSms(item) {
+  return Boolean(item && (item.senderUid ?? item.senderId) === user.uid
+    && !item.deletedForEveryone && !item.retentionDeleting
+    && ['text', 'location', 'contact'].includes(item.type)
+    && !['sending', 'failed'].includes(item.status));
+}
+
+function groupReceiptCounters(item) {
+  const count = (value) => Number.isSafeInteger(value) && value >= 0 ? value : 0;
+  // Delivery totals include readers, viewers and recipients who played the media.
+  // The viewed total already includes read receipts on current message records.
+  const seen = Math.max(count(item.readCount), count(item.viewedCount)) + count(item.playedCount);
+  const deliveredUnread = Math.max(0, count(item.deliveredCount) - seen);
+  const counters = el('span', 'message-receipt-counts');
+  counters.dir = 'ltr';
+  for (const [status, label, value, icon] of [
+    ['delivered-unread', t('deliveredUnread'), deliveredUnread, 'm2 13 4 4L17 6m-8 10 2 2L23 6'],
+    ['seen', t('seen'), seen, 'M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Zm13 0a3 3 0 1 0-6 0 3 3 0 0 0 6 0Z'],
+  ]) {
+    const counter = el('span', 'message-receipt-count');
+    const formatted = numeral(value);
+    counter.dataset.status = status;
+    counter.title = `${label} · ${formatted}`;
+    counter.append(outlineIcon(icon), el('span', 'sr-only', `${label} `), formatted);
+    counters.append(counter);
+  }
+  return counters;
+}
+
 function renderMessage(item, existingMedia) {
   const own = (item.senderUid ?? item.senderId) === user.uid;
   const group = currentThread.conversation.type !== 'direct';
@@ -549,6 +583,9 @@ function renderMessage(item, existingMedia) {
   const bubble = el('div', 'bubble');
   const hasMedia = !item.deletedForEveryone && chatMedia.handles(item);
   const sticker = hasMedia && chatMedia.isSticker(item);
+  const mediaItem = hasMedia ? {
+    ...item, thread: threadGeneration, conversationId: activeId, isSticker: sticker, identity: mediaIdentity(item),
+  } : undefined;
   if (group && !own) bubble.append(el('p', 'message-author', sender));
   if (item.deletedForEveryone) bubble.append(el('p', 'message-text', t('removed')));
   else {
@@ -557,11 +594,10 @@ function renderMessage(item, existingMedia) {
       const author = item.replyTo.senderDisplayName || t('peer');
       bubble.append(button(`${author} · ${item.replyTo.preview || t('message')}`, () => jumpTo(item.replyTo.messageId), 'reply-quote'));
     }
-    if (hasMedia) {
-      const identity = mediaIdentity(item);
-      const key = JSON.stringify([threadGeneration, language, identity, sticker, item.media]);
+    if (mediaItem) {
+      const key = JSON.stringify([threadGeneration, language, mediaItem.identity, sticker, item.media]);
       const attachment = mediaRenderKeys.get(existingMedia) === key ? existingMedia
-        : chatMedia.render({ ...item, thread: threadGeneration, conversationId: activeId, isSticker: sticker, identity });
+        : chatMedia.render(mediaItem);
       mediaRenderKeys.set(attachment, key);
       bubble.append(attachment);
     }
@@ -591,6 +627,8 @@ function renderMessage(item, existingMedia) {
       canReply: ['text', 'image', 'voice'].includes(item.type) && !sendingRestricted(),
       canEdit: own && item.type === 'text', canDelete: own,
       canPin: !group || currentThread.role === 'owner' || currentThread.role === 'admin',
+      canDownload: chatMedia.canDownload(mediaItem), mediaItem,
+      canEscalate: canSendViaOfflineSms(item),
     };
     const actions = iconButton('m6 9 6 6 6-6', t('actions'),
       () => tools.showMessageActions(menuMessage, actions), 'message-action message-menu-toggle');
@@ -606,8 +644,9 @@ function renderMessage(item, existingMedia) {
   const meta = el('p', 'message-meta');
   if (item.editedAt && !item.deletedForEveryone) meta.append(el('span', '', t('edited')));
   if (currentThread.userState?.starredMessageIds?.includes(item.id)) meta.append(el('span', 'message-star', '★'));
+  if (group && own && !item.deletedForEveryone) meta.append(groupReceiptCounters(item));
   meta.append(el('time', '', formatTime(item.createdAt)));
-  if (own && !item.deletedForEveryone) {
+  if (!group && own && !item.deletedForEveryone) {
     const state = item.readCount > 0 || item.status === 'read' ? 'read'
       : item.deliveredCount > 0 || item.status === 'delivered' ? 'delivered' : item.status === 'sent' ? 'sent' : '';
     if (state) {
@@ -990,8 +1029,13 @@ function openGroupInfo() {
   ready.start();
 }
 
-function openMessageInfo(message) {
+function openMessageInfo(message, viaSms = false) {
   if (!user || message.session !== session || message.conversationId !== activeId || !currentThread) return;
+  if (viaSms) {
+    const current = currentThread.messages.find((item) => item.id === message.id);
+    if (!canSendViaOfflineSms(current)) { announce(t('actionFailed')); return; }
+    message = { ...message, text: current.text ?? '' };
+  }
   closeDialog();
   const generation = threadGeneration;
   const conversation = currentThread.conversation;
@@ -1010,8 +1054,11 @@ function openMessageInfo(message) {
   messageInfoPanel.replaceChildren(info.view);
   messageInfoPanel.hidden = false;
   main.dataset.messageInfo = '';
-  info.focus();
-  void info.load();
+  if (viaSms) info.openSms();
+  else {
+    info.focus();
+    void info.load();
+  }
 }
 
 const feeds = createLiveFeeds({ panel: featurePanel, getLanguage: () => language, call, formatTime });
@@ -1055,6 +1102,8 @@ const tools = createChatTools({
   toggleReaction: (id, emoji, item) => chatAction('reactToMessage', { messageId: id, emoji }, item.conversationId),
   togglePin: (item) => chatMessageAction('pinMessage', item, { pinned: !item.pinned }),
   toggleStar: (item) => chatMessageAction('starMessage', item, { starred: !item.starred }),
+  downloadAttachment: (item) => chatMedia.download(item.mediaItem),
+  openMessageSms: (item) => openMessageInfo(item, true),
   openMessageInfo,
   forwardMessage: (id, item) => item.conversationId === activeId ? call('forwardMessages', {
     sourceConversationId: item.conversationId, messageIds: [item.id], targetConversationIds: [id],

@@ -9,7 +9,7 @@ const labels = {
     react: 'React with', reactAction: 'React', moreReactions: 'More reactions', chooseCopy: 'Copy message text',
     pin: 'Pin message', unpin: 'Unpin message', star: 'Star message', unstar: 'Unstar message',
     pinned: 'Message pinned.', unpinned: 'Message unpinned.', starred: 'Message starred.', unstarred: 'Star removed.',
-    info: 'Message info',
+    download: 'Download', sendSms: 'Send via OfflineSMS', info: 'Message info',
     actionFailed: 'Could not complete the action. Try again.',
     actionDenied: 'You do not have permission to perform this action.',
     editExpired: 'The time limit for editing this message has passed.',
@@ -24,7 +24,7 @@ const labels = {
     react: 'تفاعل بـ', reactAction: 'تفاعل', moreReactions: 'تفاعلات أخرى', chooseCopy: 'نسخ نص الرسالة',
     pin: 'تثبيت الرسالة', unpin: 'إلغاء تثبيت الرسالة', star: 'تمييز بنجمة', unstar: 'إزالة النجمة',
     pinned: 'ثُبّتت الرسالة.', unpinned: 'أُلغي تثبيت الرسالة.', starred: 'مُيّزت الرسالة بنجمة.', unstarred: 'أُزيلت النجمة.',
-    info: 'معلومات الرسالة',
+    download: 'تحميل', sendSms: 'إرسال عبر OfflineSMS', info: 'معلومات الرسالة',
     actionFailed: 'تعذر إكمال الإجراء. حاول مرة أخرى.',
     actionDenied: 'ليس لديك إذن لتنفيذ هذا الإجراء.',
     editExpired: 'انتهت المهلة المتاحة لتعديل هذه الرسالة.',
@@ -40,6 +40,8 @@ const actionIcons = {
   forward: 'm15 5 4 4-4 4m4-4h-7a6 6 0 0 0-6 6v2',
   pin: 'M16 3H8m1 0v7l-4 4v2h14v-2l-4-4V3m-3 13v5',
   star: 'm12 3 2.7 5.7 6.3.9-4.6 4.4 1.1 6.3-5.5-3-5.5 3 1.1-6.3L3 9.6l6.3-.9L12 3Z',
+  download: 'M12 3v12m-4-4 4 4 4-4M5 16v4h14v-4',
+  'send-sms': 'M22 2 15 22l-4-9-9-4L22 2ZM22 2 11 13',
   info: 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-1v5m0-8h.01',
   edit: 'm4 20 1-5L16 4l4 4L9 19l-5 1ZM14 6l4 4',
   remove: 'M4 6h16M9 6V3h6v3M6 6l1 14h10l1-14m-8 4v6m4-6v6',
@@ -91,7 +93,8 @@ function messageInput(value, maxLength, rows) {
 
 export function createChatTools({
   getLanguage, showDialog, closeDialog, getThreads, forwardMessage,
-  setReply, updateMessage, deleteMessage, toggleReaction, togglePin, toggleStar, openMessageInfo, announce, canUseMessage = () => true,
+  setReply, updateMessage, deleteMessage, toggleReaction, togglePin, toggleStar,
+  downloadAttachment, openMessageSms, openMessageInfo, announce, canUseMessage = () => true,
 }) {
   const copy = () => labels[getLanguage()] ?? labels.en;
   const pendingActions = new Set();
@@ -360,6 +363,15 @@ export function createChatTools({
           success: message.starred ? t.unstarred : t.starred,
         });
       }), message.starred ? 'marked' : ''));
+    }
+    if (downloadAttachment && message.canDownload && !message.deletedForEveryone) {
+      actions.append(messageActionButton('download', t.download, run(() => {
+        closeDialog();
+        void perform(actionKey('download', message), () => downloadAttachment(message), t);
+      })));
+    }
+    if (openMessageSms && message.canEscalate && !message.deletedForEveryone) {
+      actions.append(messageActionButton('send-sms', t.sendSms, run(() => openMessageSms(message))));
     }
     if (openMessageInfo) actions.append(messageActionButton('info', t.info, run(() => openMessageInfo(message))));
     const own = message.author === 'you';
