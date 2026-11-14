@@ -1,4 +1,5 @@
 import { createPhoneAuthClient } from './phone-auth-client.js';
+import { createGroupAvatarUploader } from './group-avatar-upload.js';
 
 // The web client uses the same authenticated Firestore reads and callable writes as mobile.
 export const WATCH_LIMITS = Object.freeze({ conversations: 50, messages: 100 });
@@ -140,6 +141,31 @@ export function initializeFirebaseClient(sdk, config, { appCheckSiteKey } = {}) 
     }, onError);
   }
 
+  function watchGroupRoster(uid, conversationId, collectionName, idKey, onRows, onError) {
+    const source = sdk.collection(db, 'conversations', documentId(conversationId), collectionName);
+    return watchScoped(uid, source, snapshot => {
+      onRows(snapshot.docs.map(row => ({ ...row.data(), [idKey]: row.id })));
+    }, onError);
+  }
+
+  function watchGroupInviteSettings(uid, conversationId, onSettings, onError) {
+    const source = sdk.doc(db, 'conversations', documentId(conversationId), 'inviteSettings', 'current');
+    return watchScoped(uid, source, snapshot => onSettings(snapshot.exists() ? snapshot.data() : null), onError);
+  }
+
+  function watchGroupJoinRequests(uid, conversationId, onRows, onError) {
+    const source = sdk.query(
+      sdk.collection(db, 'conversations', documentId(conversationId), 'joinRequests'),
+      sdk.where('status', '==', 'pending'),
+    );
+    return watchScoped(uid, source, snapshot => {
+      onRows(snapshot.docs.map(row => {
+        const { requesterUid, requesterName, requesterPhotoURL, requestedAt } = row.data();
+        return { requestId: row.id, requesterUid, requesterName, requesterPhotoURL, requestedAt };
+      }));
+    }, onError);
+  }
+
   function watchThread(uid, conversationId, onState, onError) {
     const id = documentId(conversationId);
     const state = { conversation: undefined, messages: undefined, userState: undefined, role: undefined };
@@ -212,6 +238,23 @@ export function initializeFirebaseClient(sdk, config, { appCheckSiteKey } = {}) 
     return asPublicProfile(snapshot);
   }
 
+  async function getGroupMemberProfiles(uid, memberUids) {
+    requireSession(uid);
+    const ids = [...new Set(memberUids.map(documentId))];
+    const profiles = [];
+    // Firestore's `in` operator supports up to 30 values per query.
+    for (let offset = 0; offset < ids.length; offset += 30) {
+      const source = sdk.query(
+        sdk.collection(db, 'users'),
+        sdk.where(sdk.documentId(), 'in', ids.slice(offset, offset + 30)),
+      );
+      const snapshot = await sdk.getDocsFromServer(source);
+      requireSession(uid);
+      profiles.push(...snapshot.docs.map(asPublicProfile));
+    }
+    return profiles;
+  }
+
   async function findByUsername(username) {
     const owner = currentUid();
     const normalized = typeof username === 'string' ? username.trim().replace(/^@/, '').toLowerCase() : '';
@@ -266,9 +309,15 @@ export function initializeFirebaseClient(sdk, config, { appCheckSiteKey } = {}) 
     watchConversations,
     watchThread,
     watchUserState,
+    watchGroupMembers: (uid, id, onRows, onError) => watchGroupRoster(uid, id, 'members', 'uid', onRows, onError),
+    watchGroupExternalMembers: (uid, id, onRows, onError) => watchGroupRoster(uid, id, 'externalMembers', 'contactId', onRows, onError),
+    watchGroupInviteSettings,
+    watchGroupJoinRequests,
     getPublicProfile,
+    getGroupMemberProfiles,
     findByUsername,
     getMediaUrl,
+    uploadGroupAvatar: createGroupAvatarUploader({ sdk, storage, currentUid, requireSession }),
     async completeInviteProfile({ username, displayName }) {
       const uid = currentUid();
       const snapshot = await sdk.getDocFromServer(sdk.doc(db, 'users', documentId(uid)));

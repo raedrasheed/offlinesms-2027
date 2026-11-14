@@ -4,6 +4,7 @@ import { createLiveFeeds } from './live-feeds.js';
 import { createChatTools } from './chat-tools.js';
 import { createGroupInviteView } from './group-invite.js';
 import { createMessageInfo } from './message-info.js';
+import { createGroupInfo } from './group-info.js';
 
 const words = {
   navigation: ['التنقل', 'Navigation'], chats: ['المحادثات', 'Chats'], status: ['الحالات', 'Status'],
@@ -41,6 +42,7 @@ const words = {
   privacy: ['سياسة الخصوصية', 'Privacy policy'], terms: ['شروط الاستخدام', 'Terms of service'],
   recent: ['المحادثات الأخيرة', 'Recent conversations'],
   groupInvite: ['دعوة المجموعة', 'Group invitation'],
+  useDefaultWallpaper: ['استخدام الإعداد العام', 'Use global default'],
 };
 
 const byId = (id) => document.getElementById(id);
@@ -58,6 +60,7 @@ const latest = byId('latest');
 const featurePanel = byId('feature-panel');
 const dialog = byId('dialog');
 const messageInfoPanel = byId('message-info');
+const groupInfoPanel = byId('group-info');
 const inviteShortcut = byId('group-invite-shortcut');
 const mobile = window.matchMedia('(max-width: 670px)');
 const darkMode = window.matchMedia('(prefers-color-scheme: dark)');
@@ -89,6 +92,7 @@ let conversations = [];
 let listState = 'loading';
 let activeId;
 let currentThread;
+let groupInfo;
 let threadError = false;
 let stopList;
 let stopThread;
@@ -393,9 +397,11 @@ function subscribeList() {
 function openThread(id, focus = true) {
   if (!user) return;
   closeMessageInfo();
+  closeGroupInfo();
   tools.dismiss();
   stopThread?.();
   activeId = id;
+  applyWallpaper();
   currentThread = undefined;
   threadError = false;
   pendingRead = undefined;
@@ -409,6 +415,13 @@ function openThread(id, focus = true) {
     if (generation !== threadGeneration) return;
     const previous = currentThread;
     currentThread = value;
+    if (groupInfo) {
+      if (!value.role || value.conversation.type !== 'group') closeGroupInfo();
+      else {
+        if (['owner', 'admin'].includes(previous?.role) && !['owner', 'admin'].includes(value.role)) closeDialog();
+        groupInfo.update();
+      }
+    }
     threadError = false;
     syncProfile(peerId(value.conversation));
     const atBottom = scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop < 90;
@@ -421,6 +434,7 @@ function openThread(id, focus = true) {
     currentThread = undefined;
     threadError = true;
     closeMessageInfo();
+    closeGroupInfo();
     tools.dismiss();
     closeDialog();
     renderThread();
@@ -428,7 +442,7 @@ function openThread(id, focus = true) {
 }
 
 function maybeMarkRead() {
-  if (!currentThread || !messageInfoPanel.hidden || section !== 'chats' || workspace.dataset.mobileView !== 'chat' || document.hidden || !document.hasFocus()) return;
+  if (!currentThread || !messageInfoPanel.hidden || !groupInfoPanel.hidden || section !== 'chats' || workspace.dataset.mobileView !== 'chat' || document.hidden || !document.hasFocus()) return;
   if (!currentThread.userState?.unreadCount) return;
   const incoming = currentThread.messages.findLast((message) => message.senderUid !== user.uid);
   if (!incoming || pendingRead === incoming.id) return;
@@ -590,6 +604,7 @@ function renderMessage(item) {
 
 function renderThreadHeader() {
   const item = currentThread?.conversation || conversations.find((candidate) => candidate.id === activeId);
+  byId('conversation-search').classList.toggle('group-search-button', item?.type === 'group');
   const title = item ? threadName(item) : t('chats');
   byId('chat-title').textContent = title;
   byId('chat-description').textContent = !item ? '' : item.type === 'direct' ? t('direct')
@@ -693,6 +708,7 @@ function showMessageSearch() {
 function showDetails() {
   const item = currentThread?.conversation;
   if (!item) return;
+  if (item.type === 'group' && currentThread.role) { openGroupInfo(); return; }
   const content = el('div');
   content.append(el('p', 'dialog-note', byId('chat-description').textContent));
   if (item.description) content.append(el('p', 'dialog-note', item.description));
@@ -767,8 +783,26 @@ function choice(title, options, selected, onChange) {
 
 function chooseWallpaper(next) {
   wallpaper = next;
-  scroll.closest('.conversation').dataset.wallpaper = next;
   savePreference('wallpaper', next);
+  applyWallpaper();
+}
+
+function chatWallpaperKey() {
+  return `wallpaper-${user?.uid}-${activeId}`;
+}
+
+function applyWallpaper() {
+  const choice = user && activeId ? preference(chatWallpaperKey(), ['inherit', 'default', 'plain'], 'inherit') : 'inherit';
+  scroll.closest('.conversation').dataset.wallpaper = choice === 'inherit' ? wallpaper : choice;
+}
+
+function showGroupWallpaper() {
+  const key = chatWallpaperKey();
+  const options = [['inherit', 'useDefaultWallpaper'], ['default', 'defaultWallpaper'], ['plain', 'plainWallpaper']];
+  showDialog(t('wallpaper'), choice(t('wallpaper'), options, preference(key, options.map(([value]) => value), 'inherit'), (next) => {
+    savePreference(key, next);
+    applyWallpaper();
+  }));
 }
 
 function showSettings() {
@@ -831,6 +865,7 @@ function renderSection() {
 
 function navigate(next) {
   closeMessageInfo();
+  closeGroupInfo();
   tools.dismiss();
   closeDialog();
   if (section !== next) { feeds.stop(); featurePanel.scrollTop = 0; }
@@ -868,6 +903,62 @@ function closeMessageInfo() {
   messageInfoPanel.hidden = true;
   messageInfoPanel.replaceChildren();
   delete main.dataset.messageInfo;
+}
+
+function closeGroupInfo() {
+  if (!groupInfo) return;
+  const view = groupInfo;
+  groupInfo = undefined;
+  view.stop();
+  closeDialog();
+  groupInfoPanel.hidden = true;
+  groupInfoPanel.replaceChildren();
+  delete main.dataset.groupInfo;
+}
+
+function openGroupInfo() {
+  const uid = user.uid;
+  const conversationId = activeId;
+  const generation = threadGeneration;
+  const getContext = () => {
+    const { conversation, role } = currentThread ?? {};
+    if (generation === threadGeneration && user?.uid === uid && conversation?.type === 'group' && role) return { conversation, role, uid };
+    return undefined;
+  };
+  if (!getContext()) return;
+  closeMessageInfo();
+  closeGroupInfo();
+  tools.dismiss();
+  closeDialog();
+  const ready = createGroupInfo({
+    locale: language, uid, conversationId, client, call, getContext,
+    isActive: () => groupInfo === ready && Boolean(getContext()),
+    showDialog, closeDialog, formatTime, makeAvatar: avatar, groupName: threadName,
+    onWallpaper: showGroupWallpaper,
+    onOpenDirect: (id) => { filter = 'all'; search.value = ''; openThread(id); },
+    onLeft: (id, actor) => {
+      if (generation !== threadGeneration || id !== activeId || actor !== user?.uid) return;
+      closeGroupInfo();
+      stopThread?.();
+      stopThread = undefined;
+      ++threadGeneration;
+      activeId = currentThread = pendingRead = renderedThread = undefined;
+      threadError = false;
+      conversations = conversations.filter((item) => item.id !== id);
+      workspace.dataset.mobileView = 'list';
+      messageInput.value = '';
+      applyWallpaper();
+      renderList();
+      renderThread();
+    },
+    onBack: () => { closeGroupInfo(); byId('details').focus({ preventScroll: true }); maybeMarkRead(); },
+  });
+  groupInfo = ready;
+  groupInfoPanel.replaceChildren(ready.view);
+  groupInfoPanel.hidden = false;
+  main.dataset.groupInfo = '';
+  workspace.dataset.mobileView = 'chat';
+  ready.start();
 }
 
 function openMessageInfo(message) {
@@ -1009,6 +1100,7 @@ function clearSession() {
   renderedThread = undefined;
   threadError = false;
   closeMessageInfo();
+  closeGroupInfo();
   tools.dismiss();
   feeds.stop();
   closeDialog();
@@ -1072,10 +1164,13 @@ inviteShortcut.addEventListener('click', showGroupInvite);
 window.addEventListener('hashchange', showGroupInvite);
 byId('details').addEventListener('click', showDetails);
 byId('conversation-search').addEventListener('click', showMessageSearch);
-byId('wallpaper').addEventListener('click', () => showDialog(t('wallpaper'),
-  choice(t('wallpaper'), [['default', 'defaultWallpaper'], ['plain', 'plainWallpaper']], wallpaper, chooseWallpaper)));
+byId('wallpaper').addEventListener('click', () => {
+  if (currentThread?.conversation.type === 'group') { showGroupWallpaper(); return; }
+  showDialog(t('wallpaper'), choice(t('wallpaper'), [['default', 'defaultWallpaper'], ['plain', 'plainWallpaper']], wallpaper, chooseWallpaper));
+});
 byId('extras').addEventListener('click', showComposerOptions);
 byId('back').addEventListener('click', () => {
+  closeGroupInfo();
   workspace.dataset.mobileView = 'list';
   [...list.querySelectorAll('[data-thread]')].find((item) => item.dataset.thread === activeId)?.focus({ preventScroll: true });
 });
