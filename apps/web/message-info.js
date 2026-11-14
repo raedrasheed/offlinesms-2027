@@ -1,10 +1,12 @@
 import { avatarColor } from '../mobile/src/lib/avatar.ts';
 import { createMessageInfoSms } from './message-info-sms.js';
+import { messageReceiptTotals } from './message-receipts.js';
 
 const copy = {
   en: {
     title: 'Message info', back: 'Back to conversation', options: 'Message info options', refresh: 'Refresh',
-    members: 'members', delivered: 'Delivered', read: 'Read', pending: 'Pending', failed: 'Failed', played: 'Played', all: 'All',
+    members: 'members', delivered: 'Delivered', 'delivered-unread': 'Delivered but unread', read: 'Seen',
+    pending: 'Pending', failed: 'Failed', played: 'Played', all: 'All',
     filter: 'Filter recipients', search: 'Search recipients', unnamed: 'Unknown recipient', empty: 'No recipients in this state.',
     permission: 'Only the sender can see individual recipient details.', loading: 'Loading message info…',
     error: 'Could not load message info.', retry: 'Try again', deleted: 'This message was deleted.',
@@ -12,7 +14,8 @@ const copy = {
   },
   ar: {
     title: 'معلومات الرسالة', back: 'العودة إلى المحادثة', options: 'خيارات معلومات الرسالة', refresh: 'تحديث',
-    members: 'أعضاء', delivered: 'وصلت', read: 'قُرئت', pending: 'قيد الانتظار', failed: 'فشلت', played: 'شُغّلت', all: 'الكل',
+    members: 'أعضاء', delivered: 'وصلت', 'delivered-unread': 'وصلت ولم تُشاهد', read: 'شوهدت',
+    pending: 'قيد الانتظار', failed: 'فشلت', played: 'شُغّلت', all: 'الكل',
     filter: 'تصفية المستلمين', search: 'ابحث عن مستلم', unnamed: 'مستلم غير معروف', empty: 'لا يوجد مستلمون بهذه الحالة.',
     permission: 'تفاصيل المستلمين متاحة لمرسل الرسالة فقط.', loading: 'جارٍ تحميل معلومات الرسالة…',
     error: 'تعذّر تحميل معلومات الرسالة.', retry: 'إعادة المحاولة', deleted: 'حُذفت هذه الرسالة.',
@@ -21,10 +24,11 @@ const copy = {
 };
 
 const statuses = ['delivered', 'read', 'pending', 'failed'];
-const filters = ['all', 'read', 'delivered', 'pending', 'failed'];
+const filters = ['all', 'read', 'delivered', 'delivered-unread', 'pending', 'failed'];
 const paths = {
   back: 'm15 18-6-6 6-6', options: 'M5 12h.01M12 12h.01M19 12h.01',
-  delivered: 'm2 12 5 5 10-10m-6 9 10-10', read: 'm2 12 5 5 10-10m-6 9 10-10', played: 'm2 12 5 5 10-10m-6 9 10-10',
+  delivered: 'm2 12 5 5 10-10m-6 9 10-10', played: 'm2 12 5 5 10-10m-6 9 10-10',
+  read: 'M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Zm13 0a3 3 0 1 0-6 0 3 3 0 0 0 6 0Z',
   pending: 'M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0ZM12 6v6l4 2',
   failed: 'M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0ZM12 7v5m0 4h.01',
   search: 'M17 10a7 7 0 1 1-14 0 7 7 0 0 1 14 0Zm-2 5 5 5',
@@ -54,10 +58,6 @@ function icon(kind) {
   if (kind === 'options') path.setAttribute('stroke-width', '3.5');
   svg.append(path);
   return svg;
-}
-
-function count(value) {
-  return Number.isInteger(value) && value >= 0 ? value : 0;
 }
 
 function receiptBucket(status) {
@@ -134,11 +134,14 @@ export function createMessageInfo({ message, title, memberCount, locale, formatT
   }
 
   function showRecipients(recipients, totals) {
+    const filterCounts = {
+      ...totals, delivered: totals.delivered + totals.read, 'delivered-unread': totals.delivered,
+    };
     const filterGroup = element('div', 'message-info-filters');
     filterGroup.setAttribute('role', 'group');
     filterGroup.setAttribute('aria-label', text.filter);
     const filterButtons = filters.map((key) => {
-      const button = action('', key === 'all' ? text.all : `${text[key]} ${number.format(totals[key])}`, () => {
+      const button = action('', key === 'all' ? text.all : `${text[key]} ${number.format(filterCounts[key])}`, () => {
         activeFilter = key;
         updateList();
       });
@@ -164,9 +167,13 @@ export function createMessageInfo({ message, title, memberCount, locale, formatT
     function updateList() {
       for (const button of filterButtons) button.setAttribute('aria-pressed', String(button.dataset.filter === activeFilter));
       const match = query.trim().toLocaleLowerCase(locale);
-      const visible = recipients.filter((recipient) =>
-        (activeFilter === 'all' || receiptBucket(recipient.status) === activeFilter)
-        && (recipient.displayName || text.unnamed).toLocaleLowerCase(locale).includes(match));
+      const visible = recipients.filter((recipient) => {
+        const status = receiptBucket(recipient.status);
+        const filterStatus = activeFilter === 'delivered-unread' ? 'delivered' : activeFilter;
+        const matchesFilter = activeFilter === 'all' || status === filterStatus
+          || (activeFilter === 'delivered' && status === 'read');
+        return matchesFilter && (recipient.displayName || text.unnamed).toLocaleLowerCase(locale).includes(match);
+      });
       list.replaceChildren(...visible.map(recipientRow));
       empty.hidden = Boolean(visible.length);
     }
@@ -205,10 +212,10 @@ export function createMessageInfo({ message, title, memberCount, locale, formatT
       ? [...data.recipients].sort((a, b) => collator.compare(a.displayName || text.unnamed, b.displayName || text.unnamed)) : null;
     const totals = { delivered: 0, read: 0, pending: 0, failed: 0 };
     for (const recipient of recipients ?? []) totals[receiptBucket(recipient.status)]++;
-    // Read/viewed/played are one filter. The delivered total includes recipients who read the message.
+    const counts = messageReceiptTotals(a);
     const summary = {
-      delivered: count(a.deliveredCount), read: count(a.viewedCount ?? a.readCount) + count(a.playedCount),
-      pending: recipients ? totals.pending : count(a.pendingCount), failed: count(a.failedCount),
+      delivered: counts.delivered, read: counts.seen,
+      pending: recipients ? totals.pending : counts.pending, failed: counts.failed,
     };
     preview.textContent = deleted ? text.deleted : message.text || '—';
     time.textContent = formatTime(data.createdAt) || message.timeLabel || '';
