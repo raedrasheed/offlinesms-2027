@@ -66,7 +66,7 @@ function asPublicProfile(snapshot) {
 export function initializeFirebaseClient(sdk, config, { appCheckSiteKey } = {}) {
   const app = sdk.initializeApp(config);
   const auth = sdk.initializeAuth(app, {
-    persistence: [sdk.browserSessionPersistence, sdk.inMemoryPersistence],
+    persistence: [sdk.indexedDBLocalPersistence, sdk.browserLocalPersistence, sdk.inMemoryPersistence],
   });
   if (appCheckSiteKey) {
     sdk.initializeAppCheck(app, {
