@@ -4,6 +4,7 @@ import { createLiveFeeds } from './live-feeds.js';
 import { createChatTools } from './chat-tools.js';
 import { createGroupInviteView } from './group-invite.js';
 import { createMessageInfo } from './message-info.js';
+import { messageReceiptTotals } from './message-receipts.js';
 import { createGroupInfo } from './group-info.js';
 import { createChatMedia } from './chat-media.js';
 import { bundledSticker, createChatMediaSource } from './chat-media-source.js';
@@ -29,7 +30,7 @@ const words = {
   replyTo: ['الرد على', 'Replying to'], cancelReply: ['إلغاء الرد', 'Cancel reply'], forwarded: ['معاد توجيهها', 'Forwarded'],
   edited: ['تم التعديل', 'Edited'], pinned: ['رسالة مثبّتة', 'Pinned message'], unpin: ['إلغاء تثبيت الرسالة', 'Unpin message'],
   removed: ['حُذفت هذه الرسالة.', 'This message was deleted.'], sent: ['أُرسلت', 'Sent'],
-  deliveredUnread: ['وصلت ولم تُشاهد', 'Delivered but unread'], seen: ['شاهدوا الرسالة', 'Seen'],
+  seen: ['شوهدت', 'Seen'],
   delivered: ['وصلت', 'Delivered'], read: ['قُرئت', 'Read'], sendRestricted: ['الإرسال مقيّد في هذه المحادثة.', 'Sending is restricted in this conversation.'],
   sendError: ['تعذّر الإرسال. بقيت رسالتك في حقل الكتابة.', 'Could not send. Your message is still in the composer.'],
   actionFailed: ['تعذّر تنفيذ الإجراء. حاول مرة أخرى.', 'Could not complete the action. Try again.'],
@@ -552,15 +553,11 @@ function canSendViaOfflineSms(item) {
 }
 
 function groupReceiptCounters(item) {
-  const count = (value) => Number.isSafeInteger(value) && value >= 0 ? value : 0;
-  // Delivery totals include readers, viewers and recipients who played the media.
-  // The viewed total already includes read receipts on current message records.
-  const seen = Math.max(count(item.readCount), count(item.viewedCount)) + count(item.playedCount);
-  const deliveredUnread = Math.max(0, count(item.deliveredCount) - seen);
+  const { delivered, seen } = messageReceiptTotals(item);
   const counters = el('span', 'message-receipt-counts');
   counters.dir = 'ltr';
   for (const [status, label, value, icon] of [
-    ['delivered-unread', t('deliveredUnread'), deliveredUnread, 'm2 13 4 4L17 6m-8 10 2 2L23 6'],
+    ['delivered', t('delivered'), delivered, 'm2 13 4 4L17 6m-8 10 2 2L23 6'],
     ['seen', t('seen'), seen, 'M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Zm13 0a3 3 0 1 0-6 0 3 3 0 0 0 6 0Z'],
   ]) {
     const counter = el('span', 'message-receipt-count');
