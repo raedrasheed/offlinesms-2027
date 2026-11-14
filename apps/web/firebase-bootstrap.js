@@ -9,7 +9,7 @@ import {
   memoryLocalCache, onSnapshot, orderBy, query, where,
 } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
-import { getDownloadURL, getStorage, ref, uploadBytes } from 'firebase/storage';
+import { getBlob, getDownloadURL, getStorage, ref, uploadBytes } from 'firebase/storage';
 import { initializeFirebaseClient } from './firebase-client.js';
 import { isProductionFirebaseConfig } from './firebase-config.js';
 
@@ -19,7 +19,7 @@ const sdk = {
   onAuthStateChanged, signInWithCustomToken, signOut,
   collection, doc, documentId, getDocFromServer, getDocsFromServer, initializeFirestore, limit,
   memoryLocalCache, onSnapshot, orderBy, query, where,
-  getFunctions, httpsCallable, getDownloadURL, getStorage, ref, uploadBytes,
+  getFunctions, httpsCallable, getBlob, getDownloadURL, getStorage, ref, uploadBytes,
 };
 
 async function loadHostingConfig() {

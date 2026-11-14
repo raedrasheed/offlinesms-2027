@@ -1,0 +1,171 @@
+.chat-media {
+  display: grid;
+  gap: 6px;
+  inline-size: clamp(190px, 34vw, 340px);
+  max-inline-size: 100%;
+  min-inline-size: 0;
+  margin-block: 4px 6px;
+}
+
+.chat-media-content { min-inline-size: 0; }
+
+.chat-media-preview {
+  display: grid;
+  place-items: center;
+  position: relative;
+  inline-size: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 14px;
+  background: var(--soft);
+  color: inherit;
+}
+
+.chat-media-image,
+.chat-media-video {
+  display: block;
+  inline-size: 100%;
+  max-block-size: min(420px, 65dvh);
+  aspect-ratio: var(--chat-media-aspect, auto);
+  border-radius: 14px;
+  object-fit: contain;
+  background: var(--soft);
+}
+
+.chat-media-video { background: #10151a; }
+.chat-media-audio { display: block; inline-size: 100%; min-inline-size: 0; }
+.chat-media-file { color: var(--text); font-size: 13px; overflow-wrap: anywhere; }
+
+.chat-media-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-inline-size: 0;
+}
+
+.chat-media :is(.chat-media-download, .chat-media-open),
+.chat-media-viewer :is(.chat-media-download, .chat-media-open) {
+  padding: 5px 9px;
+  min-block-size: 32px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--brand);
+  font-size: 12px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.chat-media :is(.chat-media-download, .chat-media-open):hover:not(:disabled),
+.chat-media-viewer :is(.chat-media-download, .chat-media-open):hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+
+.chat-media :is(.chat-media-download, .chat-media-open):disabled,
+.chat-media-viewer :is(.chat-media-download, .chat-media-open):disabled { opacity: .65; }
+
+.chat-media-note {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.chat-media-note:empty { display: none; }
+
+.chat-media:is(.chat-media--image, .chat-media--video) > .chat-media-note:only-child,
+.chat-media--sticker > .chat-media-note:only-child {
+  display: grid;
+  place-items: center;
+  aspect-ratio: var(--chat-media-aspect, 4 / 3);
+  max-block-size: min(420px, 65dvh);
+  padding: 8px;
+  border-radius: 14px;
+  background: var(--soft);
+  text-align: center;
+}
+
+.chat-media--video > .chat-media-note:only-child { aspect-ratio: var(--chat-media-aspect, 16 / 9); }
+
+.chat-media--sticker > .chat-media-note:only-child {
+  aspect-ratio: 1;
+  background: transparent;
+}
+
+.message-row .bubble:has(.chat-media--sticker) {
+  background: transparent;
+  box-shadow: none;
+}
+
+.message-row .bubble:has(.chat-media--sticker) .message-meta {
+  inline-size: fit-content;
+  max-inline-size: 100%;
+  margin-inline-start: auto;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--surface);
+}
+
+.chat-media--sticker { inline-size: 148px; }
+.chat-media--sticker .chat-media-preview { background: transparent; }
+
+.chat-media--sticker .chat-media-image,
+.chat-media-sticker-fallback {
+  inline-size: 100%;
+  aspect-ratio: 1;
+  border-radius: 0;
+  background: transparent;
+  object-fit: contain;
+}
+
+.chat-media-sticker-fallback {
+  display: grid;
+  place-items: center;
+  font-size: clamp(54px, 15vw, 88px);
+  line-height: 1;
+}
+
+#dialog:has(.chat-media-viewer) {
+  inline-size: min(900px, calc(100% - 28px));
+  max-inline-size: none;
+  max-block-size: calc(100dvh - 24px);
+  padding: 14px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+#dialog:has(.chat-media-viewer) > .dialog-heading {
+  position: sticky;
+  z-index: 1;
+  inset-block-start: 0;
+  background: var(--surface);
+}
+
+.chat-media-viewer { display: grid; justify-items: center; gap: 10px; min-inline-size: 0; }
+
+.chat-media-viewer :is(.chat-media-image, .chat-media-video) {
+  inline-size: auto;
+  max-inline-size: 100%;
+  max-block-size: min(74dvh, calc(100dvh - 142px));
+  aspect-ratio: auto;
+  object-fit: contain;
+}
+
+.chat-media-viewer .chat-media-video { inline-size: min(100%, 800px); }
+.chat-media-viewer .chat-media-audio { inline-size: min(100%, 400px); }
+
+.chat-media-viewer--sticker .chat-media-image {
+  max-inline-size: min(100%, 360px);
+  background: transparent;
+}
+
+@media (max-width: 670px) {
+  .chat-media:not(.chat-media--sticker) { inline-size: min(230px, 62vw); }
+  .chat-media-actions :is(.chat-media-download, .chat-media-open),
+  .chat-media-viewer :is(.chat-media-download, .chat-media-open) { min-block-size: 44px; }
+  #dialog:has(.chat-media-viewer) {
+    inline-size: calc(100% - 16px);
+    padding: 10px;
+  }
+}

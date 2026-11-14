@@ -1,4 +1,4 @@
-import { cp, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
@@ -55,11 +55,19 @@ const { outputFiles: [script] } = await build({
 const assetExtensions = new Set(['.css', '.jpg', '.mp4', '.png', '.svg', '.webp']);
 const entries = await readdir(source, { withFileTypes: true });
 const assets = entries.filter(entry => entry.isFile() && assetExtensions.has(extname(entry.name)));
+const stickerSource = fileURLToPath(new URL('../mobile/assets/stickers/simsim/', import.meta.url));
+const pack = JSON.parse(await readFile(join(stickerSource, 'pack.json'), 'utf8'));
+if (pack.id !== 'simsim' || !pack.stickers.every(({ id }) => /^[a-z0-9_]+$/.test(id))) {
+  throw new Error('Unexpected bundled sticker catalog.');
+}
 
 await rm(destination, { recursive: true, force: true });
-await mkdir(destination);
+const stickerDestination = join(destination, 'stickers', pack.id);
+await mkdir(stickerDestination, { recursive: true });
 await Promise.all([
   writeFile(join(destination, 'app.js'), script.contents),
   cp(join(source, 'index.html'), join(destination, 'index.html')),
   ...assets.map(({ name }) => cp(join(source, name), join(destination, name))),
+  ...pack.stickers.map(({ id }) => cp(join(stickerSource, `${id}.webp`), join(stickerDestination, `${id}.webp`))),
+  cp(join(stickerSource, 'LICENSE.md'), join(stickerDestination, 'LICENSE.md')),
 ]);
