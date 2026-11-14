@@ -105,11 +105,28 @@ const sends = new Map();
 
 const t = (key) => words[key]?.[language === 'ar' ? 0 : 1] ?? words.message[language === 'ar' ? 0 : 1];
 const numeral = (value) => new Intl.NumberFormat(language).format(value);
+const inviteCodePattern = /^[ABCDEFGHJKMNPQRSTVWXYZ0123456789]{8,40}$/;
+
+function inviteCodeFromHash(hash) {
+  if (!hash.startsWith('#join=')) return undefined;
+  const code = hash.slice('#join='.length);
+  return inviteCodePattern.test(code) ? code : null;
+}
 
 function inviteCodeFromLocation() {
-  if (!location.hash.startsWith('#join=')) return undefined;
-  const code = location.hash.slice('#join='.length);
-  return /^[ABCDEFGHJKMNPQRSTVWXYZ0123456789]{8,40}$/.test(code) ? code : null;
+  return inviteCodeFromHash(location.hash);
+}
+
+function sharedInviteCode(value) {
+  if (value.includes('\\')) return null;
+  try {
+    const url = new URL(value);
+    if (url.username || url.password) return null;
+    if (url.origin === 'https://web.offlinesms.com' && url.pathname === '/') return inviteCodeFromHash(url.hash);
+    if (!['https://links.offlinesms.com', 'https://offlinesms.com'].includes(url.origin)) return null;
+    const code = url.pathname.match(/^\/join\/([A-Z0-9]+)\/?$/)?.[1];
+    return code && inviteCodePattern.test(code) ? code : null;
+  } catch { return null; }
 }
 
 function showGroupInvite() {
@@ -465,6 +482,33 @@ function jumpTo(id) {
   window.setTimeout(() => row.classList.remove('message-highlight'), 1800);
 }
 
+function renderMessageText(value) {
+  const text = String(value);
+  const body = el('p', 'message-text');
+  body.dir = 'auto';
+  let offset = 0;
+  // Whitespace and bidi markers separate URLs from surrounding message text.
+  for (const match of text.matchAll(/https:\/\/[^\s<>"'«»“”‘’\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]+/gi)) {
+    if (match.index > 0 && /[\p{L}\p{N}_/@:.=+\-\\]/u.test(text[match.index - 1])) continue;
+    const url = match[0].replace(/[.,!?;:،؛؟…\])}]+$/u, '');
+    const code = sharedInviteCode(url);
+    if (!code) continue;
+    const anchor = el('a', 'message-invite-link', url);
+    anchor.href = `/#join=${code}`;
+    anchor.dir = 'ltr';
+    anchor.addEventListener('click', (event) => {
+      if (event.defaultPrevented || event.button !== 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      event.preventDefault();
+      if (code === inviteCodeFromLocation()) showGroupInvite();
+      else location.hash = `join=${code}`;
+    });
+    body.append(text.slice(offset, match.index), anchor);
+    offset = match.index + url.length;
+  }
+  body.append(text.slice(offset));
+  return body;
+}
+
 function renderMessage(item) {
   const own = (item.senderUid ?? item.senderId) === user.uid;
   const group = currentThread.conversation.type !== 'direct';
@@ -482,9 +526,8 @@ function renderMessage(item) {
       bubble.append(button(`${author} · ${item.replyTo.preview || t('message')}`, () => jumpTo(item.replyTo.messageId), 'reply-quote'));
     }
     if (item.media) bubble.append(showMedia(item));
-    const body = el('p', 'message-text', item.caption || item.text || (!item.media ? t(item.type) : ''));
-    body.dir = 'auto';
-    if (body.textContent) bubble.append(body);
+    const body = item.caption || item.text || (!item.media ? t(item.type) : '');
+    if (body) bubble.append(renderMessageText(body));
     if (item.type === 'poll' && Array.isArray(item.poll?.options)) {
       const options = el('ul', 'live-poll');
       item.poll.options.forEach((option) => {
