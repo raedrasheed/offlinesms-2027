@@ -29,7 +29,7 @@ textarea.chat-tool-input { resize: vertical; min-height: 58px; }
 .chat-tool-actions svg { width: 16px; height: 16px; }
 .chat-tool-actions .marked svg { color: var(--brand); }
 .chat-tool-actions .marked .chat-tool-icon-star { fill: currentColor; }
-[dir="rtl"] .chat-tool-icon-reply, [dir="rtl"] .chat-tool-icon-forward { transform: scaleX(-1); }
+[dir="rtl"] :is(.chat-tool-icon-reply, .chat-tool-icon-forward, .chat-tool-icon-send-sms) { transform: scaleX(-1); }
 .chat-tool-popover {
   position: fixed; z-index: 15; display: flex; flex-direction: column; align-items: flex-start;
   gap: 4px; width: max-content; min-width: 0; pointer-events: none;

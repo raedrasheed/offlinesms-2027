@@ -66,6 +66,7 @@ export function createChatMedia({ t, locale, showDialog, getMedia, downloadMedia
   function mediaPlayer(kind, data, active) {
     const node = element(kind === 'video' ? 'video' : 'audio', `chat-media-player chat-media-${kind}`);
     node.controls = true;
+    node.setAttribute('controlslist', 'nodownload');
     node.preload = kind === 'video' && !data.poster ? 'metadata' : 'none';
     node.setAttribute('aria-label', t(kind));
     if (kind === 'video') {
@@ -90,7 +91,33 @@ export function createChatMedia({ t, locale, showDialog, getMedia, downloadMedia
     if (playing === node) playing = undefined;
   }
 
-  function createDownload(item, data, active, controllers, isCurrent = active) {
+  function canDownload(item) {
+    if (!item || !handles(item) || item.deletedForEveryone || item.retentionDeleting) return false;
+    if (isSticker(item) && stickerSource?.(item.sticker)?.src) return true;
+    const media = item.media;
+    return Boolean((media?.storagePath || media?.downloadURL)
+      && (media.uploadStatus == null || media.uploadStatus === 'uploaded'));
+  }
+
+  async function download(item) {
+    if (!item || !isActive(item)) return;
+    if (!canDownload(item)) throw new Error('media-unavailable');
+    const request = new AbortController();
+    downloads.add(request);
+    try {
+      const local = isSticker(item) && stickerSource?.(item.sticker);
+      const data = local?.src ? local : await getMedia(item);
+      if (request.signal.aborted || !isActive(item)) return;
+      if (!data?.src) throw new Error('media-unavailable');
+      return await downloadMedia(item, data, { signal: request.signal, isActive: () => isActive(item) });
+    } catch (error) {
+      if (!request.signal.aborted && isActive(item)) throw error;
+    } finally {
+      downloads.delete(request);
+    }
+  }
+
+  function createViewerDownload(item, data, active, controllers) {
     const note = mediaNote('');
     note.hidden = true;
     let controller;
@@ -103,7 +130,7 @@ export function createChatMedia({ t, locale, showDialog, getMedia, downloadMedia
       action.textContent = labels().downloading;
       note.hidden = true;
       try {
-        await downloadMedia(item, data, { signal: request.signal, isActive: isCurrent });
+        await downloadMedia(item, data, { signal: request.signal, isActive: active });
       } catch {
         if (active() && !request.signal.aborted) {
           note.textContent = labels().downloadFailed;
@@ -128,7 +155,7 @@ export function createChatMedia({ t, locale, showDialog, getMedia, downloadMedia
     const controls = element('div', 'chat-media-actions');
     const controllers = new Set();
     const active = () => viewer.isConnected && viewer.closest('dialog')?.open === true && isActive(item);
-    const download = createDownload(item, data, active, controllers);
+    const download = createViewerDownload(item, data, active, controllers);
     controls.append(download.action);
     const node = kind === 'video' ? mediaPlayer(kind, data, active) : image(data.src, alt);
     node.addEventListener('error', () => {
@@ -174,7 +201,6 @@ export function createChatMedia({ t, locale, showDialog, getMedia, downloadMedia
     function show(data) {
       const content = element('div', 'chat-media-content');
       const actions = element('div', 'chat-media-actions');
-      const download = createDownload(item, data, active, downloads, () => isActive(item));
       const alt = data.alt || item.sticker?.alt || t(kind);
       if (kind === 'image' || kind === 'sticker') {
         const preview = button('chat-media-preview', '', () => {
@@ -213,8 +239,8 @@ export function createChatMedia({ t, locale, showDialog, getMedia, downloadMedia
         open.addEventListener('click', (event) => { if (!active()) event.preventDefault(); });
         actions.append(open);
       }
-      actions.append(download.action);
-      container.replaceChildren(content, actions, download.note);
+      container.replaceChildren(content);
+      if (actions.childElementCount) container.append(actions);
     }
 
     async function load(refresh = false) {
@@ -271,5 +297,5 @@ export function createChatMedia({ t, locale, showDialog, getMedia, downloadMedia
     }
   }
 
-  return { render, isSticker, handles, reset, prune };
+  return { render, isSticker, handles, canDownload, download, reset, prune };
 }
