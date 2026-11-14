@@ -63,14 +63,3 @@ textarea.chat-tool-input { resize: vertical; min-height: 58px; }
 .chat-tool-reaction-picker { display: grid; grid-template-columns: repeat(auto-fit, minmax(37px, 1fr)); }
 .chat-tool-reaction-picker .reaction { width: 100%; }
 .chat-tool-error { color: #a23737; font-size: 13px; }
-.chat-tool-info {
-  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 12px;
-  margin: 0; padding: 10px; border-radius: 9px; background: var(--soft);
-}
-.chat-tool-info dt { color: var(--muted); }
-.chat-tool-info dd { margin: 0; overflow-wrap: anywhere; }
-.chat-tool-info-preview { white-space: pre-wrap; overflow-wrap: anywhere; }
-.chat-tool-receipts { display: grid; gap: 8px; }
-.chat-tool-receipts h3 { margin: 0; font-size: 14px; }
-.chat-tool-recipient-list { max-height: 28vh; overflow: auto; }
-.chat-tool-recipient-list dt { overflow-wrap: anywhere; }

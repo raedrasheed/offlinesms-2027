@@ -9,10 +9,7 @@ const labels = {
     react: 'React with', reactAction: 'React', moreReactions: 'More reactions', chooseCopy: 'Copy message text',
     pin: 'Pin message', unpin: 'Unpin message', star: 'Star message', unstar: 'Unstar message',
     pinned: 'Message pinned.', unpinned: 'Message unpinned.', starred: 'Message starred.', unstarred: 'Star removed.',
-    info: 'Message info', time: 'Time', sender: 'Sender', you: 'You',
-    infoLoading: 'Loading delivery details…', infoFailed: 'Could not load delivery details.',
-    delivered: 'Delivered', read: 'Read', viewed: 'Viewed', played: 'Played', pending: 'Pending', failed: 'Failed',
-    recipients: 'Recipients', unnamedRecipient: 'Recipient',
+    info: 'Message info',
     actionFailed: 'Could not complete the action. Try again.',
     actionDenied: 'You do not have permission to perform this action.',
     editExpired: 'The time limit for editing this message has passed.',
@@ -27,10 +24,7 @@ const labels = {
     react: 'تفاعل بـ', reactAction: 'تفاعل', moreReactions: 'تفاعلات أخرى', chooseCopy: 'نسخ نص الرسالة',
     pin: 'تثبيت الرسالة', unpin: 'إلغاء تثبيت الرسالة', star: 'تمييز بنجمة', unstar: 'إزالة النجمة',
     pinned: 'ثُبّتت الرسالة.', unpinned: 'أُلغي تثبيت الرسالة.', starred: 'مُيّزت الرسالة بنجمة.', unstarred: 'أُزيلت النجمة.',
-    info: 'معلومات الرسالة', time: 'الوقت', sender: 'المرسل', you: 'أنت',
-    infoLoading: 'جارٍ تحميل تفاصيل التسليم…', infoFailed: 'تعذر تحميل تفاصيل التسليم.',
-    delivered: 'تم التسليم', read: 'مقروءة', viewed: 'شوهدت', played: 'شُغّلت', pending: 'قيد الانتظار', failed: 'تعذر التسليم',
-    recipients: 'المستلمون', unnamedRecipient: 'مستلم',
+    info: 'معلومات الرسالة',
     actionFailed: 'تعذر إكمال الإجراء. حاول مرة أخرى.',
     actionDenied: 'ليس لديك إذن لتنفيذ هذا الإجراء.',
     editExpired: 'انتهت المهلة المتاحة لتعديل هذه الرسالة.',
@@ -39,7 +33,6 @@ const labels = {
 
 const emojiChoices = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 const allReactions = [...emojiChoices, '😍', '🔥', '👏', '🎉', '🙌', '🤔', '😅', '🤩', '💯', '✨'];
-const receiptStates = ['delivered', 'read', 'viewed', 'played', 'pending', 'failed'];
 const actionIcons = {
   reply: 'M9 9 5 13l4 4M5 13h9a4 4 0 0 1 4 4',
   copy: 'M8 16H5V4h10v3M8 7h11v13H8z',
@@ -98,7 +91,7 @@ function messageInput(value, maxLength, rows) {
 
 export function createChatTools({
   getLanguage, showDialog, closeDialog, getThreads, forwardMessage,
-  setReply, updateMessage, deleteMessage, toggleReaction, togglePin, toggleStar, getMessageInfo, announce, canUseMessage = () => true,
+  setReply, updateMessage, deleteMessage, toggleReaction, togglePin, toggleStar, openMessageInfo, announce, canUseMessage = () => true,
 }) {
   const copy = () => labels[getLanguage()] ?? labels.en;
   const pendingActions = new Set();
@@ -210,59 +203,6 @@ export function createChatTools({
     buttons.append(actionButton(t.cancel, closeDialog), remove);
     content.append(element('p', 'chat-tool-note', t.removeHint), error, buttons);
     showDialog(t.remove, content);
-  }
-
-  function detailRow(list, label, value) {
-    if (typeof value !== 'string' || !value) return;
-    const detail = element('dd', '', value);
-    detail.dir = 'auto';
-    list.append(element('dt', '', label), detail);
-  }
-
-  async function showInfo(message, t) {
-    const content = element('div', 'chat-tool-stack');
-    const details = element('dl', 'chat-tool-info');
-    const sender = message.authorLabel || (message.author === 'you' ? t.you : '');
-    detailRow(details, t.sender, sender);
-    detailRow(details, t.time, message.timeLabel ?? message.time);
-    details.hidden = !details.children.length;
-    const preview = element('p', 'chat-tool-info-preview', message.text);
-    preview.dir = 'auto';
-    if (message.text) content.append(preview);
-    content.append(details);
-    const activity = element('div', 'chat-tool-receipts');
-    activity.setAttribute('aria-live', 'polite');
-    if (getMessageInfo) {
-      activity.append(element('p', 'chat-tool-note', t.infoLoading));
-      content.append(activity);
-    }
-    showDialog(t.info, content);
-    if (!getMessageInfo) return;
-
-    try {
-      const data = await getMessageInfo(message);
-      if (!sender) detailRow(details, t.sender, data?.senderDisplayName);
-      details.hidden = !details.children.length;
-      activity.replaceChildren();
-      const summary = element('dl', 'chat-tool-info');
-      const aggregates = data?.aggregates ?? data?.receiptCounts;
-      const formatNumber = new Intl.NumberFormat(getLanguage());
-      for (const status of receiptStates) {
-        const count = aggregates?.[status + 'Count'];
-        if (Number.isInteger(count) && count >= 0) detailRow(summary, t[status], formatNumber.format(count));
-      }
-      if (summary.children.length) activity.append(summary);
-      if (Array.isArray(data?.recipients) && data.recipients.length) {
-        const list = element('dl', 'chat-tool-info chat-tool-recipient-list');
-        for (const recipient of data.recipients) {
-          if (!receiptStates.includes(recipient?.status)) continue;
-          detailRow(list, recipient.displayName || t.unnamedRecipient, t[recipient.status]);
-        }
-        if (list.children.length) activity.append(element('h3', '', t.recipients), list);
-      }
-    } catch {
-      activity.replaceChildren(element('p', 'chat-tool-error', t.infoFailed));
-    }
   }
 
   function dismissPopover(restoreFocus = false) {
@@ -421,7 +361,7 @@ export function createChatTools({
         });
       }), message.starred ? 'marked' : ''));
     }
-    actions.append(messageActionButton('info', t.info, run(() => { void showInfo(message, t); })));
+    if (openMessageInfo) actions.append(messageActionButton('info', t.info, run(() => openMessageInfo(message))));
     const own = message.author === 'you';
     if (updateMessage && (message.canEdit ?? own) && (!message.type || message.type === 'text') && !message.deletedForEveryone) {
       actions.append(messageActionButton('edit', t.edit, run(() => showEdit(message, t))));

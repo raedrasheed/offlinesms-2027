@@ -3,6 +3,7 @@ import { createSignInView } from './web-sign-in.js';
 import { createLiveFeeds } from './live-feeds.js';
 import { createChatTools } from './chat-tools.js';
 import { createGroupInviteView } from './group-invite.js';
+import { createMessageInfo } from './message-info.js';
 
 const words = {
   navigation: ['التنقل', 'Navigation'], chats: ['المحادثات', 'Chats'], status: ['الحالات', 'Status'],
@@ -56,6 +57,7 @@ const feedback = byId('send-feedback');
 const latest = byId('latest');
 const featurePanel = byId('feature-panel');
 const dialog = byId('dialog');
+const messageInfoPanel = byId('message-info');
 const inviteShortcut = byId('group-invite-shortcut');
 const mobile = window.matchMedia('(max-width: 670px)');
 const darkMode = window.matchMedia('(prefers-color-scheme: dark)');
@@ -180,7 +182,8 @@ function applyTheme() {
 }
 
 function formatTime(value) {
-  const date = value?.toDate?.() ?? (value instanceof Date ? value : new Date(value ?? NaN));
+  const seconds = value?.seconds ?? value?._seconds;
+  const date = value?.toDate?.() ?? new Date(Number.isFinite(seconds) ? seconds * 1000 : value ?? NaN);
   if (!Number.isFinite(date.getTime())) return '';
   const hourCycle = clock === '24h' ? 'h23' : clock === '12h' ? 'h12' : undefined;
   return new Intl.DateTimeFormat(language, { hour: '2-digit', minute: '2-digit', hourCycle }).format(date);
@@ -389,6 +392,7 @@ function subscribeList() {
 
 function openThread(id, focus = true) {
   if (!user) return;
+  closeMessageInfo();
   tools.dismiss();
   stopThread?.();
   activeId = id;
@@ -416,6 +420,7 @@ function openThread(id, focus = true) {
     if (generation !== threadGeneration) return;
     currentThread = undefined;
     threadError = true;
+    closeMessageInfo();
     tools.dismiss();
     closeDialog();
     renderThread();
@@ -423,7 +428,7 @@ function openThread(id, focus = true) {
 }
 
 function maybeMarkRead() {
-  if (!currentThread || section !== 'chats' || workspace.dataset.mobileView !== 'chat' || document.hidden || !document.hasFocus()) return;
+  if (!currentThread || !messageInfoPanel.hidden || section !== 'chats' || workspace.dataset.mobileView !== 'chat' || document.hidden || !document.hasFocus()) return;
   if (!currentThread.userState?.unreadCount) return;
   const incoming = currentThread.messages.findLast((message) => message.senderUid !== user.uid);
   if (!incoming || pendingRead === incoming.id) return;
@@ -825,6 +830,7 @@ function renderSection() {
 }
 
 function navigate(next) {
+  closeMessageInfo();
   tools.dismiss();
   closeDialog();
   if (section !== next) { feeds.stop(); featurePanel.scrollTop = 0; }
@@ -855,6 +861,37 @@ function chatAction(name, payload, conversationId) {
 
 function chatMessageAction(name, message, payload = {}) {
   return chatAction(name, { messageId: message.id, ...payload }, message.conversationId);
+}
+
+function closeMessageInfo() {
+  if (messageInfoPanel.hidden) return;
+  messageInfoPanel.hidden = true;
+  messageInfoPanel.replaceChildren();
+  delete main.dataset.messageInfo;
+}
+
+function openMessageInfo(message) {
+  if (!user || message.session !== session || message.conversationId !== activeId || !currentThread) return;
+  closeDialog();
+  const generation = threadGeneration;
+  const conversation = currentThread.conversation;
+  const info = createMessageInfo({
+    message, title: threadName(conversation),
+    memberCount: conversation.type === 'group' ? conversation.memberCount ?? conversation.participantUids?.length : undefined,
+    locale: language, formatTime, makeAvatar: avatar, call,
+    isActive: () => generation === threadGeneration && info.view.isConnected && !messageInfoPanel.hidden,
+    onBack: () => {
+      closeMessageInfo();
+      const row = [...flow.children].find((node) => node.dataset.message === message.id);
+      (row?.querySelector('.message-menu-toggle') ?? byId('chat-title')).focus({ preventScroll: true });
+      maybeMarkRead();
+    },
+  });
+  messageInfoPanel.replaceChildren(info.view);
+  messageInfoPanel.hidden = false;
+  main.dataset.messageInfo = '';
+  info.focus();
+  void info.load();
 }
 
 const feeds = createLiveFeeds({ panel: featurePanel, getLanguage: () => language, call, formatTime });
@@ -898,7 +935,7 @@ const tools = createChatTools({
   toggleReaction: (id, emoji, item) => chatAction('reactToMessage', { messageId: id, emoji }, item.conversationId),
   togglePin: (item) => chatMessageAction('pinMessage', item, { pinned: !item.pinned }),
   toggleStar: (item) => chatMessageAction('starMessage', item, { starred: !item.starred }),
-  getMessageInfo: (item) => chatMessageAction('getMessageInfo', item),
+  openMessageInfo,
   forwardMessage: (id, item) => item.conversationId === activeId ? call('forwardMessages', {
     sourceConversationId: item.conversationId, messageIds: [item.id], targetConversationIds: [id],
   }) : Promise.reject(new Error('Conversation required')),
@@ -971,6 +1008,7 @@ function clearSession() {
   activeId = currentThread = pendingRead = undefined;
   renderedThread = undefined;
   threadError = false;
+  closeMessageInfo();
   tools.dismiss();
   feeds.stop();
   closeDialog();
