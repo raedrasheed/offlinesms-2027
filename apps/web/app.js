@@ -5,6 +5,9 @@ import { createChatTools } from './chat-tools.js';
 import { createGroupInviteView } from './group-invite.js';
 import { createMessageInfo } from './message-info.js';
 import { createGroupInfo } from './group-info.js';
+import { createChatMedia } from './chat-media.js';
+import { bundledSticker, createChatMediaSource } from './chat-media-source.js';
+import { downloadChatMedia } from './chat-media-download.js';
 
 const words = {
   navigation: ['التنقل', 'Navigation'], chats: ['المحادثات', 'Chats'], status: ['الحالات', 'Status'],
@@ -108,6 +111,7 @@ const stopStates = new Map();
 const drafts = new Map();
 const replies = new Map();
 const sends = new Map();
+const mediaRenderKeys = new WeakMap();
 
 const t = (key) => words[key]?.[language === 'ar' ? 0 : 1] ?? words.message[language === 'ar' ? 0 : 1];
 const numeral = (value) => new Intl.NumberFormat(language).format(value);
@@ -209,6 +213,7 @@ function setLanguage(next) {
 }
 
 function showDialog(title, content) {
+  viewingMedia = undefined;
   byId('dialog-title').textContent = title;
   byId('dialog-content').replaceChildren(content);
   if (!dialog.open) dialog.showModal();
@@ -216,6 +221,7 @@ function showDialog(title, content) {
 }
 
 function closeDialog() {
+  viewingMedia = undefined;
   if (dialog.open) dialog.close();
   byId('dialog-content').replaceChildren();
   byId('dialog-title').textContent = '';
@@ -396,6 +402,7 @@ function subscribeList() {
 
 function openThread(id, focus = true) {
   if (!user) return;
+  closeMedia();
   closeMessageInfo();
   closeGroupInfo();
   tools.dismiss();
@@ -415,6 +422,7 @@ function openThread(id, focus = true) {
     if (generation !== threadGeneration) return;
     const previous = currentThread;
     currentThread = value;
+    if (viewingMedia && !isActiveMedia(viewingMedia)) closeDialog();
     if (groupInfo) {
       if (!value.role || value.conversation.type !== 'group') closeGroupInfo();
       else {
@@ -432,6 +440,7 @@ function openThread(id, focus = true) {
   }, () => {
     if (generation !== threadGeneration) return;
     currentThread = undefined;
+    closeMedia();
     threadError = true;
     closeMessageInfo();
     closeGroupInfo();
@@ -453,43 +462,45 @@ function maybeMarkRead() {
   });
 }
 
-function showMedia(item) {
-  const kind = item.type;
-  const container = el('div', 'live-media');
-  const path = item.media?.storagePath;
-  const pathSegments = typeof path === 'string' ? path.split('/') : [];
-  if (item.media?.uploadStatus !== 'uploaded' || pathSegments[1] !== activeId || pathSegments[3] !== item.id) {
-    container.textContent = t(kind);
-    return container;
-  }
-  const load = button(`${t('mediaLoad')} · ${t(kind)}`, async () => {
-    load.disabled = true;
-    const generation = threadGeneration;
-    try {
-      const src = safeMediaUrl(await client.getMediaUrl(path));
-      if (!src) throw new Error('Unavailable media');
-      if (generation !== threadGeneration || !container.isConnected) return;
-      if (kind === 'file') {
-        const link = el('a', 'feature-button', item.media?.fileName || t('file'));
-        link.href = src;
-        link.target = '_blank';
-        link.rel = 'noopener noreferrer';
-        container.replaceChildren(link);
-        return;
-      }
-      const node = el(kind === 'voice' || kind === 'audio' ? 'audio' : kind === 'video' ? 'video' : 'img');
-      if (node.tagName === 'IMG') { node.alt = t(kind); node.referrerPolicy = 'no-referrer'; }
-      else { node.controls = true; node.preload = 'metadata'; node.playsInline = true; }
-      node.src = src;
-      container.replaceChildren(node);
-    } catch {
-      if (generation !== threadGeneration || !container.isConnected) return;
-      load.disabled = false;
-      load.textContent = t('mediaUnavailable') + ' · ' + t('retry');
-    }
-  }, 'feature-button');
-  container.append(load);
-  return container;
+let viewingMedia;
+
+function mediaIdentity(item) {
+  const { media, sticker } = item;
+  return JSON.stringify([item.type, item.senderUid ?? item.senderId, media?.storagePath, media?.downloadURL,
+    media?.uploadStatus, media?.presentation, media?.sizeBytes, media?.mimeType, sticker?.packId, sticker?.stickerId]);
+}
+
+function isActiveMedia(item) {
+  if (!user || item.thread !== threadGeneration || item.conversationId !== activeId || section !== 'chats') return false;
+  const message = currentThread?.messages.find((row) => row.id === item.id);
+  return Boolean(message && !message.deletedForEveryone && !message.retentionDeleting && item.identity === mediaIdentity(message));
+}
+
+function closeMedia() {
+  chatMedia.reset();
+  mediaSource.clear();
+  if (dialog.querySelector('.chat-media-viewer')) closeDialog();
+}
+
+const mediaSource = createChatMediaSource({ getClient: () => client, isActive: isActiveMedia });
+const chatMedia = createChatMedia({
+  t, locale: () => language, getMedia: mediaSource.getMedia, isActive: isActiveMedia, stickerSource: bundledSticker,
+  showDialog: (title, content, item) => { showDialog(title, content); viewingMedia = item; },
+  downloadMedia(item, data, { signal, isActive }) {
+    return downloadChatMedia({ url: data.src, fileName: data.fileName, mimeType: data.contentType, expectedSize: data.sizeBytes,
+      type: item.isSticker ? 'sticker' : item.type, signal, isActive,
+      getBlob: data.path ? (maxBytes) => client.getMediaBlob(data.path, maxBytes) : undefined });
+  },
+});
+
+function messageBody(item) {
+  if (!chatMedia.handles(item)) return item.caption || item.text || t(item.type);
+  if (chatMedia.isSticker(item)) return '';
+  if (!item.media) return item.caption || item.text || '';
+  const text = item.text?.trim();
+  const label = { image: 'Photo', video: 'Video', file: 'File', audio: 'Audio', voice: 'Voice message' }[item.type];
+  const placeholder = text === label || text === `${label}: ${item.media.fileName}`;
+  return item.caption || (placeholder ? '' : item.text) || '';
 }
 
 function jumpTo(id) {
@@ -528,7 +539,7 @@ function renderMessageText(value) {
   return body;
 }
 
-function renderMessage(item) {
+function renderMessage(item, existingMedia) {
   const own = (item.senderUid ?? item.senderId) === user.uid;
   const group = currentThread.conversation.type !== 'direct';
   const row = el('div', 'message-row' + (own ? ' outgoing' : ''));
@@ -536,6 +547,8 @@ function renderMessage(item) {
   const sender = senderName(item);
   if (group && !own) row.append(avatar(sender, item.senderPhotoURL));
   const bubble = el('div', 'bubble');
+  const hasMedia = !item.deletedForEveryone && chatMedia.handles(item);
+  const sticker = hasMedia && chatMedia.isSticker(item);
   if (group && !own) bubble.append(el('p', 'message-author', sender));
   if (item.deletedForEveryone) bubble.append(el('p', 'message-text', t('removed')));
   else {
@@ -544,8 +557,15 @@ function renderMessage(item) {
       const author = item.replyTo.senderDisplayName || t('peer');
       bubble.append(button(`${author} · ${item.replyTo.preview || t('message')}`, () => jumpTo(item.replyTo.messageId), 'reply-quote'));
     }
-    if (item.media) bubble.append(showMedia(item));
-    const body = item.caption || item.text || (!item.media ? t(item.type) : '');
+    if (hasMedia) {
+      const identity = mediaIdentity(item);
+      const key = JSON.stringify([threadGeneration, language, identity, sticker, item.media]);
+      const attachment = mediaRenderKeys.get(existingMedia) === key ? existingMedia
+        : chatMedia.render({ ...item, thread: threadGeneration, conversationId: activeId, isSticker: sticker, identity });
+      mediaRenderKeys.set(attachment, key);
+      bubble.append(attachment);
+    }
+    const body = messageBody(item);
     if (body) bubble.append(renderMessageText(body));
     if (item.type === 'poll' && Array.isArray(item.poll?.options)) {
       const options = el('ul', 'live-poll');
@@ -657,6 +677,7 @@ function renderThread(follow = false) {
   pin.hidden = !currentThread?.conversation.pinnedMessage;
   pin.replaceChildren();
   if (!currentThread) {
+    chatMedia.reset();
     renderedThread = undefined;
     const notice = el('div', 'live-thread-empty', t(!activeId ? 'choose' : threadError ? 'loadFailed' : 'loading'));
     if (threadError) notice.append(button(t('retry'), () => openThread(activeId), 'feature-button live-retry'));
@@ -677,9 +698,11 @@ function renderThread(follow = false) {
   if (renderedThread === rowsState) { updateLatest(); return; }
   renderedThread = rowsState;
   tools.dismiss();
+  const mediaByMessage = new Map([...flow.children].map((row) => [row.dataset.message, row.querySelector('.chat-media')]));
   const previousTop = scroll.scrollTop;
-  const rows = currentThread.messages.map(renderMessage);
+  const rows = currentThread.messages.map((item) => renderMessage(item, mediaByMessage.get(item.id)));
   flow.replaceChildren(...(rows.length ? rows : [el('p', 'live-thread-empty', t('noMessages'))]));
+  chatMedia.prune();
   scroll.scrollTop = follow ? scroll.scrollHeight : previousTop;
   updateLatest();
 }
@@ -868,7 +891,12 @@ function navigate(next) {
   closeGroupInfo();
   tools.dismiss();
   closeDialog();
-  if (section !== next) { feeds.stop(); featurePanel.scrollTop = 0; }
+  if (section !== next) {
+    closeMedia();
+    renderedThread = undefined;
+    feeds.stop();
+    featurePanel.scrollTop = 0;
+  }
   section = next;
   main.dataset.section = next;
   navigation.forEach((node) => {
@@ -938,6 +966,7 @@ function openGroupInfo() {
     onOpenDirect: (id) => { filter = 'all'; search.value = ''; openThread(id); },
     onLeft: (id, actor) => {
       if (generation !== threadGeneration || id !== activeId || actor !== user?.uid) return;
+      closeMedia();
       closeGroupInfo();
       stopThread?.();
       stopThread = undefined;
@@ -1082,6 +1111,7 @@ async function send(event) {
 }
 
 function clearSession() {
+  closeMedia();
   ++session;
   ++threadGeneration;
   stopList?.();
@@ -1191,7 +1221,7 @@ window.addEventListener('pagehide', (event) => {
   if (!event.persisted) { stopAccount?.(); unsubscribeAuth?.(); }
 });
 dialog.addEventListener('close', () => {
-  if (!dialog.open) byId('dialog-content').replaceChildren();
+  if (!dialog.open) { viewingMedia = undefined; byId('dialog-content').replaceChildren(); }
 });
 
 applyTheme();

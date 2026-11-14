@@ -269,15 +269,27 @@ export function initializeFirebaseClient(sdk, config, { appCheckSiteKey } = {}) 
     return profile?.status === 'active' && profile.username.toLowerCase() === normalized ? profile : null;
   }
 
-  async function getMediaUrl(storagePath) {
-    const owner = currentUid();
+  function mediaRef(storagePath) {
     const segments = typeof storagePath === 'string' ? storagePath.split('/') : [];
     if (segments.length !== 5 || segments[0] !== 'chatMedia') throw clientError('storage-path-invalid');
     segments.slice(1).forEach(documentId);
-    const url = httpsUrl(await sdk.getDownloadURL(sdk.ref(storage, storagePath)));
+    return sdk.ref(storage, storagePath);
+  }
+
+  async function getMediaUrl(storagePath) {
+    const owner = currentUid();
+    const url = httpsUrl(await sdk.getDownloadURL(mediaRef(storagePath)));
     requireSession(owner);
     if (!url) throw clientError('media-url-invalid');
     return url;
+  }
+
+  async function getMediaBlob(storagePath, maxBytes) {
+    const owner = currentUid();
+    if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > 25 * 1024 * 1024 + 1) throw clientError('media-limit-invalid');
+    const blob = await sdk.getBlob(mediaRef(storagePath), maxBytes);
+    requireSession(owner);
+    return blob;
   }
 
   return Object.freeze({
@@ -316,7 +328,9 @@ export function initializeFirebaseClient(sdk, config, { appCheckSiteKey } = {}) 
     getPublicProfile,
     getGroupMemberProfiles,
     findByUsername,
+    storageBucket: config.storageBucket,
     getMediaUrl,
+    getMediaBlob,
     uploadGroupAvatar: createGroupAvatarUploader({ sdk, storage, currentUid, requireSession }),
     async completeInviteProfile({ username, displayName }) {
       const uid = currentUid();
