@@ -5,11 +5,11 @@ import {
   onAuthStateChanged, signInWithCustomToken, signOut,
 } from 'firebase/auth';
 import {
-  collection, doc, getDocFromServer, initializeFirestore, limit,
+  collection, doc, documentId, getDocFromServer, getDocsFromServer, initializeFirestore, limit,
   memoryLocalCache, onSnapshot, orderBy, query, where,
 } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
-import { getDownloadURL, getStorage, ref } from 'firebase/storage';
+import { getDownloadURL, getStorage, ref, uploadBytes } from 'firebase/storage';
 import { initializeFirebaseClient } from './firebase-client.js';
 import { isProductionFirebaseConfig } from './firebase-config.js';
 
@@ -17,9 +17,9 @@ const sdk = {
   initializeApp, initializeAppCheck, ReCaptchaEnterpriseProvider,
   browserSessionPersistence, initializeAuth, inMemoryPersistence,
   onAuthStateChanged, signInWithCustomToken, signOut,
-  collection, doc, getDocFromServer, initializeFirestore, limit,
+  collection, doc, documentId, getDocFromServer, getDocsFromServer, initializeFirestore, limit,
   memoryLocalCache, onSnapshot, orderBy, query, where,
-  getFunctions, httpsCallable, getDownloadURL, getStorage, ref,
+  getFunctions, httpsCallable, getDownloadURL, getStorage, ref, uploadBytes,
 };
 
 async function loadHostingConfig() {
