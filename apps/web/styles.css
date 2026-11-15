@@ -186,8 +186,8 @@ h1 { font-size: 23px; font-weight: 790; letter-spacing: -.45px; line-height: 1.2
 .outgoing .bubble { background: var(--outgoing); border-start-start-radius: 9px; border-start-end-radius: 3px; }
 .message-author { font-size: 12px; font-weight: 750; color: var(--brand); margin-bottom: 3px; }
 .message-text { font-size: 14px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
-.message-invite-link { color: var(--brand); text-decoration: underline; text-underline-offset: .16em; unicode-bidi: isolate; }
-.message-invite-link:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 2px; }
+.message-link { color: var(--brand); text-decoration: underline; text-underline-offset: .16em; unicode-bidi: isolate; }
+.message-link:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 2px; }
 .message-meta { display: flex; justify-content: flex-end; gap: 5px; align-items: center; color: var(--muted); font-size: 10px; margin-top: 3px; }
 .message-meta .checks { color: var(--brand); font-size: 11px; }
 .message-receipt-counts, .message-receipt-count { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
