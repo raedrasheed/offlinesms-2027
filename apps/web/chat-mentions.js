@@ -92,8 +92,11 @@ export function createMentionComposer({ input, list, language, requestMembers, o
   let pendingEdit;
 
   function close() {
+    if (!popup) return;
     popup = undefined;
     list.hidden = true;
+    menuList.replaceChildren();
+    status.textContent = '';
     input.removeAttribute('aria-activedescendant');
   }
 
@@ -143,6 +146,7 @@ export function createMentionComposer({ input, list, language, requestMembers, o
         const image = owner.createElement('img');
         image.alt = '';
         image.loading = 'lazy';
+        image.referrerPolicy = 'no-referrer';
         image.src = member.photoURL;
         image.addEventListener('error', () => image.remove(), { once: true });
         avatar.append(image);
