@@ -1,6 +1,7 @@
 import { createPhoneAuthClient } from './phone-auth-client.js';
 import { createGroupAvatarUploader } from './group-avatar-upload.js';
 import { createChatAttachmentUploader } from './chat-attachment-upload.js';
+import { normalizeUsername, validateUsername } from '../mobile/src/lib/username.ts';
 
 // The web client uses the same authenticated Firestore reads and callable writes as mobile.
 export const WATCH_LIMITS = Object.freeze({ conversations: 50, messages: 100 });
@@ -242,6 +243,38 @@ export function initializeFirebaseClient(sdk, config, { appCheckSiteKey } = {}) 
     return asPublicProfile(snapshot);
   }
 
+  async function readOwnProfile() {
+    const uid = currentUid();
+    const source = sdk.doc(db, 'users', documentId(uid));
+    const snapshot = await sdk.getDocFromServer(source);
+    requireSession(uid);
+    const profile = snapshot.data();
+    if (!profile || (profile.status ?? 'active') !== 'active') throw clientError('permission-denied');
+    return { uid, source, profile };
+  }
+
+  async function updateOwnProfile({ displayName, username }) {
+    if (displayName === undefined && username === undefined) return {};
+    const { uid, source, profile } = await readOwnProfile();
+    requireSession(uid);
+    const name = displayName ?? profile.displayName;
+    const nextName = typeof name === 'string' ? name.trim() : '';
+    if (!nextName) throw clientError('display-name-required');
+    if (nextName.length > 60) throw clientError('display-name-too-long');
+
+    if (username !== undefined) {
+      const nextUsername = typeof username === 'string' ? normalizeUsername(username) : '';
+      if (validateUsername(nextUsername) !== 'ok') throw clientError('username-invalid');
+      const about = typeof profile.about === 'string' ? profile.about : null;
+      const result = await call('claimUsername', { displayName: nextName, username: nextUsername, about });
+      return { displayName: nextName, username: result.username };
+    }
+
+    await sdk.updateDoc(source, { displayName: nextName, updatedAt: sdk.serverTimestamp() });
+    requireSession(uid);
+    return { displayName: nextName };
+  }
+
   async function getGroupMemberProfiles(uid, memberUids) {
     requireSession(uid);
     const ids = [...new Set(memberUids.map(documentId))];
@@ -308,7 +341,10 @@ export function initializeFirebaseClient(sdk, config, { appCheckSiteKey } = {}) 
     },
     watchAccount(uid, onAccount, onError) {
       const source = sdk.doc(db, 'users', documentId(uid));
-      return watchScoped(uid, source, (snapshot) => onAccount(asPublicProfile(snapshot)), onError);
+      return watchScoped(uid, source, (snapshot) => {
+        // A display-name write may be reflected locally before the server accepts it.
+        if (!snapshot.metadata?.hasPendingWrites) onAccount(asPublicProfile(snapshot));
+      }, onError);
     },
     async requestEmailOtp(email) {
       await invoke('requestEmailOtp', { email: emailAddress(email) });
@@ -341,12 +377,10 @@ export function initializeFirebaseClient(sdk, config, { appCheckSiteKey } = {}) 
     getMediaBlob,
     sendAttachment,
     uploadGroupAvatar: createGroupAvatarUploader({ sdk, storage, currentUid, requireSession }),
+    updateOwnProfile,
     async completeInviteProfile({ username, displayName }) {
-      const uid = currentUid();
-      const snapshot = await sdk.getDocFromServer(sdk.doc(db, 'users', documentId(uid)));
+      const { uid, profile } = await readOwnProfile();
       requireSession(uid);
-      const profile = snapshot.data();
-      if (!profile || (profile.status ?? 'active') !== 'active') throw clientError('permission-denied');
       if (typeof profile.username === 'string' && profile.username.trim()) return;
       const savedName = typeof profile.displayName === 'string' ? profile.displayName.trim() : '';
       const about = typeof profile.about === 'string' ? profile.about : null;
