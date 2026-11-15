@@ -30,6 +30,7 @@ export function remoteMessageInput(remoteId: string, conversationId: string, m: 
     remoteCreatedAt: ms(m.createdAt),
     editedAt: ms(m.editedAt),
     deletedForEveryone: !!m.deletedForEveryone,
+    retentionDeleting: m.retentionDeleting === true,
     replyToMessageId: m.replyTo?.messageId ?? null,
     replyToPreview: m.replyTo?.preview ?? null,
     replyToSenderUid: m.replyTo?.senderUid ?? null,

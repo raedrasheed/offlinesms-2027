@@ -15,6 +15,7 @@
 
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { isBinaryAttachment } from './attachmentModel';
 
 type Status = 'pending' | 'delivered' | 'read' | 'viewed' | 'played' | 'failed';
 const ALLOWED: ReadonlySet<Status> = new Set([
@@ -36,7 +37,12 @@ export const markReceipt = onCall(async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'sign-in-required');
 
-  const data = (request.data ?? {}) as { conversationId?: unknown; messageId?: unknown; status?: unknown };
+  const data = (request.data ?? {}) as {
+    conversationId?: unknown; messageId?: unknown; status?: unknown; recipientUid?: unknown;
+  };
+  // An account can change while an SDK request is waiting for an ID token.
+  if (data.recipientUid !== undefined && data.recipientUid !== uid)
+    throw new HttpsError('permission-denied', 'account-changed');
   if (typeof data.conversationId !== 'string' || !data.conversationId)
     throw new HttpsError('invalid-argument', 'conversationId-required');
   if (typeof data.messageId !== 'string' || !data.messageId)
@@ -51,28 +57,20 @@ export const markReceipt = onCall(async (request) => {
   const msgRef = convoRef.collection('messages').doc(data.messageId);
   const receiptRef = msgRef.collection('receipts').doc(uid);
 
-  const [convoSnap, msgSnap] = await Promise.all([convoRef.get(), msgRef.get()]);
-  if (!convoSnap.exists) throw new HttpsError('not-found', 'conversation-not-found');
-  if (!msgSnap.exists)   throw new HttpsError('not-found', 'message-not-found');
-
-  const convo = convoSnap.data() as { participantUids?: string[]; memberIds?: string[] };
-  const participants = convo.participantUids ?? convo.memberIds ?? [];
-  if (!participants.includes(uid)) {
-    throw new HttpsError('permission-denied', 'not-a-participant');
-  }
-
-  const msg = msgSnap.data() as { senderUid?: string; senderId?: string };
-  const senderUid = msg.senderUid ?? msg.senderId;
-  if (senderUid === uid) {
-    // Self-receipt isn't useful — sender already saw their own message.
-    // Treat as a no-op (idempotent).
-    return { ok: true, applied: false, reason: 'self-receipt' };
-  }
-
   const result = await db.runTransaction(async (tx) => {
-    const [liveMessage, snap] = await Promise.all([tx.get(msgRef), tx.get(receiptRef)]);
-    if (!liveMessage.exists || liveMessage.get('retentionDeleting') === true) {
-      throw new HttpsError('not-found', 'message-expired');
+    const [convo, message, snap] = await tx.getAll(convoRef, msgRef, receiptRef);
+    if (!convo.exists) throw new HttpsError('not-found', 'conversation-not-found');
+    if (!message.exists) throw new HttpsError('not-found', 'message-not-found');
+    const participants: string[] = convo.get('participantUids') ?? convo.get('memberIds') ?? [];
+    if (!participants.includes(uid)) throw new HttpsError('permission-denied', 'not-a-participant');
+
+    const senderUid = message.get('senderUid') ?? message.get('senderId');
+    if (senderUid === uid) return { applied: false, reason: 'self-receipt' };
+    if (message.get('retentionDeleting') === true) throw new HttpsError('not-found', 'message-expired');
+    if (message.get('deletedForEveryone') === true) return { applied: false, reason: 'message-deleted' };
+    const uploadStatus = message.get('media.uploadStatus');
+    if (status !== 'failed' && isBinaryAttachment(message.get('type')) && uploadStatus != null && uploadStatus !== 'uploaded') {
+      return { applied: false, reason: 'media-not-ready' };
     }
     const current = snap.exists ? (snap.data() as Record<string, unknown>) : null;
     const currentStatus = ((current?.status as Status | undefined) ?? 'pending') as Status;
@@ -91,17 +89,12 @@ export const markReceipt = onCall(async (request) => {
       updatedAt:      now,
     };
     if (!snap.exists) patch.createdAt = now;
-    if (status === 'delivered' && !current?.['deliveredAt']) patch.deliveredAt = now;
+    // A read, view or playback also proves delivery if its receipt arrived first.
+    if (status !== 'failed' && !current?.['deliveredAt']) patch.deliveredAt = now;
     if (status === 'read'      && !current?.['readAt'])      patch.readAt      = now;
     if (status === 'viewed'    && !current?.['viewedAt'])    patch.viewedAt    = now;
     if (status === 'played'    && !current?.['playedAt'])    patch.playedAt    = now;
     if (status === 'failed')                                  patch.failedAt    = now;
-
-    // `read` implies the recipient already received delivery — backfill
-    // deliveredAt if missing so the per-recipient timeline stays sensible.
-    if (status === 'read' && !current?.['deliveredAt']) {
-      patch.deliveredAt = now;
-    }
 
     tx.set(receiptRef, patch, { merge: true });
     return { applied: true };

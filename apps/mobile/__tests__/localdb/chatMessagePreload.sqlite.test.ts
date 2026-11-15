@@ -75,7 +75,7 @@ describe('chat list preloading into real SQLite', () => {
     expect(rows.at(-1)?.remote_id).toBe('m76');
   });
 
-  it('stores new messages before a conversation opens, without marking them read', async () => {
+  it('stores and acknowledges delivery before a conversation opens, without marking it read', async () => {
     await mountList(); await waitMessage('m1');
     await act(async () => {
       fakeWrite('conversations/c/messages/m2', message(2));
@@ -84,7 +84,11 @@ describe('chat list preloading into real SQLite', () => {
     await waitMessage('m2'); await settle();
     expect(list.items[0].state.unreadCount).toBe(2);
     expect(await getConversation('c')).toMatchObject({ last_message_id: 'm2', last_message_at: 2, unread_count: 2 });
-    expect(await db.first('SELECT COUNT(*) AS n FROM outbox')).toEqual({ n: 0 });
+    const receipt = await db.first<{ payload_json: string }>(
+      "SELECT payload_json FROM outbox WHERE type = 'mark_receipt' AND entity_id = 'm2'",
+    );
+    expect(JSON.parse(receipt!.payload_json)).toMatchObject({ conversationId: 'c', messageId: 'm2', status: 'delivered' });
+    expect(await db.first("SELECT COUNT(*) AS n FROM outbox WHERE json_extract(payload_json, '$.status') = 'read'")).toEqual({ n: 0 });
     // Open with all incoming network work stalled. The first local read has m2.
     state.online = false; state.network.forEach(cb => cb(false));
     const listen = vi.spyOn(firestoreMock, 'onSnapshot').mockReturnValue(() => {});

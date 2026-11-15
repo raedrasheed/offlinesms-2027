@@ -1,10 +1,11 @@
 // Phase 22 — receipts repository. Status transitions are monotonic; the
 // conflict resolver decides whether an incoming status may overwrite the
 // current one (never a downgrade).
-import { getDb } from '../connection';
-import { localId } from '../sync/ids';
+import { getDb, type LocalDatabase } from '../connection';
+import { idempotencyKey, localId } from '../sync/ids';
 import { mergeReceiptStatus } from '../sync/conflictResolver';
 import type { ReceiptRow, ReceiptStatus } from '../types';
+import { enqueue } from './outboxRepo';
 
 export async function getReceipt(messageId: string, uid: string): Promise<ReceiptRow | null> {
   return getDb().first<ReceiptRow>(
@@ -13,6 +14,36 @@ export async function getReceipt(messageId: string, uid: string): Promise<Receip
 
 export async function listReceipts(messageId: string): Promise<ReceiptRow[]> {
   return getDb().all<ReceiptRow>(`SELECT * FROM message_receipts WHERE message_id = ?`, [messageId]);
+}
+
+/** Called inside the same transaction that stores an authorized incoming message. */
+export async function stageDeliveryReceipt(
+  database: LocalDatabase, conversationId: string, messageId: string, recipientUid: string,
+): Promise<boolean> {
+  const existing = await database.first<Pick<ReceiptRow, 'status'>>(
+    'SELECT status FROM message_receipts WHERE message_id = ? AND user_uid = ?', [messageId, recipientUid],
+  );
+  if (existing && mergeReceiptStatus(existing.status, 'delivered') === existing.status) return false;
+  await enqueue({
+    type: 'mark_receipt', entityType: 'message', entityId: messageId, conversationId,
+    idempotencyKey: idempotencyKey(['delivery', conversationId, messageId]),
+    payload: { conversationId, messageId, status: 'delivered', recipientUid },
+    maxAttempts: 3,
+  }, database);
+  await database.run(
+    `INSERT INTO message_receipts (id, message_id, user_uid, status, delivered_at, sync_status)
+     VALUES (?, ?, ?, 'delivered', ?, 'pending')
+     ON CONFLICT(message_id, user_uid) DO UPDATE SET status = 'delivered', delivered_at = excluded.delivered_at, sync_status = 'pending'`,
+    [localId('receipt'), messageId, recipientUid, Date.now()],
+  );
+  return true;
+}
+
+export async function markDeliveryReceiptSynced(messageId: string, recipientUid: string): Promise<void> {
+  await getDb().run(
+    "UPDATE message_receipts SET sync_status = 'synced' WHERE message_id = ? AND user_uid = ?",
+    [messageId, recipientUid],
+  );
 }
 
 /** Upsert a receipt, never downgrading status (monotonic). */

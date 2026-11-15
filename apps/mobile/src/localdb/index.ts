@@ -62,8 +62,9 @@ export const notificationTargets = createNotificationTargets({
   loadPending: async () => JSON.parse((await getState('notification_targets')) ?? '[]'),
   savePending: targets => setState('notification_targets', JSON.stringify(targets)),
 });
-onLocalMessagesChanged(conversationId => {
+onLocalMessagesChanged((conversationId, queuedDelivery) => {
   void notificationTargets.onLocalMessagesChanged(conversationId);
+  if (queuedDelivery) kick('outbox');
 });
 export { setActiveConversation, kick as kickSync } from './sync/syncScheduler';
 
@@ -494,14 +495,19 @@ export async function queuePinMessage(args: { conversationId: string; messageId:
   return { ok: true };
 }
 
-export async function queueMarkReceipt(args: { conversationId: string; messageId: string; status: string }): Promise<ActionResult> {
-  if (!getCurrentUid()) return { ok: false, reason: 'not-initialised' };
+export async function queueMarkReceipt(args: {
+  conversationId: string; messageId: string; status: string; recipientUid?: string;
+}): Promise<ActionResult> {
+  const uid = getCurrentUid();
+  if (!uid || uid !== auth.currentUser?.uid || (args.recipientUid !== undefined && args.recipientUid !== uid)) {
+    return { ok: false, reason: 'not-initialised' };
+  }
   await outboxRepo.enqueue({
     type: 'mark_receipt', entityType: 'message', entityId: args.messageId,
     conversationId: args.conversationId,
     // Idempotent per (message, status) → repeated receipts collapse to one item.
     idempotencyKey: idempotencyKey(['receipt', args.messageId, args.status]),
-    payload: { conversationId: args.conversationId, messageId: args.messageId, status: args.status },
+    payload: { ...args, recipientUid: uid },
     // Receipts are best-effort: cap retries so a chronically-failing backlog
     // dead-letters quickly instead of churning the queue (and battery) 8× each.
     maxAttempts: 3,

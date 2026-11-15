@@ -97,7 +97,7 @@ function assertUser(uid: string | null) {
  * succeed; replaying a partial page is safe because upserts are idempotent. */
 async function applyMessagePage(
   batch: RemoteMessageInput[], uid: string | null, database: LocalDatabase,
-  options: { insertOnly?: boolean } = {},
+  options: { insertOnly?: boolean; deliveryRecipientUid?: string } = {},
 ): Promise<void> {
   const assertSession = () => {
     assertUser(uid);
@@ -130,7 +130,7 @@ export function pullRecentMessages(conversationId: string): Promise<number> {
     assertUser(uid);
     if (getDb() !== database) throw new Error('sync-session-changed');
     const started = perfNow();
-    await applyMessagePage(batch, uid, database, { insertOnly: true });
+    await applyMessagePage(batch, uid, database, { insertOnly: true, deliveryRecipientUid: uid ?? undefined });
     perfMark('sync:recent:commit', { durationMs: Math.round(perfNow() - started), count: batch.length });
     return batch.length;
   })().finally(() => { if (recentFlights.get(key)?.task === task) recentFlights.delete(key); });
@@ -169,7 +169,8 @@ export function pullMessages(conversationId: string, max = MSG_PAGE, pages = 8):
         ...(cursor ? [after(cursor)] : []), qlimit(max),
       ));
       assertUser(uid);
-      await applyMessagePage(snap.docs.map(d => remoteMessageInput(d.id, conversationId, d.data())), uid, database);
+      await applyMessagePage(snap.docs.map(d => remoteMessageInput(d.id, conversationId, d.data())), uid, database,
+        { deliveryRecipientUid: uid ?? undefined });
       total += snap.size;
       const last = snap.docs[snap.docs.length - 1];
       if (last) { cursor = cursorOf(last); await setState(key, JSON.stringify(cursor)); }
@@ -234,7 +235,7 @@ export async function pullMessageById(conversationId: string, messageId: string)
   if (getDb() !== database) throw new Error('sync-session-changed');
   // Targeted retries also finish an existing image/voice upload, so unlike the
   // recent bootstrap they must reconcile an incomplete local media row.
-  await applyRemoteMessages([message]);
+  await applyRemoteMessages([message], { deliveryRecipientUid: uid ?? undefined });
   return true;
 }
 

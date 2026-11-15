@@ -4,6 +4,7 @@
 import * as outboxRepo from '../repositories/outboxRepo';
 import * as messagesRepo from '../repositories/messagesRepo';
 import * as conversationsRepo from '../repositories/conversationsRepo';
+import { markDeliveryReceiptSynced } from '../repositories/receiptsRepo';
 import { getCursor, setCursor, getState, setState } from '../repositories/syncStateRepo';
 import { pullConversations, pullMessages, pullMembers, pullMessageHistoryPage, pullRecentMessages } from './firebasePull';
 import { pushOutboxItem } from './firebasePush';
@@ -91,6 +92,12 @@ export async function pushOutbox(lane: outboxRepo.OutboxLane = 'all'): Promise<n
     await outboxRepo.markProcessing(item.id);
     try {
       const res = await pushOutboxItem(item);
+      if (item.type === 'mark_receipt' && item.entity_id && ownerUid && getCurrentUid() === ownerUid) {
+        const payload = JSON.parse(item.payload_json);
+        if (payload.status === 'delivered' && payload.recipientUid === ownerUid) {
+          await markDeliveryReceiptSynced(item.entity_id, ownerUid);
+        }
+      }
       if (item.type.startsWith('send_')) console.log(`[outbox] sent ${item.type} ${item.id} → ${res.remoteId ?? '(no id)'}`);
       // Reconcile an optimistic send (text or media) with its canonical server
       // message id so the local row flips from pending → sent.
