@@ -13,6 +13,7 @@ import { downloadChatMedia } from './chat-media-download.js';
 import { createChatAttachments } from './chat-attachments.js';
 import { openStructuredAttachment } from './chat-attachments-structured.js';
 import { renderRichMessage } from './chat-rich-message.js';
+import { createChatReceipts } from './chat-receipts.js';
 
 const words = {
   navigation: ['التنقل', 'Navigation'], chats: ['المحادثات', 'Chats'], status: ['الحالات', 'Status'],
@@ -124,6 +125,8 @@ const sends = new Map();
 const attachmentSends = new Map();
 const mediaRenderKeys = new WeakMap();
 const richRenderKeys = new WeakMap();
+const chatReceipts = createChatReceipts({ viewport: scroll, flow, canRead: canReadMessages,
+  send: (receipt) => call('markReceipt', receipt) });
 
 const t = (key) => words[key]?.[language === 'ar' ? 0 : 1] ?? words.message[language === 'ar' ? 0 : 1];
 const numeral = (value) => new Intl.NumberFormat(language).format(value);
@@ -241,6 +244,7 @@ function showDialog(title, content, attachmentDialog = false) {
   byId('dialog-content').replaceChildren(content);
   if (!dialog.open) dialog.showModal();
   else content.querySelector('button, input, select, textarea')?.focus();
+  chatReceipts.refreshVisibility();
 }
 
 function closeDialog() {
@@ -250,6 +254,7 @@ function closeDialog() {
   if (dialog.open) dialog.close();
   byId('dialog-content').replaceChildren();
   byId('dialog-title').textContent = '';
+  chatReceipts.refreshVisibility();
 }
 
 function announce(text) {
@@ -427,6 +432,7 @@ function subscribeList() {
 
 function openThread(id, focus = true) {
   if (!user) return;
+  chatReceipts.stop();
   if (viewingReactions || attachments) closeDialog();
   closeMedia();
   closeMessageInfo();
@@ -461,12 +467,12 @@ function openThread(id, focus = true) {
     threadError = false;
     syncProfile(peerId(value.conversation));
     const atBottom = scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop < 90;
-    if (section === 'chats') {
-      renderThread(!previous || atBottom);
-      maybeMarkRead();
-    }
+    if (section === 'chats') renderThread(!previous || atBottom);
+    trackReceivedMessages();
+    if (section === 'chats') maybeMarkRead();
   }, () => {
     if (generation !== threadGeneration) return;
+    chatReceipts.stop();
     currentThread = undefined;
     closeMedia();
     threadError = true;
@@ -478,8 +484,26 @@ function openThread(id, focus = true) {
   });
 }
 
+function canReadMessages() {
+  return Boolean(user && currentThread && messageInfoPanel.hidden && groupInfoPanel.hidden && !dialog.open
+    && section === 'chats' && workspace.dataset.mobileView === 'chat' && !document.hidden && document.hasFocus());
+}
+
+function trackReceivedMessages() {
+  if (!user || !currentThread) return;
+  const confirmed = new Set(currentThread.serverMessageIds);
+  const incoming = currentThread.messages.filter((message) => {
+    const sender = message.senderUid ?? message.senderId;
+    const upload = message.media?.uploadStatus;
+    return confirmed.has(message.id) && sender && sender !== user.uid && !message.deletedForEveryone && !message.retentionDeleting
+      && (!upload || upload === 'uploaded');
+  });
+  chatReceipts.update(activeId, user.uid, incoming.reverse().map(({ id }) => id));
+}
+
 function maybeMarkRead() {
-  if (!currentThread || !messageInfoPanel.hidden || !groupInfoPanel.hidden || section !== 'chats' || workspace.dataset.mobileView !== 'chat' || document.hidden || !document.hasFocus()) return;
+  chatReceipts.refreshVisibility();
+  if (!canReadMessages()) return;
   if (!currentThread.userState?.unreadCount) return;
   const incoming = currentThread.messages.findLast((message) => message.senderUid !== user.uid);
   if (!incoming || pendingRead === incoming.id) return;
@@ -1038,6 +1062,7 @@ function navigate(next) {
     featurePanel.scrollTop = 0;
   }
   section = next;
+  chatReceipts.refreshVisibility();
   main.dataset.section = next;
   navigation.forEach((node) => {
     if (node.dataset.section === next) node.setAttribute('aria-current', 'page');
@@ -1127,6 +1152,7 @@ function openGroupInfo() {
   groupInfoPanel.hidden = false;
   main.dataset.groupInfo = '';
   workspace.dataset.mobileView = 'chat';
+  chatReceipts.refreshVisibility();
   ready.start();
 }
 
@@ -1155,6 +1181,7 @@ function openMessageInfo(message, viaSms = false) {
   messageInfoPanel.replaceChildren(info.view);
   messageInfoPanel.hidden = false;
   main.dataset.messageInfo = '';
+  chatReceipts.refreshVisibility();
   if (viaSms) info.openSms();
   else {
     info.focus();
@@ -1303,6 +1330,7 @@ async function send(event) {
 }
 
 function clearSession() {
+  chatReceipts.reset();
   closeMedia();
   ++session;
   ++threadGeneration;
@@ -1397,10 +1425,11 @@ byId('back').addEventListener('click', () => {
   if (attachments) closeDialog();
   closeGroupInfo();
   workspace.dataset.mobileView = 'list';
+  chatReceipts.refreshVisibility();
   [...list.querySelectorAll('[data-thread]')].find((item) => item.dataset.thread === activeId)?.focus({ preventScroll: true });
 });
 latest.addEventListener('click', () => { scroll.scrollTop = scroll.scrollHeight; scroll.focus({ preventScroll: true }); });
-scroll.addEventListener('scroll', updateLatest, { passive: true });
+scroll.addEventListener('scroll', () => { updateLatest(); chatReceipts.refreshVisibility(); }, { passive: true });
 messageInput.addEventListener('input', () => { drafts.set(activeId, messageInput.value); updateComposer(); });
 messageInput.addEventListener('keydown', (event) => {
   if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && event.keyCode !== 229) {
@@ -1411,8 +1440,16 @@ messageInput.addEventListener('keydown', (event) => {
 composer.addEventListener('submit', send);
 document.addEventListener('visibilitychange', maybeMarkRead);
 window.addEventListener('focus', maybeMarkRead);
+window.addEventListener('blur', chatReceipts.refreshVisibility);
+window.addEventListener('resize', chatReceipts.refreshVisibility);
+if (typeof ResizeObserver === 'function') {
+  const receiptLayout = new ResizeObserver(chatReceipts.refreshVisibility);
+  receiptLayout.observe(scroll);
+  receiptLayout.observe(flow);
+}
 darkMode.addEventListener('change', applyTheme);
 window.addEventListener('pagehide', (event) => {
+  if (!event.persisted) chatReceipts.stop();
   if (attachments) closeDialog();
   if (!event.persisted) { stopAccount?.(); unsubscribeAuth?.(); }
 });
@@ -1421,6 +1458,7 @@ dialog.addEventListener('close', () => {
     disposeAttachments();
     viewingMedia = viewingReactions = undefined;
     byId('dialog-content').replaceChildren();
+    chatReceipts.refreshVisibility();
   }
 });
 

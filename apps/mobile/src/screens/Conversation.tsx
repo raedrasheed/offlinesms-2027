@@ -71,6 +71,7 @@ import { LockedVoiceRecorderBar } from '../components/chat/LockedVoiceRecorderBa
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
 import { useAndroidBackDismiss } from '../hooks/useAndroidBackDismiss';
 import { validateMediaMessage, formatDuration, type AttachmentKey } from '../media/mediaValidation';
+import { isBinaryAttachment } from '../media/attachmentModel';
 
 type ComposerGate =
   | { kind: 'allowed' }
@@ -678,7 +679,7 @@ export default function Conversation({ route, navigation }: any) {
     Alert.alert(peerName, undefined, buttons);
   }
   const onPlayedVoice = useCallback((msg: Message) => {
-    if (msg.senderUid !== me) void queueMarkReceipt({ conversationId: id, messageId: msg.id, status: 'played' });
+    if (msg.senderUid !== me) void queueMarkReceipt({ conversationId: id, messageId: msg.id, status: 'played', recipientUid: me });
   }, [id, me]);
 
   // Phase 23 — voice recording (hold mic → record, slide left → cancel, swipe up → lock).
@@ -940,14 +941,35 @@ export default function Conversation({ route, navigation }: any) {
   const { onScroll: onListScroll, scrollToBottom, showScrollDown, highlightId } = viewport;
 
   // Native viewability controls receipts and prefetch, not the entire history.
-  const viewContext = useRef({ id, me, useLocal, newestId: invData[0]?.id, active: conversationVisible,
+  const viewContext = useRef({ id, me, useLocal, rows: invData, newestId: invData[0]?.id, active: conversationVisible,
     serverNewestId, live: local.live, onVisible: viewport.onVisible });
-  viewContext.current = { id, me, useLocal, newestId: invData[0]?.id, active: conversationVisible,
+  viewContext.current = { id, me, useLocal, rows: invData, newestId: invData[0]?.id, active: conversationVisible,
     serverNewestId, live: local.live, onVisible: viewport.onVisible };
   const readNewestRef = useRef('');
   const lastViewableRef = useRef<Array<{ item: any; isViewable: boolean }>>([]);
   useEffect(() => { receiptedRef.current.clear(); readNewestRef.current = ''; lastViewableRef.current = []; }, [id, me]);
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 60, minimumViewTime: 150 }).current;
+  const acknowledgeVisible = useCallback((viewableItems: Array<{ item: any; isViewable: boolean }>) => {
+    const ctx = viewContext.current;
+    if (!ctx.id || !ctx.me || !ctx.active || auth.currentUser?.uid !== ctx.me || !viewableItems.length) return;
+    const visible = new Set(viewableItems.filter(v => v.isViewable && v.item.conversationId === ctx.id).map(v => v.item.id));
+    for (const m of ctx.rows) {
+      if (!visible.has(m.id) || m.senderUid === ctx.me || m.deletedForEveryone || m.retentionDeleting || m.__pending) continue;
+      if (isBinaryAttachment(m.type) && ((m.media?.uploadStatus != null && m.media.uploadStatus !== 'uploaded')
+        || !(m.media?.downloadURL || m.media?.storagePath))) continue;
+      const key = `${ctx.id}/${m.id}`;
+      if (receiptedRef.current.has(key)) continue;
+      receiptedRef.current.add(key);
+      if (ctx.useLocal) {
+        const retry = () => {
+          if (viewContext.current.id === ctx.id && viewContext.current.me === ctx.me) receiptedRef.current.delete(key);
+        };
+        void queueMarkReceipt({ conversationId: ctx.id, messageId: m.id, status: 'read', recipientUid: ctx.me })
+          .then(result => { if (!result.ok) retry(); })
+          .catch(retry);
+      } else markReceipt(ctx.id, m.id, 'read');
+    }
+  }, []);
   const onViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: Array<{ item: any; isViewable: boolean }> }) => {
     const ctx = viewContext.current;
     lastViewableRef.current = viewableItems;
@@ -974,24 +996,18 @@ export default function Conversation({ route, navigation }: any) {
       readNewestRef.current = readKey;
       void markRead(ctx.id).catch(() => { if (readNewestRef.current === readKey) readNewestRef.current = ''; });
     }
-    for (const m of visible) {
-      if (m.senderUid === ctx.me || m.deletedForEveryone || (m as any).__pending) continue;
-      const key = `${ctx.id}/${m.id}`;
-      if (receiptedRef.current.has(key)) continue;
-      receiptedRef.current.add(key);
-      if (ctx.useLocal) {
-        void queueMarkReceipt({ conversationId: ctx.id, messageId: m.id, status: 'read' })
-          .then(result => { if (!result.ok) receiptedRef.current.delete(key); })
-          .catch(() => { receiptedRef.current.delete(key); });
-      } else markReceipt(ctx.id, m.id, 'read');
-    }
-  }, []);
+    acknowledgeVisible(viewableItems);
+  }, [acknowledgeVisible]);
   useEffect(() => {
     if (!conversationVisible) { readNewestRef.current = ''; return; }
     // Native viewability may not fire again when an already-mounted screen
     // regains focus, or when only its server watermark changes.
     onViewableItemsChanged({ viewableItems: lastViewableRef.current });
   }, [conversationVisible, id, invData[0]?.id, serverNewestId, local.live, onViewableItemsChanged]);
+  useEffect(() => {
+    // A still-visible upload placeholder can become ready without any scroll.
+    acknowledgeVisible(lastViewableRef.current);
+  }, [invData, acknowledgeVisible]);
 
   // Timing (test builds, src/lib/perf.ts): the same screen-level points as the
   // baseline build — open → first rows, and every render reports its ids so

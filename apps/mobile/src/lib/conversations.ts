@@ -819,14 +819,16 @@ export async function getMessageInfo(conversationId: string, messageId: string):
 /** In-memory dedupe of (messageId, status) pairs per session. */
 const sentReceipts = new Set<string>();
 let receiptFlushTimer: ReturnType<typeof setTimeout> | null = null;
-let receiptQueue: Array<{ conversationId: string; messageId: string; status: ReceiptStatus }> = [];
+type QueuedReceipt = { conversationId: string; messageId: string; status: ReceiptStatus; recipientUid: string };
+let receiptQueue: QueuedReceipt[] = [];
 
 async function flushReceiptQueue() {
   const queue = receiptQueue;
   receiptQueue = [];
   receiptFlushTimer = null;
-  const call = fn<{ conversationId: string; messageId: string; status: ReceiptStatus }, { ok: true }>('markReceipt');
+  const call = fn<QueuedReceipt, { ok: true }>('markReceipt');
   for (const r of queue) {
+    if (auth.currentUser?.uid !== r.recipientUid) continue;
     try { await call(r); } catch { /* best-effort */ }
   }
 }
@@ -840,10 +842,12 @@ async function flushReceiptQueue() {
  * loses the dedupe state across reloads the receipt can't downgrade.
  */
 export function markReceipt(conversationId: string, messageId: string, status: ReceiptStatus) {
-  const key = `${messageId}:${status}`;
+  const uid = auth.currentUser?.uid;
+  if (!uid) return;
+  const key = JSON.stringify([uid, conversationId, messageId, status]);
   if (sentReceipts.has(key)) return;
   sentReceipts.add(key);
-  receiptQueue.push({ conversationId, messageId, status });
+  receiptQueue.push({ conversationId, messageId, status, recipientUid: uid });
   if (receiptFlushTimer == null) {
     receiptFlushTimer = setTimeout(() => { flushReceiptQueue().catch(() => {}); }, 300);
   }

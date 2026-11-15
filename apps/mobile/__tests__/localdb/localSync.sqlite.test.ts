@@ -17,7 +17,7 @@ vi.mock('../../src/lib/firebase', () => ({ app: {}, db: {}, auth: { currentUser:
 
 import * as messagesRepo from '../../src/localdb/repositories/messagesRepo';
 import { startConversationFeeder, type FeederChange } from '../../src/localdb/sync/conversationFeeder';
-import { pullMessageById } from '../../src/localdb/sync/firebasePull';
+import { pullMessageById, pullMessages, pullRecentMessages } from '../../src/localdb/sync/firebasePull';
 import { remoteMessageInput } from '../../src/localdb/sync/remoteMessage';
 import { mapAndOrderMessages } from '../../src/hooks/messageModel';
 
@@ -190,6 +190,75 @@ describe('targeted fetch and focus position', () => {
     expect(await messagesRepo.positionFromNewest(C, 'p49')).toBe(1);
     expect(await messagesRepo.positionFromNewest(C, 'p0')).toBe(50);
     expect(await messagesRepo.positionFromNewest(C, 'unknown')).toBeNull();
+  });
+});
+
+describe('incoming delivery receipts', () => {
+  async function deliveries() {
+    const rows = await db.all<{ payload_json: string }>(
+      "SELECT payload_json FROM outbox WHERE type = 'mark_receipt' ORDER BY entity_id",
+    );
+    return rows.map(row => JSON.parse(row.payload_json));
+  }
+
+  it('acknowledges a live incoming message once without opening or reading it', async () => {
+    fakeSeed(`conversations/${C}/messages/history`, msg(2));
+    const onChange = vi.fn();
+    const stop = startConversationFeeder(C, onChange);
+    try {
+      await vi.waitFor(() => expect(onChange).toHaveBeenCalled());
+      expect(await deliveries()).toEqual([]);
+      fakeWrite(`conversations/${C}/messages/fresh`, msg(4));
+      await vi.waitFor(async () => expect(await deliveries()).toEqual([
+        { conversationId: C, messageId: 'fresh', status: 'delivered', recipientUid: 'u_me' },
+      ]));
+      expect((await messagesRepo.getByRemoteId('fresh'))?.text).toBe('m4');
+      fakeWrite(`conversations/${C}/messages/fresh`, msg(4, { deliveredCount: 1 }));
+      fakeWrite(`conversations/${C}/messages/self`, msg(5));
+      await vi.waitFor(async () => expect(await messagesRepo.getByRemoteId('self')).toBeTruthy());
+      expect(await deliveries()).toHaveLength(1);
+    } finally { stop(); }
+  });
+
+  it('records targeted media delivery only once the original upload is ready', async () => {
+    const ref = `conversations/${C}/messages/photo`;
+    fakeSeed(ref, msg(2, { type: 'image', media: { uploadStatus: 'pending' } }));
+    await pullMessageById(C, 'photo');
+    expect(await deliveries()).toEqual([]);
+    fakeSeed(ref, msg(2, { type: 'image', media: { uploadStatus: 'uploaded', downloadURL: 'https://example.test/photo' } }));
+    await pullMessageById(C, 'photo');
+    await pullMessageById(C, 'photo');
+    expect(await deliveries()).toEqual([
+      { conversationId: C, messageId: 'photo', status: 'delivered', recipientUid: 'u_me' },
+    ]);
+  });
+
+  it('acknowledges an authoritative recent read even if the row was already cached', async () => {
+    const remote = msg(2);
+    const id = 'cached';
+    fakeSeed(`conversations/${C}/messages/${id}`, remote);
+    await messagesRepo.applyRemoteMessages([remoteMessageInput(id, C, remote)], { insertOnly: true });
+    expect(await deliveries()).toEqual([]);
+    await pullRecentMessages(C);
+    expect(await deliveries()).toEqual([
+      { conversationId: C, messageId: id, status: 'delivered', recipientUid: 'u_me' },
+    ]);
+    await db.run("DELETE FROM outbox WHERE type = 'mark_receipt'");
+    await pullMessageById(C, id);
+    expect(await deliveries()).toEqual([]);
+  });
+
+  it('delivers incremental catch-up and skips historical, deleted and retained messages', async () => {
+    fakeSeed(`conversations/${C}/messages/history`, msg(2));
+    await pullMessages(C);
+    expect(await deliveries()).toEqual([]);
+    fakeSeed(`conversations/${C}/messages/deleted`, msg(4, { deletedForEveryone: true }));
+    fakeSeed(`conversations/${C}/messages/retained`, msg(6, { retentionDeleting: true }));
+    fakeSeed(`conversations/${C}/messages/fresh`, msg(8));
+    await pullMessages(C);
+    expect(await deliveries()).toEqual([
+      { conversationId: C, messageId: 'fresh', status: 'delivered', recipientUid: 'u_me' },
+    ]);
   });
 });
 

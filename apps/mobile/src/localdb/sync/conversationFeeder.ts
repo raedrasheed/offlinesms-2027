@@ -10,7 +10,7 @@
 // never run ahead of the write and miss the new message.
 
 import { collection, query, orderBy, limit as qlimit, onSnapshot } from 'firebase/firestore';
-import { db } from '../../lib/firebase';
+import { auth, db } from '../../lib/firebase';
 import { applyRemoteMessages } from '../repositories/messagesRepo';
 import { remoteMessageInput } from './remoteMessage';
 import { getCurrentUid, getDb } from '../connection';
@@ -47,6 +47,11 @@ export function startConversationFeeder(
     // (deletes arrive as a modified doc with deletedForEveryone).
     const changed = snap.docChanges().filter(c => c.type !== 'removed').map(c => c.doc);
     const fromCache = snap.metadata.fromCache;
+    // Starting a listener replays its whole history window. Acknowledgements
+    // are only for incoming changes after that server baseline.
+    const deliveryRecipientUid = !fromCache && !firstServer && auth.currentUser?.uid === uid ? uid ?? undefined : undefined;
+    const deliveryMessageIds = deliveryRecipientUid
+      ? new Set(changed.filter(doc => !doc.metadata?.hasPendingWrites).map(doc => doc.id)) : undefined;
     if (!fromCache && firstServer) {
       firstServer = false;
       perfMark('sync:live:first-server', { durationMs: Math.round(perfNow() - started), count: snap.docs.length });
@@ -65,7 +70,13 @@ export function startConversationFeeder(
           const chunk = batch.slice(offset, offset + FEEDER_COMMIT_SIZE);
           for (let attempt = 0; ; attempt++) {
             if (!active()) return;
-            try { await applyRemoteMessages(chunk); break; }
+            try {
+              await applyRemoteMessages(chunk, {
+                deliveryRecipientUid: deliveryRecipientUid === auth.currentUser?.uid ? deliveryRecipientUid : undefined,
+                deliveryMessageIds,
+              });
+              break;
+            }
             catch (error) {
               if (attempt >= 2) throw error;
               await new Promise<void>(resolve => setTimeout(resolve, 150 * (attempt + 1)));

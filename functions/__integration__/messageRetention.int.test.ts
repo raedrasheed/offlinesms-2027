@@ -1,10 +1,11 @@
 import { getStorage } from 'firebase-admin/storage';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { db, resetEmulators, Timestamp } from './harness';
+import { db, expectHttps, req, resetEmulators, Timestamp } from './harness';
 import { runMessageRetention } from '../src/chats/messageRetention';
 import { DAY_MS } from '../src/chats/messageRetentionPolicy';
 import { aggregateReceipt } from '../src/chats/onReceiptWrite';
 import { onMessageCreate } from '../src/chats/onMessageCreate';
+import { markReceipt } from '../src/chats/markReceipt';
 
 const NOW = 1_800_000_000_000;
 const path = (id: string) => `conversations/c/messages/${id}`;
@@ -96,6 +97,48 @@ describe('cloud message retention', () => {
 });
 
 describe('receipt aggregation and fan-out races', () => {
+  it('counts delivery before viewing and never downgrades a seen message on a late receipt', async () => {
+    await db().doc('conversations/c').set({ participantUids: ['sender', 'a', 'b', 'waiting'] });
+    await message('m', 0);
+    const ref = db().doc(path('m'));
+    await onMessageCreate.run({ params: { convoId: 'c', msgId: 'm' }, data: await ref.get() } as any);
+    const receipt = (uid: string, status: string) => markReceipt.run(req(uid, {
+      recipientUid: uid, conversationId: 'c', messageId: 'm', status,
+    }));
+    await receipt('a', 'delivered');
+    await receipt('b', 'read');
+    await Promise.all(['a', 'b', 'waiting'].map(uid => aggregateReceipt(db(), 'c', 'm', uid)));
+    expect((await ref.get()).data()).toMatchObject({ deliveredCount: 2, viewedCount: 1, pendingCount: 1 });
+    const deliveredAt = (await ref.collection('receipts').doc('a').get()).get('deliveredAt');
+    await receipt('a', 'viewed');
+    expect(await receipt('a', 'delivered')).toMatchObject({ applied: false, reason: 'no-downgrade' });
+    await Promise.all([aggregateReceipt(db(), 'c', 'm', 'a'), aggregateReceipt(db(), 'c', 'm', 'a')]);
+    expect((await ref.get()).data()).toMatchObject({ deliveredCount: 2, viewedCount: 2, pendingCount: 1 });
+    expect((await ref.collection('receipts').doc('a').get()).get('deliveredAt')).toEqual(deliveredAt);
+  });
+
+  it('binds receipts to the recipient account and ignores deleted or unfinished messages', async () => {
+    await db().doc('conversations/c').set({ memberIds: ['sender', 'peer'] });
+    await message('m', 0, { type: 'video', media: { uploadStatus: 'pending' } });
+    const ref = db().doc(path('m'));
+    const payload = { conversationId: 'c', messageId: 'm', status: 'delivered' };
+    await expectHttps(markReceipt.run(req('peer', { ...payload, recipientUid: 'old-account' })), 'permission-denied', 'account-changed');
+    await expectHttps(markReceipt.run(req('outsider', payload)), 'permission-denied', 'not-a-participant');
+    expect(await markReceipt.run(req('sender', payload))).toMatchObject({ applied: false, reason: 'self-receipt' });
+    expect(await markReceipt.run(req('peer', payload))).toMatchObject({ applied: false, reason: 'media-not-ready' });
+    await ref.update({ deletedForEveryone: true });
+    expect(await markReceipt.run(req('peer', payload))).toMatchObject({ applied: false, reason: 'message-deleted' });
+    await ref.update({ deletedForEveryone: false, retentionDeleting: true });
+    await expectHttps(markReceipt.run(req('peer', payload)), 'not-found', 'message-expired');
+    expect((await ref.collection('receipts').get()).empty).toBe(true);
+    await ref.update({ retentionDeleting: false, media: { uploadStatus: 'uploaded' } });
+    // A legacy client can still send a receipt without the optional recipientUid.
+    expect(await markReceipt.run(req('peer', { ...payload, status: 'played' }))).toMatchObject({ applied: true });
+    expect((await ref.collection('receipts').doc('peer').get()).data()).toEqual(expect.objectContaining({
+      status: 'played', deliveredAt: expect.any(Timestamp), playedAt: expect.any(Timestamp),
+    }));
+  });
+
   it('bootstraps once, reads current statuses for duplicate/out-of-order events, and handles removal', async () => {
     await message('m', 0);
     const ref = db().doc(path('m'));

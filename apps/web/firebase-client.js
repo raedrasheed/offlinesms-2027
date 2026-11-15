@@ -169,7 +169,7 @@ export function initializeFirebaseClient(sdk, config, { appCheckSiteKey } = {}) 
 
   function watchThread(uid, conversationId, onState, onError) {
     const id = documentId(conversationId);
-    const state = { conversation: undefined, messages: undefined, userState: undefined, role: undefined };
+    const state = { conversation: undefined, messages: undefined, userState: undefined, role: undefined, serverMessageIds: [] };
     const unsubscribes = [];
     let stopped = false;
     let watchingMessages = false;
@@ -213,6 +213,9 @@ export function initializeFirebaseClient(sdk, config, { appCheckSiteKey } = {}) 
       );
       track(watchScoped(uid, source, messages => {
         state.messages = messages.docs.map(asMessage).reverse();
+        state.serverMessageIds = messages.metadata?.fromCache ? [] : messages.docs
+          .filter(message => !message.metadata?.fromCache && !message.metadata?.hasPendingWrites)
+          .map(message => message.id);
         publish();
       }, fail));
       if (stopped) return;

@@ -5,9 +5,10 @@ import { emitLocalMessagesChanged } from '../messageChanges';
 // immediately as `pending` for optimistic UI; the sync engine reconciles them
 // to their canonical remote counterpart by local_id once the server confirms.
 
-import { getDb, type LocalDatabase } from '../connection';
+import { getCurrentUid, getDb, type LocalDatabase } from '../connection';
 import { localMessageId } from '../sync/ids';
 import type { MessageRow, MessageStatus, MessageSyncStatus } from '../types';
+import { stageDeliveryReceipt } from './receiptsRepo';
 import { parsePayload } from '../../media/attachmentModel';
 
 const PAGE = 40;
@@ -366,7 +367,7 @@ export interface RemoteMessageInput {
   /** Sticker / poll payload JSON; undefined = leave as is. */
   payload?: string | null;
   text: string | null; remoteCreatedAt: number | null; editedAt?: number | null;
-  deletedForEveryone?: boolean; replyToMessageId?: string | null; replyToPreview?: string | null;
+  deletedForEveryone?: boolean; retentionDeleting?: boolean; replyToMessageId?: string | null; replyToPreview?: string | null;
   replyToSenderUid?: string | null; replyToSenderName?: string | null; replyToType?: string | null;
   mentions?: Array<{ userId: string; displayName: string; startIndex: number; endIndex: number }> | null;
   forwarded?: boolean; serverVersion?: number; status?: MessageStatus;
@@ -383,21 +384,45 @@ export interface RemoteMessageInput {
  * is what keeps applying a snapshot off the user's critical path. Deleted-for-
  * everyone messages are tombstoned in the same transaction.
  */
-export async function applyRemoteMessages(batch: RemoteMessageInput[], options: { insertOnly?: boolean } = {}): Promise<void> {
+export async function applyRemoteMessages(batch: RemoteMessageInput[], options: {
+  insertOnly?: boolean;
+  deliveryRecipientUid?: string;
+  deliveryMessageIds?: ReadonlySet<string>;
+} = {}): Promise<void> {
   if (batch.length === 0) return;
   const database = getDb();
+  const receiptChats = new Set<string>();
   await database.transaction(async tx => {
+    const recipientUid = options.deliveryRecipientUid;
     for (const r of batch) {
       // A deleted-for-everyone message keeps its row (it renders as "deleted"
       // in place, preserving order) but never keeps its content.
-      if (r.deletedForEveryone) await upsertRemoteMessage({ ...r, text: null, caption: null, media: null, payload: null }, tx, options.insertOnly);
-      else await upsertRemoteMessage(r, tx, options.insertOnly);
+      const row = r.deletedForEveryone ? { ...r, text: null, caption: null, media: null, payload: null } : r;
+      const deliveryRecipient = options.deliveryMessageIds?.has(r.remoteId) === false ? undefined : recipientUid;
+      const queued = await upsertRemoteMessage(row, tx, options.insertOnly, deliveryRecipient);
+      if (queued) receiptChats.add(r.conversationId);
     }
   });
-  for (const id of new Set(batch.map(r => r.conversationId))) emitLocalMessagesChanged(id);
+  for (const id of new Set(batch.map(r => r.conversationId))) emitLocalMessagesChanged(id, receiptChats.has(id) || undefined);
 }
 
-export async function upsertRemoteMessage(r: RemoteMessageInput, database: LocalDatabase = getDb(), insertOnly = false): Promise<void> {
+async function acknowledgeDelivery(
+  r: RemoteMessageInput, database: LocalDatabase, existing: MessageRow | null, recipientUid?: string,
+): Promise<boolean> {
+  if (!recipientUid || recipientUid !== getCurrentUid() || !r.senderUid || r.senderUid === recipientUid
+    || r.deletedForEveryone || r.retentionDeleting || existing?.deleted_for_me || existing?.deleted_for_everyone) return false;
+  if (['image', 'video', 'voice', 'audio', 'file'].includes(r.type ?? existing?.type ?? '')) {
+    const media = r.media;
+    const ready = media?.uploadStatus == null ? Boolean(media?.downloadURL)
+      : media.uploadStatus === 'uploaded' && Boolean(media.downloadURL || media.storagePath);
+    if (!ready) return false;
+  }
+  return stageDeliveryReceipt(database, r.conversationId, r.remoteId, recipientUid);
+}
+
+export async function upsertRemoteMessage(
+  r: RemoteMessageInput, database: LocalDatabase = getDb(), insertOnly = false, recipientUid?: string,
+): Promise<boolean> {
   const find = () => database.first<MessageRow>('SELECT * FROM messages WHERE remote_id = ? LIMIT 1', [r.remoteId]);
   let existing = await find();
   // A bootstrap read may finish after a newer live edit/delete.
@@ -436,7 +461,7 @@ export async function upsertRemoteMessage(r: RemoteMessageInput, database: Local
         source: r.media.storagePath || r.media.downloadURL || '', thumbnailURL: r.media.thumbnailURL,
         thumbnailPath: r.media.thumbnailPath }, database);
     }
-    return;
+    return acknowledgeDelivery(r, database, existing, recipientUid);
   }
   if (!existing && r.clientLocalId) {
     // Our own message, delivered by the realtime feed before the send call
@@ -530,6 +555,8 @@ export async function upsertRemoteMessage(r: RemoteMessageInput, database: Local
       ],
     );
   }
+
+  return acknowledgeDelivery(r, database, existing, recipientUid);
 }
 
 /** Phase 22D — optimistic local mutators (applied before the outbox push). */
