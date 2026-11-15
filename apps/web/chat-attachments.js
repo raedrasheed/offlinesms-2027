@@ -1,4 +1,4 @@
-import { attachmentLimit, attachmentMimeAllowed, inferAttachmentMime, MIME_EXTENSIONS } from '../mobile/src/media/attachmentModel.ts';
+import { attachmentLimit, attachmentMimeAllowed, inferAttachmentMime, MIME_EXTENSIONS, normalizeAttachmentMime } from '../mobile/src/media/attachmentModel.ts';
 
 const copy = {
   en: {
@@ -64,6 +64,20 @@ function showNotice(notice, message) {
   notice.hidden = !message;
 }
 
+function clipboardImageMime(file) {
+  return normalizeAttachmentMime(file.type) || inferAttachmentMime(file.name.replace(/\.jpeg$/i, '.jpg'));
+}
+
+export function getClipboardImage(clipboard) {
+  const isImage = file => file && clipboardImageMime(file).startsWith('image/');
+  for (const item of Array.from(clipboard?.items ?? [])) {
+    if (item.kind !== 'file') continue;
+    const file = item.getAsFile();
+    if (isImage(file)) return file;
+  }
+  return Array.from(clipboard?.files ?? []).find(isImage);
+}
+
 export function createChatAttachments({ locale, showDialog, closeDialog, openStructured, sendAttachment, isActive }) {
   const language = typeof locale === 'function' ? locale() : locale;
   const text = copy[language] ?? copy.en;
@@ -95,6 +109,12 @@ export function createChatAttachments({ locale, showDialog, closeDialog, openStr
     lifecycle.observe(modal, { attributes: true, attributeFilter: ['open'], subtree: true, childList: true });
   }
 
+  function fileIssue(file, type, mime = inferAttachmentMime(file.name, file.type)) {
+    const attachmentType = type === 'gif' ? 'image' : type;
+    if (!file.size || !attachmentMimeAllowed(attachmentType, mime) || type === 'gif' && mime !== 'image/gif') return text.invalid;
+    return file.size > attachmentLimit(attachmentType) ? text.tooLarge : '';
+  }
+
   function chooseFile(option, container, notice) {
     if (!active(container)) return;
     container.querySelector('input[type="file"]')?.remove();
@@ -112,10 +132,8 @@ export function createChatAttachments({ locale, showDialog, closeDialog, openStr
       const file = input.files?.[0];
       input.remove();
       if (!file || !active(container)) return;
-      const mime = inferAttachmentMime(file.name, file.type);
-      if (!file.size || !attachmentMimeAllowed(attachmentType, mime) || type === 'gif' && mime !== 'image/gif') {
-        showNotice(notice, text.invalid);
-      } else if (file.size > attachmentLimit(attachmentType)) showNotice(notice, text.tooLarge);
+      const issue = fileIssue(file, type);
+      if (issue) showNotice(notice, issue);
       else showReview(file, option);
     }, { once: true });
     container.append(input);
@@ -266,12 +284,12 @@ export function createChatAttachments({ locale, showDialog, closeDialog, openStr
     }).catch(() => { if (active(panel)) showNotice(notice, text.cameraFailed); });
   }
 
-  function open() {
+  function open(issue = '') {
     if (!isActive()) return;
     const menu = node('div', 'chat-attachment-menu');
     const notice = node('p', 'chat-attachment-error');
     notice.setAttribute('role', 'alert');
-    notice.hidden = true;
+    showNotice(notice, issue);
     for (const [key, path] of options) {
       const choice = button('', () => {
         if (!active(menu)) return;
@@ -289,5 +307,12 @@ export function createChatAttachments({ locale, showDialog, closeDialog, openStr
     show(text.attach, menu);
   }
 
-  return { open, close };
+  function openImage(file) {
+    if (!isActive()) return;
+    const issue = fileIssue(file, 'image', clipboardImageMime(file));
+    if (issue) open(issue);
+    else showReview(file, 'photos');
+  }
+
+  return { open, openImage, close };
 }

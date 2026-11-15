@@ -10,7 +10,7 @@ import { createGroupInfo } from './group-info.js';
 import { createChatMedia } from './chat-media.js';
 import { bundledSticker, createChatMediaSource } from './chat-media-source.js';
 import { downloadChatMedia } from './chat-media-download.js';
-import { createChatAttachments } from './chat-attachments.js';
+import { createChatAttachments, getClipboardImage } from './chat-attachments.js';
 import { openStructuredAttachment } from './chat-attachments-structured.js';
 import { renderRichMessage } from './chat-rich-message.js';
 import { createChatReceipts } from './chat-receipts.js';
@@ -1509,7 +1509,7 @@ function showComposerOptions() {
   showDialog(t('composerOptions'), grid);
 }
 
-function showAttachments() {
+function showAttachments(image) {
   const conversationId = activeId;
   if (!user || section !== 'chats' || sendingRestricted() || sends.get(conversationId)?.busy || attachmentSends.has(conversationId)) return;
   disposeAttachments();
@@ -1548,7 +1548,9 @@ function showAttachments() {
       ), rich.kind !== 'poll'),
     }),
   });
-  attachments.open();
+  if (image) attachments.openImage(image);
+  else attachments.open();
+  return true;
 }
 
 async function send(event) {
@@ -1703,7 +1705,7 @@ byId('details').addEventListener('click', showDetails);
 byId('conversation-search').addEventListener('click', showMessageSearch);
 byId('wallpaper').addEventListener('click', showGroupWallpaper);
 byId('extras').addEventListener('click', showComposerOptions);
-byId('attach').addEventListener('click', showAttachments);
+byId('attach').addEventListener('click', () => showAttachments());
 byId('back').addEventListener('click', () => {
   if (attachments) closeDialog();
   closeGroupInfo();
@@ -1715,6 +1717,11 @@ byId('back').addEventListener('click', () => {
 latest.addEventListener('click', () => { scroll.scrollTop = scroll.scrollHeight; scroll.focus({ preventScroll: true }); });
 scroll.addEventListener('scroll', () => { updateLatest(); chatReceipts.refreshVisibility(); }, { passive: true });
 messageInput.addEventListener('input', updateDraft);
+messageInput.addEventListener('paste', event => {
+  if (event.defaultPrevented || dialog.open || workspace.dataset.mobileView !== 'chat') return;
+  const image = getClipboardImage(event.clipboardData);
+  if (image && showAttachments(image)) event.preventDefault();
+});
 messageInput.addEventListener('keydown', (event) => {
   if (mentionComposer.keydown(event)) return;
   if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && event.keyCode !== 229) {
