@@ -14,6 +14,10 @@ import { createChatAttachments } from './chat-attachments.js';
 import { openStructuredAttachment } from './chat-attachments-structured.js';
 import { renderRichMessage } from './chat-rich-message.js';
 import { createChatReceipts } from './chat-receipts.js';
+import { createMentionComposer } from './chat-mentions.js';
+import { createMessageLink, messageLinks } from './message-links.js';
+import { isExternalId, looksLikeUid } from '../mobile/src/lib/displayNames.pure.ts';
+import { renderMentionSegments } from '../mobile/src/lib/mentions.ts';
 
 const words = {
   navigation: ['التنقل', 'Navigation'], chats: ['المحادثات', 'Chats'], status: ['الحالات', 'Status'],
@@ -115,6 +119,7 @@ let pendingRead;
 let announcementTimer;
 let renderedThread;
 let attachments;
+let mentionRoster;
 let lastPollVoteSeq = 0;
 const profiles = new Map();
 const userStates = new Map();
@@ -127,6 +132,8 @@ const mediaRenderKeys = new WeakMap();
 const richRenderKeys = new WeakMap();
 const chatReceipts = createChatReceipts({ viewport: scroll, flow, canRead: canReadMessages,
   send: (receipt) => call('markReceipt', receipt) });
+const mentionComposer = createMentionComposer({ input: messageInput, list: byId('mention-suggestions'),
+  language: () => language, requestMembers: requestMentionMembers, onChange: updateDraft });
 
 const t = (key) => words[key]?.[language === 'ar' ? 0 : 1] ?? words.message[language === 'ar' ? 0 : 1];
 const numeral = (value) => new Intl.NumberFormat(language).format(value);
@@ -153,6 +160,14 @@ function sharedInviteCode(value) {
     return code && inviteCodePattern.test(code) ? code : null;
   } catch { return null; }
 }
+
+const messageLinkActions = {
+  inviteCode: sharedInviteCode,
+  openInvite(code) {
+    if (code === inviteCodeFromLocation()) showGroupInvite();
+    else location.hash = `join=${code}`;
+  },
+};
 
 function showGroupInvite() {
   const code = inviteCodeFromLocation();
@@ -266,6 +281,31 @@ function announce(text) {
 
 function peerId(item) {
   return item?.type === 'direct' ? item.participantUids?.find((uid) => uid !== user?.uid) : undefined;
+}
+
+async function requestMentionMembers(conversationId) {
+  const uid = user?.uid;
+  const conversation = currentThread?.conversation;
+  if (!uid || conversationId !== conversation?.id || conversation.type !== 'group') return [];
+  const ids = conversation.participantUids.filter(id => typeof id === 'string' && id !== uid && !isExternalId(id));
+  const key = JSON.stringify([conversationId, ids]);
+  if (mentionRoster?.key !== key || mentionRoster.expiresAt < Date.now()) {
+    const request = { key, expiresAt: Date.now() + 60_000, profiles: client.getGroupMemberProfiles(uid, ids) };
+    mentionRoster = request;
+    request.profiles.catch(() => { if (mentionRoster === request) mentionRoster = undefined; });
+  }
+  const generation = session;
+  const rows = await mentionRoster.profiles;
+  if (generation !== session || activeId !== conversationId || !currentThread) return [];
+  const participants = new Set(currentThread.conversation.participantUids);
+  const compare = new Intl.Collator(language, { numeric: true, sensitivity: 'base' }).compare;
+  return rows.flatMap((profile) => {
+    if (profile?.status !== 'active' || !participants.has(profile.uid)) return [];
+    const username = profile.username.trim().replace(/^@+/, '');
+    const name = profile.displayName.trim().replace(/^@+/, '');
+    const displayName = (looksLikeUid(name, profile.uid) ? username : name || username).slice(0, 80).trimEnd();
+    return displayName ? [{ uid: profile.uid, displayName, username, photoURL: safeMediaUrl(profile.photoURL) }] : [];
+  }).sort((a, b) => compare(a.displayName, b.displayName) || compare(a.username, b.username));
 }
 
 function threadName(item) {
@@ -607,30 +647,29 @@ function jumpTo(id) {
   window.setTimeout(() => row.classList.remove('message-highlight'), 1800);
 }
 
-function renderMessageText(value) {
+function renderMessageText(value, mentions) {
   const text = String(value);
   const body = el('p', 'message-text');
   body.dir = 'auto';
-  let offset = 0;
-  // Whitespace and bidi markers separate URLs from surrounding message text.
-  for (const match of text.matchAll(/https:\/\/[^\s<>"'«»“”‘’\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]+/gi)) {
-    if (match.index > 0 && /[\p{L}\p{N}_/@:.=+\-\\]/u.test(text[match.index - 1])) continue;
-    const url = match[0].replace(/[.,!?;:،؛؟…\])}]+$/u, '');
-    const code = sharedInviteCode(url);
-    if (!code) continue;
-    const anchor = el('a', 'message-invite-link', url);
-    anchor.href = `/#join=${code}`;
-    anchor.dir = 'ltr';
-    anchor.addEventListener('click', (event) => {
-      if (event.defaultPrevented || event.button !== 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-      event.preventDefault();
-      if (code === inviteCodeFromLocation()) showGroupInvite();
-      else location.hash = `join=${code}`;
-    });
-    body.append(text.slice(offset, match.index), anchor);
-    offset = match.index + url.length;
+  const valid = Array.isArray(mentions) ? mentions.filter((mention) => (
+    typeof mention?.userId === 'string' && typeof mention.displayName === 'string'
+    && Number.isInteger(mention.startIndex) && Number.isInteger(mention.endIndex)
+    && (mention.startIndex === 0 || /\s/u.test(text[mention.startIndex - 1] ?? ''))
+    && text.slice(mention.startIndex, mention.endIndex) === `@${mention.displayName}`
+  )) : [];
+  for (const segment of renderMentionSegments(text, valid)) {
+    if (segment.type === 'mention') {
+      const name = el('bdi', 'message-mention', segment.text);
+      body.append(name);
+      continue;
+    }
+    let offset = 0;
+    for (const link of messageLinks(segment.text)) {
+      body.append(segment.text.slice(offset, link.start), createMessageLink(link, messageLinkActions));
+      offset = link.end;
+    }
+    body.append(segment.text.slice(offset));
   }
-  body.append(text.slice(offset));
   return body;
 }
 
@@ -718,7 +757,7 @@ function renderMessage(item, existingRow) {
     if (rich) bubble.append(rich);
     else {
       const body = messageBody(item);
-      if (body) bubble.append(renderMessageText(body));
+      if (body) bubble.append(renderMessageText(body, body === item.text ? item.mentions : undefined));
       // Older polls can carry labels without option IDs.
       if (item.type === 'poll' && Array.isArray(item.poll?.options)) {
         const options = el('ul', 'live-poll');
@@ -807,6 +846,11 @@ function sendingRestricted() {
     && !['owner', 'admin'].includes(currentThread.role);
 }
 
+function updateDraft() {
+  drafts.set(activeId, messageInput.value);
+  updateComposer();
+}
+
 function updateComposer() {
   const sending = sends.get(activeId)?.busy === true || attachmentSends.has(activeId);
   const canSend = Boolean(currentThread && !sendingRestricted());
@@ -817,6 +861,9 @@ function updateComposer() {
   byId('extras').disabled = sending;
   byId('attach').disabled = !canSend || sending;
   messageInput.readOnly = sending;
+  const canMention = canSend && !sending && section === 'chats' && workspace.dataset.mobileView === 'chat'
+    && currentThread.conversation.type === 'group';
+  mentionComposer.setContext(canMention ? activeId : null);
   const error = sends.get(activeId)?.error;
   feedback.hidden = !error;
   feedback.textContent = error ? t('sendError') : '';
@@ -1074,7 +1121,10 @@ function navigate(next) {
     renderList();
     renderThread();
     maybeMarkRead();
-  } else renderSection();
+  } else {
+    mentionComposer.setContext(null);
+    renderSection();
+  }
 }
 
 function call(name, data) {
@@ -1141,6 +1191,7 @@ function openGroupInfo() {
       conversations = conversations.filter((item) => item.id !== id);
       workspace.dataset.mobileView = 'list';
       messageInput.value = '';
+      mentionComposer.clear(id);
       applyWallpaper();
       renderList();
       renderThread();
@@ -1243,9 +1294,11 @@ function showComposerOptions() {
   for (const emoji of ['😊', '😂', '❤️', '👍', '🎉', '🙏', '👋', '🤔', '🙌', '✅', '☕', '⭐']) {
     grid.append(button(emoji, () => {
       closeDialog();
-      messageInput.setRangeText(emoji, messageInput.selectionStart, messageInput.selectionEnd, 'end');
-      drafts.set(activeId, messageInput.value);
-      updateComposer();
+      const start = messageInput.selectionStart;
+      const end = messageInput.selectionEnd;
+      messageInput.setRangeText(emoji, start, end, 'end');
+      mentionComposer.refresh({ start, end });
+      updateDraft();
       messageInput.focus();
     }, 'feature-button'));
   }
@@ -1302,14 +1355,17 @@ async function send(event) {
   if (!id || !text || !currentThread || sends.get(id)?.busy || attachmentSends.has(id) || sendingRestricted()) return;
   const generation = session;
   const previous = sends.get(id);
-  const attempt = previous?.text === text && previous?.replyTo?.messageId === replyTo?.messageId
-    ? previous : { text, replyTo, localId: crypto.randomUUID() };
+  const mentions = currentThread.conversation.type === 'group'
+    ? mentionComposer.mentionsFor(id, text, currentThread.conversation.participantUids) : [];
+  const mentionKey = JSON.stringify(mentions);
+  const attempt = previous?.text === text && previous?.replyTo?.messageId === replyTo?.messageId && previous?.mentionKey === mentionKey
+    ? previous : { text, replyTo, mentionKey, localId: crypto.randomUUID() };
   sends.set(id, attempt);
   attempt.busy = true;
   attempt.error = false;
   updateComposer();
   try {
-    await client.sendText({ conversationId: id, text, replyTo, localId: attempt.localId });
+    await client.sendText({ conversationId: id, text, replyTo, localId: attempt.localId, mentions: mentions.length ? mentions : null });
     if (generation !== session) return;
     sends.delete(id);
     drafts.delete(id);
@@ -1319,6 +1375,7 @@ async function send(event) {
       renderReply();
       messageInput.focus();
     }
+    mentionComposer.clear(id);
   } catch {
     if (generation === session) attempt.error = true;
   } finally {
@@ -1331,6 +1388,8 @@ async function send(event) {
 
 function clearSession() {
   chatReceipts.reset();
+  mentionComposer.reset();
+  mentionRoster = undefined;
   closeMedia();
   ++session;
   ++threadGeneration;
@@ -1425,13 +1484,15 @@ byId('back').addEventListener('click', () => {
   if (attachments) closeDialog();
   closeGroupInfo();
   workspace.dataset.mobileView = 'list';
+  mentionComposer.setContext(null);
   chatReceipts.refreshVisibility();
   [...list.querySelectorAll('[data-thread]')].find((item) => item.dataset.thread === activeId)?.focus({ preventScroll: true });
 });
 latest.addEventListener('click', () => { scroll.scrollTop = scroll.scrollHeight; scroll.focus({ preventScroll: true }); });
 scroll.addEventListener('scroll', () => { updateLatest(); chatReceipts.refreshVisibility(); }, { passive: true });
-messageInput.addEventListener('input', () => { drafts.set(activeId, messageInput.value); updateComposer(); });
+messageInput.addEventListener('input', updateDraft);
 messageInput.addEventListener('keydown', (event) => {
+  if (mentionComposer.keydown(event)) return;
   if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && event.keyCode !== 229) {
     event.preventDefault();
     if (!byId('send').disabled) composer.requestSubmit();
