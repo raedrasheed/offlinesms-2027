@@ -1,0 +1,60 @@
+.settings-action-note:empty,
+.settings-friends-dialog .feature-form:empty { display: none; }
+
+.settings-friend-contacts {
+  padding-block-end: 12px;
+  border-block-end: 1px solid var(--line);
+}
+
+.settings-contact-progress { width: 100%; accent-color: var(--brand); }
+.settings-friend {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  flex-wrap: wrap;
+  padding: 10px 0;
+  border-block-end: 1px solid var(--line);
+}
+
+.settings-friend-name { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.settings-wallpaper-preview {
+  position: relative;
+  display: grid;
+  align-content: end;
+  gap: 8px;
+  min-height: 220px;
+  isolation: isolate;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 14px;
+  background: var(--chat-bg);
+}
+
+.settings-wallpaper-preview::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--wallpaper-wash), url("./chat-bg-default.jpg") center top / 430px auto repeat;
+  filter: var(--wallpaper-filter);
+}
+
+.settings-wallpaper-preview[data-wallpaper="plain"]::before { display: none; }
+.settings-wallpaper-preview[data-wallpaper="custom"]::before,
+.conversation[data-wallpaper="custom"]::before {
+  background: var(--custom-chat-wallpaper) center / cover no-repeat;
+  filter: none;
+}
+
+.settings-preview-incoming,
+.settings-preview-outgoing {
+  max-width: 85%;
+  border-radius: 12px;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+.settings-preview-incoming { justify-self: start; background: var(--surface); }
+.settings-preview-outgoing { justify-self: end; background: var(--deep); color: white; }

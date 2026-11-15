@@ -1,12 +1,12 @@
 import { initializeApp } from 'firebase/app';
 import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-check';
 import {
-  browserLocalPersistence, indexedDBLocalPersistence, initializeAuth, inMemoryPersistence,
+  beforeAuthStateChanged, browserLocalPersistence, indexedDBLocalPersistence, initializeAuth, inMemoryPersistence,
   onAuthStateChanged, signInWithCustomToken, signOut,
 } from 'firebase/auth';
 import {
-  collection, doc, documentId, getDocFromServer, getDocsFromServer, initializeFirestore, limit,
-  memoryLocalCache, onSnapshot, orderBy, query, serverTimestamp, updateDoc, where,
+  addDoc, collection, doc, documentId, getDocFromServer, getDocsFromServer, initializeFirestore, limit,
+  memoryLocalCache, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc, where,
 } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { getBlob, getDownloadURL, getStorage, ref, uploadBytes, uploadBytesResumable } from 'firebase/storage';
@@ -15,10 +15,10 @@ import { isProductionFirebaseConfig } from './firebase-config.js';
 
 const sdk = {
   initializeApp, initializeAppCheck, ReCaptchaEnterpriseProvider,
-  browserLocalPersistence, indexedDBLocalPersistence, initializeAuth, inMemoryPersistence,
+  beforeAuthStateChanged, browserLocalPersistence, indexedDBLocalPersistence, initializeAuth, inMemoryPersistence,
   onAuthStateChanged, signInWithCustomToken, signOut,
-  collection, doc, documentId, getDocFromServer, getDocsFromServer, initializeFirestore, limit,
-  memoryLocalCache, onSnapshot, orderBy, query, serverTimestamp, updateDoc, where,
+  addDoc, collection, doc, documentId, getDocFromServer, getDocsFromServer, initializeFirestore, limit,
+  memoryLocalCache, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc, where,
   getFunctions, httpsCallable, getBlob, getDownloadURL, getStorage, ref, uploadBytes, uploadBytesResumable,
 };
 

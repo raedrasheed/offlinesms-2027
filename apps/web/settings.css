@@ -1,0 +1,17 @@
+.settings-row-description:empty { display: none; }
+.settings-row { text-align: start; text-decoration: none; color: inherit; }
+.settings-row .settings-trailing { color: var(--muted); font-size: 13px; font-weight: 400; }
+.settings-row.settings-danger .feature-list-copy strong { color: #ff8c82; }
+[data-theme="light"] .settings-row.settings-danger .feature-list-copy strong { color: #b72825; }
+.settings-danger-action { background: #a82024; border-color: #a82024; color: #fff; }
+.settings-danger-action:hover { background: #87171b; border-color: #87171b; }
+.feature-settings-portrait > .avatar {
+  width: 104px;
+  height: 104px;
+  font-size: 32px;
+  border-radius: 50%;
+}
+.settings-profile-editor { display: grid; gap: 14px; }
+.settings-profile-photo { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.settings-profile-photo input { max-width: min(100%, 240px); }
+.settings-profile-photo .avatar { width: 48px; height: 48px; }

@@ -1,0 +1,43 @@
+.settings-pref-switch {
+  appearance: none;
+  position: relative;
+  flex: 0 0 auto;
+  width: 38px;
+  height: 22px;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.settings-pref-switch::before {
+  position: absolute;
+  inset-block-start: 3px;
+  inset-inline-start: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--muted);
+  content: '';
+}
+
+.settings-pref-switch:checked { background: #176989; border-color: #176989; }
+.settings-pref-switch:checked::before { inset-inline-start: 19px; background: #fff; }
+.settings-pref-switch:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.settings-pref-switch:disabled { opacity: .5; cursor: default; }
+
+.settings-pref-pane { gap: 4px; }
+.settings-pref-detail {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  min-width: 0;
+  gap: 12px;
+  padding-block: 9px;
+  border-block-end: 1px solid var(--line);
+}
+.settings-pref-detail .feature-button { flex-shrink: 0; }
+.settings-pref-copy { display: grid; gap: 3px; min-width: 0; }
+.settings-pref-copy strong { font-size: 14px; }
+.settings-pref-copy small { color: var(--muted); font-size: 12px; }

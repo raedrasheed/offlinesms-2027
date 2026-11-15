@@ -1,0 +1,29 @@
+.settings-points-dialog,
+.settings-points-body,
+.settings-browser-storage {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.settings-points-dialog { max-height: min(70vh, 42rem); overflow: auto; padding: 2px; }
+.settings-points-body { justify-items: stretch; }
+.settings-points-body > .feature-button { justify-self: start; }
+.settings-points-toolbar { display: flex; flex-wrap: wrap; gap: 6px; }
+.settings-points-card { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 9px; }
+.settings-points-body .dialog-note, .settings-browser-storage .dialog-note { margin: 0; overflow-wrap: anywhere; }
+.settings-points-body h3 { font-size: 14px; }
+.settings-points-amount { font-size: clamp(20px, 4vw, 28px); }
+
+.settings-points-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(78px, 1fr)); gap: 6px; margin: 0; }
+.settings-points-metrics > div { min-width: 0; display: grid; gap: 3px; text-align: center; padding: 7px 5px; border-radius: 8px; background: var(--soft); }
+.settings-points-metrics dt, .settings-points-details dt { font-size: 11px; color: var(--muted); }
+.settings-points-metrics dd { margin: 0; font-weight: 750; overflow-wrap: anywhere; }
+.settings-browser-storage > h2 { margin: 0; font-size: 12px; color: var(--muted); }
+.settings-browser-storage .settings-points-metrics dd { font-size: 18px; }
+
+.settings-points-details { display: grid; margin: 0; }
+.settings-points-details > div { display: grid; grid-template-columns: 1fr minmax(0, 1.4fr); gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); }
+.settings-points-details dd { margin: 0; text-align: end; overflow-wrap: anywhere; font-size: 12px; }
+.settings-points-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; width: 100%; text-align: start; }
+.settings-points-row-value { color: var(--brand); text-align: end; white-space: nowrap; }
