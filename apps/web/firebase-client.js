@@ -2,11 +2,21 @@ import { createPhoneAuthClient } from './phone-auth-client.js';
 import { createGroupAvatarUploader } from './group-avatar-upload.js';
 import { createChatAttachmentUploader } from './chat-attachment-upload.js';
 import { normalizeUsername, validateUsername } from '../mobile/src/lib/username.ts';
+import { createSettingsAccountSecurityClient } from './settings-account-security-client.js';
+import { createSettingsPointsData } from './settings-points-data.js';
+import { createSettingsPreferencesClient, normalizeAccountAlertPreferences } from './settings-preferences-client.js';
+import { createSettingsSupportClient } from './settings-support-client.js';
 
 // The web client uses the same authenticated Firestore reads and callable writes as mobile.
 export const WATCH_LIMITS = Object.freeze({ conversations: 50, messages: 100 });
 
 const REGION = 'us-central1';
+const APPEARANCE_VALUES = {
+  preferredLanguage: ['ar', 'en'],
+  preferredTheme: ['system', 'light', 'dark'],
+  timeFormat: ['system', '12h', '24h'],
+};
+const PROFILE_IMAGE_TYPES = new Map([['image/jpeg', 'jpg'], ['image/png', 'png'], ['image/webp', 'webp']]);
 
 function clientError(code) {
   return Object.assign(new Error(code), { code });
@@ -275,6 +285,32 @@ export function initializeFirebaseClient(sdk, config, { appCheckSiteKey } = {}) 
     return { displayName: nextName };
   }
 
+  async function updateAccountAppearance(patch) {
+    const uid = currentUid();
+    const entries = Object.entries(patch ?? {});
+    if (!entries.length || entries.some(([key, value]) => !Object.hasOwn(APPEARANCE_VALUES, key) || !APPEARANCE_VALUES[key].includes(value))) {
+      throw clientError('invalid-preference');
+    }
+    await sdk.updateDoc(sdk.doc(db, 'users', documentId(uid)), { ...patch, updatedAt: sdk.serverTimestamp() });
+    requireSession(uid);
+  }
+
+  async function updateOwnPhoto(file) {
+    const uid = currentUid();
+    const extension = PROFILE_IMAGE_TYPES.get(file?.type);
+    if (!extension || !file.size || file.size >= 5 * 1024 * 1024) throw clientError('invalid-profile-photo');
+    const ref = sdk.ref(storage, `avatars/${documentId(uid)}/avatar-web.${extension}`);
+    await sdk.uploadBytes(ref, file, { contentType: file.type, cacheControl: 'no-cache' });
+    requireSession(uid);
+    const photo = new URL(await sdk.getDownloadURL(ref));
+    photo.searchParams.set('v', String(Date.now()));
+    const photoURL = photo.href;
+    requireSession(uid);
+    await sdk.updateDoc(sdk.doc(db, 'users', documentId(uid)), { photoURL, updatedAt: sdk.serverTimestamp() });
+    requireSession(uid);
+    return photoURL;
+  }
+
   async function getGroupMemberProfiles(uid, memberUids) {
     requireSession(uid);
     const ids = [...new Set(memberUids.map(documentId))];
@@ -330,6 +366,7 @@ export function initializeFirebaseClient(sdk, config, { appCheckSiteKey } = {}) 
   }
 
   const { sendAttachment, cancelUploads } = createChatAttachmentUploader({ sdk, mediaRef, currentUid, requireSession, documentId, call });
+  const settingsContext = { sdk, db, auth, watchScoped, documentId, currentUid, requireSession, invoke, call };
 
   return Object.freeze({
     watchAuth(onUser, onError) {
@@ -343,7 +380,13 @@ export function initializeFirebaseClient(sdk, config, { appCheckSiteKey } = {}) 
       const source = sdk.doc(db, 'users', documentId(uid));
       return watchScoped(uid, source, (snapshot) => {
         // A display-name write may be reflected locally before the server accepts it.
-        if (!snapshot.metadata?.hasPendingWrites) onAccount(asPublicProfile(snapshot));
+        if (snapshot.metadata?.hasPendingWrites) return;
+        const account = asPublicProfile(snapshot);
+        if (!account) { onAccount(null); return; }
+        const data = snapshot.data();
+        const appearance = Object.fromEntries(Object.entries(APPEARANCE_VALUES)
+          .filter(([key, values]) => values.includes(data[key])).map(([key]) => [key, data[key]]));
+        onAccount({ ...account, ...normalizeAccountAlertPreferences(data), ...appearance });
       }, onError);
     },
     async requestEmailOtp(email) {
@@ -357,6 +400,10 @@ export function initializeFirebaseClient(sdk, config, { appCheckSiteKey } = {}) 
       await sdk.signInWithCustomToken(auth, customToken);
     },
     ...phoneAuth,
+    ...createSettingsAccountSecurityClient({ ...settingsContext, useAppCheck: Boolean(appCheckSiteKey) }),
+    ...createSettingsPointsData(settingsContext),
+    ...createSettingsPreferencesClient(settingsContext),
+    ...createSettingsSupportClient(settingsContext),
     signOut() {
       cancelUploads();
       phoneAuth.resetPhoneFlow();
@@ -378,6 +425,8 @@ export function initializeFirebaseClient(sdk, config, { appCheckSiteKey } = {}) 
     sendAttachment,
     uploadGroupAvatar: createGroupAvatarUploader({ sdk, storage, currentUid, requireSession }),
     updateOwnProfile,
+    updateOwnPhoto,
+    updateAccountAppearance,
     async completeInviteProfile({ username, displayName }) {
       const { uid, profile } = await readOwnProfile();
       requireSession(uid);

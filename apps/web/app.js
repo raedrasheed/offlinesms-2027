@@ -17,10 +17,24 @@ import { createChatReceipts } from './chat-receipts.js';
 import { createMentionComposer } from './chat-mentions.js';
 import { createMessageLink, messageLinks } from './message-links.js';
 import { createProfileSettings } from './profile-settings.js';
+import { createSettingsLayout, settingsLabels } from './settings-layout.js';
+import { createSettingsAccountSecurity } from './settings-account-security.js';
+import { createSettingsDevicesPoints } from './settings-devices-points.js';
+import { createSettingsFriendsWallpaper, readBrowserWallpaper } from './settings-friends-wallpaper.js';
+import { createSettingsSupport } from './settings-support.js';
+import { createSettingsPreferences } from './settings-preferences.js';
+import { DEFAULT_NOTIFICATION_PREFERENCES } from './settings-preferences-client.js';
+import { showConnectedBrowserNotification } from './settings-browser-permissions.js';
+import { version as webVersion } from './package.json';
 import { isExternalId, looksLikeUid } from '../mobile/src/lib/displayNames.pure.ts';
 import { renderMentionSegments } from '../mobile/src/lib/mentions.ts';
 
 const words = {
+  profilePhoto: ['صورة الملف الشخصي', 'Profile photo'],
+  profilePhotoInvalid: ['اختر صورة JPEG أو PNG أو WebP أصغر من 5 ميغابايت.', 'Choose a JPEG, PNG, or WebP image smaller than 5 MB.'],
+  profilePhotoFailed: ['تعذّر حفظ صورة الملف الشخصي.', 'Could not save the profile photo.'],
+  profilePhotoSaved: ['تم تحديث صورة الملف الشخصي.', 'Profile photo updated.'],
+  newMessageNotification: ['رسالة جديدة', 'New message'],
   navigation: ['التنقل', 'Navigation'], chats: ['المحادثات', 'Chats'], status: ['الحالات', 'Status'],
   clips: ['المقاطع', 'Clips'], settings: ['الإعدادات', 'Settings'], conversations: ['المحادثات', 'Conversations'],
   filters: ['فلترة المحادثات', 'Filter conversations'], all: ['الكل', 'All'], unread: ['غير مقروءة', 'Unread'],
@@ -98,7 +112,8 @@ function savePreference(key, value) {
 let language = preference('language', ['ar', 'en'], 'ar');
 let theme = preference('theme', ['system', 'dark', 'light'], 'dark');
 let clock = preference('clock', ['system', '12h', '24h'], 'system');
-let wallpaper = preference('wallpaper', ['default', 'plain'], 'default');
+const wallpaperFallback = preference('wallpaper', ['default', 'plain'], 'default');
+let wallpaper = readBrowserWallpaper(undefined, wallpaperFallback);
 let client;
 let user;
 let session = 0;
@@ -122,10 +137,17 @@ let renderedThread;
 let attachments;
 let mentionRoster;
 let profileSettings;
+let settingsPage;
+let accountDeletionUid;
+let stopNotificationPreferences;
+let notificationPreferences = DEFAULT_NOTIFICATION_PREFERENCES;
 let lastPollVoteSeq = 0;
 const profiles = new Map();
 const userStates = new Map();
 const stopStates = new Map();
+const localMessageCounts = new Map();
+const connectedNotifications = new Map();
+const pendingConversationAlerts = new Map();
 const drafts = new Map();
 const replies = new Map();
 const sends = new Map();
@@ -434,13 +456,47 @@ function syncProfile(uid) {
   });
 }
 
+function alertConversation(item) {
+  if (!pendingConversationAlerts.delete(item.id) || !user || userStates.get(item.id)?.muted) return;
+  const group = item.type === 'group';
+  if (!notificationPreferences.enabled || (group ? !notificationPreferences.groupMessages : !notificationPreferences.directMessages)) return;
+  if (activeId === item.id && canReadMessages()) return;
+  const title = threadName(item);
+  const message = item.lastMessage;
+  const preview = notificationPreferences.showPreview && message?.preview ? message.preview : t('newMessageNotification');
+  if (!document.hidden && document.hasFocus()) {
+    if (user.inAppNotifications !== false) announce(`${title} · ${preview}`);
+    return;
+  }
+  const generation = session;
+  connectedNotifications.get(item.id)?.close();
+  const notice = showConnectedBrowserNotification({
+    title, body: preview, tag: `offlinesms-chat-${item.id}`,
+    sound: notificationPreferences.sound, vibration: notificationPreferences.vibration,
+    onOpen() {
+      if (generation !== session || !conversations.some(row => row.id === item.id)) return;
+      navigate('chats');
+      openThread(item.id);
+    },
+  });
+  if (notice) {
+    connectedNotifications.set(item.id, notice);
+    notice.addEventListener?.('close', () => {
+      if (connectedNotifications.get(item.id) === notice) connectedNotifications.delete(item.id);
+    });
+  }
+}
+
 function subscribeList() {
   stopList?.();
   listState = 'loading';
   renderList();
   const generation = session;
+  const subscribedAt = Date.now();
   stopList = client.watchConversations(user.uid, (rows) => {
     if (generation !== session) return;
+    const previous = new Map(conversations.map(item => [item.id, item.lastMessage?.messageId]));
+    const initialized = listState === 'ready';
     listState = 'ready';
     conversations = rows;
     const ids = new Set(rows.map((item) => item.id));
@@ -449,13 +505,26 @@ function subscribeList() {
       stop();
       stopStates.delete(id);
       userStates.delete(id);
+      pendingConversationAlerts.delete(id);
+      connectedNotifications.get(id)?.close();
+      connectedNotifications.delete(id);
+      localMessageCounts.delete(id);
     }
     for (const item of rows) {
+      const message = item.lastMessage;
+      const freshConversation = !previous.has(item.id) && message?.createdAt?.toMillis?.() >= subscribedAt;
+      if (initialized && message?.messageId && message.senderUid && message.senderUid !== user.uid
+          && ((previous.has(item.id) && previous.get(item.id) !== message.messageId) || freshConversation)) {
+        pendingConversationAlerts.set(item.id, item);
+        if (userStates.has(item.id)) alertConversation(item);
+      }
       syncProfile(peerId(item));
       if (stopStates.has(item.id)) continue;
       const stop = client.watchUserState(user.uid, item.id, (state) => {
         if (generation !== session) return;
         userStates.set(item.id, state);
+        const pending = pendingConversationAlerts.get(item.id);
+        if (pending) alertConversation(pending);
         if (section === 'chats') renderList();
       }, () => {});
       stopStates.set(item.id, stop);
@@ -468,6 +537,7 @@ function subscribeList() {
     for (const stop of stopStates.values()) stop();
     stopStates.clear();
     userStates.clear();
+    pendingConversationAlerts.clear();
     renderList();
   });
 }
@@ -496,6 +566,7 @@ function openThread(id, focus = true) {
     if (generation !== threadGeneration) return;
     const previous = currentThread;
     currentThread = value;
+    localMessageCounts.set(id, value.messages.length);
     if (attachments && sendingRestricted()) closeDialog();
     if (viewingMedia && !isActiveMedia(viewingMedia)) closeDialog();
     if (viewingReactions) updateReactionDetails();
@@ -1019,7 +1090,6 @@ function choice(title, options, selected, onChange) {
 
 function chooseWallpaper(next) {
   wallpaper = next;
-  savePreference('wallpaper', next);
   applyWallpaper();
 }
 
@@ -1029,7 +1099,11 @@ function chatWallpaperKey() {
 
 function applyWallpaper() {
   const choice = user && activeId ? preference(chatWallpaperKey(), ['inherit', 'default', 'plain'], 'inherit') : 'inherit';
-  scroll.closest('.conversation').dataset.wallpaper = choice === 'inherit' ? wallpaper : choice;
+  const effective = choice === 'inherit' ? wallpaper : { type: choice };
+  const panel = scroll.closest('.conversation');
+  panel.dataset.wallpaper = effective.type;
+  if (effective.type === 'custom') panel.style.setProperty('--custom-chat-wallpaper', `url("${effective.url}")`);
+  else panel.style.removeProperty('--custom-chat-wallpaper');
 }
 
 function showGroupWallpaper() {
@@ -1041,63 +1115,184 @@ function showGroupWallpaper() {
   }));
 }
 
-function showSettings() {
-  const content = el('div', 'live-settings');
-  content.append(el('h1', '', t('settings')));
-  const identity = el('section', 'feature-card live-preferences');
-  const account = el('p', '', user.email || user.phoneNumber || t('peer'));
-  account.dir = 'auto';
+function disposeSettings() {
+  settingsPage?.dispose();
+  settingsPage = profileSettings = undefined;
+}
+
+function openProfileSettings(title) {
+  if (!user) return;
   const generation = session;
+  const content = el('div', 'settings-profile-editor');
+  const photoField = el('label', 'settings-profile-photo');
+  const preview = el('span');
+  const file = el('input');
+  file.type = 'file';
+  file.accept = 'image/jpeg,image/png,image/webp';
+  file.setAttribute('aria-label', t('profilePhoto'));
+  const photoStatus = el('p', 'dialog-note');
+  photoStatus.setAttribute('role', 'status');
+  const active = () => generation === session && content.isConnected && dialog.open;
+  const updatePhoto = () => preview.replaceChildren(avatar(user.displayName || title, user.photoURL));
+  updatePhoto();
+  photoField.append(preview, el('span', '', t('profilePhoto')), file);
   profileSettings = createProfileSettings({
     locale: language,
     profile: user,
     save: changes => client.updateOwnProfile(changes),
-    isActive: () => generation === session && section === 'settings' && identity.isConnected,
+    isActive: active,
   });
-  const logout = button(t('signOut'), async () => {
-    logout.disabled = true;
-    workspace.hidden = true;
-    signIn.showLoading();
-    try { await client.signOut(); } catch {
-      if (generation !== session) return;
+  file.addEventListener('change', async () => {
+    const photo = file.files?.[0];
+    if (!photo || !active() || file.disabled) return;
+    file.disabled = true;
+    photoStatus.textContent = t('loading');
+    try {
+      const photoURL = await client.updateOwnPhoto(photo);
+      if (!active()) return;
+      user.photoURL = photoURL;
+      settingsPage?.update(user);
+      updatePhoto();
+      photoStatus.textContent = t('profilePhotoSaved');
+    } catch (error) {
+      if (active()) photoStatus.textContent = t(error?.code === 'invalid-profile-photo' ? 'profilePhotoInvalid' : 'profilePhotoFailed');
+    } finally {
+      file.value = '';
+      file.disabled = false;
+    }
+  });
+  content.append(photoField, photoStatus, profileSettings.element);
+  showDialog(title, content);
+}
+
+function applyAccountAppearance(profile) {
+  if (profile.preferredTheme && profile.preferredTheme !== theme) {
+    theme = profile.preferredTheme;
+    savePreference('theme', theme);
+    applyTheme();
+  }
+  const timeChanged = profile.timeFormat && profile.timeFormat !== clock;
+  if (timeChanged) {
+    clock = profile.timeFormat;
+    savePreference('clock', clock);
+  }
+  if (profile.preferredLanguage && profile.preferredLanguage !== language) setLanguage(profile.preferredLanguage);
+  else if (timeChanged && section === 'chats') { renderList(); renderThread(); }
+}
+
+async function signOutWeb() {
+  const generation = session;
+  workspace.hidden = true;
+  signIn.showLoading();
+  try {
+    await client.signOut();
+    return true;
+  } catch {
+    if (generation === session) {
       signIn.hide();
       workspace.hidden = false;
+    }
+    return false;
+  }
+}
+
+function showSettings() {
+  if (settingsPage && dialog.open) closeDialog();
+  disposeSettings();
+  const text = settingsLabels[language];
+  const content = el('section', 'feature-settings-layout');
+  content.dataset.view = 'overview';
+  const overview = el('div', 'feature-settings-overview');
+  overview.append(el('h1', 'sr-only', text.title));
+  content.append(overview);
+  const generation = session;
+  const active = () => generation === session && section === 'settings' && content.isConnected;
+  const { row, card, profileHeader, options } = createSettingsLayout({ outlineIcon, avatar });
+  const header = profileHeader(text.profile, text.editProfileHint, () => openProfileSettings(text.profile));
+  const common = { locale: language, client, user, row, showDialog, closeDialog, isActive: active, announce };
+  const account = createSettingsAccountSecurity({ ...common, onAccountRefreshed({ email, phone }) {
+    if (!active()) return;
+    user.email = email;
+    user.phoneNumber = phone;
+    header.update(user);
+  } });
+  const friends = createSettingsFriendsWallpaper({ ...common, wallpaper, applyWallpaper: chooseWallpaper,
+    openDirect(id, profile) {
+      if (!active()) return;
+      if (profile?.uid) profiles.set(profile.uid, profile);
+      navigate('chats');
+      openThread(id);
+    },
+  });
+  const preferences = createSettingsPreferences({ ...common, openFindFriends: friends.openFindFriends });
+  const devicePoints = createSettingsDevicesPoints({ ...common,
+    getLocalCounts: () => ({ chats: conversations.length, messages: [...localMessageCounts.values()].reduce((a, b) => a + b, 0) }),
+  });
+  const support = createSettingsSupport({ ...common,
+    onAccountDeletionPending(uid, pending) {
+      if (user?.uid === uid && generation === session) accountDeletionUid = pending ? uid : undefined;
+    },
+    onAccountDeleted(uid, result) {
+      if (user?.uid === uid && generation === session && !result.signedOut) {
+        void signOutWeb().then(success => {
+          if (!success && user?.uid === uid && generation === session) authChanged(null);
+        });
+      }
+    },
+  });
+  const saveChoice = (key) => async value => {
+    const patch = { [key]: value };
+    await client.updateAccountAppearance(patch);
+    if (generation === session) applyAccountAppearance(patch);
+  };
+  const choiceError = () => announce(text.updateFailed);
+  const languages = options(text.language, [['en', 'English'], ['ar', 'العربية']], language, saveChoice('preferredLanguage'), choiceError, active);
+  const themes = options(text.theme, [['system', text.themeSystem], ['light', text.themeLight], ['dark', text.themeDark]],
+    theme, saveChoice('preferredTheme'), choiceError, active);
+  const times = options(text.timeFormat, [['system', text.timeFormatSystem], ['12h', text.timeFormat12], ['24h', text.timeFormat24]],
+    clock, saveChoice('timeFormat'), choiceError, active);
+  const legal = card(
+    row({ label: text.privacyPolicy, icon: 'privacyPolicy', href: 'https://offlinesms.com/offlinesms-privacy-policy.html' }),
+    row({ label: text.termsOfService, icon: 'terms', href: 'https://offlinesms.com/offlinesms-terms-of-service.html' }),
+  );
+  const error = el('p', 'dialog-note');
+  error.setAttribute('role', 'status');
+  const logout = row({ label: text.signOut, icon: 'signOut', danger: true, async onClick() {
+    logout.disabled = true;
+    if (!await signOutWeb() && active()) {
       logout.disabled = false;
       error.textContent = t('signOutFailed');
     }
-  }, 'feature-button');
-  const error = el('p', 'dialog-note');
-  error.setAttribute('role', 'status');
-  identity.append(el('h2', '', t('account')), account, profileSettings.element, logout, error);
-  content.append(identity);
-  const languages = el('section', 'feature-card live-preferences');
-  const controls = el('div', 'feature-toolbar');
-  controls.setAttribute('role', 'group');
-  controls.setAttribute('aria-label', t('language'));
-  for (const [value, label] of [['ar', 'العربية'], ['en', 'English']]) {
-    const item = button(label, () => setLanguage(value), 'feature-button');
-    item.setAttribute('aria-pressed', String(value === language));
-    controls.append(item);
-  }
-  languages.append(el('h2', '', t('language')), controls);
-  content.append(languages,
-    choice(t('appearance'), [['system', 'system'], ['dark', 'dark'], ['light', 'light']], theme, (next) => { theme = next; savePreference('theme', next); applyTheme(); }),
-    choice(t('time'), [['system', 'system'], ['12h', 'hour12'], ['24h', 'hour24']], clock, (next) => { clock = next; savePreference('clock', next); }),
-    choice(t('wallpaper'), [['default', 'defaultWallpaper'], ['plain', 'plainWallpaper']], wallpaper, chooseWallpaper),
+  } });
+  overview.append(header.element,
+    card(friends.friends, account.email, account.phone, account.pin, preferences.permissions),
+    card(devicePoints.points, preferences.sms, preferences.inApp),
+    card(friends.wallpaper, preferences.notifications),
+    languages.element, themes.element, times.element,
+    card(devicePoints.devices), devicePoints.storage,
+    card(support.help), legal, card(support.deleteAccount),
+    card(row({ label: text.appVersion, icon: 'version', trailing: webVersion }), logout), error,
   );
-  const legal = el('div', 'feature-toolbar');
-  for (const [label, href] of [
-    ['privacy', 'https://offlinesms.com/offlinesms-privacy-policy.html'],
-    ['terms', 'https://offlinesms.com/offlinesms-terms-of-service.html'],
-  ]) {
-    const link = el('a', '', t(label));
-    link.href = href;
-    link.target = '_blank';
-    link.rel = 'noopener noreferrer';
-    legal.append(link);
-  }
-  content.append(legal);
+  settingsPage = {
+    update(profile) {
+      header.update(profile);
+      preferences.update(profile);
+      profileSettings?.update(profile);
+      languages.update(language);
+      themes.update(theme);
+      times.update(clock);
+    },
+    updateNotifications: preferences.updateNotifications,
+    dispose() {
+      account.dispose?.();
+      preferences.dispose?.();
+      support.dispose();
+      devicePoints.dispose();
+    },
+  };
   featurePanel.replaceChildren(content);
+  settingsPage.update(user);
+  settingsPage.updateNotifications(notificationPreferences);
 }
 
 function renderSection() {
@@ -1117,7 +1312,7 @@ function navigate(next) {
     featurePanel.scrollTop = 0;
   }
   section = next;
-  if (next !== 'settings') profileSettings = undefined;
+  if (next !== 'settings') disposeSettings();
   chatReceipts.refreshVisibility();
   main.dataset.section = next;
   navigation.forEach((node) => {
@@ -1399,12 +1594,20 @@ function clearSession() {
   chatReceipts.reset();
   mentionComposer.reset();
   mentionRoster = undefined;
-  profileSettings = undefined;
+  disposeSettings();
+  accountDeletionUid = undefined;
   closeMedia();
   ++session;
   ++threadGeneration;
   stopList?.();
   stopThread?.();
+  stopNotificationPreferences?.();
+  stopNotificationPreferences = undefined;
+  notificationPreferences = DEFAULT_NOTIFICATION_PREFERENCES;
+  for (const notice of connectedNotifications.values()) notice.close();
+  connectedNotifications.clear();
+  pendingConversationAlerts.clear();
+  localMessageCounts.clear();
   for (const stop of stopStates.values()) stop();
   stopList = stopThread = undefined;
   stopStates.clear();
@@ -1417,6 +1620,7 @@ function clearSession() {
   conversations = [];
   listState = 'loading';
   activeId = currentThread = pendingRead = undefined;
+  chooseWallpaper(readBrowserWallpaper(undefined, wallpaperFallback));
   renderedThread = undefined;
   threadError = false;
   closeMessageInfo();
@@ -1451,6 +1655,7 @@ function authChanged(next) {
   signIn.showLoading();
   stopAccount = client.watchAccount(next.uid, (profile) => {
     if (generation !== accountWatch) return;
+    if (!profile && accountDeletionUid === next.uid) return;
     if (!profile || profile.status !== 'active') {
       workspace.hidden = true;
       clearSession();
@@ -1459,18 +1664,23 @@ function authChanged(next) {
       return;
     }
     if (user?.uid === next.uid) {
-      if (user.displayName !== profile.displayName || user.username !== profile.username) {
-        user.displayName = profile.displayName;
-        user.username = profile.username;
-        profileSettings?.update(user);
-      }
+      Object.assign(user, profile);
+      applyAccountAppearance(profile);
+      settingsPage?.update(user);
       return;
     }
-    user = { ...next, displayName: profile.displayName, username: profile.username };
+    user = { ...next, ...profile };
     signIn.hide();
     filter = 'all';
     navigate('chats');
+    applyAccountAppearance(profile);
+    chooseWallpaper(readBrowserWallpaper(user.uid, wallpaperFallback));
     workspace.hidden = false;
+    stopNotificationPreferences = client.watchNotificationPreferences?.(user.uid, values => {
+      if (generation !== accountWatch || user?.uid !== next.uid) return;
+      notificationPreferences = values;
+      settingsPage?.updateNotifications(values);
+    }, () => {});
     subscribeList();
     showGroupInvite();
   }, () => {
@@ -1491,10 +1701,7 @@ inviteShortcut.addEventListener('click', showGroupInvite);
 window.addEventListener('hashchange', showGroupInvite);
 byId('details').addEventListener('click', showDetails);
 byId('conversation-search').addEventListener('click', showMessageSearch);
-byId('wallpaper').addEventListener('click', () => {
-  if (currentThread?.conversation.type === 'group') { showGroupWallpaper(); return; }
-  showDialog(t('wallpaper'), choice(t('wallpaper'), [['default', 'defaultWallpaper'], ['plain', 'plainWallpaper']], wallpaper, chooseWallpaper));
-});
+byId('wallpaper').addEventListener('click', showGroupWallpaper);
 byId('extras').addEventListener('click', showComposerOptions);
 byId('attach').addEventListener('click', showAttachments);
 byId('back').addEventListener('click', () => {
@@ -1529,10 +1736,11 @@ darkMode.addEventListener('change', applyTheme);
 window.addEventListener('pagehide', (event) => {
   if (!event.persisted) chatReceipts.stop();
   if (attachments) closeDialog();
-  if (!event.persisted) { stopAccount?.(); unsubscribeAuth?.(); }
+  if (!event.persisted) { stopAccount?.(); stopNotificationPreferences?.(); disposeSettings(); unsubscribeAuth?.(); }
 });
 dialog.addEventListener('close', () => {
   if (!dialog.open) {
+    profileSettings = undefined;
     disposeAttachments();
     viewingMedia = viewingReactions = undefined;
     byId('dialog-content').replaceChildren();

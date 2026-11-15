@@ -37,6 +37,9 @@ function fixture(profile, { beforeRead, claimError } = {}) {
       return () => {};
     },
     async updateDoc(path, data) { writes.push(['updateDoc', path, data]); },
+    ref: (_, path) => path,
+    async uploadBytes(path, file) { writes.push(['uploadBytes', path, file.type]); },
+    async getDownloadURL() { return 'https://firebasestorage.googleapis.com/avatar?token=fixture'; },
     httpsCallable: (_, name) => async data => {
       writes.push([name, data]);
       if (claimError) throw claimError;
@@ -88,4 +91,27 @@ test('keeps pending local edits out of the authoritative account snapshot', () =
   emitAccount({ displayName: 'Pending' }, { hasPendingWrites: true });
   emitAccount({ displayName: 'Confirmed' }, { fromCache: false });
   assert.deepEqual(names, ['Original', 'Confirmed']);
+});
+
+test('writes only supported appearance preferences to the authenticated profile', async () => {
+  const { client, writes } = fixture();
+  await assert.rejects(client.updateAccountAppearance({ username: 'other' }), { code: 'invalid-preference' });
+  await assert.rejects(client.updateAccountAppearance({ preferredTheme: 'purple' }), { code: 'invalid-preference' });
+  await client.updateAccountAppearance({ preferredTheme: 'light', timeFormat: '24h' });
+  assert.deepEqual(writes, [
+    ['updateDoc', ['db', 'users', 'owner'], { preferredTheme: 'light', timeFormat: '24h', updatedAt: 'server timestamp' }],
+  ]);
+});
+
+test('updates the current avatar with a fresh image URL and leaves other profile fields alone', async () => {
+  const { client, writes } = fixture();
+  await assert.rejects(client.updateOwnPhoto({ type: 'image/svg+xml', size: 1 }), { code: 'invalid-profile-photo' });
+  const photoURL = await client.updateOwnPhoto({ type: 'image/webp', size: 1000 });
+  const photo = new URL(photoURL);
+  assert.equal(photo.searchParams.get('token'), 'fixture');
+  assert.ok(photo.searchParams.get('v'));
+  assert.deepEqual(writes, [
+    ['uploadBytes', 'avatars/owner/avatar-web.webp', 'image/webp'],
+    ['updateDoc', ['db', 'users', 'owner'], { photoURL, updatedAt: 'server timestamp' }],
+  ]);
 });

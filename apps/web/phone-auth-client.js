@@ -6,7 +6,7 @@ const INSTALLATION_KEY = 'offlinesms.web.installationId';
 
 // Like the mobile app, keep only the random installation signal. The session,
 // challenge, phone number and verification code are never persisted here.
-function installationId() {
+export function installationId() {
   try {
     const previous = localStorage.getItem(INSTALLATION_KEY);
     if (previous && /^[A-Za-z0-9_-]{16,64}$/.test(previous)) return previous;
