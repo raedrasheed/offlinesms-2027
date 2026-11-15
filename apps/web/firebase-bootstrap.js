@@ -6,7 +6,7 @@ import {
 } from 'firebase/auth';
 import {
   collection, doc, documentId, getDocFromServer, getDocsFromServer, initializeFirestore, limit,
-  memoryLocalCache, onSnapshot, orderBy, query, where,
+  memoryLocalCache, onSnapshot, orderBy, query, serverTimestamp, updateDoc, where,
 } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { getBlob, getDownloadURL, getStorage, ref, uploadBytes, uploadBytesResumable } from 'firebase/storage';
@@ -18,7 +18,7 @@ const sdk = {
   browserLocalPersistence, indexedDBLocalPersistence, initializeAuth, inMemoryPersistence,
   onAuthStateChanged, signInWithCustomToken, signOut,
   collection, doc, documentId, getDocFromServer, getDocsFromServer, initializeFirestore, limit,
-  memoryLocalCache, onSnapshot, orderBy, query, where,
+  memoryLocalCache, onSnapshot, orderBy, query, serverTimestamp, updateDoc, where,
   getFunctions, httpsCallable, getBlob, getDownloadURL, getStorage, ref, uploadBytes, uploadBytesResumable,
 };
 

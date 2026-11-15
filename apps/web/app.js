@@ -16,6 +16,7 @@ import { renderRichMessage } from './chat-rich-message.js';
 import { createChatReceipts } from './chat-receipts.js';
 import { createMentionComposer } from './chat-mentions.js';
 import { createMessageLink, messageLinks } from './message-links.js';
+import { createProfileSettings } from './profile-settings.js';
 import { isExternalId, looksLikeUid } from '../mobile/src/lib/displayNames.pure.ts';
 import { renderMentionSegments } from '../mobile/src/lib/mentions.ts';
 
@@ -120,6 +121,7 @@ let announcementTimer;
 let renderedThread;
 let attachments;
 let mentionRoster;
+let profileSettings;
 let lastPollVoteSeq = 0;
 const profiles = new Map();
 const userStates = new Map();
@@ -1045,8 +1047,14 @@ function showSettings() {
   const identity = el('section', 'feature-card live-preferences');
   const account = el('p', '', user.email || user.phoneNumber || t('peer'));
   account.dir = 'auto';
+  const generation = session;
+  profileSettings = createProfileSettings({
+    locale: language,
+    profile: user,
+    save: changes => client.updateOwnProfile(changes),
+    isActive: () => generation === session && section === 'settings' && identity.isConnected,
+  });
   const logout = button(t('signOut'), async () => {
-    const generation = session;
     logout.disabled = true;
     workspace.hidden = true;
     signIn.showLoading();
@@ -1060,7 +1068,7 @@ function showSettings() {
   }, 'feature-button');
   const error = el('p', 'dialog-note');
   error.setAttribute('role', 'status');
-  identity.append(el('h2', '', t('account')), account, logout, error);
+  identity.append(el('h2', '', t('account')), account, profileSettings.element, logout, error);
   content.append(identity);
   const languages = el('section', 'feature-card live-preferences');
   const controls = el('div', 'feature-toolbar');
@@ -1109,6 +1117,7 @@ function navigate(next) {
     featurePanel.scrollTop = 0;
   }
   section = next;
+  if (next !== 'settings') profileSettings = undefined;
   chatReceipts.refreshVisibility();
   main.dataset.section = next;
   navigation.forEach((node) => {
@@ -1390,6 +1399,7 @@ function clearSession() {
   chatReceipts.reset();
   mentionComposer.reset();
   mentionRoster = undefined;
+  profileSettings = undefined;
   closeMedia();
   ++session;
   ++threadGeneration;
@@ -1448,8 +1458,15 @@ function authChanged(next) {
       signIn.showBlocked();
       return;
     }
-    if (user?.uid === next.uid) return;
-    user = { ...next, displayName: profile.displayName };
+    if (user?.uid === next.uid) {
+      if (user.displayName !== profile.displayName || user.username !== profile.username) {
+        user.displayName = profile.displayName;
+        user.username = profile.username;
+        profileSettings?.update(user);
+      }
+      return;
+    }
+    user = { ...next, displayName: profile.displayName, username: profile.username };
     signIn.hide();
     filter = 'all';
     navigate('chats');
